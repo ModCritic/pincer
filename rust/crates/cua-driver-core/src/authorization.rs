@@ -241,6 +241,7 @@ const PRIVATE_OBSERVATION_OPERATIONS: &[&str] = &[
     "page[action=get_text|query_dom]",
     "escalate_session",
     "zoom",
+    "capture_series",
     "start_recording",
 ];
 const PRIVATE_OBSERVATION_SCOPE_KEYS: &[&str] = &[
@@ -304,6 +305,7 @@ const FILE_TRANSFER_OPERATIONS: &[&str] = &[
     "browser_download",
     "get_desktop_state[with_file_output]",
     "get_window_state[with_file_output]",
+    "capture_series[output=files]",
     "start_recording",
     "stop_recording",
     "replay_trajectory",
@@ -746,6 +748,7 @@ pub fn enforcement_adapters_for_call(
             | "get_browser_state"
             | "escalate_session"
             | "zoom"
+            | "capture_series"
             | "start_recording"
     ) || (tool == "page"
         && matches!(
@@ -770,11 +773,12 @@ pub fn enforcement_adapters_for_call(
         add("clipboard");
     }
 
-    let writes_screenshot = matches!(tool, "get_desktop_state" | "get_window_state")
+    let writes_screenshot = (matches!(tool, "get_desktop_state" | "get_window_state")
         && args
             .get("screenshot_out_file")
             .and_then(Value::as_str)
-            .is_some_and(|path| !path.is_empty());
+            .is_some_and(|path| !path.is_empty()))
+        || capture_series_writes_files(tool, args);
     if matches!(
         tool,
         "browser_set_input_files"
@@ -933,6 +937,7 @@ pub fn advertised_risk_for(tool: &str) -> RiskAssessment {
         // External/file side effects or generic compound action surfaces.
         "get_desktop_state"
         | "get_window_state"
+        | "capture_series"
         | "kill_app"
         | "stop_recording"
         | "replay_trajectory"
@@ -1022,6 +1027,15 @@ pub fn classify_tool_call(tool: &str, args: &Value) -> RiskAssessment {
             enforcement: RiskEnforcement::Active,
             operation_sensitive: true,
         },
+        "capture_series" => RiskAssessment {
+            class: if capture_series_writes_files(tool, args) {
+                RiskClass::R3
+            } else {
+                RiskClass::R2
+            },
+            enforcement: RiskEnforcement::Active,
+            operation_sensitive: true,
+        },
         "verify_state" => RiskAssessment {
             class: RiskClass::R2,
             enforcement: RiskEnforcement::Active,
@@ -1096,6 +1110,11 @@ pub fn classify_tool_call(tool: &str, args: &Value) -> RiskAssessment {
         }
         _ => advertised_risk_for(tool),
     }
+}
+
+/// `capture_series` with `output:"files"` writes frames into a directory.
+fn capture_series_writes_files(tool: &str, args: &Value) -> bool {
+    tool == "capture_series" && args.get("output").and_then(Value::as_str) == Some("files")
 }
 
 pub fn risk_metadata_json(tool: &str) -> Value {

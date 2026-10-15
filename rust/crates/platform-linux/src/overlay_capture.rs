@@ -303,9 +303,35 @@ pub fn verify_hidden_capture(
     png: Vec<u8>,
     hidden: Option<&HiddenOverlay>,
 ) -> (Vec<u8>, cursor_overlay::capture_exclusion::ResidualCheck) {
+    verify_hidden_capture_at(png, hidden, (0, 0))
+}
+
+/// [`verify_hidden_capture`] for a capture of part of the screen whose
+/// top-left pixel is at `origin` in root-window coordinates.
+#[cfg(target_os = "linux")]
+pub fn verify_hidden_capture_at(
+    png: Vec<u8>,
+    hidden: Option<&HiddenOverlay>,
+    origin: (i32, i32),
+) -> (Vec<u8>, cursor_overlay::capture_exclusion::ResidualCheck) {
     use cursor_overlay::capture_exclusion::ResidualCheck;
     let Some(hidden) = hidden.filter(|hidden| !hidden.residual.is_empty()) else {
         return (png, ResidualCheck::Clean);
+    };
+    let shifted;
+    let patches = if origin == (0, 0) {
+        &hidden.residual
+    } else {
+        shifted = hidden
+            .residual
+            .iter()
+            .map(|patch| ResidualPatch {
+                x: patch.x.saturating_sub(origin.0),
+                y: patch.y.saturating_sub(origin.1),
+                ..patch.clone()
+            })
+            .collect::<Vec<_>>();
+        &shifted
     };
     let decoded = match image::load_from_memory(&png) {
         Ok(decoded) => decoded.to_rgba8(),
@@ -323,8 +349,7 @@ pub fn verify_hidden_capture(
     };
     let (width, height) = decoded.dimensions();
     let mut rgba = decoded.into_raw();
-    let replaced =
-        scrub_residual_overlay(&mut rgba, width as usize, height as usize, &hidden.residual);
+    let replaced = scrub_residual_overlay(&mut rgba, width as usize, height as usize, patches);
     if replaced == 0 {
         return (png, ResidualCheck::Clean);
     }

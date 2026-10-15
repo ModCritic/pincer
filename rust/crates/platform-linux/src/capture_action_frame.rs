@@ -75,6 +75,52 @@ pub fn publish_desktop(
     )
 }
 
+/// Publish a crop of the desktop: screenshot pixel (0, 0) is the region's
+/// top-left corner in the action frame, and the region's size is scaled to
+/// the encoded size.
+pub fn publish_desktop_region(
+    service: &CaptureService,
+    args: &Value,
+    png_bytes: &[u8],
+    encoded_dimensions: (u32, u32),
+    native_action_dimensions: (u32, u32),
+    region: cua_driver_core::image_utils::PixelRect,
+) -> anyhow::Result<String> {
+    publish(
+        service,
+        args,
+        png_bytes,
+        CaptureTarget::PrimaryDesktop,
+        encoded_dimensions,
+        native_action_dimensions,
+        region_transform(encoded_dimensions, region)?,
+    )
+}
+
+/// Screenshot-to-action mapping for a region crop encoded at `encoded`
+/// pixels.
+fn region_transform(
+    encoded: (u32, u32),
+    region: cua_driver_core::image_utils::PixelRect,
+) -> anyhow::Result<ScreenshotToActionTransform> {
+    anyhow::ensure!(
+        encoded.0 > 0 && encoded.1 > 0,
+        "capture has an empty encoded frame: {}x{}",
+        encoded.0,
+        encoded.1
+    );
+    let scale_x = f64::from(region.width) / f64::from(encoded.0);
+    let scale_y = f64::from(region.height) / f64::from(encoded.1);
+    Ok(ScreenshotToActionTransform::new(
+        scale_x,
+        0.0,
+        0.0,
+        scale_y,
+        f64::from(region.x),
+        f64::from(region.y),
+    )?)
+}
+
 /// Screenshot-to-action scaling for a capture encoded at `encoded` pixels of
 /// a `native` action frame. The resizer preserves aspect ratio before rounding
 /// each encoded axis, so both ratios are derived independently: a one-pixel
@@ -343,6 +389,32 @@ mod tests {
         service.retire_session(&binding);
 
         assert!(admit_desktop(&service, &call_args, &id, (1.0, 1.0), (3, 2)).is_err());
+    }
+
+    #[test]
+    fn desktop_region_capture_maps_back_to_the_full_desktop() {
+        let service = CaptureService::default();
+        let call_args = args("region");
+        let region = cua_driver_core::image_utils::PixelRect {
+            x: 2240,
+            y: 1380,
+            width: 320,
+            height: 60,
+        };
+        // The 320x60 crop delivered at half size.
+        let id = publish_desktop_region(
+            &service,
+            &call_args,
+            &png(160, 30, 0x44),
+            (160, 30),
+            (2560, 1440),
+            region,
+        )
+        .unwrap();
+        assert_eq!(
+            admit_desktop(&service, &call_args, &id, (10.0, 5.0), (2560, 1440)).unwrap(),
+            (2260.0, 1390.0)
+        );
     }
 
     #[test]

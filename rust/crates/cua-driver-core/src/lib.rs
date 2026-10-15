@@ -60,6 +60,7 @@ pub mod capture_mode;
 pub(crate) mod capture_registry;
 pub mod capture_runtime;
 pub mod capture_scope;
+pub mod capture_series;
 pub mod cdp;
 pub mod clipboard;
 pub mod consent;

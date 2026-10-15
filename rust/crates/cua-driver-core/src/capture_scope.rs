@@ -185,6 +185,14 @@ fn tool_scope(tool_name: &str, args: &Value) -> ToolScope {
     ) {
         return ToolScope::Desktop;
     }
+    if tool_name == "capture_series" {
+        // A pid/window_id names one window; otherwise the desktop.
+        return if args.get("pid").is_some() || args.get("window_id").is_some() {
+            ToolScope::Window
+        } else {
+            ToolScope::Desktop
+        };
+    }
     if matches!(
         tool_name,
         "get_window_state"

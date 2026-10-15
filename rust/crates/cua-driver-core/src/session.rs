@@ -979,7 +979,7 @@ fn capture_modality_for(tool_name: &str, args: &serde_json::Value) -> Option<Cap
     }
     match tool_name {
         "get_window_state" => Some(CaptureModality::Window),
-        "get_desktop_state" | "get_screen_size" | "get_cursor_position" => {
+        "get_desktop_state" | "get_screen_size" | "get_cursor_position" | "capture_series" => {
             Some(CaptureModality::Desktop)
         }
         _ => None,

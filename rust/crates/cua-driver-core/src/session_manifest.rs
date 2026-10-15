@@ -417,12 +417,14 @@ impl SessionManifest {
                 &self.writable_paths,
                 &self.writable_roots,
             ),
-            "recording_output" | "recording_finalize" => self.authorize_exact_path(
-                resource,
-                "canonical_output_directory",
-                &self.writable_paths,
-                &self.writable_roots,
-            ),
+            // capture_series writes new frame files inside one directory.
+            "recording_output" | "recording_finalize" | "screenshot_series_output" => self
+                .authorize_exact_path(
+                    resource,
+                    "canonical_output_directory",
+                    &self.writable_paths,
+                    &self.writable_roots,
+                ),
             // The exact dependency and confirmation bit are fixed by the
             // typed install_ffmpeg route; the manifest's tool allow is the
             // reviewed bounded decision.
@@ -995,6 +997,7 @@ pub fn load_manifest(path: &Path) -> Result<SessionManifest, String> {
                 "get_window_state",
                 "verify_state",
                 "get_desktop_state",
+                "capture_series",
             ];
             if let Some(tool) = ORIGIN_BYPASS_TOOLS
                 .iter()

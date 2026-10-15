@@ -675,7 +675,7 @@ fn deprecated_name_note(old: &str, new: &str) -> String {
 /// - `input.delivery_mode` (the live tool schema accepts the shared
 ///   `background` / `foreground` delivery ladder)
 /// - `screen.capture`, `screen.capture.window`,
-///   `screen.capture.region`, `screen.dimensions`,
+///   `screen.capture.region`, `screen.capture.series`, `screen.dimensions`,
 ///   `screen.cursor.position`
 /// - `accessibility.tree`, `accessibility.tree.structured`,
 ///   `accessibility.tree.bounded`, `accessibility.window_state`,
@@ -766,6 +766,14 @@ pub fn default_capabilities_for(tool_name: &str) -> Vec<String> {
             "screen.capture",
             "screen.capture.window",
             "screen.capture.region",
+        ],
+        // Scheduled screenshots of the desktop or one window, optionally
+        // cropped to a region.
+        "capture_series" => &[
+            "screen.capture",
+            "screen.capture.window",
+            "screen.capture.region",
+            "screen.capture.series",
         ],
         // ── accessibility / window state ─────────────────────────────
         "get_accessibility_tree" => &["accessibility.tree", "accessibility.tree.structured"],
@@ -2281,7 +2289,11 @@ impl ToolRegistry {
         )
         .await;
         match resolved_name {
-            "get_desktop_state" if result.is_error != Some(true) => {
+            // A region crop is not the desktop frame later desktop-scope
+            // pixels are read from, so it leaves the recorded scale alone.
+            "get_desktop_state"
+                if result.is_error != Some(true) && args.get("region").is_none() =>
+            {
                 crate::desktop_capture_scale::record_desktop_state(
                     &args,
                     result.structured_content.as_ref(),
@@ -2851,6 +2863,28 @@ impl ToolRegistry {
                         "canonical_output_path": output,
                     }),
                     "Allow Cua to write this screenshot to the exact local path".to_owned(),
+                )
+            }
+            "capture_series" => {
+                let raw = required_path_arg(args, "out_dir")?;
+                if !Path::new(raw).is_absolute() {
+                    return Err(protected_scope_refusal(
+                        "`out_dir` must be an absolute path",
+                    ));
+                }
+                let output = canonical_existing_directory(raw)?;
+                args["out_dir"] = Value::String(output.clone());
+                (
+                    serde_json::json!({
+                        "kind": "screenshot_series_output",
+                        "tool": tool_name,
+                        "pid": args.get("pid").and_then(Value::as_i64),
+                        "window_id": args.get("window_id").and_then(Value::as_u64),
+                        "direction": "driver_to_local",
+                        "canonical_output_directory": output,
+                    }),
+                    "Allow Cua to write new screenshot files into the exact local directory"
+                        .to_owned(),
                 )
             }
             "start_recording" => {
@@ -6345,6 +6379,7 @@ mod capability_tests {
         "set_value",
         // screen
         "zoom",
+        "capture_series",
         "get_screen_size",
         "get_desktop_state",
         "get_cursor_position",
@@ -6426,6 +6461,7 @@ mod capability_tests {
         "screen.capture",
         "screen.capture.window",
         "screen.capture.region",
+        "screen.capture.series",
         "screen.capture.registry.read",
         "screen.dimensions",
         "screen.cursor.position",

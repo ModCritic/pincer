@@ -945,6 +945,45 @@ fn rects_intersect(a: (i32, i32, u32, u32), b: (i32, i32, u32, u32)) -> bool {
         && a.1 + a.3 as i32 > b.1
 }
 
+/// Whether `xid` is still a window `pid` may be observed through. Shared by
+/// `get_window_state` and `capture_series`; `window_meta` is the listed
+/// window when the caller already enumerated it.
+fn window_target_matches(pid: u32, xid: u64, window_meta: Option<&crate::x11::WindowInfo>) -> bool {
+    if crate::wayland::is_wayland() {
+        window_meta.is_some_and(|w| w.pid == Some(pid))
+            || crate::wayland::window_was_listed_for_pid(pid, xid)
+    } else {
+        crate::x11::window_belongs_to_pid(xid, pid)
+            || crate::input::popup_window_info(xid)
+                .is_some_and(|popup| popup.pid.is_none_or(|owner| owner == pid))
+            // A cross-process dialog/plugin window transient-for one of
+            // pid's own windows (GIMP export dialogs, LibreOffice's
+            // Document Recovery) legitimately belongs to a different pid
+            // than the caller's target; accept it here too so the
+            // get_window_state(window_id=...) follow-up named in the
+            // dialogs[] overlay actually works.
+            || crate::x11::list_cross_pid_transient_windows(pid)
+                .iter()
+                .any(|w| w.xid == xid)
+    }
+}
+
+/// Native-size PNG of one window. When a same-pid popup or dialog covers the
+/// window, the screen rectangle is read instead, since the window's own
+/// drawable never shows them. Shared by `get_window_state` and
+/// `capture_series`.
+fn capture_window_png(xid: u64, pid: u32, overlays: &WindowOverlays) -> anyhow::Result<Vec<u8>> {
+    if overlays.covers_window {
+        overlays
+            .window_rect
+            .ok_or_else(|| anyhow::anyhow!("window geometry unavailable"))
+            .and_then(|(x, y, w, h)| crate::capture::screenshot_root_region_png(x, y, w, h))
+            .or_else(|_| crate::wayland::screenshot_dispatch_with_pid(xid, pid))
+    } else {
+        crate::wayland::screenshot_dispatch_with_pid(xid, pid)
+    }
+}
+
 fn window_overlays(pid: u32, xid: u64) -> WindowOverlays {
     let mut out = WindowOverlays {
         window_rect: crate::x11::window_info(xid).map(|w| (w.x, w.y, w.width, w.height)),
@@ -1290,23 +1329,7 @@ impl Tool for GetWindowStateTool {
                     height: popup.height,
                 })
             });
-        let window_matches = if crate::wayland::is_wayland() {
-            window_meta.as_ref().is_some_and(|w| w.pid == Some(pid))
-                || crate::wayland::window_was_listed_for_pid(pid, xid)
-        } else {
-            crate::x11::window_belongs_to_pid(xid, pid)
-                || crate::input::popup_window_info(xid)
-                    .is_some_and(|popup| popup.pid.is_none_or(|owner| owner == pid))
-                // A cross-process dialog/plugin window transient-for one of
-                // pid's own windows (GIMP export dialogs, LibreOffice's
-                // Document Recovery) legitimately belongs to a different pid
-                // than the caller's target; accept it here too so the
-                // get_window_state(window_id=...) follow-up named in the
-                // dialogs[] overlay actually works.
-                || crate::x11::list_cross_pid_transient_windows(pid)
-                    .iter()
-                    .any(|w| w.xid == xid)
-        };
+        let window_matches = window_target_matches(pid, xid, window_meta.as_ref());
         if !process_is_live || !window_matches {
             return ToolResult::error(format!(
                 "Window target pid {pid}, window_id {xid} is stale or no longer running; refresh list_windows."
@@ -1388,17 +1411,8 @@ impl Tool for GetWindowStateTool {
                 };
                 let captured = if let Some((png, width, height)) = preview {
                     Ok((png, Some((width, height))))
-                } else if overlays.covers_window {
-                    overlays
-                        .window_rect
-                        .ok_or_else(|| anyhow::anyhow!("window geometry unavailable"))
-                        .and_then(|(x, y, w, h)| {
-                            crate::capture::screenshot_root_region_png(x, y, w, h)
-                        })
-                        .or_else(|_| crate::wayland::screenshot_dispatch_with_pid(xid, pid))
-                        .map(|png| (png, None))
                 } else {
-                    crate::wayland::screenshot_dispatch_with_pid(xid, pid).map(|png| (png, None))
+                    capture_window_png(xid, pid, &overlays).map(|png| (png, None))
                 };
                 match captured {
                     Ok((raw, original_size)) => {
@@ -12588,6 +12602,79 @@ fn normalize_desktop_capture_for_action_frame(
     Ok((encoded.into_inner(), action_width, action_height, scale_x))
 }
 
+/// One full-display capture in the desktop action coordinate frame. Shared by
+/// `get_desktop_state` and `capture_series`.
+struct DesktopActionFrame {
+    png: Vec<u8>,
+    width: u32,
+    height: u32,
+    /// Capture pixels per action-frame pixel before normalization.
+    scale_factor: f64,
+    overlay_capture: cursor_overlay::capture_exclusion::AgentOverlayCapture,
+    /// The Hyprland layout the image was composed from.
+    hyprland_frame: Option<crate::wayland::hyprland::DesktopFrame>,
+}
+
+fn capture_desktop_action_frame() -> anyhow::Result<DesktopActionFrame> {
+    // Capture the full display at native size first. When the
+    // compositor consumes logical input coordinates, normalize the
+    // image below so screenshot pixels still land exactly.
+    //
+    // The agent reads this image, so the Driver's own cursor and
+    // session pill are hidden around the grab (or the limitation is
+    // reported) instead of being baked over the controls it reads.
+    // Hyprland: read the desktop frame once. The screenshot, its action
+    // size and the window geometry below all use it.
+    let hyprland_plan = if crate::wayland::is_wayland() && crate::wayland::hyprland::is_session() {
+        Some(crate::wayland::hyprland::desktop_capture_plan()?)
+    } else {
+        None
+    };
+    let (native_png, overlay_capture) =
+        cursor_overlay::capture_exclusion::capture_excluding_overlays(
+            &crate::overlay_capture::OverlayExcluder,
+            |hidden| {
+                // A multi-monitor layout is composed from the frame
+                // read above, so the image is exactly that frame.
+                let png = match &hyprland_plan {
+                    Some(plan) if plan.composite => {
+                        crate::wayland::hyprland::compose_desktop_capture(&plan.frame)?
+                    }
+                    _ => crate::capture::screenshot_display_bytes()?,
+                };
+                Ok::<_, anyhow::Error>(crate::overlay_capture::verify_hidden_capture(png, hidden))
+            },
+        )?;
+    let (native_w, native_h) = crate::capture::png_dimensions_pub(&native_png)?;
+    // True screen size. On a pure-Wayland session (native backend
+    // opted in, no X11 DISPLAY) the capture above came from the
+    // wlroots `zwlr_screencopy` cascade, whose full-display buffer is
+    // the whole output at native (physical) pixels, so the PNG
+    // dimensions ARE the true screen size. Querying the X11 root
+    // window here would fail with "$DISPLAY variable not set" and
+    // abort the tool even though the screenshot already succeeded.
+    // Only fall back to the X11 root-window geometry off Wayland, so
+    // the X11 / XWayland path is unchanged. See #2017 / Sway testing.
+    let hyprland_frame = hyprland_plan.map(|plan| plan.frame);
+    let (screen_w, screen_h) = if let Some(frame) = &hyprland_frame {
+        (frame.width, frame.height)
+    } else if crate::wayland::is_wayland() {
+        crate::capture_action_frame::desktop_action_dimensions((native_w, native_h))?
+    } else {
+        x11_screen_size()?
+    };
+    let (png, width, height, scale_factor) =
+        normalize_desktop_capture_for_action_frame(native_png, screen_w, screen_h)?;
+    Ok(DesktopActionFrame {
+        png,
+        width,
+        height,
+        scale_factor,
+        overlay_capture,
+        hyprland_frame,
+    })
+}
+
 // ── get_desktop_state ─────────────────────────────────────────────────────────
 
 pub struct GetDesktopStateTool {
@@ -12606,75 +12693,59 @@ impl Tool for GetDesktopStateTool {
             input_schema: json!({"type":"object","properties":{
                 "session":{"type":"string","description":"For multi-call work, prefer a short public session label and repeat it on every call that accepts it. Omit it to use the authenticated transport's implicit lifecycle session."},
                 "screenshot_out_file":{"type":"string","description":"Write PNG here instead of base64."},
-                "max_image_dimension": cua_driver_core::tool_schema::desktop_max_image_dimension_schema()
+                "max_image_dimension": cua_driver_core::tool_schema::desktop_max_image_dimension_schema(),
+                "region": cua_driver_core::capture_series::region_schema(
+                    "Optional crop in full-size desktop pixels (the uncapped get_desktop_state frame; physical screen pixels on X11), applied before max_image_dimension. Must lie inside the screen. Screenshot pixel (px,py) is desktop (x + px*frame_scale, y + py*frame_scale); capture_id maps it for you."
+                )
             },"additionalProperties":false}),
             read_only: true, destructive: false, idempotent: false, open_world: false,
         })
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        let capture_args = args.clone();
-        let input = match parse_typed_input::<GetDesktopStateInput>("get_desktop_state", args) {
+        // `region` is a Linux addition outside the portable contract type.
+        let input = match parse_typed_projection::<GetDesktopStateInput>("get_desktop_state", &args)
+        {
             Ok(input) => input,
             Err(result) => return result,
         };
+        let region = match cua_driver_core::capture_series::parse_region(args.get("region")) {
+            Ok(region) => region,
+            Err(message) => {
+                return ToolResult::error(format!(
+                    "get_desktop_state: invalid arguments: {message}"
+                ))
+                .with_structured(json!({
+                    "code": "invalid_arguments",
+                    "tool": "get_desktop_state",
+                    "detail": message,
+                }))
+            }
+        };
+        let capture_args = args;
         let out_file = input.screenshot_out_file;
         let max_image_dimension = input.max_image_dimension;
         let capture_service = self.state.capture_service.clone();
 
         let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-            // Capture the full display at native size first. When the
-            // compositor consumes logical input coordinates, normalize the
-            // image below so screenshot pixels still land exactly.
-            //
-            // The agent reads this image, so the Driver's own cursor and
-            // session pill are hidden around the grab (or the limitation is
-            // reported) instead of being baked over the controls it reads.
-            // Hyprland: read the desktop frame once. The screenshot, its action
-            // size and the window geometry below all use it.
-            let hyprland_plan =
-                if crate::wayland::is_wayland() && crate::wayland::hyprland::is_session() {
-                    Some(crate::wayland::hyprland::desktop_capture_plan()?)
-                } else {
-                    None
-                };
-            let (native_png, overlay_capture) =
-                cursor_overlay::capture_exclusion::capture_excluding_overlays(
-                    &crate::overlay_capture::OverlayExcluder,
-                    |hidden| {
-                        // A multi-monitor layout is composed from the frame
-                        // read above, so the image is exactly that frame.
-                        let png = match &hyprland_plan {
-                            Some(plan) if plan.composite => {
-                                crate::wayland::hyprland::compose_desktop_capture(&plan.frame)?
-                            }
-                            _ => crate::capture::screenshot_display_bytes()?,
-                        };
-                        Ok::<_, anyhow::Error>(crate::overlay_capture::verify_hidden_capture(
-                            png, hidden,
-                        ))
-                    },
-                )?;
-            let (native_w, native_h) = crate::capture::png_dimensions_pub(&native_png)?;
-            // True screen size. On a pure-Wayland session (native backend
-            // opted in, no X11 DISPLAY) the capture above came from the
-            // wlroots `zwlr_screencopy` cascade, whose full-display buffer is
-            // the whole output at native (physical) pixels — so the PNG
-            // dimensions ARE the true screen size. Querying the X11 root
-            // window here would fail with "$DISPLAY variable not set" and
-            // abort the tool even though the screenshot already succeeded.
-            // Only fall back to the X11 root-window geometry off Wayland, so
-            // the X11 / XWayland path is unchanged. See #2017 / Sway testing.
-            let hyprland_frame = hyprland_plan.map(|plan| plan.frame);
-            let (screen_w, screen_h) = if let Some(frame) = &hyprland_frame {
-                (frame.width, frame.height)
-            } else if crate::wayland::is_wayland() {
-                crate::capture_action_frame::desktop_action_dimensions((native_w, native_h))?
-            } else {
-                x11_screen_size()?
+            let DesktopActionFrame {
+                png,
+                width: screen_w,
+                height: screen_h,
+                scale_factor,
+                overlay_capture,
+                hyprland_frame,
+            } = capture_desktop_action_frame()?;
+            // Optional crop, in action-frame pixels, before the cap.
+            let (png, shot_w, shot_h) = match region {
+                Some(region) => {
+                    cua_driver_core::capture_series::check_region(region, (screen_w, screen_h))
+                        .map_err(|message| anyhow::anyhow!(message))?;
+                    let png = cua_driver_core::image_utils::crop_png(&png, region)?;
+                    (png, region.width, region.height)
+                }
+                None => (png, screen_w, screen_h),
             };
-            let (png, shot_w, shot_h, scale_factor) =
-                normalize_desktop_capture_for_action_frame(native_png, screen_w, screen_h)?;
             // Opt-in long-edge cap: the full-size capture is the desktop
             // action frame; a capped image is mapped back at dispatch
             // (cua_driver_core::desktop_capture_scale) and by its capture_id.
@@ -12714,13 +12785,23 @@ impl Tool for GetDesktopStateTool {
                 );
                 frame.rebase_windows(&mut windows);
             }
-            let capture_id = crate::capture_action_frame::publish_desktop(
-                &capture_service,
-                &capture_args,
-                &png,
-                (shot_w, shot_h),
-                (screen_w, screen_h),
-            )?;
+            let capture_id = match region {
+                Some(region) => crate::capture_action_frame::publish_desktop_region(
+                    &capture_service,
+                    &capture_args,
+                    &png,
+                    (shot_w, shot_h),
+                    (screen_w, screen_h),
+                    region,
+                )?,
+                None => crate::capture_action_frame::publish_desktop(
+                    &capture_service,
+                    &capture_args,
+                    &png,
+                    (shot_w, shot_h),
+                    (screen_w, screen_h),
+                )?,
+            };
             Ok((
                 b64,
                 shot_w,
@@ -12749,8 +12830,11 @@ impl Tool for GetDesktopStateTool {
                 capture_id,
                 overlay_capture,
             ))) => {
+                // Desktop pixels per screenshot pixel: the crop's width when a
+                // region was taken, the whole screen's otherwise.
+                let source_w = region.map_or(screen_w, |region| region.width);
                 let frame_scale = if shot_w > 0 {
-                    f64::from(screen_w) / f64::from(shot_w)
+                    f64::from(source_w) / f64::from(shot_w)
                 } else {
                     1.0
                 };
@@ -12769,7 +12853,12 @@ impl Tool for GetDesktopStateTool {
                     "capture_id": capture_id,
                     "agent_overlay_capture": overlay_capture,
                 });
-                if (frame_scale - 1.0).abs() > 0.001 {
+                if let Some(region) = region {
+                    structured["region"] = json!({
+                        "x": region.x, "y": region.y,
+                        "width": region.width, "height": region.height,
+                    });
+                } else if (frame_scale - 1.0).abs() > 0.001 {
                     // Capped: the uncapped capture is the action frame.
                     structured["screenshot_original_width"] = json!(screen_w);
                     structured["screenshot_original_height"] = json!(screen_h);
@@ -12777,8 +12866,20 @@ impl Tool for GetDesktopStateTool {
                 if let Some(b64) = b64_opt {
                     content.push(cua_driver_core::protocol::Content::image_png(b64));
                 }
-                let window_lines = desktop_window_lines(&windows, frame_scale);
-                let mut frame_note = if (frame_scale - 1.0).abs() > 0.001 {
+                // A cropped image is not the desktop frame, so window
+                // geometry stays in full-size desktop pixels.
+                let window_lines = desktop_window_lines(
+                    &windows,
+                    if region.is_some() { 1.0 } else { frame_scale },
+                );
+                let mut frame_note = if let Some(region) = region {
+                    format!(
+                        "; region {},{} {}x{} of the desktop: screenshot pixel (px,py) is desktop \
+                         ({} + px*{frame_scale:.2}, {} + py*{frame_scale:.2}); window positions \
+                         below are full-size desktop pixels",
+                        region.x, region.y, region.width, region.height, region.x, region.y
+                    )
+                } else if (frame_scale - 1.0).abs() > 0.001 {
                     format!(
                         "; x/y for scope:\"desktop\" actions are pixels of THIS screenshot \
                          (mapped ×{frame_scale:.2} back to the screen automatically)"
@@ -13701,6 +13802,212 @@ impl Tool for ZoomTool {
             Ok(Err(e)) => ToolResult::error(format!("Zoom failed: {e}")),
             Err(e) => ToolResult::error(format!("Task error: {e}")),
         }
+    }
+}
+
+// ── capture_series ────────────────────────────────────────────────────────────
+
+/// The whole desktop, in the desktop action frame `get_desktop_state` uses.
+struct DesktopFrameSource;
+
+impl cua_driver_core::capture_series::FrameSource for DesktopFrameSource {
+    fn frame_size(&self) -> anyhow::Result<Option<(u32, u32)>> {
+        // On X11 the desktop action frame is the root window. Wayland frames
+        // are measured on the first capture.
+        if crate::wayland::is_wayland() {
+            Ok(None)
+        } else {
+            x11_screen_size().map(Some)
+        }
+    }
+
+    fn capture(
+        &self,
+        region: Option<cua_driver_core::image_utils::PixelRect>,
+    ) -> anyhow::Result<cua_driver_core::capture_series::SourceFrame> {
+        if let (Some(region), false) = (region, crate::wayland::is_wayland()) {
+            // X11 maps the root window 1:1 onto the action frame, so read
+            // only the region from it instead of the whole screen.
+            let frame_size = x11_screen_size()?;
+            let origin = (i32::try_from(region.x)?, i32::try_from(region.y)?);
+            let (png, _) = cursor_overlay::capture_exclusion::capture_excluding_overlays(
+                &crate::overlay_capture::OverlayExcluder,
+                |hidden| {
+                    let png = crate::capture::screenshot_root_region_png(
+                        origin.0,
+                        origin.1,
+                        region.width,
+                        region.height,
+                    )?;
+                    Ok::<_, anyhow::Error>(crate::overlay_capture::verify_hidden_capture_at(
+                        png, hidden, origin,
+                    ))
+                },
+            )?;
+            return Ok(cua_driver_core::capture_series::SourceFrame {
+                png,
+                origin: (region.x, region.y),
+                frame_size,
+            });
+        }
+        let frame = capture_desktop_action_frame()?;
+        Ok(cua_driver_core::capture_series::SourceFrame {
+            png: frame.png,
+            origin: (0, 0),
+            frame_size: (frame.width, frame.height),
+        })
+    }
+
+    fn label(&self) -> String {
+        "desktop".into()
+    }
+}
+
+/// One window at native size, captured the way `get_window_state` does.
+struct WindowFrameSource {
+    pid: u32,
+    xid: u64,
+}
+
+impl WindowFrameSource {
+    fn grab(&self) -> anyhow::Result<Vec<u8>> {
+        let overlays = if crate::wayland::is_wayland() {
+            WindowOverlays::default()
+        } else {
+            window_overlays(self.pid, self.xid)
+        };
+        capture_window_png(self.xid, self.pid, &overlays).map_err(|error| {
+            if !crate::wayland::is_wayland() && !crate::x11::window_exists(self.xid) {
+                anyhow::anyhow!(
+                    "Window target pid {}, window_id {} is stale or no longer running; refresh list_windows.",
+                    self.pid,
+                    self.xid
+                )
+            } else {
+                error
+            }
+        })
+    }
+}
+
+impl cua_driver_core::capture_series::FrameSource for WindowFrameSource {
+    fn frame_size(&self) -> anyhow::Result<Option<(u32, u32)>> {
+        // Only a capture tells the exact native size, so probe once.
+        let png = self.grab()?;
+        crate::capture::png_dimensions_pub(&png).map(Some)
+    }
+
+    fn capture(
+        &self,
+        _region: Option<cua_driver_core::image_utils::PixelRect>,
+    ) -> anyhow::Result<cua_driver_core::capture_series::SourceFrame> {
+        let png = self.grab()?;
+        let frame_size = crate::capture::png_dimensions_pub(&png)?;
+        Ok(cua_driver_core::capture_series::SourceFrame {
+            png,
+            origin: (0, 0),
+            frame_size,
+        })
+    }
+
+    fn label(&self) -> String {
+        format!("window {} of pid {}", self.xid, self.pid)
+    }
+}
+
+pub struct CaptureSeriesTool;
+static CAPTURE_SERIES_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
+
+#[async_trait]
+impl Tool for CaptureSeriesTool {
+    fn def(&self) -> &ToolDef {
+        CAPTURE_SERIES_DEF.get_or_init(|| ToolDef {
+            name: cua_driver_core::capture_series::TOOL_NAME.into(),
+            description: "Take screenshots on a schedule: `count` frames `interval_ms` apart \
+                (default 5 x 1000 ms) or at `offsets_ms` from the start, all timed from one \
+                start so delays never accumulate. Captures the desktop, or one window with \
+                pid + window_id. `region` crops each frame, then `max_image_dimension` caps \
+                its long edge. Desktop regions are full-size desktop pixels (physical screen \
+                pixels on X11), not pixels of a capped get_desktop_state image; window regions \
+                are native window pixels (get_window_state pixels divided by its frame_scale). \
+                `return_frames`: all, changed (differs from the last kept frame in more than \
+                `change_threshold` of its pixels) or last. Inline replies carry at most \
+                `max_inline_images`; `output:\"files\"` writes new frame-0001.png, ... into \
+                `out_dir` instead. Each frame reports t_ms, and late when the previous capture \
+                overran its slot. At most 120 frames within 600000 ms."
+                .into(),
+            input_schema: json!({"type":"object","properties":{
+                "session": cua_driver_core::tool_schema::session_schema(),
+                "pid":{"type":"integer","description":"Window owner pid; with window_id, capture that window. Omit both for the desktop."},
+                "window_id":{"type":"integer","description":"Window id from list_windows, with pid."},
+                "count":{"type":"integer","minimum":1,"maximum":120,"description":"Frames to take (default 5). Not with offsets_ms."},
+                "interval_ms":{"type":"integer","minimum":0,"maximum":60000,"description":"Time between frame starts (default 1000; 0 = back to back). Not with offsets_ms."},
+                "offsets_ms":{"type":"array","items":{"type":"integer","minimum":0},"minItems":1,"maxItems":120,"description":"Strictly increasing capture times in ms from the start, instead of count and interval_ms."},
+                "region": cua_driver_core::capture_series::region_schema(
+                    "Crop {x,y,width,height}: full-size desktop pixels, or native window pixels with pid/window_id. Must lie inside the frame."
+                ),
+                "max_image_dimension":{"type":"integer","minimum":0,"description":"Long-edge cap applied after the crop (0 or omitted: none)."},
+                "format":{"type":"string","enum":["png","jpeg"],"description":"Image format (default png)."},
+                "quality":{"type":"integer","minimum":1,"maximum":100,"description":"JPEG quality (default 80)."},
+                "output":{"type":"string","enum":["inline","files"],"description":"inline (default) returns the images; files writes them to out_dir."},
+                "out_dir":{"type":"string","description":"Absolute path of an existing directory, not a symlink. Frame files that already exist are never overwritten; the call refuses instead."},
+                "return_frames":{"type":"string","enum":["all","changed","last"],"description":"Which frames to return (default all)."},
+                "max_inline_images":{"type":"integer","minimum":1,"maximum":30,"description":"Most images in an inline reply (default 10). For changed, the first and the latest frames are kept."},
+                "change_threshold":{"type":"number","minimum":0,"maximum":1,"description":"Fraction of pixels that must differ for a frame to count as changed (default 0.001), measured on the cropped, capped frame."}
+            },"additionalProperties":false}),
+            read_only: true,
+            destructive: false,
+            idempotent: false,
+            open_world: false,
+        })
+    }
+
+    async fn invoke(&self, args: Value) -> ToolResult {
+        use cua_driver_core::capture_series::{self, FrameSource, SeriesRequest};
+        let request = match SeriesRequest::parse(&args) {
+            Ok(request) => request,
+            Err(message) => return capture_series::invalid_arguments(&message),
+        };
+        let source: Arc<dyn FrameSource> = match (args.get("pid"), args.get("window_id")) {
+            (None, None) => Arc::new(DesktopFrameSource),
+            (Some(pid), Some(window_id)) => {
+                let Some(pid) = pid
+                    .as_u64()
+                    .and_then(|pid| u32::try_from(pid).ok())
+                    .filter(|pid| *pid > 0)
+                else {
+                    return capture_series::invalid_arguments(
+                        "`pid` must be a positive 32-bit integer",
+                    );
+                };
+                let Some(xid) = window_id.as_u64().filter(|xid| *xid > 0) else {
+                    return capture_series::invalid_arguments(
+                        "`window_id` must be a positive integer",
+                    );
+                };
+                let current = tokio::task::spawn_blocking(move || {
+                    let meta = crate::wayland::list_windows_dispatch(Some(pid))
+                        .into_iter()
+                        .find(|w| w.xid == xid);
+                    crate::proc_fs::is_process_live(pid)
+                        && window_target_matches(pid, xid, meta.as_ref())
+                })
+                .await
+                .unwrap_or(false);
+                if !current {
+                    return ToolResult::error(format!(
+                        "Window target pid {pid}, window_id {xid} is stale or no longer running; refresh list_windows."
+                    ));
+                }
+                Arc::new(WindowFrameSource { pid, xid })
+            }
+            _ => {
+                return capture_series::invalid_arguments(
+                    "pass both pid and window_id for a window, or neither for the desktop",
+                )
+            }
+        };
+        capture_series::run(request, source).await
     }
 }
 
@@ -14716,6 +15023,7 @@ pub fn build_registry_with_provider(
     r.register(Box::new(ZoomTool {
         state: state.clone(),
     }));
+    r.register(Box::new(CaptureSeriesTool));
     // `type_text_chars` is a deprecated invoke-time alias for `type_text`.
     // Keep it out of tools/list, matching the macOS and Windows registries.
     let _: &TypeTextCharsTool = &TypeTextCharsTool;

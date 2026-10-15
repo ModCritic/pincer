@@ -186,8 +186,8 @@ fn validate_crosshair_point(
     Ok(())
 }
 
-/// Internal: decode PNG to a mutable RGBA8 image buffer.
-fn decode_png_to_rgba8(png_bytes: &[u8]) -> Result<ImageBuffer<image::Rgba<u8>, Vec<u8>>> {
+/// Decode an RGB8 or RGBA8 PNG to an RGBA8 image buffer.
+pub fn decode_png_to_rgba8(png_bytes: &[u8]) -> Result<ImageBuffer<image::Rgba<u8>, Vec<u8>>> {
     let cursor = std::io::Cursor::new(png_bytes);
     let decoder = image::codecs::png::PngDecoder::new(cursor)?;
     let (w, h) = decoder.dimensions();
@@ -202,7 +202,7 @@ fn decode_png_to_rgba8(png_bytes: &[u8]) -> Result<ImageBuffer<image::Rgba<u8>, 
         ColorType::Rgb8 => DynamicImage::ImageRgb8(
             ImageBuffer::from_raw(w, h, buf).ok_or_else(|| anyhow!("invalid RGB buffer"))?,
         ),
-        _ => bail!("unsupported color type for crosshair: {color:?}"),
+        _ => bail!("unsupported PNG color type: {color:?}"),
     };
     Ok(img.to_rgba8())
 }
@@ -255,6 +255,73 @@ fn draw_crosshair(img: &mut ImageBuffer<image::Rgba<u8>, Vec<u8>>, cx: f64, cy: 
             }
         }
     }
+}
+
+// ── Crop ──────────────────────────────────────────────────────────────────
+
+/// A pixel rectangle inside an image: top-left corner plus size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PixelRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl PixelRect {
+    /// Whether the rectangle is non-empty and lies inside a
+    /// `width`x`height` image.
+    pub fn fits_within(&self, width: u32, height: u32) -> bool {
+        self.width > 0
+            && self.height > 0
+            && u64::from(self.x) + u64::from(self.width) <= u64::from(width)
+            && u64::from(self.y) + u64::from(self.height) <= u64::from(height)
+    }
+}
+
+/// Copy `rect` out of an RGBA image. A rectangle that does not fit is an
+/// error, never a silent clamp.
+pub fn crop_rgba8(
+    image: &ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    rect: PixelRect,
+) -> Result<ImageBuffer<image::Rgba<u8>, Vec<u8>>> {
+    let (w, h) = image.dimensions();
+    if !rect.fits_within(w, h) {
+        bail!(
+            "crop {},{} {}x{} does not fit the {w}x{h} image",
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height
+        );
+    }
+    Ok(image::imageops::crop_imm(image, rect.x, rect.y, rect.width, rect.height).to_image())
+}
+
+/// Crop a PNG to `rect` and re-encode it as PNG.
+pub fn crop_png(png_bytes: &[u8], rect: PixelRect) -> Result<Vec<u8>> {
+    let cropped = crop_rgba8(&decode_png_to_rgba8(png_bytes)?, rect)?;
+    let mut out = Vec::new();
+    DynamicImage::ImageRgba8(cropped)
+        .write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::Png)?;
+    Ok(out)
+}
+
+/// Downscale an RGBA image so its long edge is at most `max_dim`, with the
+/// same size rounding and Lanczos3 resampler as [`resize_png_if_needed`].
+/// `max_dim == 0` or an image that already fits is returned unchanged.
+pub fn fit_rgba8_long_edge(
+    image: ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    max_dim: u32,
+) -> ImageBuffer<image::Rgba<u8>, Vec<u8>> {
+    let (w, h) = image.dimensions();
+    if max_dim == 0 || (w <= max_dim && h <= max_dim) {
+        return image;
+    }
+    let scale = f64::from(max_dim) / f64::from(w.max(h));
+    let new_w = ((f64::from(w) * scale).round() as u32).max(1);
+    let new_h = ((f64::from(h) * scale).round() as u32).max(1);
+    image::imageops::resize(&image, new_w, new_h, image::imageops::FilterType::Lanczos3)
 }
 
 // ── PNG dimensions ────────────────────────────────────────────────────────
@@ -355,6 +422,88 @@ mod tests {
             };
             assert_eq!(limits.resolve(), expected, "{limits:?}");
         }
+    }
+
+    #[test]
+    fn crop_png_copies_exactly_the_rectangle() {
+        // 4x3 image where each pixel encodes its own x and y.
+        let mut rgba = Vec::new();
+        for y in 0..3u8 {
+            for x in 0..4u8 {
+                rgba.extend_from_slice(&[x, y, 0, 255]);
+            }
+        }
+        let png = encode_rgba_to_png(&rgba, 4, 3).unwrap();
+        let rect = PixelRect {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 2,
+        };
+        let cropped = decode_png_to_rgba8(&crop_png(&png, rect).unwrap()).unwrap();
+        assert_eq!(cropped.dimensions(), (2, 2));
+        assert_eq!(cropped.get_pixel(0, 0).0, [1, 1, 0, 255]);
+        assert_eq!(cropped.get_pixel(1, 1).0, [2, 2, 0, 255]);
+    }
+
+    #[test]
+    fn crop_refuses_rectangles_outside_the_image() {
+        let image = ImageBuffer::from_pixel(4, 3, image::Rgba([0u8, 0, 0, 255]));
+        for rect in [
+            PixelRect {
+                x: 3,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+            PixelRect {
+                x: 0,
+                y: 2,
+                width: 1,
+                height: 2,
+            },
+            PixelRect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 1,
+            },
+            PixelRect {
+                x: u32::MAX,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+        ] {
+            assert!(crop_rgba8(&image, rect).is_err(), "{rect:?}");
+        }
+        let whole = PixelRect {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 3,
+        };
+        assert_eq!(crop_rgba8(&image, whole).unwrap().dimensions(), (4, 3));
+    }
+
+    #[test]
+    fn fit_long_edge_matches_resize_png_rounding() {
+        let image = ImageBuffer::from_pixel(300, 100, image::Rgba([9u8, 9, 9, 255]));
+        assert_eq!(
+            fit_rgba8_long_edge(image.clone(), 0).dimensions(),
+            (300, 100)
+        );
+        assert_eq!(
+            fit_rgba8_long_edge(image.clone(), 300).dimensions(),
+            (300, 100)
+        );
+        assert_eq!(
+            fit_rgba8_long_edge(image.clone(), 200).dimensions(),
+            (200, 67)
+        );
+        let png = encode_rgba_to_png(image.as_raw(), 300, 100).unwrap();
+        let resized = resize_png_if_needed(&png, 200).unwrap();
+        assert_eq!(png_dimensions(&resized).unwrap(), (200, 67));
     }
 
     #[test]
