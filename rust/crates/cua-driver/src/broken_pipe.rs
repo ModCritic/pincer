@@ -64,23 +64,6 @@ pub fn is_broken_pipe_print_panic(message: &str) -> bool {
     std::io::Error::from_raw_os_error(code).kind() == ErrorKind::BrokenPipe
 }
 
-/// Map a child's exit status to the status a shell would report, so the
-/// telemetry wrapper preserves a signal death such as `SIGPIPE` as `128 + n`
-/// instead of collapsing it to a generic failure.
-pub fn shell_exit_code(status: std::process::ExitStatus) -> i32 {
-    if let Some(code) = status.code() {
-        return code;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        if let Some(signal) = status.signal() {
-            return 128 + signal;
-        }
-    }
-    1
-}
-
 fn terminate_for_broken_pipe() -> ! {
     #[cfg(unix)]
     // SAFETY: restoring the default disposition and raising a signal on the
@@ -129,15 +112,5 @@ mod tests {
             "called `Result::unwrap()` on an `Err` value: Broken pipe (os error 32)"
         ));
         assert!(!is_broken_pipe_print_panic("failed printing to stdout"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn wrapper_reports_signal_deaths_like_a_shell() {
-        use std::os::unix::process::ExitStatusExt;
-        let status = std::process::ExitStatus::from_raw(libc::SIGPIPE);
-        assert_eq!(shell_exit_code(status), BROKEN_PIPE_EXIT_CODE);
-        let status = std::process::ExitStatus::from_raw(3 << 8);
-        assert_eq!(shell_exit_code(status), 3);
     }
 }

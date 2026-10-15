@@ -380,10 +380,17 @@ pub fn default_pid_file_path() -> String {
 
 // ── Protocol types ────────────────────────────────────────────────────────────
 
-fn daemon_observation_transport(req: &DaemonRequest) -> Option<crate::telemetry::Transport> {
+/// Front end a daemon tool call arrived through, as declared by the caller.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ObservedTransport {
+    McpStdio,
+    Daemon,
+}
+
+fn daemon_observation_transport(req: &DaemonRequest) -> Option<ObservedTransport> {
     match req.observation_origin {
-        Some(ToolObservationOrigin::McpProxy) => Some(crate::telemetry::Transport::McpStdio),
-        Some(ToolObservationOrigin::Direct) => Some(crate::telemetry::Transport::Daemon),
+        Some(ToolObservationOrigin::McpProxy) => Some(ObservedTransport::McpStdio),
+        Some(ToolObservationOrigin::Direct) => Some(ObservedTransport::Daemon),
         // Legacy callers did not declare ownership. Leaving them unobserved
         // preserves the legacy proxy as the single emitter during rollout;
         // current direct callers explicitly select `Direct` above.
@@ -392,14 +399,11 @@ fn daemon_observation_transport(req: &DaemonRequest) -> Option<crate::telemetry:
 }
 
 fn observe_daemon_result(
-    observation: Option<(
-        cua_driver_core::server::ToolObservationTimer,
-        crate::telemetry::Transport,
-    )>,
+    observation: Option<cua_driver_core::server::ToolObservationTimer>,
     session_context: Option<cua_driver_core::session::SessionToolContext>,
     result: serde_json::Value,
 ) -> serde_json::Value {
-    let Some((timer, transport)) = observation else {
+    let Some(timer) = observation else {
         return result;
     };
     let response = cua_driver_core::protocol::Response::ok(serde_json::Value::Null, result);
@@ -407,34 +411,12 @@ fn observe_daemon_result(
     if let Some(context) = session_context {
         context.complete(&outcome);
     }
-    crate::telemetry::capture_tool_completed(outcome, transport);
     match response.body {
         cua_driver_core::protocol::ResponseBody::Result { result } => result,
         cua_driver_core::protocol::ResponseBody::Error { .. } => {
             unreachable!("constructed ok response")
         }
     }
-}
-
-fn observe_daemon_error(
-    observation: Option<(
-        cua_driver_core::server::ToolObservationTimer,
-        crate::telemetry::Transport,
-    )>,
-    exit_code: i32,
-) {
-    let Some((timer, transport)) = observation else {
-        return;
-    };
-    let response = cua_driver_core::protocol::Response::ok(
-        serde_json::Value::Null,
-        serde_json::json!({
-            "content": [],
-            "isError": true,
-            "structuredContent": { "exit_code": exit_code },
-        }),
-    );
-    crate::telemetry::capture_tool_completed(timer.finish(&response), transport);
 }
 
 async fn invoke_daemon_tool(
@@ -463,22 +445,18 @@ async fn invoke_daemon_tool(
     let effective_session =
         cua_driver_core::tool_args::apply_session_identity(&mut args, req.session_id.as_deref());
     let operation = cua_driver_core::server::tool_operation(&tool_name, Some(&args));
-    let observation = observation_transport.map(|transport| {
-        (
-            cua_driver_core::server::ToolObservationTimer::start_with_operation(
-                tool_name.clone(),
-                operation,
-                known_tool,
-                true,
-                cua_driver_core::server::StdioExecutionPath::DirectDaemon,
-            ),
-            transport,
+    let observation = observation_transport.map(|_| {
+        cua_driver_core::server::ToolObservationTimer::start_with_operation(
+            tool_name.clone(),
+            operation,
+            known_tool,
+            true,
+            cua_driver_core::server::StdioExecutionPath::DirectDaemon,
         )
     });
 
     if let Some(sid) = &effective_session {
         if !is_session_lifecycle_tool(&tool_name) && sdk.is_session_ended(sid) {
-            observe_daemon_error(observation, 1);
             // An unnamed call's lifecycle id is the transport session, which
             // is not a label the caller can pass back to start_session.
             let recovery = if req.session_id.as_deref() == Some(sid.as_str()) {
@@ -501,12 +479,10 @@ async fn invoke_daemon_tool(
     // whether an unapproved name happens to be registered. This also preserves
     // the MCP policy contract now that every call passes through the daemon.
     if let Err(error) = cua_driver_core::authorization::authorize_tool_call(&tool_name, &args) {
-        observe_daemon_error(observation, 1);
         return DaemonResponse::err(error.to_string(), 1);
     }
 
     if !known_tool {
-        observe_daemon_error(observation, 64);
         return DaemonResponse::err(format!("Unknown tool: {tool_name}"), 64);
     }
 
@@ -514,16 +490,8 @@ async fn invoke_daemon_tool(
 
     let session_context = observation_transport.and_then(|transport| {
         let transport = match transport {
-            crate::telemetry::Transport::McpStdio => {
-                cua_driver_core::session::SessionTransport::McpStdio
-            }
-            crate::telemetry::Transport::McpHttp => {
-                cua_driver_core::session::SessionTransport::McpHttp
-            }
-            crate::telemetry::Transport::Cli => cua_driver_core::session::SessionTransport::Cli,
-            crate::telemetry::Transport::Daemon => {
-                cua_driver_core::session::SessionTransport::Daemon
-            }
+            ObservedTransport::McpStdio => cua_driver_core::session::SessionTransport::McpStdio,
+            ObservedTransport::Daemon => cua_driver_core::session::SessionTransport::Daemon,
         };
         let client_kind = match transport {
             cua_driver_core::session::SessionTransport::McpStdio
@@ -554,7 +522,6 @@ async fn invoke_daemon_tool(
     let result_value = match sdk.invoke_raw(&tool_name, args).await {
         Ok(result) => result,
         Err(error) => {
-            observe_daemon_error(observation, 1);
             return DaemonResponse::err(error, 1);
         }
     };
@@ -2928,11 +2895,11 @@ mod telemetry_routing_tests {
     fn observation_origin_selects_exactly_one_transport() {
         assert_eq!(
             daemon_observation_transport(&request(Some(ToolObservationOrigin::McpProxy))),
-            Some(crate::telemetry::Transport::McpStdio)
+            Some(ObservedTransport::McpStdio)
         );
         assert_eq!(
             daemon_observation_transport(&request(Some(ToolObservationOrigin::Direct))),
-            Some(crate::telemetry::Transport::Daemon)
+            Some(ObservedTransport::Daemon)
         );
         assert_eq!(daemon_observation_transport(&request(None)), None);
     }

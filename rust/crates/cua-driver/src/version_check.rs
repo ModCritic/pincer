@@ -37,9 +37,9 @@
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Disk-resident cache file (sibling of the telemetry artifacts under
-/// `~/.cua-driver/`). Holds the last-seen latest version plus the list
-/// of versions the user has actively dismissed.
+/// Disk-resident cache file under `~/.cua-driver/`. Holds the last-seen
+/// latest version plus the list of versions the user has actively
+/// dismissed.
 const CACHE_FILE_NAME: &str = "version_check.json";
 
 /// The pre-rename home. [`migrate_legacy_cache`] moves a cache written
@@ -48,9 +48,8 @@ const CACHE_FILE_NAME: &str = "version_check.json";
 /// migrations. Nothing in this module writes here.
 const LEGACY_HOME_SUBDIRECTORY: &str = ".cua-driver-rs";
 
-/// Single-invocation opt-out env var. Recognised values mirror the
-/// telemetry opt-out: `0|false|no|off` disables the check, everything
-/// else (including unset) leaves it on.
+/// Single-invocation opt-out env var: `0|false|no|off` disables the
+/// check, everything else (including unset) leaves it on.
 const ENV_UPDATE_CHECK: &str = "CUA_DRIVER_RS_UPDATE_CHECK";
 
 /// Refresh threshold for a cached *result*. Short enough that a release
@@ -97,7 +96,6 @@ pub fn maybe_announce_update() {
             &current,
             || fetch_latest_version().map_err(|e| e.to_string()),
             std::io::stderr(),
-            true,
         );
     };
 
@@ -146,28 +144,6 @@ pub struct UpdateState {
     /// Human-readable reason an upstream check is unavailable or failed
     /// without a cache. `None` on success / cache fallback.
     pub error: Option<String>,
-}
-
-/// Emit the bounded result of an explicit update check. The structured state
-/// remains the source of truth for CLI/MCP output; telemetry receives only a
-/// closed outcome, a strict public release version, and the cache flag.
-pub(crate) fn capture_update_state(
-    state: &UpdateState,
-    source: crate::telemetry::UpdateCheckSource,
-) {
-    let outcome = if state.update_available {
-        crate::telemetry::UpdateCheckOutcome::Available
-    } else if state.latest_version.is_some() {
-        crate::telemetry::UpdateCheckOutcome::UpToDate
-    } else {
-        crate::telemetry::UpdateCheckOutcome::Unavailable
-    };
-    crate::telemetry::capture_update_checked(
-        source,
-        outcome,
-        state.latest_version.as_deref(),
-        state.cache_hit,
-    );
 }
 
 /// Build the canonical install one-liner for the current target.
@@ -415,7 +391,7 @@ pub(crate) fn record_latest(channel: crate::release_channel::ReleaseChannel, lat
 /// against a stubbed fetcher and capture the banner into an in-memory
 /// buffer. Errors here never propagate — the function consumes them
 /// and converts to `tracing::debug!` lines.
-fn run_check_and_announce<F, W>(current: &str, fetch: F, mut writer: W, capture_telemetry: bool)
+fn run_check_and_announce<F, W>(current: &str, fetch: F, mut writer: W)
 where
     F: FnOnce() -> Result<String, String>,
     W: std::io::Write,
@@ -424,7 +400,6 @@ where
         current,
         fetch,
         &mut writer,
-        capture_telemetry,
         crate::updater::is_pacman_managed(),
     );
 }
@@ -433,7 +408,6 @@ fn run_check_and_announce_with_ownership<F, W>(
     current: &str,
     fetch: F,
     mut writer: W,
-    capture_telemetry: bool,
     managed: bool,
 ) where
     F: FnOnce() -> Result<String, String>,
@@ -456,12 +430,12 @@ fn run_check_and_announce_with_ownership<F, W>(
         .map(|t| t <= now && now - t < ERROR_BACKOFF_SECONDS)
         .unwrap_or(false);
 
-    let (latest, cache_hit) = if needs_refresh && !backing_off {
+    let latest = if needs_refresh && !backing_off {
         match fetch() {
             Ok(v) => {
                 // Persist on success so the next launch re-uses the answer.
                 persist_result(&cached, now, current, selected_channel, &v);
-                (v, false)
+                v
             }
             Err(e) => {
                 tracing::debug!(target: "cua_driver::version_check",
@@ -470,14 +444,14 @@ fn run_check_and_announce_with_ownership<F, W>(
                 // Fall back to a trusted cached value if any — better an old
                 // banner than none on a brief network blip.
                 match cached.latest_version.clone().filter(|_| trusted) {
-                    Some(v) => (v, true),
+                    Some(v) => v,
                     None => return,
                 }
             }
         }
     } else {
         match cached.latest_version.clone().filter(|_| trusted) {
-            Some(v) => (v, true),
+            Some(v) => v,
             None => return,
         }
     };
@@ -496,17 +470,6 @@ fn run_check_and_announce_with_ownership<F, W>(
         tracing::debug!(target: "cua_driver::version_check",
                         "newer version {latest} dismissed; skipping banner");
         return;
-    }
-
-    // Background entry points can be hot-restarted. Record availability only
-    // on the freshness-bounded network check, not on every cached banner.
-    if capture_telemetry && !cache_hit {
-        crate::telemetry::capture_update_checked(
-            crate::telemetry::UpdateCheckSource::Background,
-            crate::telemetry::UpdateCheckOutcome::Available,
-            Some(&latest),
-            false,
-        );
     }
 
     let banner = format_banner(&latest, current, selected_channel);
@@ -847,9 +810,8 @@ pub(crate) fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-/// Render a unix timestamp as `YYYY-MM-DDTHH:MM:SSZ`. Mirrors the
-/// telemetry module's formatter so the on-disk cache file stays
-/// human-readable without dragging in `chrono`.
+/// Render a unix timestamp as `YYYY-MM-DDTHH:MM:SSZ` so the on-disk cache
+/// file stays human-readable without dragging in `chrono`.
 pub(crate) fn iso8601(unix_secs: u64) -> String {
     let (year, month, day, hour, minute, second) = civil_from_unix(unix_secs);
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
@@ -926,7 +888,6 @@ mod tests {
             "0.24.0",
             || panic!("managed startup must not fetch"),
             &mut banner,
-            false,
             true,
         );
         assert!(banner.is_empty());
@@ -1180,7 +1141,6 @@ mod tests {
                     Ok("0.1.4".to_owned()) // newer version returned by network
                 },
                 &mut buf,
-                false,
             );
 
             assert_eq!(
@@ -1220,7 +1180,6 @@ mod tests {
                     Ok("0.1.5".to_owned())
                 },
                 &mut buf,
-                false,
             );
 
             assert_eq!(
@@ -1253,7 +1212,7 @@ mod tests {
             write_cache(&cache).unwrap();
 
             let mut buf: Vec<u8> = Vec::new();
-            run_check_and_announce("0.1.3", || Ok("0.1.4".to_owned()), &mut buf, false);
+            run_check_and_announce("0.1.3", || Ok("0.1.4".to_owned()), &mut buf);
             assert!(buf.is_empty(), "dismissed version must suppress banner");
         });
     }
@@ -1341,7 +1300,6 @@ mod tests {
                     Ok("0.34.0".into())
                 },
                 &mut buf,
-                false,
             );
             assert_eq!(fetches.load(std::sync::atomic::Ordering::SeqCst), 1);
             let refreshed = read_cache().unwrap();
@@ -1366,7 +1324,7 @@ mod tests {
             // untrusted 0.33.4 is not shown as a fallback.
             write_cache(&seeded(now, 2 * 3600, "0.99.0", Some("0.33.4"))).unwrap();
             let mut buf: Vec<u8> = Vec::new();
-            run_check_and_announce("0.33.0", failing, &mut buf, false);
+            run_check_and_announce("0.33.0", failing, &mut buf);
             assert_eq!(count(), 1);
             assert!(buf.is_empty(), "untrusted result must not be announced");
 
@@ -1374,7 +1332,7 @@ mod tests {
             // still shown, and the failure is recorded.
             write_cache(&seeded(now, 2 * 3600, "0.34.0", Some("0.33.0"))).unwrap();
             let mut buf: Vec<u8> = Vec::new();
-            run_check_and_announce("0.33.0", failing, &mut buf, false);
+            run_check_and_announce("0.33.0", failing, &mut buf);
             assert_eq!(count(), 2);
             assert!(String::from_utf8(buf)
                 .unwrap()
@@ -1389,7 +1347,7 @@ mod tests {
 
             // Within the backoff window the lookup is not retried.
             let mut buf: Vec<u8> = Vec::new();
-            run_check_and_announce("0.33.0", failing, &mut buf, false);
+            run_check_and_announce("0.33.0", failing, &mut buf);
             assert_eq!(count(), 2, "backoff");
             assert!(String::from_utf8(buf)
                 .unwrap()

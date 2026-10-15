@@ -152,7 +152,7 @@ pub enum Command {
         value: Option<String>,
         socket: Option<String>,
     },
-    /// Content-free telemetry preference, inspection, and installer hooks.
+    /// Telemetry was removed from this build; the subcommand only says so.
     Telemetry(TelemetryCommand),
     /// `cua-driver autostart {enable|disable|status|kick}` —
     /// platform-native auto-start so `cua-driver serve` comes up on
@@ -282,14 +282,6 @@ fn serve_only_authorization_flag(args: &[String]) -> Option<&'static str> {
     })
 }
 
-/// Classify the requested finite command without parsing its arguments. The
-/// parent process uses this before `parse_command` so invalid JSON and other
-/// parser exits are still observed as completed failures.
-pub fn finite_command_name_from_argv() -> Option<&'static str> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    finite_command_name_from_args(&args)
-}
-
 fn positional_args(args: &[String]) -> Vec<&str> {
     let mut positionals = Vec::new();
     let mut index = 0;
@@ -321,209 +313,6 @@ pub fn is_long_lived_transport_command(args: &[String]) -> bool {
         positional_args(args).first().copied(),
         None | Some("mcp" | "serve")
     )
-}
-
-fn finite_command_name_from_args(args: &[String]) -> Option<&'static str> {
-    if args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--help" | "-h" | "--version" | "-V"))
-    {
-        return None;
-    }
-    let positionals = positional_args(args);
-    match positionals.first().copied() {
-        None | Some("mcp" | "serve" | "telemetry") => None,
-        Some("list-tools") => Some("list_tools"),
-        Some("describe") => Some("describe"),
-        Some("mcp-config") => Some("mcp_config"),
-        Some("manifest") => Some("manifest"),
-        Some("call") => Some("call"),
-        Some("stop") => Some("stop"),
-        Some("revoke") => Some("revoke"),
-        Some("status") => Some("status"),
-        Some("sessions") => Some("sessions"),
-        Some("recording") => Some("recording"),
-        Some("history") => Some("history"),
-        Some("dump-docs") => Some("dump_docs"),
-        Some("update") => Some("update"),
-        Some("check-update") => Some("check_update"),
-        Some("channel") => Some("channel"),
-        Some("doctor") => Some("doctor"),
-        Some("diagnose") => Some("diagnose"),
-        Some("permissions") => Some("permissions"),
-        Some("autostart") => Some("autostart"),
-        Some("skills") => Some("skills"),
-        Some("extension") => Some("extension"),
-        Some("perception") => Some("perception"),
-        Some("cursor-theme") => Some("cursor_theme"),
-        Some("cursor") => Some("call"),
-        Some("config") => Some("config"),
-        Some(_) => Some("call"),
-    }
-}
-
-/// Return the candidate tool for a finite `call` command. The telemetry layer
-/// maps this through its fixed registry allowlist before anything is emitted.
-pub fn finite_tool_name_from_argv() -> Option<String> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    finite_tool_name_from_args(&args)
-}
-
-/// Return whether a finite `call` targets a fixed computer-action category.
-/// JSON is inspected only long enough to classify the closed `page.action`
-/// vocabulary and is never retained or passed to telemetry.
-pub fn finite_computer_action_from_argv() -> bool {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    finite_computer_action_from_args(&args)
-}
-
-fn finite_computer_action_from_args(args: &[String]) -> bool {
-    let Some(tool_name) = finite_tool_name_from_args(args) else {
-        return false;
-    };
-    let positionals = positional_args(args);
-    let json_arg = match positionals.as_slice() {
-        ["call", _, json, ..] | [_, json, ..] => Some(*json),
-        _ => None,
-    };
-    let parsed_args = json_arg.and_then(|json| serde_json::from_str(json).ok());
-    let operation = cua_driver_core::server::tool_operation(&tool_name, parsed_args.as_ref());
-    cua_driver_core::server::is_computer_action(&tool_name, operation)
-}
-
-/// Return the bounded sub-operation for a finite command. This classifier
-/// reads only the command verb, a reviewed subcommand, and the presence of
-/// `--apply`; arbitrary values never leave this function.
-pub fn finite_operation_from_argv() -> &'static str {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    finite_operation_from_args(&args)
-}
-
-fn finite_operation_from_args(args: &[String]) -> &'static str {
-    let command = finite_command_name_from_args(args);
-    let positionals = positional_args(args);
-    let subcommand = positionals.get(1).copied();
-    match command {
-        Some("recording") => match subcommand.unwrap_or("status") {
-            "start" => "start",
-            "stop" => "stop",
-            "status" => "status",
-            "render" => "render",
-            _ => "other",
-        },
-        Some("history") => match subcommand.unwrap_or("status") {
-            "enable" => "enable",
-            "disable" => "disable",
-            "pause" => "pause",
-            "resume" => "resume",
-            "status" => "status",
-            "flush" => "flush",
-            "list" => "list",
-            "show" => "show",
-            "delete" => "delete",
-            _ => "other",
-        },
-        Some("permissions") => match subcommand.unwrap_or("status") {
-            "status" => "status",
-            "grant" => "grant",
-            _ => "other",
-        },
-        Some("config") => match subcommand.unwrap_or("show") {
-            "show" => "show",
-            "get" => "get",
-            "set" => "set",
-            "reset" => "reset",
-            _ => "other",
-        },
-        Some("sessions") => match subcommand.unwrap_or("list") {
-            "list" => "list",
-            _ => "other",
-        },
-        Some("autostart") => match subcommand.unwrap_or("") {
-            "enable" => "enable",
-            "disable" => "disable",
-            "status" => "status",
-            "kick" => "kick",
-            _ => "other",
-        },
-        Some("skills") => match subcommand.unwrap_or("status") {
-            "install" => "install",
-            "update" => "update",
-            "uninstall" => "uninstall",
-            "status" => "status",
-            "path" => "path",
-            _ => "other",
-        },
-        Some("extension") => match subcommand.unwrap_or("list") {
-            "list" => "list",
-            "info" => "info",
-            "status" => "status",
-            "install" => "install",
-            "update" => "update",
-            "path" => "path",
-            _ => "other",
-        },
-        Some("perception") => match subcommand.unwrap_or("") {
-            "parse" => "parse",
-            _ => "other",
-        },
-        Some("update") if args.iter().any(|arg| arg == "--apply") => "apply",
-        Some("update") => "check_only",
-        Some("channel") => match subcommand.unwrap_or("status") {
-            "status" => "status",
-            "set" => "set",
-            _ => "other",
-        },
-        _ => "not_applicable",
-    }
-}
-
-/// Return the configured MCP client as a closed category. Raw `--client`
-/// values are mapped to `other` before the detached worker is spawned.
-pub fn finite_client_kind_from_argv() -> &'static str {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    finite_client_kind_from_args(&args)
-}
-
-fn finite_client_kind_from_args(args: &[String]) -> &'static str {
-    if finite_command_name_from_args(args) != Some("mcp_config") {
-        return "not_applicable";
-    }
-    let value = args
-        .iter()
-        .position(|arg| arg == "--client")
-        .and_then(|index| args.get(index + 1))
-        .map(String::as_str)
-        .unwrap_or("");
-    match value {
-        "" => "generic",
-        "claude" | "claude-code" => "claude_code",
-        "codex" => "codex",
-        "cursor" => "cursor",
-        "openclaw" => "openclaw",
-        "opencode" => "opencode",
-        "hermes" => "hermes",
-        "pi" => "pi",
-        "prime-agent" => "prime_agent",
-        "antigravity" | "gemini" => "antigravity",
-        "qwen" | "qwen-code" => "qwen_code",
-        "droid" | "factory" => "factory_droid",
-        "zcode" => "zcode",
-        _ => "other",
-    }
-}
-
-fn finite_tool_name_from_args(args: &[String]) -> Option<String> {
-    if finite_command_name_from_args(args) != Some("call") {
-        return None;
-    }
-    let positionals = positional_args(args);
-    match positionals.as_slice() {
-        ["call", tool, ..] => Some((*tool).to_owned()),
-        ["cursor", ..] => Some(<cua_driver_contract::SetAgentCursorMotionInput as cua_driver_contract::ToolInput>::TOOL_NAME.to_owned()),
-        [tool, ..] => Some((*tool).to_owned()),
-        _ => None,
-    }
 }
 
 /// Parse the first non-flag positional argument from argv to determine which
@@ -1806,19 +1595,6 @@ pub enum McpDaemonStartup {
     UnsupportedRelaunch,
 }
 
-impl McpDaemonStartup {
-    pub const fn telemetry_value(self) -> &'static str {
-        match self {
-            Self::AlreadyRunning => "already_running",
-            Self::Launched => "launched",
-            Self::LaunchFailed => "launch_failed",
-            Self::LaunchTimeout => "launch_timeout",
-            Self::Unreachable => "unreachable",
-            Self::UnsupportedRelaunch => "unsupported_relaunch",
-        }
-    }
-}
-
 pub fn run_mcp_via_daemon_proxy<F>(
     socket: Option<String>,
     claude_code_compat: bool,
@@ -2148,7 +1924,7 @@ pub fn build_manifest() -> serde_json::Value {
                   { "name": "--socket", "type": "string", "description": "Override the daemon socket path." }
               ] },
             { "name": "telemetry",
-              "description": "Inspect or change content-free telemetry and its pseudonymous installation identity.",
+              "description": "Telemetry was removed from this build; every subcommand only reports that.",
               "args": [
                   { "name": "subcommand", "type": "positional-string", "description": "enable | disable | status | reset-id | inspect" },
                   { "name": "event", "type": "positional-string", "description": "Fixed event name for inspect." },
@@ -3257,7 +3033,6 @@ pub fn run_update_cmd(apply: bool, json: bool) {
         );
         process::exit(2);
     }
-    let apply_started_at = std::time::Instant::now();
     let daemon_was_running = apply && crate::updater::daemon_is_running();
     // `--json` short-circuits the text path entirely so scripted callers
     // get a parseable payload regardless of `--apply`. The check itself
@@ -3272,10 +3047,6 @@ pub fn run_update_cmd(apply: bool, json: bool) {
         // pre-install snapshot. Returning here when apply is false keeps
         // the existing "check + suggest" behaviour off the JSON path.
         if !apply {
-            crate::version_check::capture_update_state(
-                &state,
-                crate::telemetry::UpdateCheckSource::Cli,
-            );
             return;
         }
     }
@@ -3301,21 +3072,6 @@ pub fn run_update_cmd(apply: bool, json: bool) {
     }
     match latest {
         Err(e) => {
-            crate::telemetry::capture_update_checked(
-                crate::telemetry::UpdateCheckSource::Cli,
-                crate::telemetry::UpdateCheckOutcome::Unavailable,
-                None,
-                false,
-            );
-            if apply {
-                crate::telemetry::capture_update_apply_completed(
-                    None,
-                    crate::telemetry::UpdateApplyOutcome::Failed,
-                    crate::telemetry::UpdateFailureClass::CheckFailed,
-                    daemon_was_running,
-                    apply_started_at.elapsed(),
-                );
-            }
             // The error names the real cause: a GitHub API rate limit (with its
             // reset time) is not a network failure, and vice versa.
             tracing::debug!(target: "cua_driver::update", "fetch failed: {e:?}");
@@ -3332,32 +3088,11 @@ pub fn run_update_cmd(apply: bool, json: bool) {
                 selected_channel,
             ) =>
         {
-            crate::telemetry::capture_update_checked(
-                crate::telemetry::UpdateCheckSource::Cli,
-                crate::telemetry::UpdateCheckOutcome::UpToDate,
-                Some(&v),
-                false,
-            );
-            if apply {
-                crate::telemetry::capture_update_apply_completed(
-                    Some(&v),
-                    crate::telemetry::UpdateApplyOutcome::AlreadyCurrent,
-                    crate::telemetry::UpdateFailureClass::None,
-                    daemon_was_running,
-                    apply_started_at.elapsed(),
-                );
-            }
             if !json {
                 println!("Already up to date.");
             }
         }
         Ok(v) => {
-            crate::telemetry::capture_update_checked(
-                crate::telemetry::UpdateCheckSource::Cli,
-                crate::telemetry::UpdateCheckOutcome::Available,
-                Some(&v),
-                false,
-            );
             if !json {
                 println!("New version available: {v}");
             }
@@ -3377,16 +3112,8 @@ pub fn run_update_cmd(apply: bool, json: bool) {
             if !json {
                 println!("Downloading and installing cua-driver {v}…");
             }
-            crate::telemetry::capture_update_apply_started(&v, daemon_was_running);
             match crate::updater::run_install_script(&v) {
                 Ok(s) if s.success() => {
-                    crate::telemetry::capture_update_apply_completed(
-                        Some(&v),
-                        crate::telemetry::UpdateApplyOutcome::Installed,
-                        crate::telemetry::UpdateFailureClass::None,
-                        daemon_was_running,
-                        apply_started_at.elapsed(),
-                    );
                     // What was "latest" before this install says nothing about
                     // what is latest after it.
                     crate::version_check::invalidate_cache();
@@ -3403,13 +3130,6 @@ pub fn run_update_cmd(apply: bool, json: bool) {
                     }
                 }
                 Ok(s) => {
-                    crate::telemetry::capture_update_apply_completed(
-                        Some(&v),
-                        crate::telemetry::UpdateApplyOutcome::Failed,
-                        crate::telemetry::UpdateFailureClass::InstallerExit,
-                        daemon_was_running,
-                        apply_started_at.elapsed(),
-                    );
                     eprintln!(
                         "Installation failed (exit {}). Re-run install manually:",
                         s.code().unwrap_or(1)
@@ -3418,13 +3138,6 @@ pub fn run_update_cmd(apply: bool, json: bool) {
                     process::exit(s.code().unwrap_or(1));
                 }
                 Err(e) => {
-                    crate::telemetry::capture_update_apply_completed(
-                        Some(&v),
-                        crate::telemetry::UpdateApplyOutcome::Failed,
-                        crate::telemetry::UpdateFailureClass::InstallerLaunch,
-                        daemon_was_running,
-                        apply_started_at.elapsed(),
-                    );
                     eprintln!("Failed to launch installer: {e}");
                     #[cfg(windows)]
                     eprintln!("  (is powershell.exe on PATH?)");
@@ -4017,8 +3730,6 @@ pub fn run_check_update_cmd(json: bool, no_cache: bool) {
 }
 
 fn print_check_update_state(state: crate::version_check::UpdateState, json: bool) {
-    crate::version_check::capture_update_state(&state, crate::telemetry::UpdateCheckSource::Cli);
-
     if json {
         let val = serde_json::to_value(&state).unwrap_or_else(|_| serde_json::json!({}));
         let pretty = serde_json::to_string_pretty(&val).unwrap_or_else(|_| val.to_string());
@@ -4571,8 +4282,8 @@ fn cli_docs_literal() -> serde_json::Value {
             },
             {
                 "name": "telemetry",
-                "abstract": "Inspect or change content-free product telemetry.",
-                "discussion": "Telemetry is default-on. Disable retains the pseudonymous installation ID; reset-id erases the ID and event markers while preserving the preference.",
+                "abstract": "Report that telemetry was removed from this build.",
+                "discussion": "Kept so existing scripts still parse. Nothing is collected, stored or sent, and every subcommand prints that.",
                 "arguments": no_args,
                 "options": no_options,
                 "flags": no_flags,
@@ -5607,15 +5318,6 @@ mod tests {
         help.insert("dump-docs".to_owned());
         assert_eq!(docs, help, "cli_docs_json vs --help");
         assert_eq!(manifest, help, "manifest catalog vs --help");
-        // Every positional the dispatcher routes to a command resolves to one.
-        for name in &help {
-            let args = vec![name.clone()];
-            assert!(
-                super::finite_command_name_from_args(&args).is_some()
-                    || matches!(name.as_str(), "mcp" | "serve" | "telemetry"),
-                "{name} is not dispatched"
-            );
-        }
         let serve = super::cli_docs_json()["commands"]
             .as_array()
             .unwrap()
@@ -5661,11 +5363,6 @@ mod tests {
                 "effects": {"trail": true, "ripple": null},
                 "glide_duration_ms": 900.0
             })
-        );
-        assert_eq!(finite_command_name_from_args(&argv), Some("call"));
-        assert_eq!(
-            finite_tool_name_from_args(&argv).as_deref(),
-            Some("set_agent_cursor_motion")
         );
         let parsed: cua_driver_contract::SetAgentCursorMotionInput =
             serde_json::from_value(cursor_motion_args(&argv).unwrap()).unwrap();
@@ -5846,122 +5543,6 @@ mod tests {
                 Some("/tmp/cua-driver.pid".to_owned())
             );
         }
-    }
-
-    #[test]
-    fn finite_call_tool_extraction_supports_subcommand_and_legacy_forms() {
-        assert_eq!(
-            finite_tool_name_from_args(&args(&["call", "click", r#"{\"x\":1}"#])),
-            Some("click".into())
-        );
-        assert_eq!(
-            finite_tool_name_from_args(&args(&["--socket", "/tmp/test", "click", "{}"])),
-            Some("click".into())
-        );
-    }
-
-    #[test]
-    fn finite_call_tool_extraction_ignores_non_call_commands() {
-        assert_eq!(
-            finite_tool_name_from_args(&args(&["describe", "click"])),
-            None
-        );
-        assert_eq!(finite_tool_name_from_args(&args(&["mcp"])), None);
-    }
-
-    #[test]
-    fn finite_computer_action_discards_arguments_after_fixed_classification() {
-        assert!(finite_computer_action_from_args(&args(&[
-            "call",
-            "click",
-            r#"{"x":1,"private":"discarded"}"#,
-        ])));
-        assert!(finite_computer_action_from_args(&args(&[
-            "call",
-            "page",
-            r#"{"action":"insert_text","text":"private"}"#,
-        ])));
-        assert!(!finite_computer_action_from_args(&args(&[
-            "call",
-            "page",
-            r#"{"action":"query_dom","selector":"private"}"#,
-        ])));
-        assert!(!finite_computer_action_from_args(&args(&[
-            "call", "page", "not-json",
-        ])));
-    }
-
-    #[test]
-    fn finite_operations_are_closed_and_ignore_values() {
-        assert_eq!(
-            finite_operation_from_args(&args(&["recording", "start", "/private/path"])),
-            "start"
-        );
-        assert_eq!(
-            finite_operation_from_args(&args(&["config", "set", "private.key", "private-value"])),
-            "set"
-        );
-        assert_eq!(finite_operation_from_args(&args(&["skills"])), "status");
-        assert_eq!(finite_operation_from_args(&args(&["sessions"])), "list");
-        assert_eq!(
-            finite_operation_from_args(&args(&["sessions", "private-value"])),
-            "other"
-        );
-        assert_eq!(
-            finite_operation_from_args(&args(&["update", "--apply"])),
-            "apply"
-        );
-        assert_eq!(finite_operation_from_args(&args(&["update"])), "check_only");
-        assert_eq!(finite_operation_from_args(&args(&["channel"])), "status");
-        assert_eq!(
-            finite_operation_from_args(&args(&["channel", "set", "private-value"])),
-            "set"
-        );
-        assert_eq!(finite_operation_from_args(&args(&["history"])), "status");
-        assert_eq!(
-            finite_operation_from_args(&args(&["history", "show", "private-value"])),
-            "show"
-        );
-        assert_eq!(
-            finite_operation_from_args(&args(&["history", "private-value"])),
-            "other"
-        );
-        assert_eq!(
-            finite_operation_from_args(&args(&["doctor", "private-value"])),
-            "not_applicable"
-        );
-        assert_eq!(
-            finite_operation_from_args(&args(&["recording", "private-value"])),
-            "other"
-        );
-    }
-
-    #[test]
-    fn finite_mcp_config_clients_are_closed_before_worker_handoff() {
-        assert_eq!(
-            finite_client_kind_from_args(&args(&["mcp-config"])),
-            "generic"
-        );
-        assert_eq!(
-            finite_client_kind_from_args(&args(&["mcp-config", "--client", "claude-code"])),
-            "claude_code"
-        );
-        assert_eq!(
-            finite_client_kind_from_args(&args(&["mcp-config", "--client", "antigravity"])),
-            "antigravity"
-        );
-        assert_eq!(
-            finite_client_kind_from_args(&args(&["mcp-config", "--client", "prime-agent"])),
-            "prime_agent"
-        );
-        assert_eq!(
-            finite_client_kind_from_args(&args(&["mcp-config", "--client", "/private/client"])),
-            "other"
-        );
-        assert_eq!(
-            finite_client_kind_from_args(&args(&["doctor", "--client", "claude"])),
-            "not_applicable"
-        );
     }
 
     #[test]

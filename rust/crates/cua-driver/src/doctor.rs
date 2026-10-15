@@ -13,8 +13,8 @@
 //!
 //! ## Probe categories
 //!
-//! - **Cross-platform**: version + arch, install layout, home dir,
-//!   telemetry state.
+//! - **Cross-platform**: version + arch, install layout, home dir, and a
+//!   note that telemetry was removed from this build.
 //! - **Windows**: interactive desktop session detection (Session 0 warning),
 //!   UI Automation COM availability, top-level window enumeration count.
 //! - **Linux**: `DISPLAY` / `WAYLAND_DISPLAY` presence, X11 connection
@@ -250,24 +250,13 @@ fn probe_home_dir(home: Option<&Path>) -> Probe {
     )
 }
 
-/// Probe the same effective persisted/environment state as `telemetry status`.
-fn probe_telemetry(status: &crate::telemetry::TelemetryStatus) -> Probe {
-    if status.enabled {
-        let identity = if status.installation_id_present {
-            "install-id present"
-        } else {
-            "install-id not yet generated"
-        };
-        Probe::ok(
-            "telemetry",
-            format!("enabled via {} ({identity})", status.source),
-        )
-    } else {
-        Probe::ok(
-            "telemetry",
-            format!("disabled via {} (installation ID retained)", status.source),
-        )
-    }
+/// This build has no telemetry code; the probe says so for `doctor` readers
+/// who look for the line.
+fn probe_telemetry() -> Probe {
+    Probe::ok(
+        "telemetry",
+        "removed from this build; nothing is collected or sent",
+    )
 }
 
 /// `$HOME` on Unix, `%USERPROFILE%` on Windows.
@@ -630,24 +619,16 @@ fn append_platform_probes(report: &mut Report) {
 
 /// Run every probe and return the aggregated report.
 pub fn run() -> Report {
-    assemble(
-        home_dir().as_deref(),
-        &crate::telemetry::status(),
-        append_platform_probes,
-    )
+    assemble(home_dir().as_deref(), append_platform_probes)
 }
 
 /// The cross-platform probes over explicit host inputs, then `platform`'s.
-fn assemble(
-    home: Option<&Path>,
-    telemetry: &crate::telemetry::TelemetryStatus,
-    platform: impl FnOnce(&mut Report),
-) -> Report {
+fn assemble(home: Option<&Path>, platform: impl FnOnce(&mut Report)) -> Report {
     let mut report = Report::default();
     report.push(probe_version());
     report.push(probe_install_layout());
     report.push(probe_home_dir(home));
-    report.push(probe_telemetry(telemetry));
+    report.push(probe_telemetry());
     platform(&mut report);
     report
 }
@@ -714,17 +695,6 @@ mod tests {
         child.wait().unwrap();
     }
 
-    fn telemetry_status() -> crate::telemetry::TelemetryStatus {
-        crate::telemetry::TelemetryStatus {
-            enabled: false,
-            source: "test",
-            installation_id_present: false,
-            installation_id: None,
-            registration_recorded: false,
-            current_release_recorded: false,
-        }
-    }
-
     // Every probe runs over explicit inputs: a test must never read the real
     // home, run the telemetry home migration, or remove a real LaunchAgent.
     #[test]
@@ -739,14 +709,14 @@ mod tests {
         let h = probe_home_dir(Some(home.path()));
         assert_eq!(h.label, "home dir");
         assert_eq!(probe_home_dir(None).status, Status::Warn);
-        let t = probe_telemetry(&telemetry_status());
+        let t = probe_telemetry();
         assert_eq!(t.label, "telemetry");
     }
 
     #[test]
     fn run_emits_at_least_cross_platform_probes() {
         let home = tempfile::tempdir().unwrap();
-        let report = assemble(Some(home.path()), &telemetry_status(), |report| {
+        let report = assemble(Some(home.path()), |report| {
             report.push(Probe::ok("platform", "probed"))
         });
         // 4 cross-platform + the platform-specific ones.
