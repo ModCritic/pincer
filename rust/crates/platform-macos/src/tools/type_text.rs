@@ -84,7 +84,7 @@ fn def() -> &'static ToolDef {
                 "delivery_mode": {
                     "type": "string",
                     "enum": ["background", "foreground"],
-                    "description": "Default \"background\": AX insert, then CGEvent keys, no focus steal. \"foreground\": front the window, type, restore; last resort for surfaces (WhatsApp/Catalyst) where background keys do not land."
+                    "description": "Default \"background\": AX insert, then CGEvent keys, no focus steal. \"foreground\": front the window, type, restore; last resort for surfaces (Catalyst apps such as Notes) where background keys do not land."
                 }
             },
             "additionalProperties": false

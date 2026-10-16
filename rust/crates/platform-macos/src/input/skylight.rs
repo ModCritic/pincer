@@ -991,9 +991,9 @@ fn foreground_turn() -> ForegroundTurn {
 /// running the body straight away means the body's `AXFocused` write races
 /// AppKit's own activation. AppKit wins: when activation completes it installs
 /// the window's remembered first responder and clobbers the write. The
-/// keystrokes then land wherever the app chose — for a Catalyst app such as
-/// WhatsApp, the message list rather than the composer, which silently scrolls
-/// the transcript instead of typing.
+/// keystrokes then land wherever the app chose. In a Catalyst chat app that is
+/// the message list rather than the composer, which silently scrolls the
+/// transcript instead of typing.
 ///
 /// So this waits for the activation to be observable before running `body`, the
 /// same ordering [`with_foreground_hid_activation`] already relies on. The wait
@@ -1063,11 +1063,12 @@ const ACTIVATION_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_
 /// The predicate is deliberately `AXFocusedWindow` and not
 /// `NSWorkspace.frontmostApplication`. The latter does not observe a
 /// SkyLight-level front-process change at all: polling it every 15ms across a
-/// full foreground `type_text` against WhatsApp showed zero transitions while
-/// the target was demonstrably being fronted, so a frontmost-based wait always
-/// burns its whole timeout and never actually gates on anything. `AXFocusedWindow`
-/// is the same proof [`preserves_exact_existing_focus`] already trusts to decide
-/// whether a window is focused.
+/// full foreground `type_text` against a Catalyst chat app showed zero
+/// transitions while the target was demonstrably being fronted, so a
+/// frontmost-based wait always burns its whole timeout and never actually gates
+/// on anything. `AXFocusedWindow` is the same proof
+/// [`preserves_exact_existing_focus`] already trusts to decide whether a window
+/// is focused.
 ///
 /// A `false` return is not fatal: the caller proceeds with delivery regardless,
 /// because a target that never reports focus is exactly the case the pre-existing

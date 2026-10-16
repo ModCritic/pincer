@@ -487,7 +487,7 @@ the step as blocked.
 
 ### Known text-input limits (Catalyst + Electron)
 
-On **Catalyst** apps (WhatsApp, Reminders, Notes-via-Catalyst,
+On **Catalyst** apps (Messages, Reminders, Notes-via-Catalyst,
 anything in `/Applications` that's actually `iOSAppOnMac.app`) and
 **Electron** apps (VS Code's Monaco editor, Slack composer, Discord,
 Linear), an AX `type_text` can't reach the rendered text view: the

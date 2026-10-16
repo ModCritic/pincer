@@ -119,31 +119,6 @@ still work as driver calls, but they do not expose the
 `mcp__cua-computer-use__screenshot` tool name that Claude Code appears to use
 as the image-grounding cue.
 
-### Muse Code
-
-[Muse Code](https://research.meta.ai/blog/introducing-muse-code-and-muse-spark-1-2)
-can use the driver as a local stdio MCP server on macOS and Linux. Merge the
-following entry into `$XDG_CONFIG_HOME/muse/settings.json`, or
-`~/.config/muse/settings.json` when `XDG_CONFIG_HOME` is not set:
-
-```json
-{
-  "mcp_servers": {
-    "cua-driver": {
-      "enabled": true,
-      "transport": "stdio",
-      "command": "/absolute/path/to/cua-driver",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-Use the absolute path to the binary you built. Merge the `cua-driver` entry
-with any existing `mcp_servers` instead of replacing the settings file. Start
-a new Muse session after saving the file; Muse loads MCP servers at session
-startup.
-
 ## Agent skill pack
 
 The skill pack in `rust/Skills/cua-driver` is compiled into the binary. The

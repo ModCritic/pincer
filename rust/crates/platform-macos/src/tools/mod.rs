@@ -1238,7 +1238,7 @@ mod pixel_focus_readback_tests {
 
     #[test]
     fn rejects_a_point_outside_the_focused_element() {
-        // The WhatsApp case: the click targeted the composer but focus stayed on
+        // The Catalyst chat case: the click targeted the composer but focus stayed on
         // the transcript above it, so the clicked point is not inside the
         // focused element's rect and the caller must escalate.
         let transcript = [100.0, 100.0, 640.0, 690.0];

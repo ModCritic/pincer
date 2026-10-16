@@ -1509,7 +1509,7 @@ mod tests {
 
     #[test]
     fn elements_surface_value_separately_from_label() {
-        // A field with BOTH a title and a value (e.g. WhatsApp's "Compose
+        // A field with BOTH a title and a value (e.g. a Catalyst chat app's "Compose
         // message" box holding typed text): label is the title, but the typed
         // value must ALSO be exposed so the caller can verify what landed.
         let mut nodes = vec![node(
