@@ -873,7 +873,6 @@ pub fn advertised_risk_for(tool: &str) -> RiskAssessment {
         | "get_session_state"
         | "get_agent_cursor_state"
         | "get_recording_state"
-        | "check_for_update"
         | "health_report"
         | "probe"
         // Refuses every request; this build ships no installable extensions.

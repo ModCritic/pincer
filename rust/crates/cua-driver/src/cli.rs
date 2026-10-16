@@ -112,25 +112,6 @@ pub enum Command {
         pretty: bool,
         doc_type: String,
     },
-    Update {
-        apply: bool,
-        json: bool,
-    },
-    /// `cua-driver check-update [--json] [--no-cache]` — pure check verb.
-    /// Never installs; the apply path stays on `update --apply` so the
-    /// "did anything change on disk?" question is unambiguous from argv.
-    /// Mirror of the `check_for_update` MCP tool — both routes share
-    /// `crate::version_check::check_update_state`.
-    CheckUpdate {
-        json: bool,
-        no_cache: bool,
-    },
-    /// Persist or inspect the stable/nightly release preference.
-    Channel {
-        subcommand: String,
-        value: Option<String>,
-        json: bool,
-    },
     Doctor {
         json: bool,
     },
@@ -339,19 +320,6 @@ pub fn parse_command() -> Command {
         println!("                                  explain and request Accessibility, Screen Recording, and Tahoe's");
         println!("                                  direct-capture consent, then verify live capture. This is the correct");
         println!("                                  way to grant; the read-only status command never triggers that probe.");
-        println!();
-        println!("Updating cua-driver:");
-        println!("  cua-driver check-update         Ask GitHub whether a newer release is available. Read-only.");
-        println!("                                  Default output is human-friendly text.");
-        println!("    --json                        Emit a machine-readable JSON payload (same shape as the");
-        println!("                                  check_for_update MCP tool). Hermes branches on update_available.");
-        println!("    --no-cache                    Skip the 20h on-disk cache and force a fresh GitHub round-trip.");
-        println!("  cua-driver update               Same check as above, then suggest --apply if outdated.");
-        println!("    --apply                       Download + install the latest release via the canonical installer.");
-        println!("    --json                        Emit the structured check payload (does not change --apply behaviour).");
-        println!("  cua-driver channel status      Show the saved stable/nightly update channel.");
-        println!("  cua-driver channel set <name>  Save stable or nightly; run update --apply to switch binaries.");
-        println!("    --json                        Emit machine-readable channel state.");
         println!();
         println!("autostart options (Windows-only today):");
         println!("  cua-driver autostart enable     Register a logon Scheduled Task so serve starts at every interactive logon.");
@@ -676,37 +644,9 @@ pub fn parse_command() -> Command {
         }
         Some("manifest") => {
             // Default to compact output to match other JSON-emitting commands
-            // (`check-update --json`, `doctor --json`); `--pretty` is opt-in for
-            // shell-debug use.
+            // (`doctor --json`); `--pretty` is opt-in for shell-debug use.
             let pretty = args.iter().any(|a| a == "--pretty" || a == "-p");
             Command::Manifest { pretty }
-        }
-        Some("update") => {
-            let apply = args.iter().any(|a| a == "--apply");
-            let json = args.iter().any(|a| a == "--json");
-            Command::Update { apply, json }
-        }
-        Some("check-update") => {
-            let json = args.iter().any(|a| a == "--json");
-            let no_cache = args.iter().any(|a| a == "--no-cache");
-            Command::CheckUpdate { json, no_cache }
-        }
-        Some("channel") => {
-            let subcommand = pos.next().unwrap_or("status").to_owned();
-            let value = pos.next().map(str::to_owned);
-            if !matches!(subcommand.as_str(), "status" | "set") {
-                eprintln!("Unknown channel subcommand '{subcommand}'. Valid: status, set");
-                process::exit(64);
-            }
-            if subcommand == "set" && value.is_none() {
-                eprintln!("Usage: cua-driver channel set <stable|nightly>");
-                process::exit(64);
-            }
-            Command::Channel {
-                subcommand,
-                value,
-                json: args.iter().any(|arg| arg == "--json"),
-            }
         }
         Some("doctor") => {
             // `--json` switches to machine-readable output for scripting.
@@ -1830,25 +1770,6 @@ pub fn build_manifest() -> serde_json::Value {
                   { "name": "--pretty", "type": "flag", "description": "Pretty-print." },
                   { "name": "--type", "type": "string", "description": "Output type." }
               ] },
-            { "name": "update",
-              "description": "Check GitHub for a newer release; with --apply, download and install via the canonical installer.",
-              "args": [
-                  { "name": "--apply", "type": "flag", "description": "Apply the update." },
-                  { "name": "--json", "type": "flag", "description": "Emit the structured check payload." }
-              ] },
-            { "name": "check-update",
-              "description": "Read-only release-check verb (mirror of the check_for_update MCP tool).",
-              "args": [
-                  { "name": "--json", "type": "flag", "description": "Emit the structured check payload." },
-                  { "name": "--no-cache", "type": "flag", "description": "Force a fresh GitHub round-trip." }
-              ] },
-            { "name": "channel",
-              "description": "Inspect or persist the stable/nightly release channel.",
-              "args": [
-                  { "name": "subcommand", "type": "positional-string", "description": "status | set. Default: status." },
-                  { "name": "channel", "type": "positional-string", "description": "stable | nightly (required for set)." },
-                  { "name": "--json", "type": "flag", "description": "Emit machine-readable channel state." }
-              ] },
             { "name": "doctor",
               "description": "Self-diagnose probes for runtime prerequisites (permissions, accessibility, capture, etc.).",
               "args": [ { "name": "--json", "type": "flag", "description": "Machine-readable doctor report." } ] },
@@ -2938,145 +2859,6 @@ fn run_recording_render(args: &[String]) {
     }
 }
 
-/// `cua-driver update [--apply]` — check for a newer release and optionally apply it.
-///
-/// Shares the release lookup with the startup banner via
-/// [`crate::version_check::fetch_latest_version`] so both code paths agree on
-/// the source (the installer's own version pin, then GitHub) and tag filtering. `--apply` delegates to the canonical
-/// installer script — see [`crate::updater`] for why we go through the script
-/// instead of re-implementing the asset resolution + atomic swap + GC in Rust.
-pub fn run_update_cmd(apply: bool, json: bool) {
-    if crate::updater::is_pacman_managed() {
-        print_check_update_state(
-            crate::version_check::check_update_state_with_ownership(false, true),
-            json,
-        );
-        return;
-    }
-    if apply && crate::bundle::is_local_installation() {
-        eprintln!(
-            "cua-driver-local is managed by scripts/install-local.sh (or install-local.ps1); \
-             refusing to run the release installer from the local product."
-        );
-        process::exit(2);
-    }
-    let daemon_was_running = apply && crate::updater::daemon_is_running();
-    // `--json` short-circuits the text path entirely so scripted callers
-    // get a parseable payload regardless of `--apply`. The check itself
-    // routes through the same `check_update_state` the `check-update`
-    // verb and the MCP tool use, so all three surfaces agree.
-    if json {
-        let state = crate::version_check::check_update_state(false);
-        let val = serde_json::to_value(&state).unwrap_or_else(|_| serde_json::json!({}));
-        let pretty = serde_json::to_string_pretty(&val).unwrap_or_else(|_| val.to_string());
-        println!("{pretty}");
-        // `--apply` still installs when JSON is on — the JSON is just the
-        // pre-install snapshot. Returning here when apply is false keeps
-        // the existing "check + suggest" behaviour off the JSON path.
-        if !apply {
-            return;
-        }
-    }
-
-    let current = env!("CARGO_PKG_VERSION");
-    let selected_channel = crate::release_channel::selected().unwrap_or_else(|error| {
-        eprintln!("Cannot read release channel: {error}");
-        eprintln!(
-            "Repair it with `cua-driver channel set stable` or `cua-driver channel set nightly`."
-        );
-        process::exit(1);
-    });
-    let current_channel = crate::release_channel::ReleaseChannel::from_version(current);
-    if !json {
-        println!("Current version: {current}");
-        println!("Checking for updates…");
-    }
-
-    let latest = crate::version_check::fetch_latest_version();
-    if let Ok(v) = &latest {
-        // Keep the cache in step with what the user was just told.
-        crate::version_check::record_latest(selected_channel, v);
-    }
-    match latest {
-        Err(e) => {
-            // The error names the real cause: a GitHub API rate limit (with its
-            // reset time) is not a network failure, and vice versa.
-            tracing::debug!(target: "cua_driver::update", "fetch failed: {e:?}");
-            if !json {
-                println!("Could not check for updates: {e}");
-            }
-            process::exit(1);
-        }
-        Ok(v)
-            if !crate::version_check::update_is_available(
-                &v,
-                current,
-                current_channel,
-                selected_channel,
-            ) =>
-        {
-            if !json {
-                println!("Already up to date.");
-            }
-        }
-        Ok(v) => {
-            if !json {
-                println!("New version available: {v}");
-            }
-
-            if !apply {
-                if !json {
-                    println!();
-                    println!("Run with --apply to download and install it:");
-                    println!("  cua-driver update --apply");
-                    println!();
-                    println!("Or reinstall directly:");
-                    println!("  {}", crate::updater::manual_install_one_liner());
-                }
-                return;
-            }
-
-            if !json {
-                println!("Downloading and installing cua-driver {v}…");
-            }
-            match crate::updater::run_install_script(&v) {
-                Ok(s) if s.success() => {
-                    // What was "latest" before this install says nothing about
-                    // what is latest after it.
-                    crate::version_check::invalidate_cache();
-                    if !json {
-                        println!("Installed cua-driver {v}.");
-                    }
-                    if daemon_was_running {
-                        // The atomic swap (symlink retarget / junction flip)
-                        // means the running daemon kept executing the old
-                        // binary — restart picks up the new one.
-                        println!();
-                        println!("A daemon was running before the install. Restart it to pick up the new binary:");
-                        println!("  cua-driver stop && cua-driver serve");
-                    }
-                }
-                Ok(s) => {
-                    eprintln!(
-                        "Installation failed (exit {}). Re-run install manually:",
-                        s.code().unwrap_or(1)
-                    );
-                    eprintln!("  {}", crate::updater::manual_install_one_liner());
-                    process::exit(s.code().unwrap_or(1));
-                }
-                Err(e) => {
-                    eprintln!("Failed to launch installer: {e}");
-                    #[cfg(windows)]
-                    eprintln!("  (is powershell.exe on PATH?)");
-                    #[cfg(not(windows))]
-                    eprintln!("  (is bash + curl on PATH?)");
-                    process::exit(1);
-                }
-            }
-        }
-    }
-}
-
 /// `cua-driver permissions status|grant`.
 pub fn run_permissions_cmd(subcommand: &str, json: bool) {
     match subcommand {
@@ -3637,134 +3419,6 @@ fn run_permissions_grant() {
     }
 }
 
-/// `cua-driver check-update [--json] [--no-cache]` — pure check, never installs.
-///
-/// Mirror of the `check_for_update` MCP tool. Both routes call into
-/// [`crate::version_check::check_update_state`] so the CLI and MCP
-/// surfaces never disagree on which release is "latest".
-///
-/// Exit codes (mirror `brew outdated` / `npm outdated`):
-///   * `0` — the check itself succeeded (regardless of `update_available`)
-///   * `1` — the check failed (network down, parse error, GitHub 5xx)
-///
-/// We deliberately do NOT use a non-zero exit to mean "outdated" — that
-/// would conflict with every shell script's "non-zero means error"
-/// assumption. Hermes parses JSON; humans read text; the signal lives in
-/// the payload.
-pub fn run_check_update_cmd(json: bool, no_cache: bool) {
-    let state = crate::version_check::check_update_state(no_cache);
-    print_check_update_state(state, json);
-}
-
-fn print_check_update_state(state: crate::version_check::UpdateState, json: bool) {
-    if json {
-        let val = serde_json::to_value(&state).unwrap_or_else(|_| serde_json::json!({}));
-        let pretty = serde_json::to_string_pretty(&val).unwrap_or_else(|_| val.to_string());
-        println!("{pretty}");
-    } else {
-        println!("Current: {}", state.current_version);
-        match (&state.latest_version, &state.error) {
-            (Some(latest), _) => {
-                println!("Latest:  {latest}");
-                if state.update_available {
-                    println!();
-                    println!("Update available. Run `cua-driver update --apply` to install.");
-                    if let Some(url) = &state.release_notes_url {
-                        println!("Release notes: {url}");
-                    }
-                } else {
-                    println!();
-                    println!("You're on the latest release.");
-                }
-            }
-            (None, Some(err)) => {
-                println!("Latest:  <unavailable>");
-                println!();
-                println!("Update check unavailable: {err}");
-            }
-            (None, None) => {
-                // Network failed AND no cache existed — `error` should be set;
-                // fall through with a generic message in case it isn't.
-                println!("Latest:  <unavailable>");
-            }
-        }
-    }
-
-    if state.error.is_some() && state.latest_version.is_none() {
-        process::exit(1);
-    }
-}
-
-/// Inspect or persist the release channel. Selection never installs by itself;
-/// replacement remains explicit through `cua-driver update --apply`.
-pub fn run_channel_cmd(subcommand: &str, value: Option<&str>, json: bool) {
-    if crate::updater::is_pacman_managed() {
-        if json {
-            let current =
-                crate::release_channel::ReleaseChannel::from_version(env!("CARGO_PKG_VERSION"));
-            println!(
-                "{}",
-                serde_json::json!({
-                    "selected_channel": null,
-                    "current_channel": current.map(|channel| channel.as_str()),
-                    "current_version": env!("CARGO_PKG_VERSION"),
-                    "error": crate::updater::PACMAN_UPDATE_GUIDANCE,
-                })
-            );
-        } else {
-            eprintln!("{}", crate::updater::PACMAN_UPDATE_GUIDANCE);
-        }
-        process::exit(1);
-    }
-    let result = match subcommand {
-        "status" => crate::release_channel::selected(),
-        "set" => {
-            let channel = value
-                .unwrap_or_default()
-                .parse::<crate::release_channel::ReleaseChannel>()
-                .unwrap_or_else(|error| {
-                    eprintln!("{error}");
-                    process::exit(64);
-                });
-            if let Err(error) = crate::release_channel::set(channel) {
-                eprintln!("Failed to save release channel: {error}");
-                process::exit(1);
-            }
-            Ok(channel)
-        }
-        _ => unreachable!("validated by parse_command"),
-    };
-
-    let selected = result.unwrap_or_else(|error| {
-        eprintln!("Failed to read release channel: {error}");
-        eprintln!(
-            "Repair it with `cua-driver channel set stable` or `cua-driver channel set nightly`."
-        );
-        process::exit(1);
-    });
-    let current = crate::release_channel::ReleaseChannel::from_version(env!("CARGO_PKG_VERSION"));
-
-    if json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "selected_channel": selected.as_str(),
-                "current_channel": current.map(|channel| channel.as_str()),
-                "current_version": env!("CARGO_PKG_VERSION"),
-            })
-        );
-    } else {
-        println!("Selected channel: {selected}");
-        match current {
-            Some(channel) => println!("Current channel:  {channel}"),
-            None => println!("Current channel:  development"),
-        }
-        if subcommand == "set" && current != Some(selected) {
-            println!("Run `cua-driver update --apply` to install the latest {selected} release.");
-        }
-    }
-}
-
 /// Every subcommand `--help` names. `cli_docs_json` and the `manifest`
 /// catalog must list each one (and only these, plus `dump-docs`); a test
 /// keeps the three in step, because the parser is hand-written.
@@ -3780,15 +3434,12 @@ const HELP_SUBCOMMANDS: &[&str] = &[
     "config",
     "telemetry",
     "recording",
-    "update",
-    "check-update",
     "doctor",
     "diagnose",
     "permissions",
     "autostart",
     "skills",
     "manifest",
-    "channel",
     "cursor-theme",
     "cursor",
     "sessions",
@@ -3946,7 +3597,6 @@ const CLI_DEFAULT_SUBCOMMANDS: &[(&str, &str)] = &[
     ("recording", "status"),
     ("config", "show"),
     ("skills", "status"),
-    ("channel", "status"),
 ];
 
 /// The CLI surface without examples; `attach_cli_examples` adds those.
@@ -3962,8 +3612,8 @@ fn cli_docs_literal() -> serde_json::Value {
         "abstract": "Cross-platform computer-use automation driver.",
         "exit_codes": [
             {"code": 0, "meaning": "Success."},
-            {"code": 1, "meaning": "Failure: the daemon is not running or is incompatible, a tool call returned an error, or the operation failed. `call` and direct tool invocations exit with the daemon's result code (1 on a tool error); `update --apply` passes through the installer's status."},
-            {"code": 2, "meaning": "Invalid input: tool arguments that are not valid JSON, an unknown `mcp-config` client, or an `update --apply` refused on a local development install."},
+            {"code": 1, "meaning": "Failure: the daemon is not running or is incompatible, a tool call returned an error, or the operation failed. `call` and direct tool invocations exit with the daemon's result code (1 on a tool error)."},
+            {"code": 2, "meaning": "Invalid input: tool arguments that are not valid JSON or an unknown `mcp-config` client."},
             {"code": 64, "meaning": "Usage error: an unknown or missing subcommand or argument, or conflicting flags (for example `revoke` without exactly one of `--session` or `--all`, or an authorization flag passed to `mcp`)."}
         ],
         "commands": [
@@ -4220,42 +3870,6 @@ fn cli_docs_literal() -> serde_json::Value {
                 ]
             },
             {
-                "name": "check-update",
-                "abstract": "Check whether a newer cua-driver release is available.",
-                "discussion": "Read-only. Uses the same update-state payload as the check_for_update MCP tool.",
-                "arguments": no_args,
-                "options": no_options,
-                "flags": [
-                    {"name":"json","short_name":null,"help":"Emit a machine-readable JSON payload.","default_value":false},
-                    {"name":"no-cache","short_name":null,"help":"Skip the 1-hour on-disk cache and look up the latest release again.","default_value":false}
-                ],
-                "subcommands": no_subcommands
-            },
-            {
-                "name": "update",
-                "abstract": "Check for an update and optionally apply it.",
-                "discussion": "The apply path delegates to the canonical platform installer scripts.",
-                "arguments": no_args,
-                "options": no_options,
-                "flags": [
-                    {"name":"apply","short_name":null,"help":"Download and install the latest release when one is available.","default_value":false},
-                    {"name":"json","short_name":null,"help":"Emit the structured update-state payload.","default_value":false}
-                ],
-                "subcommands": no_subcommands
-            },
-            {
-                "name": "channel",
-                "abstract": "Inspect or change the stable/nightly update channel.",
-                "discussion": "Selection is persistent but never installs by itself; use cua-driver update --apply after changing it.",
-                "arguments": no_args,
-                "options": no_options,
-                "flags": no_flags,
-                "subcommands": [
-                    {"name":"status","abstract":"Show selected and current release channels.","discussion":"","arguments":[],"options":[],"flags":[{"name":"json","short_name":null,"help":"Emit machine-readable channel state.","default_value":false}],"subcommands":[]},
-                    {"name":"set","abstract":"Save stable or nightly as the update channel.","discussion":"","arguments":[{"name":"channel","help":"Release channel: stable or nightly.","type":"String","is_optional":false}],"options":[],"flags":[{"name":"json","short_name":null,"help":"Emit machine-readable channel state.","default_value":false}],"subcommands":[]}
-                ]
-            },
-            {
                 "name": "doctor",
                 "abstract": "Run platform-aware diagnostic probes.",
                 "discussion": "Exit code is non-zero when any probe is an error.",
@@ -4420,17 +4034,6 @@ const CLI_EXAMPLES: &[(&str, &[(&str, &str)])] = &[
     ("telemetry status", &[("cua-driver telemetry status --json", "Show the setting as JSON")]),
     ("telemetry reset-id", &[("cua-driver telemetry reset-id", "Erase the installation ID")]),
     ("telemetry inspect", &[("cua-driver telemetry inspect cua_driver_cli_completed --json", "Show the payload of one event without sending it")]),
-    ("check-update", &[
-        ("cua-driver check-update", "Check for a newer release"),
-        ("cua-driver check-update --json --no-cache", "Check now, as JSON"),
-    ]),
-    ("update", &[
-        ("cua-driver update", "Check and print the install command"),
-        ("cua-driver update --apply", "Install the latest release"),
-    ]),
-    ("channel", &[("cua-driver channel", "Show the selected release channel")]),
-    ("channel status", &[("cua-driver channel status --json", "Show the channels as JSON")]),
-    ("channel set", &[("cua-driver channel set nightly", "Follow nightly builds (then run update --apply)")]),
     ("doctor", &[
         ("cua-driver doctor", "Run the diagnostic probes"),
         ("cua-driver doctor --json", "Emit the probe report as JSON"),

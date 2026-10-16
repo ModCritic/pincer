@@ -700,7 +700,7 @@ fn deprecated_name_note(old: &str, new: &str) -> String {
 /// - `browser.state`, `browser.prepare`, `browser.navigate`,
 ///   `browser.input.click`, `browser.input.type`, `browser.input.files`,
 ///   `browser.dialog`
-/// - `driver.update_check`, `driver.probe`
+/// - `driver.probe`
 /// - `history.status`, `history.query`
 ///
 /// Tools with no entry get `[]` — that's fine, it just means
@@ -850,7 +850,6 @@ pub fn default_capabilities_for(tool_name: &str) -> Vec<String> {
         "browser_pointer" => &["browser.input.pointer"],
 
         // ── driver self-service ──────────────────────────────────────
-        "check_for_update" => &["driver.update_check"],
         "probe" => &["driver.probe"],
 
         // ── encrypted local Computer History ─────────────────────────
@@ -6383,7 +6382,6 @@ mod capability_tests {
         "install_extension",
         // misc
         "page",
-        "check_for_update",
         "probe",
         // browser-tool v1
         "get_browser_state",
@@ -6485,7 +6483,6 @@ mod capability_tests {
         "browser.download",
         "browser.input.pointer",
         // driver self
-        "driver.update_check",
         "driver.probe",
         // encrypted local history
         "history.status",

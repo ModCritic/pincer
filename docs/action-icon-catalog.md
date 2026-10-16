@@ -188,13 +188,12 @@ distinct resolved action IDs.
 | `health_report`            | `system.health.inspect`                               |
 | `get_config`               | `config.inspect`                                      |
 | `set_config`               | `config.update`                                       |
-| `check_for_update`         | `update.inspect`                                      |
 | `install_ffmpeg`           | `dependency.ffmpeg.plan`, `dependency.ffmpeg.install` |
 
 ## Complete public tool-name union
 
-The source-built macOS registry contains 49 tools. Windows adds
-`debug_window_info`. Linux adds four low-level pointer tools. The union is 54
+The source-built macOS registry contains 48 tools. Windows adds
+`debug_window_info`. Linux adds four low-level pointer tools. The union is 53
 public tool names.
 
 |   # | Tool                       | Category                    | Platform                              | Primary icon intent                                                   |
@@ -249,12 +248,11 @@ public tool names.
 |  48 | `end_session`              | Session lifecycle           | All                                   | End session                                                           |
 |  49 | `escalate_session`         | Legacy session compatibility | All                                  | Deprecated capture-scope escalation                                   |
 |  50 | `get_session_state`        | Legacy session compatibility | All                                  | Deprecated capture-scope inspect                                      |
-|  51 | `check_for_update`         | Maintenance                 | All                                   | Update check                                                          |
-|  52 | `debug_window_info`        | Diagnostic                  | Windows only                          | Window diagnostic                                                     |
-|  53 | `mouse_button_down`        | Low-level pointer           | Linux only                            | Hold button                                                           |
-|  54 | `mouse_drag`               | Low-level pointer           | Linux only                            | Move held pointer                                                     |
-|  55 | `mouse_button_up`          | Low-level pointer           | Linux only                            | Release button                                                        |
-|  56 | `parallel_mouse_drag`      | Multi-pointer               | Linux only                            | Concurrent drags                                                      |
+|  51 | `debug_window_info`        | Diagnostic                  | Windows only                          | Window diagnostic                                                     |
+|  52 | `mouse_button_down`        | Low-level pointer           | Linux only                            | Hold button                                                           |
+|  53 | `mouse_drag`               | Low-level pointer           | Linux only                            | Move held pointer                                                     |
+|  54 | `mouse_button_up`          | Low-level pointer           | Linux only                            | Release button                                                        |
+|  55 | `parallel_mouse_drag`      | Multi-pointer               | Linux only                            | Concurrent drags                                                      |
 
 ## Linux low-level pointer action keys
 
@@ -274,6 +272,8 @@ linux.parallel_mouse_drag.fixed_background
   deliberately hidden from `tools/list` and should reuse the `type_text` icon.
 - The old `screenshot` tool is removed. Window capture is represented by
   `get_window_state`; full-display capture is `get_desktop_state`.
+- `check_for_update` is removed in this fork, together with the update check,
+  so it needs no icon.
 - Deprecated `get_window_state.capture_mode` values are accepted but ignored.
   They do not represent distinct actions and should not receive icons.
 - Internal platform delivery paths such as `cgevent`, `x11_atspi`, `msaa`, and
@@ -311,7 +311,6 @@ session
 permissions
 settings
 health
-update
 ```
 
 Then generate small composable treatments for:

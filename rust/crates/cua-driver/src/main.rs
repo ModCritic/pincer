@@ -20,7 +20,6 @@
 mod autostart;
 mod broken_pipe;
 mod bundle;
-mod check_update_tool;
 mod cli;
 mod doctor;
 mod driver_service_http;
@@ -30,15 +29,11 @@ mod mcp_envelope;
 mod mcp_http;
 mod private_worker;
 mod proxy;
-mod release_channel;
-mod release_source;
 mod responsibility;
 mod sdk_adapter;
 mod serve;
 mod skills;
 mod stop;
-mod updater;
-mod version_check;
 
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -535,10 +530,6 @@ fn main() {
             // also covers a probe launch failure without letting the serving
             // process perform and cache its own negative TCC preflight.
             serve::set_permission_gate_pending(!gate_opts.opt_out);
-            // Long-running daemon — kick off the background update check
-            // before any blocking work so the banner can land on stderr
-            // early in the serve lifecycle.
-            version_check::maybe_announce_update();
             let pip_cfg = match pip_preview::default_config_path() {
                 Some(p) => pip_preview::PipConfig::from_args_and_file(&p),
                 None => pip_preview::PipConfig::from_args(),
@@ -682,27 +673,7 @@ fn main() {
             let tools = inspect_tools_without_runtime();
             cli::run_dump_docs_with_type(&tools, pretty, &doc_type);
         }
-        cli::Command::Update { apply, json } => {
-            cli::run_update_cmd(apply, json);
-        }
-        cli::Command::CheckUpdate { json, no_cache } => {
-            cli::run_check_update_cmd(json, no_cache);
-        }
-        cli::Command::Channel {
-            subcommand,
-            value,
-            json,
-        } => {
-            cli::run_channel_cmd(&subcommand, value.as_deref(), json);
-        }
         cli::Command::Doctor { json } => {
-            // Long-running interactive entry point — kick off the
-            // background "new version available?" check so the banner
-            // can land on stderr if the user is on an outdated install.
-            // Skip the banner in --json mode so output stays parseable.
-            if !json {
-                version_check::maybe_announce_update();
-            }
             cli::run_doctor_cmd(json);
         }
         cli::Command::Diagnose => {
@@ -739,9 +710,6 @@ fn main() {
             claude_code_compat,
             grants,
         } => {
-            // Long-running MCP proxy — kick off the background update check
-            // before connecting to or launching the daemon.
-            version_check::maybe_announce_update();
             let result = match mcp_uses_direct_runtime(socket.as_deref(), direct) {
                 Ok(true) => {
                     if let Err(error) =
@@ -860,9 +828,6 @@ fn main() -> anyhow::Result<()> {
                 claude_code_compat,
                 &grants,
             );
-            // Long-running daemon — kick off the background update check
-            // before any blocking work so the banner can land on stderr.
-            version_check::maybe_announce_update();
             // The Rust permissions gate is macOS-only (TCC concept).
             // On Windows / Linux the flag is silently accepted for
             // CLI uniformity and ignored. The Claude-Code compat screenshot
@@ -940,29 +905,7 @@ fn main() -> anyhow::Result<()> {
             cli::run_dump_docs_with_type(&tools, pretty, &doc_type);
             Ok(())
         }
-        cli::Command::Update { apply, json } => {
-            cli::run_update_cmd(apply, json);
-            Ok(())
-        }
-        cli::Command::CheckUpdate { json, no_cache } => {
-            cli::run_check_update_cmd(json, no_cache);
-            Ok(())
-        }
-        cli::Command::Channel {
-            subcommand,
-            value,
-            json,
-        } => {
-            cli::run_channel_cmd(&subcommand, value.as_deref(), json);
-            Ok(())
-        }
         cli::Command::Doctor { json } => {
-            // Long-running interactive entry point — kick off the
-            // background update check so the banner can land on stderr.
-            // Skip the banner in --json mode so output stays parseable.
-            if !json {
-                version_check::maybe_announce_update();
-            }
             cli::run_doctor_cmd(json);
             Ok(())
         }
@@ -1005,9 +948,6 @@ fn main() -> anyhow::Result<()> {
             claude_code_compat,
             grants,
         } => {
-            // Long-running MCP proxy — kick off the background update check
-            // before connecting to the daemon.
-            version_check::maybe_announce_update();
             let result = match mcp_uses_direct_runtime(socket.as_deref(), direct) {
                 Ok(true) => {
                     configure_startup_permission_mode(None, false, None, false, &grants)?;

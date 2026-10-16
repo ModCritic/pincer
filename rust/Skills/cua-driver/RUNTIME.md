@@ -25,7 +25,7 @@ Use the CLI by default when a shell is available, or the existing MCP connection
 
 Bare MCP owns a runtime on Windows/Linux and uses the signed service identity on macOS. `cua-driver mcp --socket <endpoint>` explicitly selects a service. One-shot CLI calls are service-backed. Starting a process that serves MCP is not the same as connecting a client: use the harness's MCP integration, not independent shell writes to a dead stdin.
 
-For missing software, use the installation instructions in [README.md](README.md) with user approval. `check-update` is read-only; `update --apply` installs software. After an approved update, check both the executable and daemon. Do not interpret a nonzero updater exit as proof that nothing changed.
+For missing software, use the installation instructions in [README.md](README.md) with user approval. This build has no update check or self-update command. After an approved install, check both the executable and daemon.
 
 `skills update` replaces the installed pack. Back up personal edits before refreshing. `skills install --from main` is for source validation, not proof of compatibility with a release binary. Other platform guides are installed only with `--all-platforms`.
 

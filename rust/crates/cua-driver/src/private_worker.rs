@@ -123,7 +123,7 @@ async fn run_async(
             host_bundle_id: Some(initialization.host_bundle_id.clone()),
             claude_code_compatibility: false,
             prepare_desktop_environment: true,
-            register_host_tools: Some(crate::check_update_tool::register_into),
+            register_host_tools: None,
             authorization_host: None,
             activity_observer: None,
         },

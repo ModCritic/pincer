@@ -30,17 +30,13 @@ For a fresh Windows installation, run in PowerShell:
 & ([scriptblock]::Create((irm https://cua.ai/driver/install.ps1))) -Channel nightly
 ```
 
-To switch an existing installation, run:
+This build has no `channel` or `update` command. To switch an existing
+installation, run the installer above again with the nightly channel option.
+
+Confirm the installed version:
 
 ```bash
-cua-driver channel set nightly
-cua-driver update --apply
-```
-
-Confirm the selected and installed channels:
-
-```bash
-cua-driver channel status
+cua-driver --version
 ```
 
 ## Enable Computer History
@@ -161,9 +157,9 @@ Disable capture before switching binaries:
 
 ```bash
 cua-driver history disable
-cua-driver channel set stable
-cua-driver update --apply
 ```
+
+Then run the installer again without the nightly channel option.
 
 Switching channels does not delete encrypted history. A stable build that does
 not understand the preview store must leave it untouched.

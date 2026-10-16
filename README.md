@@ -21,11 +21,14 @@ Changes from upstream:
   `parse_visual_regions` tool, the extension installer, and the
   `cua-perception` worker. `install_extension` remains and refuses every
   request.
+- The update check is removed: the startup check, the `check-update`,
+  `update` and `channel` commands, and the `check_for_update` tool. The
+  driver never looks up releases or runs Cua's installer, so it cannot
+  replace itself with an upstream build. `CUA_DRIVER_RS_UPDATE_CHECK` no
+  longer has any effect.
 
-The automatic update check still contacts cua.ai and GitHub. Set
-`CUA_DRIVER_RS_UPDATE_CHECK=false` to turn it off. The `check-update`,
-`update`, and `skills install` commands and the `check_for_update` tool
-contact them whenever they are used.
+`skills install` and `skills update` still download the skill pack from
+trycua/cua on GitHub.
 
 **[Documentation](https://cua.ai/docs/cua-driver)** - Installation, guides, and API reference.
 
