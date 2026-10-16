@@ -273,6 +273,7 @@ const DESKTOP_INPUT_OPERATIONS: &[&str] = &[
     "drag",
     "scroll",
     "move_cursor",
+    "move_along_path",
     "mouse_button_down",
     "mouse_button_up",
     "mouse_drag",
@@ -883,6 +884,7 @@ pub fn advertised_risk_for(tool: &str) -> RiskAssessment {
         | "drag"
         | "scroll"
         | "move_cursor"
+        | "move_along_path"
         | "mouse_button_down"
         | "mouse_button_up"
         | "mouse_drag"
@@ -1202,6 +1204,7 @@ fn enforce_hard_invariants(
             | "double_click"
             | "right_click"
             | "drag"
+            | "move_along_path"
             | "scroll"
             | "type_text"
             | "type_text_chars"

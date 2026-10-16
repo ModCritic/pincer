@@ -993,6 +993,7 @@ pub fn load_manifest(path: &Path) -> Result<SessionManifest, String> {
                 "mouse_button_up",
                 "mouse_drag",
                 "parallel_mouse_drag",
+                "move_along_path",
                 "get_accessibility_tree",
                 "get_window_state",
                 "verify_state",

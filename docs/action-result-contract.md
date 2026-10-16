@@ -46,10 +46,10 @@ evidence rests on. A `refused` result adds `error: {code, hint}`.
 The action-result tools are:
 
 `click`, `double_click`, `right_click`, `scroll`, `drag`, `mouse_drag`,
-`parallel_mouse_drag`, `move_cursor`, `mouse_button_down`, `mouse_button_up`,
-`type_text`, `type_text_chars`, `press_key`, `hotkey`, `set_value`,
-`set_window_frame`, `invoke_menu`, `browser_click`, `browser_pointer`, and
-`browser_type`.
+`parallel_mouse_drag`, `move_cursor`, `move_along_path`, `mouse_button_down`,
+`mouse_button_up`, `type_text`, `type_text_chars`, `press_key`, `hotkey`,
+`set_value`, `set_window_frame`, `invoke_menu`, `browser_click`,
+`browser_pointer`, and `browser_type`.
 
 Other mutating tools such as application launch, window activation, browser
 navigation, dialogs, uploads, and downloads retain their own typed results.

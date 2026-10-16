@@ -20,6 +20,8 @@ pub mod foreground;
 pub mod interactive;
 mod mpx_keyboard;
 mod mpx_owner;
+/// Path sampling and timing for `move_along_path`.
+pub mod path;
 /// One-shot targeted pointer/keyboard delivery with explicit
 /// auto/background/foreground semantics (embedders).
 pub mod targeted;
@@ -3993,6 +3995,141 @@ pub fn send_drag_xtest_desktop_with_modifiers(
     gesture_result?;
     cleanup_result?;
     Ok(())
+}
+
+/// One real-pointer glide for `move_along_path`, in screen-absolute pixels.
+#[derive(Clone, Debug)]
+pub struct PointerPathGesture {
+    /// Samples in screen pixels, already checked to be on screen.
+    pub points: Vec<(i32, i32)>,
+    /// When each sample is due, in milliseconds after the first one.
+    pub offsets_ms: Vec<f64>,
+    /// X button held from the first sample to the last, if any.
+    pub button: Option<u8>,
+    /// X button and count clicked at the last sample after the glide.
+    pub click_at_end: Option<(u8, usize)>,
+}
+
+/// Glide the real X11 pointer through `gesture.points` with XTest, each
+/// sample at its scheduled time from one monotonic start, so a slow event
+/// never shifts the ones after it. With a button, it is pressed at the first
+/// sample and released at the last; the release is attempted even when a
+/// motion request fails, so no button is left held. Returns the glide's
+/// measured duration, from the first sample to the last.
+pub fn send_pointer_path_xtest(gesture: &PointerPathGesture) -> Result<Duration> {
+    use x11rb::protocol::xtest::ConnectionExt as _;
+    let points = &gesture.points;
+    anyhow::ensure!(
+        !points.is_empty() && points.len() == gesture.offsets_ms.len(),
+        "a pointer path needs one time per sample"
+    );
+    let (conn, screen_num) = connect_x11_for_input()?;
+    let root = conn.setup().roots[screen_num].root;
+    let motion = |(x, y): (i32, i32)| {
+        conn.xtest_fake_input(MOTION_NOTIFY_EVENT, 0, 0, root, x as i16, y as i16, 0)
+    };
+    let mut button_pressed = false;
+    let mut last_sent = points[0];
+    let mut glide_time = Duration::ZERO;
+
+    let gesture_result = (|| -> Result<()> {
+        motion(points[0])?;
+        if let Some(button) = gesture.button {
+            let (x, y) = points[0];
+            // Confirm the press before the first motion, so the target sees
+            // the button go down where the path starts.
+            conn.xtest_fake_input(BUTTON_PRESS_EVENT, button, 0, root, x as i16, y as i16, 0)?
+                .check()?;
+            button_pressed = true;
+        } else {
+            conn.flush()?;
+        }
+        let start = std::time::Instant::now();
+        for (&point, &offset) in points.iter().zip(&gesture.offsets_ms).skip(1) {
+            let due = start + Duration::from_secs_f64(offset.max(0.0) / 1000.0);
+            let now = std::time::Instant::now();
+            if due > now {
+                sleep(due - now);
+            }
+            // Rounding can repeat a pixel; a motion that does not move is
+            // only noise for the target.
+            if point != last_sent {
+                motion(point)?;
+                conn.flush()?;
+                last_sent = point;
+            }
+        }
+        glide_time = start.elapsed();
+        let end = *points.last().expect("non-empty");
+        if let Some(button) = gesture.button {
+            conn.xtest_fake_input(
+                BUTTON_RELEASE_EVENT,
+                button,
+                0,
+                root,
+                end.0 as i16,
+                end.1 as i16,
+                0,
+            )?
+            .check()?;
+            button_pressed = false;
+        }
+        if let Some((button, count)) = gesture.click_at_end {
+            for click_index in 0..count.max(1) {
+                conn.xtest_fake_input(
+                    BUTTON_PRESS_EVENT,
+                    button,
+                    0,
+                    root,
+                    end.0 as i16,
+                    end.1 as i16,
+                    0,
+                )?
+                .check()?;
+                sleep(Duration::from_millis(CLICK_DELAY_MS));
+                conn.xtest_fake_input(
+                    BUTTON_RELEASE_EVENT,
+                    button,
+                    0,
+                    root,
+                    end.0 as i16,
+                    end.1 as i16,
+                    0,
+                )?
+                .check()?;
+                if click_index + 1 < count {
+                    sleep(Duration::from_millis(DOUBLE_CLICK_DELAY_MS));
+                }
+            }
+        }
+        Ok(())
+    })();
+
+    let mut cleanup_result: Result<()> = Ok(());
+    if let (true, Some(button)) = (button_pressed, gesture.button) {
+        cleanup_result = (|| -> Result<()> {
+            conn.xtest_fake_input(
+                BUTTON_RELEASE_EVENT,
+                button,
+                0,
+                root,
+                last_sent.0 as i16,
+                last_sent.1 as i16,
+                0,
+            )?
+            .check()?;
+            Ok(())
+        })();
+    }
+    // Deliver everything queued before this short-lived connection closes.
+    let completion_result = (|| -> Result<()> {
+        conn.get_input_focus()?.reply()?;
+        Ok(())
+    })();
+    gesture_result?;
+    cleanup_result?;
+    completion_result?;
+    Ok(glide_time)
 }
 
 /// Send a named key press to a window.

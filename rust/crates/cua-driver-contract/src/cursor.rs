@@ -478,6 +478,16 @@ pub fn classify_cursor_semantics(name: &str, args: &Value) -> Option<CursorSeman
         | "browser_right_click" => CursorAction::Click,
 
         "drag" | "browser_drag" => CursorAction::Drag,
+        // A held button makes the path a drag; a bare glide only points.
+        "move_along_path"
+            if args
+                .get("button")
+                .and_then(Value::as_str)
+                .is_some_and(|button| button != "none") =>
+        {
+            CursorAction::Drag
+        }
+        "move_along_path" => CursorAction::Navigate,
         "scroll" | "browser_scroll" => CursorAction::Scroll,
         "type_text" | "set_value" | "browser_type" | "browser_fill" => CursorAction::Text,
         "press_key" | "hotkey" | "browser_press_key" | "browser_hotkey" => CursorAction::Key,

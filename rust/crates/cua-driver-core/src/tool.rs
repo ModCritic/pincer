@@ -667,7 +667,8 @@ fn deprecated_name_note(old: &str, new: &str) -> String {
 /// - `input.pointer.click`, `input.pointer.click.left`,
 ///   `input.pointer.click.right`, `input.pointer.click.double`,
 ///   `input.pointer.drag`, `input.pointer.scroll`,
-///   `input.pointer.move`, `input.pointer.button` (raw down/up)
+///   `input.pointer.move`, `input.pointer.button` (raw down/up),
+///   `input.pointer.path` (a real-pointer glide along a sampled path)
 /// - `input.scroll.coordinates` (the live scroll schema accepts numeric x/y;
 ///   does not imply focus-free background delivery)
 /// - `input.keyboard.type`, `input.keyboard.hotkey`,
@@ -729,6 +730,12 @@ pub fn default_capabilities_for(tool_name: &str) -> Vec<String> {
         ],
         "mouse_drag" => &["input.pointer.drag"],
         "parallel_mouse_drag" => &["input.pointer.drag"],
+        // Real-pointer glide along a sampled path, hover or with a held button.
+        "move_along_path" => &[
+            "input.pointer.move",
+            "input.pointer.drag",
+            "input.pointer.path",
+        ],
         "mouse_button_down" => &["input.pointer.button"],
         "mouse_button_up" => &["input.pointer.button"],
         // ── input.keyboard ───────────────────────────────────────────
@@ -3316,6 +3323,7 @@ fn is_physical_desktop_action(tool: &str) -> bool {
             | "mouse_drag"
             | "parallel_mouse_drag"
             | "move_cursor"
+            | "move_along_path"
             | "mouse_button_down"
             | "mouse_button_up"
             | "type_text"
@@ -6333,6 +6341,7 @@ mod capability_tests {
         "mouse_button_up",
         "mouse_drag",
         "parallel_mouse_drag",
+        "move_along_path",
         // keyboard
         "type_text",
         "type_text_chars",
@@ -6410,6 +6419,7 @@ mod capability_tests {
         "input.scroll.coordinates",
         "input.pointer.move",
         "input.pointer.button",
+        "input.pointer.path",
         // keyboard
         "input.keyboard.type",
         "input.keyboard.type.terminal_safe",

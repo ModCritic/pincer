@@ -13125,6 +13125,293 @@ impl Tool for MoveCursorTool {
     }
 }
 
+// ── move_along_path ───────────────────────────────────────────────────────────
+
+/// Glides the real pointer along a sampled path (see `crate::input::path`).
+/// Delivery is XTest, the route `move_cursor` scope=desktop and foreground
+/// drags use; the session's MPX virtual pointer is never used, because the
+/// point of this tool is the visible system pointer.
+pub struct MoveAlongPathTool {
+    state: Arc<ToolState>,
+}
+
+static MOVE_ALONG_PATH_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
+
+fn path_point_schema(description: &str) -> Value {
+    json!({
+        "type": "array",
+        "items": {"type": "number"},
+        "minItems": 2,
+        "maxItems": 2,
+        "description": description
+    })
+}
+
+fn move_along_path_schema() -> Value {
+    use crate::input::path::{
+        MAX_DURATION_MS, MAX_POINTS, MAX_SAMPLES, MAX_SEGMENTS, MAX_SPACING_PX, MIN_SPACING_PX,
+    };
+    let point = |description: &str| path_point_schema(description);
+    let segment = |properties: Value, required: Value, description: &str| {
+        json!({
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": false,
+            "description": description
+        })
+    };
+    json!({"type":"object","properties":{
+        "session": cua_driver_core::tool_schema::session_schema(),
+        "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"\"window\" (default): points are window-local pixels of window_id's get_window_state screenshot, and the window is brought to front first. \"desktop\": get_desktop_state pixels, without pid/window_id."},
+        "pid":{"type":"integer","description":"Target process ID. Required for window scope."},
+        "window_id":{"type":"integer","description":"Target window ID. Required for window scope."},
+        "start": point("First point [x, y] of `segments`."),
+        "segments":{"type":"array","minItems":1,"maxItems":MAX_SEGMENTS,"description":"Path pieces after `start`, each with exactly one key: line, quad, cubic, or arc (around center from the current point; positive sweep_deg is clockwise on screen, the radius is the distance to center).","items":{
+            "type":"object",
+            "minProperties":1,
+            "maxProperties":1,
+            "additionalProperties":false,
+            "properties":{
+                "line": segment(json!({"to": point("End point.")}), json!(["to"]), "Straight line to `to`."),
+                "quad": segment(json!({"control": point("Control point."), "to": point("End point.")}), json!(["control","to"]), "Quadratic Bezier curve."),
+                "cubic": segment(json!({"control1": point("First control point."), "control2": point("Second control point."), "to": point("End point.")}), json!(["control1","control2","to"]), "Cubic Bezier curve."),
+                "arc": segment(json!({"center": point("Center of the arc."), "sweep_deg": {"type":"number","description":"Degrees to turn; positive is clockwise on screen."}}), json!(["center","sweep_deg"]), "Circular arc around `center`.")
+            }
+        }},
+        "points":{"type":"array","minItems":2,"maxItems":MAX_POINTS,"items": point("Point [x, y]."),"description":"Polyline [[x, y], ...], instead of segments."},
+        "smooth":{"type":"boolean","description":"With `points`: a Catmull-Rom curve through every point instead of straight spans. Default false."},
+        "parametric":{"type":"object","required":["x","y","t_from","t_to"],"additionalProperties":false,"description":"Curve x(t), y(t) for t from t_from to t_to, for circles, loops and spirals. Expressions support + - * / ^, sin/cos/tan, sqrt, abs, exp, ln, pi, e.","properties":{
+            "x":{"type":"string","description":"x(t), e.g. \"1280+300*cos(t)\"."},
+            "y":{"type":"string","description":"y(t), e.g. \"720+300*sin(t)\"."},
+            "t_from":{"type":"number","description":"First value of t."},
+            "t_to":{"type":"number","description":"Last value of t."}
+        }},
+        // The shared `button` shape (left/right/middle); leaving it out is the
+        // hover-only glide, and "none" is accepted as the same thing.
+        "button":{"type":"string","enum":["left","right","middle"],"description":"Button pressed at the first point, held along the path and released at the last. Omit for a hover-only glide."},
+        "click_at_end":{"type":"string","enum":["left","right","middle","double"],"description":"Click at the last point after the glide. Only without `button`."},
+        "duration_ms":{"type":"integer","minimum":0,"maximum":MAX_DURATION_MS,"default":600,"description":"Glide time in milliseconds. Default 600."},
+        "easing":{"type":"string","enum":["linear","ease_in","ease_out","ease_in_out"],"default":"ease_in_out","description":"Speed along the path; linear is even speed. Default ease_in_out."},
+        "spacing_px":{"type":"number","minimum":MIN_SPACING_PX,"maximum":MAX_SPACING_PX,"default":4,"description":format!("Largest distance between samples along the path, in the path's pixels. Default 4. At most {MAX_SAMPLES} samples.")}
+    },"additionalProperties":false})
+}
+
+fn move_along_path_refusal(detail: impl Into<String>) -> ToolResult {
+    // Parser messages arrive with their own full stop.
+    let detail = detail.into().trim_end_matches('.').to_owned();
+    ToolResult::error(format!("move_along_path: {detail}. No input was sent.")).with_structured(
+        json!({
+            "code": "invalid_arguments",
+            "tool": "move_along_path",
+            "effect": "refused",
+            "detail": detail,
+        }),
+    )
+}
+
+fn round_tenth(value: f64) -> f64 {
+    (value * 10.0).round() / 10.0
+}
+
+#[async_trait]
+impl Tool for MoveAlongPathTool {
+    fn def(&self) -> &ToolDef {
+        MOVE_ALONG_PATH_DEF.get_or_init(|| ToolDef {
+            name: "move_along_path".into(),
+            description: "Glide the real OS pointer along a path: line, quad, cubic and arc segments, a \
+                polyline (optionally smoothed), or a parametric x(t), y(t). Optionally hold a button \
+                along it (draw, drag) or click at the end. Samples are evenly spaced along the path and \
+                timed by duration_ms and easing. X11 only."
+                .into(),
+            input_schema: move_along_path_schema(),
+            read_only: false,
+            destructive: true,
+            idempotent: false,
+            open_world: true,
+        })
+    }
+
+    async fn invoke(&self, args: Value) -> ToolResult {
+        use crate::input::path;
+        if crate::wayland::wayland_input_enabled() {
+            return ToolResult::error(
+                "move_along_path is not supported on Wayland: it needs the X11 XTest pointer. \
+                 Use drag, or move_cursor with scope \"desktop\". No input was sent.",
+            )
+            .with_structured(json!({
+                "code": "unsupported_platform",
+                "tool": "move_along_path",
+                "effect": "refused",
+            }));
+        }
+        let scope = args.opt_str("scope");
+        if let Some(other) = scope
+            .as_deref()
+            .filter(|scope| !matches!(*scope, "window" | "desktop"))
+        {
+            return move_along_path_refusal(format!(
+                "scope must be \"window\" or \"desktop\", not \"{other}\""
+            ));
+        }
+        // Dispatch rewrites scope:"desktop" plus pid/window_id into
+        // coordinate_frame:"desktop": desktop pixels, delivered to that window.
+        let desktop_pixels = scope.as_deref() == Some("desktop") || desktop_frame_requested(&args);
+        let target = match (args.opt_u64("pid"), args.opt_u64("window_id")) {
+            (None, None) => None,
+            (Some(pid), Some(xid)) => match u32::try_from(pid) {
+                Ok(pid) => Some((pid, xid)),
+                Err(_) => return move_along_path_refusal("pid is out of range"),
+            },
+            _ => return move_along_path_refusal("pid and window_id go together"),
+        };
+        if target.is_none() && !desktop_pixels {
+            return move_along_path_refusal(
+                "window scope needs pid and window_id (window-local screenshot pixels); \
+                 pass scope \"desktop\" without them for get_desktop_state pixels",
+            );
+        }
+        let request = match path::PathRequest::from_args(&args) {
+            Ok(request) => request,
+            Err(error) => return move_along_path_refusal(error.to_string()),
+        };
+        let sampled = {
+            let request = request.clone();
+            match tokio::task::spawn_blocking(move || path::sample(&request)).await {
+                Ok(Ok(sampled)) => sampled,
+                Ok(Err(error)) => return move_along_path_refusal(error.to_string()),
+                Err(error) => return ToolResult::error(format!("Task error: {error}")),
+            }
+        };
+
+        // Map the samples to screen pixels: one affine map for the whole
+        // path, so arcs and parametric curves keep their shape.
+        let (scale, origin) = if let Some((pid, xid)) = target {
+            match tokio::task::spawn_blocking(move || window_target_matches(pid, xid, None)).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    return move_along_path_refusal(format!(
+                        "window_id {xid} does not belong to pid {pid}"
+                    ))
+                }
+                Err(error) => return ToolResult::error(format!("Task error: {error}")),
+            }
+            let scale = if desktop_pixels {
+                let (fx, fy) = cua_driver_core::desktop_capture_scale::desktop_scale_factor(&args)
+                    .unwrap_or((1.0, 1.0));
+                (fx, fy)
+            } else {
+                match screenshot_scale(&self.state, &args, pid, Some(xid)) {
+                    Ok(scale) => (scale, scale),
+                    Err(refusal) => return refusal,
+                }
+            };
+            let origin = if desktop_pixels {
+                (0.0, 0.0)
+            } else {
+                match tokio::task::spawn_blocking(move || window_local_to_screen(xid, 0.0, 0.0))
+                    .await
+                {
+                    Ok(Ok(origin)) => origin,
+                    Ok(Err(error)) => return ToolResult::error(format!("{error:#}")),
+                    Err(error) => return ToolResult::error(format!("Task error: {error}")),
+                }
+            };
+            (scale, origin)
+        } else {
+            (
+                cua_driver_core::desktop_capture_scale::desktop_scale_factor(&args)
+                    .unwrap_or((1.0, 1.0)),
+                (0.0, 0.0),
+            )
+        };
+        let screen: Vec<(f64, f64)> = sampled
+            .points
+            .iter()
+            .map(|(x, y)| (origin.0 + x * scale.0, origin.1 + y * scale.1))
+            .collect();
+        let (width, height) = match tokio::task::spawn_blocking(x11_screen_size).await {
+            Ok(Ok(size)) => size,
+            Ok(Err(error)) => return ToolResult::error(error.to_string()),
+            Err(error) => return ToolResult::error(format!("Task error: {error}")),
+        };
+        if let Err(error) = path::check_on_screen(&screen, width, height) {
+            return move_along_path_refusal(error.to_string());
+        }
+
+        let gesture = crate::input::PointerPathGesture {
+            points: screen
+                .iter()
+                .map(|(x, y)| (x.round() as i32, y.round() as i32))
+                .collect(),
+            offsets_ms: sampled.offsets_ms.clone(),
+            button: request.button,
+            click_at_end: request.click_at_end.map(path::EndClick::x_button_and_count),
+        };
+        let budget = std::time::Duration::from_millis(request.duration_ms + 15_000);
+        let result = match target {
+            None => {
+                spawn_blocking_bounded("move_along_path", budget, move || {
+                    crate::input::send_pointer_path_xtest(&gesture)
+                })
+                .await
+            }
+            Some((pid, xid)) => {
+                spawn_blocking_bounded("move_along_path", budget, move || {
+                    crate::input::with_x11_foreground_opts(
+                        xid,
+                        crate::input::ForegroundOptions::pointer().for_pid(pid),
+                        || crate::input::send_pointer_path_xtest(&gesture),
+                    )
+                    .map(|(elapsed, _report)| elapsed)
+                })
+                .await
+            }
+        };
+        let elapsed = match result {
+            Ok(Ok(elapsed)) => elapsed,
+            Ok(Err(error)) => return input_error_result(error),
+            Err(error) => return ToolResult::error(format!("Task error: {error}")),
+        };
+
+        let first = sampled.points[0];
+        let last = *sampled.points.last().expect("sampled path is non-empty");
+        let duration_ms = elapsed.as_millis() as u64;
+        let stats = json!({
+            "segments": sampled.segment_count,
+            "samples": sampled.points.len(),
+            "length_px": round_tenth(sampled.length_px),
+            "duration_ms": duration_ms,
+            "start": [round_tenth(first.0), round_tenth(first.1)],
+            "end": [round_tenth(last.0), round_tenth(last.1)],
+        });
+        let held = match request.button {
+            Some(1) => " holding the left button",
+            Some(2) => " holding the middle button",
+            Some(3) => " holding the right button",
+            _ => "",
+        };
+        let click = match request.click_at_end {
+            Some(path::EndClick::Left) => ", then left-clicked",
+            Some(path::EndClick::Right) => ", then right-clicked",
+            Some(path::EndClick::Middle) => ", then middle-clicked",
+            Some(path::EndClick::Double) => ", then double-clicked",
+            None => "",
+        };
+        let windowed = target.is_some();
+        ToolResult::text(format!(
+            "Moved the real pointer along the path{held} in {duration_ms} ms{click}.\n{stats}"
+        ))
+        .with_structured(json!({
+            "scope": if windowed { "window" } else { "desktop" },
+            "path": if windowed { "x11_xtest_fg" } else { "xtest_desktop" },
+            "delivery_mode": if windowed { "foreground" } else { "not_applicable" },
+            "effect": "unverifiable",
+            "stats": stats,
+        }))
+    }
+}
+
 // ── set_agent_cursor_enabled ──────────────────────────────────────────────────
 
 pub struct SetAgentCursorEnabledV2Tool {
@@ -14995,6 +15282,9 @@ pub fn build_registry_with_provider(
     }));
     r.register(Box::new(GetCursorPositionTool));
     r.register(Box::new(MoveCursorTool {
+        state: state.clone(),
+    }));
+    r.register(Box::new(MoveAlongPathTool {
         state: state.clone(),
     }));
     r.register(Box::new(SetAgentCursorEnabledV2Tool {

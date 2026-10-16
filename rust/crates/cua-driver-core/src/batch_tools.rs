@@ -40,6 +40,7 @@ pub const BATCHABLE_TOOLS: &[&str] = &[
     "scroll",
     "drag",
     "move_cursor",
+    "move_along_path",
 ];
 
 /// Most steps one call may carry. Keeps a batch inside client call timeouts.

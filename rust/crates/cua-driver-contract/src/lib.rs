@@ -105,6 +105,7 @@ pub const ACTION_RESULT_TOOLS: &[&str] = &[
     "mouse_drag",
     "parallel_mouse_drag",
     "move_cursor",
+    "move_along_path",
     "mouse_button_down",
     "mouse_button_up",
     "type_text",

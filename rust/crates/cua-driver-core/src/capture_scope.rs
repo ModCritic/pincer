@@ -170,6 +170,7 @@ fn is_scoped_action(tool_name: &str) -> bool {
             | "mouse_drag"
             | "parallel_mouse_drag"
             | "move_cursor"
+            | "move_along_path"
             | "type_text"
             | "type_text_chars"
             | "press_key"
