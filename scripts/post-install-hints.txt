@@ -15,7 +15,7 @@ Next steps:
                                    # running so you grant once and it persists.
 
   3. Agent skill pack (optional):
-       {{BINARY}} skills install   # fetch + link the cua-driver skill pack
+       {{BINARY}} skills install   # write the skill pack bundled in the binary
                                    # into Claude Code / Codex / Prime Agent /
                                    # OpenClaw / OpenCode and other supported agents.
                                    # The binary installer never touches your agent dirs.
@@ -100,4 +100,4 @@ Next steps:
          {{BINARY}} serve --permission-mode unrestricted \
            --dangerously-bypass-approvals
 
-Docs: https://cua.ai/docs/cua-driver/guides/connect-your-agent
+Docs: https://github.com/ModCritic/pincer#connect-an-agent

@@ -38,8 +38,9 @@ a browser on this machine through its loopback debugging port.
 `install_ffmpeg` with `confirm: true` runs the system package manager, which
 downloads ffmpeg from that package manager's sources.
 
-This fork publishes no release binaries, Python wheels, or npm packages.
-Build it from source as described below. The fork's own changes target Linux;
+This fork publishes no release binaries, Python wheels, or npm packages, and
+upstream's release installer scripts are removed. Build it from source as
+described below. The fork's own changes target Linux;
 the macOS and Windows code from upstream is still in the tree.
 
 See [MCP protocol and skills](docs/mcp-protocol-and-skills.md) for the modern
@@ -224,7 +225,7 @@ for the permission modes, capability manifests, and authorization rules.
 | `tests/fixtures/`                   | Source-built GUI harness apps and shared fixtures                      |
 | `rust/crates/cua-driver/tests/`     | Hermetic Rust integration tests for the driver                         |
 | `rust/crates/cua-driver-e2e/tests/` | Desktop E2E suites for the GUI harnesses                               |
-| `scripts/`                          | Install, uninstall, local build, and VM sync helpers                   |
+| `scripts/`                          | Local build-and-install, uninstall, and VM sync helpers                |
 | `docs/`                             | Repo-local specs, design notes, and historical plans                   |
 
 Start with `rust/README.md`, `rust/crates/cua-driver-e2e/tests/README.md`, and

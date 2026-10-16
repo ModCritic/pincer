@@ -212,10 +212,3 @@ def test_windows_local_installer_uses_separate_paths_and_autostart() -> None:
     assert '"cua-driver-local-serve"' in script
     assert "Repair-CuaDriverStaleDaemon" not in script
 
-
-def test_release_installers_do_not_target_local_product_artifacts() -> None:
-    for name in ("_install-rust.sh", "install.ps1"):
-        script = (SCRIPTS_DIR / name).read_text()
-        assert "CuaDriverLocal" not in script
-        assert ".cua-driver-local" not in script
-        assert "cua-driver-local-serve" not in script

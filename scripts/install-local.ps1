@@ -15,9 +15,9 @@
 # Use `cargo build -p cua-driver` directly + invoke target\debug\cua-driver.exe
 # if you specifically want a faster-to-compile debug binary.
 #
-# Not for end-users — `irm https://.../install.ps1 | iex` fetches a
-# signed/built release from GitHub. This script is for the developer
-# loop (rapid edit/build/test on a Windows host).
+# This script is for the developer loop (rapid edit/build/test on a
+# Windows host). Comments that mention install.ps1 or _install-rust.sh
+# refer to upstream Cua's release installer, which this fork removed.
 #
 # Separate local layout produced:
 #
@@ -378,8 +378,7 @@ if ($AutoStart) {
 }
 
 # Unified post-install hints come from a single shared text file so the
-# 4 Rust installers (this script + install-local.sh + install.ps1 +
-# _install-rust.sh) never drift. The .txt holds the OS-agnostic bulk
+# local installers (this script + install-local.sh) never drift. The .txt holds the OS-agnostic bulk
 # (Try-it / skill pack / MCP setup / docs link) with {{BINARY}}
 # placeholders; OS-specific bits stay inline below.
 $installedBinary = Join-Path $VisibleBinDir $BinaryName
@@ -397,7 +396,7 @@ if (Test-Path -LiteralPath $HintsTxt) {
     # Repo layout changed or .txt missing — fall back to one-line
     # essentials so users still know what to do next.
     Write-Host "Next steps: $installedBinary --version  |  $installedBinary mcp-config  |  $installedBinary skills install"
-    Write-Host "Docs: https://github.com/trycua/cua/tree/main/libs/cua-driver/rust"
+    Write-Host "Docs: https://github.com/ModCritic/pincer#readme"
 }
 
 # The local/release identity split deliberately stopped source installs from
@@ -412,8 +411,7 @@ if (-not (Test-Path -LiteralPath $releaseBinary -PathType Leaf)) {
     Write-Host "  Existing MCP clients configured for 'cua-driver' will not use this local build." -ForegroundColor Yellow
     Write-Host "  To configure Codex for the local build, run:"
     Write-Host "    $installedBinary mcp-config --client codex"
-    Write-Host "  To restore the published product instead, run:"
-    Write-Host "    irm https://cua.ai/driver/install.ps1 | iex"
+    Write-Host "  For other MCP clients, see https://github.com/ModCritic/pincer#connect-an-agent"
 }
 
 # Windows-specific autostart hint (kept inline; per-shell natural location).

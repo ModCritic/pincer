@@ -14,7 +14,7 @@
 # directory as `cua-driver`. The Info.plist's CFBundleExecutable
 # points at that name.
 #
-# See:
+# In upstream Cua (neither file is part of this fork):
 #   - .github/workflows/cd-rust-cua-driver.yml  (copies the skeleton's
 #     Contents/ into the release tarball at CD time and adds the
 #     universal binary)

@@ -16,8 +16,8 @@
 #   --experimental-rust    legacy alias for --backend=rust (no-op)
 #   --backend=swift        retired Swift backend (no-op; accepted for compat)
 #
-# Not for end-users — see install.sh for the curl-pipe-bash one-liner that
-# fetches the signed release tarball.
+# Upstream Cua's release installer (install.sh), which fetched a signed
+# release tarball, is not part of this fork.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

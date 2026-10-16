@@ -1,17 +1,20 @@
 # cua-driver scripts
 
-Install, uninstall, local-build, and VM sync helpers for cua-driver.
+Local build-and-install, uninstall, and VM sync helpers for cua-driver.
+
+Upstream Cua's release installers and uninstallers (`install.sh`,
+`install.ps1`, `uninstall.sh`, `uninstall.ps1`, and their helpers) fetched
+and managed upstream releases, so this fork removed them. To build the driver
+without installing it, see the [top-level README](../README.md#build-from-source).
 
 | Script | Purpose |
 | --- | --- |
-| `install.sh` / `install.ps1` | Install released cua-driver binaries |
 | `install-local.sh` / `install-local.ps1` | Build this checkout as the separate `cua-driver-local` product |
 | `uninstall-local.sh` / `uninstall-local.ps1` | Remove only the source-built `cua-driver-local` product |
-| `uninstall.sh` / `uninstall.ps1` | Remove installed driver artifacts |
-| `_install-common.sh` / `_install-common.psm1` | Shared install helper logic |
-| `_install-rust.sh` / `_install-local-rust.sh` | Rust build/install internals |
+| `_install-local-rust.sh` | Rust build and install internals for `install-local.sh` |
+| `_local-signing.sh` | Stable macOS code-signing helpers for the local installer |
 | `sync-vm-worktree.sh` | Sync this checkout to verification VMs and pull artifacts back |
-| `post-install-hints.txt` | User-facing hints printed by install scripts |
+| `post-install-hints.txt` | User-facing hints printed by the local installers |
 
 ## Stable macOS local signing
 
@@ -25,7 +28,7 @@ prominent warning and bootstrap instructions.
 For behavior or E2E verification, require the stable path:
 
 ```bash
-bash libs/cua-driver/scripts/install-local.sh \
+bash scripts/install-local.sh \
   --release --autostart --require-stable-signing
 ```
 
@@ -71,42 +74,20 @@ once. When the dedicated default keychain above exists, the installer prefers
 it automatically; exporting `CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN` remains the
 most explicit choice.
 
-Released installers show a telemetry notice before asking the installed binary
-to record anything. Telemetry is enabled by default and can be persistently
-disabled with `cua-driver telemetry disable`. Installation events use the same
-consent decision as routine events. A normal uninstall preserves the pseudonymous
-installation ID and preference for a future reinstall; use `--purge` on Unix,
-or set `CUA_DRIVER_RS_UNINSTALL_PURGE=1` on Windows, to delete them.
-
 Keep source commits host-owned. Verification machines should sync from this
 checkout and return artifacts, not push code.
 
-Local and released installations are removed independently:
+To remove a local installation, run the matching script from the checkout.
 
 ```bash
 # macOS / Linux, from the checkout
-libs/cua-driver/scripts/uninstall-local.sh
+scripts/uninstall-local.sh
 
 # Windows, from the checkout
-libs/cua-driver/scripts/uninstall-local.ps1
+scripts/uninstall-local.ps1
 ```
 
-The local uninstaller leaves `cua-driver`, `CuaDriver.app`, release services,
-release state, and release TCC grants untouched. On macOS it revokes only
-`com.trycua.driver.local`; pass `--keep-tcc` to retain that local grant.
-
-The release Unix uninstaller shuts down the release service before removing
-anything. It first requires the systemd/launchd supervisor to stop, then uses
-the daemon PID file to validate the installed release process and invokes the
-trusted installed helper as `cua-driver --expected-pid <pid> stop`. A helper
-that supports this option reads daemon metadata and requires the daemon PID to
-match before sending shutdown; older helpers reject this argv shape instead of
-silently stopping an unrelated default-socket daemon. The uninstaller escalates
-only the already-validated release PID if graceful shutdown is unavailable, and
-verifies the daemon stays stopped before cleanup begins.
-
-With a missing or stale PID file, the script performs only a narrow
-release-executable process check. It never signals an ambiguous process. If
-supervisor shutdown, ownership validation, process inspection, or final
-shutdown verification cannot be proven safe, uninstall aborts non-zero while
-the runtime is still in place.
+The local uninstaller leaves any `cua-driver` or `CuaDriver.app` installed by
+other means untouched, together with their services, state, and TCC grants.
+On macOS it revokes only `com.trycua.driver.local`; pass `--keep-tcc` to
+retain that local grant.

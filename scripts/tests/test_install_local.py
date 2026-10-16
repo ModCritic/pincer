@@ -42,7 +42,8 @@ def test_windows_local_install_reports_missing_release_cli_without_aliasing_it()
     assert hints < warning
     assert MIGRATION_WARNING in installer[warning:]
     assert "$installedBinary mcp-config --client codex" in installer[warning:]
-    assert "irm https://cua.ai/driver/install.ps1 | iex" in installer[warning:]
+    assert "https://github.com/ModCritic/pincer#connect-an-agent" in installer[warning:]
+    assert "cua.ai" not in installer
     assert "New-Item -ItemType SymbolicLink" not in installer[warning:]
 
 
@@ -242,7 +243,8 @@ esac
     migration = output[note:]
     assert MIGRATION_WARNING in migration
     assert f"{install_bin}/cua-driver-local mcp-config --client codex" in migration
-    assert "https://cua.ai/driver/install.sh" in migration
+    assert "https://github.com/ModCritic/pincer#connect-an-agent" in migration
+    assert "cua.ai" not in output
 
 
 def _linux_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:

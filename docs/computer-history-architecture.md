@@ -109,10 +109,10 @@ The implementation must extend current source-of-truth contracts:
 - [`cua-driver/src/cli.rs`](../rust/crates/cua-driver/src/cli.rs) preserves the
   verified installed product, namespace, permission mode, grants, compatibility
   mode, socket, and history admission across daemon relaunch on each platform.
-- [`scripts/uninstall.sh`](../scripts/uninstall.sh) and
-  [`scripts/uninstall.ps1`](../scripts/uninstall.ps1) preserve history during a
-  normal uninstall and perform exact installed-helper cryptographic purge before
-  package removal when purge is explicit.
+- Upstream's `scripts/uninstall.sh` and `scripts/uninstall.ps1`, which this
+  fork removed, preserve history during a normal uninstall and perform exact
+  installed-helper cryptographic purge before package removal when purge is
+  explicit.
 - [`cua-driver-core/src/authorization.rs`](../rust/crates/cua-driver-core/src/authorization.rs), [`cua-driver-core/src/policy.rs`](../rust/crates/cua-driver-core/src/policy.rs), and [`cua-driver-core/src/session_manifest.rs`](../rust/crates/cua-driver-core/src/session_manifest.rs) are authoritative for the Preview 0 read-only history operations and remain the stable seam for a later NVIDIA OpenShell adapter.
 - [`cua-driver/src/bundle.rs`](../rust/crates/cua-driver/src/bundle.rs) is authoritative for release/local namespace separation and default state paths.
 

@@ -1,4 +1,6 @@
 # Remove only the source-built cua-driver-local product on Windows.
+# Comments that mention uninstall.ps1 refer to upstream Cua's release
+# uninstaller, which this fork removed.
 [CmdletBinding()]
 param([switch]$Force, [switch]$ValidateOnly)
 

@@ -18,9 +18,10 @@
 #                ~/.local/bin. Takes precedence over
 #                CUA_DRIVER_LOCAL_INSTALL_DIR; must be absolute.
 #
-# Not for end-users — scripts/install.sh fetches a built release from
-# GitHub. This script is for the developer loop (rapid edit/build/test
-# on a Linux or macOS host).
+# This script is for the developer loop (rapid edit/build/test on a
+# Linux or macOS host). Comments below that mention install.sh or
+# _install-rust.sh refer to upstream Cua's release installer, which this
+# fork removed.
 #
 # Linux layout produced (matches install.sh):
 #
@@ -612,8 +613,7 @@ echo "  ${BOLD}$INSTALLED_BIN${NORMAL}"
 echo ""
 
 # Unified post-install hints come from a single shared text file so the
-# 4 Rust installers (this script + install-local.ps1 + _install-rust.sh +
-# install.ps1) never drift. The .txt holds the OS-agnostic bulk
+# local installers (this script + install-local.ps1) never drift. The .txt holds the OS-agnostic bulk
 # (Try-it / skill pack / MCP setup / docs link) with {{BINARY}}
 # placeholders; OS-specific bits stay inline below.
 HINTS_TXT="$SCRIPT_DIR/post-install-hints.txt"
@@ -623,7 +623,7 @@ else
     # Repo layout changed or running from an unexpected location — fall
     # back to one-line essentials so users still know what to do next.
     echo "Next steps: $INSTALLED_BIN --version  |  $INSTALLED_BIN mcp-config  |  $INSTALLED_BIN skills install"
-    echo "Docs: https://github.com/trycua/cua/tree/main/libs/cua-driver/rust"
+    echo "Docs: https://github.com/ModCritic/pincer#readme"
 fi
 
 # The local/release identity split deliberately stopped source installs from
@@ -639,8 +639,7 @@ if [ ! -e "$RELEASE_BIN" ]; then
     echo "  Existing MCP clients configured for 'cua-driver' will not use this local build." >&2
     echo "  To configure Codex for the local build, run:" >&2
     echo "    $INSTALLED_BIN mcp-config --client codex" >&2
-    echo "  To restore the published product instead, run:" >&2
-    echo '    /bin/bash -c "$(curl -fsSL https://cua.ai/driver/install.sh)"' >&2
+    echo "  For other MCP clients, see https://github.com/ModCritic/pincer#connect-an-agent" >&2
 fi
 
 # OS-specific autostart hint (kept inline; per-shell natural location).
