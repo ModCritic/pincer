@@ -25,9 +25,14 @@ Changes from upstream:
   driver never looks up releases or runs Cua's installer, so it cannot
   replace itself with an upstream build. `CUA_DRIVER_RS_UPDATE_CHECK` no
   longer has any effect.
+- `skills install` and `skills update` write the skill pack built into the
+  binary instead of downloading it from GitHub, so they work offline.
+  `--from main` is refused.
 
-`skills install` and `skills update` still download the skill pack from
-trycua/cua on GitHub.
+The driver makes no network calls of its own; the browser tools only talk to
+a browser on this machine through its loopback debugging port.
+`install_ffmpeg` with `confirm: true` runs the system package manager, which
+downloads ffmpeg from that package manager's sources.
 
 **[Documentation](https://cua.ai/docs/cua-driver)** - Installation, guides, and API reference.
 

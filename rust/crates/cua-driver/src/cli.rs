@@ -163,11 +163,9 @@ pub enum Command {
     /// installs or updates the cua-driver skill pack into their agent
     /// dirs (Claude Code / Codex / Prime Agent / OpenClaw / OpenCode); the install
     /// scripts never touch ~/.claude/skills/ etc. directly. `install`
-    /// fetches the matching versioned release asset
-    /// (`cua-driver-rs-v<v>-skills.tar.gz` — the asset filename keeps
-    /// the legacy `-rs` for backward-compat with pinned URLs) from
-    /// GitHub, places it under `<HomeDir>/skills/cua-driver/`, and
-    /// symlinks into each detected agent's `skills/` dir. See
+    /// writes the skill pack built into this binary to
+    /// `<HomeDir>/skills/cua-driver/` and symlinks it into each detected
+    /// agent's `skills/` dir. Nothing is downloaded. See
     /// `crates/cua-driver/src/skills.rs`.
     Skills {
         subcommand: String,
@@ -328,14 +326,14 @@ pub fn parse_command() -> Command {
         println!("  cua-driver autostart kick       Start the entry now without re-logging.");
         println!();
         println!("skills options (agent skill-pack management, opt-in):");
-        println!("  cua-driver skills install       Fetch the versioned skill pack from GitHub Releases and symlink it");
+        println!("  cua-driver skills install       Write the skill pack built into this binary and symlink it");
         println!("                                  into each detected agent's skills/ dir (Claude Code, Codex, Prime Agent,");
         println!("                                  OpenClaw, OpenCode). Idempotent. Never overwrites existing user links.");
-        println!("  cua-driver skills update        Re-fetch the skill pack from GitHub, refreshing the local copy + links.");
+        println!("                                  Works offline; nothing is downloaded.");
+        println!("  cua-driver skills update        Rewrite the local copy from this binary, refreshing it + links.");
         println!("  cua-driver skills uninstall     Remove the agent symlinks. Add --all to also delete the local copy.");
         println!("  cua-driver skills status        Report local install state + per-agent link state. Read-only.");
         println!("  cua-driver skills path          Print where the local skill pack lives.");
-        println!("  --from main                     (install only) Fetch latest from main branch instead of the tagged release.");
         println!();
         println!("agent authorization (serve only):");
         println!("  --permission-mode <mode>        standard (default), bounded, or unrestricted.");
@@ -754,8 +752,8 @@ pub fn parse_command() -> Command {
             // skills` is a read-only probe — won't ever modify user state.
             let subcommand = pos.next().unwrap_or("status").to_string();
             // Pass through any other flags / args after the subcommand for
-            // the verb's own parsing (e.g. `--force`, `--from main`,
-            // `--agent claude-code`, `--local`, `--all`). Collect from `pos`
+            // the verb's own parsing (e.g. `--force`, `--all-platforms`,
+            // `--all`). Collect from `pos`
             // and dotted long-form flags from the raw args too.
             let mut flags: Vec<String> = pos.map(str::to_owned).collect();
             for a in &args {
@@ -3909,8 +3907,8 @@ fn cli_docs_literal() -> serde_json::Value {
                 "options": no_options,
                 "flags": no_flags,
                 "subcommands": [
-                    {"name":"install","abstract":"Fetch the versioned skill pack and link detected agents.","discussion":"","arguments":[],"options":[{"name":"from","short_name":null,"help":"Fetch from the main branch instead of the tagged release. Only `main` is accepted; write it as `--from=main`.","type":"String","default_value":null,"is_optional":true}],"flags":[{"name":"all-platforms","short_name":null,"help":"Keep platform-specific skill files for every platform.","default_value":false},{"name":"force","short_name":null,"help":"Re-fetch the skill pack even when the local copy is current.","default_value":false}],"subcommands":[]},
-                    {"name":"update","abstract":"Refresh the local skill pack and links.","discussion":"Always re-fetches; takes the same options as install.","arguments":[],"options":[{"name":"from","short_name":null,"help":"Fetch from the main branch instead of the tagged release. Only `main` is accepted; write it as `--from=main`.","type":"String","default_value":null,"is_optional":true}],"flags":[{"name":"all-platforms","short_name":null,"help":"Keep platform-specific skill files for every platform.","default_value":false}],"subcommands":[]},
+                    {"name":"install","abstract":"Install the skill pack built into this binary and link detected agents.","discussion":"Nothing is downloaded; the pack matches this driver build.","arguments":[],"options":[],"flags":[{"name":"all-platforms","short_name":null,"help":"Keep platform-specific skill files for every platform.","default_value":false},{"name":"force","short_name":null,"help":"Rewrite the skill pack even when a local copy exists.","default_value":false}],"subcommands":[]},
+                    {"name":"update","abstract":"Refresh the local skill pack and links.","discussion":"Always rewrites the local copy from this binary; takes the same options as install.","arguments":[],"options":[],"flags":[{"name":"all-platforms","short_name":null,"help":"Keep platform-specific skill files for every platform.","default_value":false}],"subcommands":[]},
                     {"name":"uninstall","abstract":"Remove agent skill links.","discussion":"","arguments":[],"options":[],"flags":[{"name":"all","short_name":null,"help":"Also delete the local skill-pack copy.","default_value":false}],"subcommands":[]},
                     {"name":"status","abstract":"Report local skill-pack and per-agent link state.","discussion":"","arguments":[],"options":[],"flags":[],"subcommands":[]},
                     {"name":"path","abstract":"Print the local skill-pack path.","discussion":"","arguments":[],"options":[],"flags":[],"subcommands":[]}
@@ -4047,7 +4045,7 @@ const CLI_EXAMPLES: &[(&str, &[(&str, &str)])] = &[
     ("skills", &[("cua-driver skills", "Report skill-pack state")]),
     ("skills install", &[
         ("cua-driver skills install", "Install the skill pack and link detected agents"),
-        ("cua-driver skills install --from=main", "Install the latest skill pack from main"),
+        ("cua-driver skills install --all-platforms", "Also keep the other platforms' guides"),
     ]),
     ("skills update", &[("cua-driver skills update", "Refresh the skill pack and links")]),
     ("skills uninstall", &[("cua-driver skills uninstall --all", "Remove the links and the local copy")]),

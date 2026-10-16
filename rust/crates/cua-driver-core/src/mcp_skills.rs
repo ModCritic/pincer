@@ -118,6 +118,13 @@ fn pack() -> &'static Pack {
     })
 }
 
+/// The compiled-in skill pack as `(file name, contents)` pairs. `cua-driver
+/// skills install` writes these files, so the installed pack is the one this
+/// binary was built with and serves over MCP.
+pub fn bundled_files() -> &'static [(&'static str, &'static str)] {
+    FILES
+}
+
 /// Capabilities shared by every MCP transport serving this pack.
 pub fn capabilities() -> Value {
     json!({

@@ -27,20 +27,6 @@ httparse = "1.10.1"
 base64 = { workspace = true }
 uuid = { workspace = true }
 zeroize = { workspace = true }
-# HTTP client for the `cua-driver skills install` download.
-# `ureq` over `reqwest` for the small dep footprint. Uses rustls (default) so
-# Linux/Windows builds don't require system OpenSSL.
-ureq = { version = "3", features = ["json"] }
-# Version parsing for the skill-pack release tag (stable or nightly).
-semver = "1"
-# Tarball extraction for `cua-driver skills install`. The verb fetches a
-# versioned `cua-driver-rs-v<v>-skills.tar.gz` release asset from GitHub
-# and unpacks it under `<HomeDir>/skills/cua-driver-rs/`. `tar` is the
-# canonical streaming TAR reader; `flate2` provides gzip decoding (pulled
-# in transitively by ureq already, but declared explicitly here so the
-# dependency is easy to find).
-tar = { version = "0.4", default-features = false }
-flate2 = "1"
 sha2 = { workspace = true }
 ring = "0.17"
 fs2 = { workspace = true }
@@ -92,6 +78,8 @@ tokio = { workspace = true, features = ["full"] }
 base64 = { workspace = true }
 # Isolated HOME and scratch directories for unit and CLI tests.
 tempfile = "3"
+# Version parsing in the compatibility contract tests.
+semver = "1"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 # Private session and accessibility buses for the AT-SPI listener tests: the

@@ -27,7 +27,7 @@ Bare MCP owns a runtime on Windows/Linux and uses the signed service identity on
 
 For missing software, use the installation instructions in [README.md](README.md) with user approval. This build has no update check or self-update command. After an approved install, check both the executable and daemon.
 
-`skills update` replaces the installed pack. Back up personal edits before refreshing. `skills install --from main` is for source validation, not proof of compatibility with a release binary. Other platform guides are installed only with `--all-platforms`.
+`skills update` replaces the installed pack with the copy built into the running binary. Back up personal edits before refreshing. Other platform guides are installed only with `--all-platforms`.
 
 The old computer-use compatibility flag does not add a screenshot tool. Use `get_window_state` or explicitly authorized `get_desktop_state`.
 

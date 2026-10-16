@@ -44,8 +44,8 @@ From ClawHub:
 clawhub install @cua/driver
 ```
 
-Or let the installed driver add the version-matched skill to detected agent
-directories:
+Or let the installed driver add the skill it was built with to detected agent
+directories. It writes the copy bundled in the binary and downloads nothing:
 
 ```bash
 cua-driver skills install
@@ -53,7 +53,8 @@ cua-driver skills install
 
 The direct installer keeps only the current host's platform guide by default.
 Use `--all-platforms` when the agent assists users across operating systems.
-`cua-driver skills update` refreshes the pack to match a later driver release.
+After installing a newer driver, `cua-driver skills update` refreshes the pack
+to match it.
 
 ## Reading order
 
@@ -100,12 +101,9 @@ missing. See `RECORDING.md`.
 
 The skill is versioned with Cua Driver releases. Back up personal edits before updating: updates replace the installed pack.
 The pack version does not identify the running daemon; inspect the live tool
-schema when versions differ. For bleeding-edge validation against a matching
-source build (not an arbitrary installed release):
-
-```bash
-cua-driver skills install --from main
-```
+schema when versions differ. A source build bundles the pack from its own
+checkout, so `cua-driver skills install` run from that build installs the
+matching pack.
 
 From a local checkout, `libs/cua-driver/scripts/install-local.sh` installs the
 source-built macOS driver as `cua-driver-local` and `CuaDriverLocal.app`, without
