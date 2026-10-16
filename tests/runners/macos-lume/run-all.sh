@@ -197,9 +197,9 @@ require_golden_image_dependencies() {
   done
 }
 
-# The Tk pointer and perception rows skip when python3 has no tkinter, and
-# Apple's Tk 8.5.9 renders the canvas fixture too poorly for OCR. The canonical
-# lane must run them, so require a modern Tk instead of a shrunken matrix.
+# The Tk pointer rows skip when python3 has no tkinter, and Apple's Tk 8.5.9
+# renders the canvas fixture too poorly. The canonical lane must run them, so
+# require a modern Tk instead of a shrunken matrix.
 require_modern_tk() {
   local version
   if ! version="$(python3 -c 'import tkinter; print(tkinter.Tcl().eval("info patchlevel"))' 2>/dev/null)"; then

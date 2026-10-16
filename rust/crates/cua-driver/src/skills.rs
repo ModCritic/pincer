@@ -85,7 +85,6 @@ const SKILL_FILES: &[&str] = &[
     "MACOS.md",
     "LINUX.md",
     "BROWSER.md",
-    "VISUAL.md",
     "RECORDING.md",
     "EMBEDDING.md",
 ];
@@ -1575,7 +1574,6 @@ mod tests {
             ("cua-driver-rs-v0.2.20-skills/LINUX.md", b"l"),
             ("cua-driver-rs-v0.2.20-skills/RECORDING.md", b"R"),
             ("cua-driver-rs-v0.2.20-skills/BROWSER.md", b"B"),
-            ("cua-driver-rs-v0.2.20-skills/VISUAL.md", b"V"),
             ("cua-driver-rs-v0.2.20-skills/EMBEDDING.md", b"E"),
         ]);
         let dest = tempdir().unwrap();
@@ -1586,7 +1584,6 @@ mod tests {
             "SKILL.md",
             "RECORDING.md",
             "BROWSER.md",
-            "VISUAL.md",
             "EMBEDDING.md",
         ] {
             assert!(

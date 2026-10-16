@@ -12,6 +12,10 @@ advertises the capture-bound `click.capture_id` contract. They capture the
 browser window with `get_window_state`, then keep that exact `capture_id` in the
 click arguments. Otherwise they continue through the semantic path.
 
+This fork's Driver does not provide `parse_visual_regions` (the optional
+perception extension was removed), so against it the agents always take the
+semantic path. The visual adapter and its fixtures are unchanged.
+
 The TypeSafe-specific code lives in `python/jev_adapter.py` and
 `typescript/jev_adapter.ts`, outside Driver. Both adapters send Jev the bounded
 candidate IDs and descriptions plus a compact observation. When visual regions
@@ -126,8 +130,9 @@ Task mode is selected with `CUA_APPKIT_TASK_STATE`, `CUA_WPF_TASK_STATE`,
 a small dedicated task window.
 A fourth task, `canvas-cancel`, clicks the Cancel card on the cross-platform
 visual-only canvas fixture (a custom-painted Tk window with no accessibility
-tree), so it can only succeed through the visual fallback and needs the
-cua-perception extension. It observes only the window's top level
+tree), so it can only succeed through the visual fallback. That needs a
+Driver that provides `parse_visual_regions`, which this fork's Driver does
+not. It observes only the window's top level
 (`max_depth: 1`), so macOS does not spend the walk budget in the menu bar. It
 targets Cancel because OmniParser reads the Save label inconsistently on a 1x
 macOS capture (`Save`, then `Saye`), and the exact text match then correctly
@@ -356,8 +361,9 @@ uv run --frozen python verify_setup.py --visual-fixture --require-visual-path \
 ```
 
 This fails unless every runner verified the fixture through `click` with the
-exact `capture_id`. It needs a Driver with the cua-perception extension
-installed. Without the extension, the visual fixture cannot be submitted.
+exact `capture_id`. It needs a Driver that provides `parse_visual_regions`,
+which this fork's Driver does not, so here the visual fixture cannot be
+submitted.
 `--expect-visual-status not_installed` checks that fallback instead: every
 step that attempted a visual parse must log `not_installed`, no runner may
 submit, and the run must end without claiming success. Skipped steps do not

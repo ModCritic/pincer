@@ -66,9 +66,6 @@ class GeneratedOptionsTests(unittest.TestCase):
             "InputDeliveryMode", "ListAppsInput", "ListAppsOutput", "ListWindowsInput",
             "ListWindowsOutput", "SnapshotImage", "WindowBounds", "WindowElement",
             "WindowInfo", "WindowStateOutput",
-            "ParseVisualRegionsInput", "ParseVisualRegionsOptions",
-            "ParseVisualRegionsOutput", "VisualCaptureProvenance",
-            "VisualParseError", "VisualParseErrorCode", "VisualRegion",
         ):
             self.assertIn(name, cua_driver.__all__)
             self.assertIsNotNone(getattr(cua_driver, name))
@@ -188,8 +185,6 @@ except FileNotFoundError:
             EffectiveScope,
             StatePredicate,
             StartSessionOutput,
-            ParseVisualRegionsInput,
-            ParseVisualRegionsOptions,
             VerificationStatus,
             VerifyStateInput,
             WindowPredicate,
@@ -211,7 +206,7 @@ except FileNotFoundError:
             captured: list[dict[str, object]] = []
 
             def serve() -> None:
-                while len(captured) < 3:
+                while len(captured) < 2:
                     connection, _ = listener.accept()
                     with connection:
                         line = connection.makefile("r", encoding="utf-8").readline()
@@ -235,31 +230,6 @@ except FileNotFoundError:
                                     "elapsed_ms": 12,
                                     "samples": 2,
                                     "predicates": [],
-                                }
-                            elif request["name"] == "parse_visual_regions":
-                                structured = {
-                                    "schema": "cua.visual_regions_v1",
-                                    "capture": {
-                                        "capture_id": "capture-123",
-                                        "source": {"kind": "primary_desktop", "display_id": "primary"},
-                                        "screenshot": {
-                                            "reference": "sha256:abc",
-                                            "width": 2,
-                                            "height": 2,
-                                            "mime_type": "image/png",
-                                            "sha256": "abc",
-                                        },
-                                        "action_coordinate_space": {"kind": "identity"},
-                                    },
-                                    "parser": {
-                                        "extension_id": "cua-perception",
-                                        "extension_version": "1.0.0",
-                                        "model_id": "fixture",
-                                        "model_version": "1",
-                                        "runtime": "fixture",
-                                    },
-                                    "regions": [],
-                                    "timing": {"duration_ms": 1},
                                 }
                             else:
                                 structured = {
@@ -303,9 +273,9 @@ except FileNotFoundError:
                 "press_key",
                 "hotkey",
                 "verify_state",
-                "parse_visual_regions",
             }
             self.assertTrue(all(hasattr(driver, name) for name in expected_methods))
+            self.assertFalse(hasattr(driver, "parse_visual_regions"))
             verification_result = asyncio.run(
                 driver.verify_state(
                     VerifyStateInput(
@@ -336,16 +306,6 @@ except FileNotFoundError:
                     )
                 )
             )
-            visual_result = asyncio.run(
-                driver.parse_visual_regions(
-                    ParseVisualRegionsInput(
-                        capture_id="capture-123",
-                        options=ParseVisualRegionsOptions(
-                            kinds=None, min_confidence=None, max_regions=None
-                        ),
-                    )
-                )
-            )
             server.join(timeout=5)
             listener.close()
 
@@ -358,10 +318,6 @@ except FileNotFoundError:
         self.assertEqual(action_result.effect, ActionEffect.UNVERIFIABLE)
         self.assertEqual(action_result.route, ActionRoute.GLOBAL_INPUT)
         self.assertFalse(hasattr(action_result, "verified"))
-        self.assertEqual(
-            json.loads(visual_result.structured_json)["schema"],
-            "cua.visual_regions_v1",
-        )
         self.assertEqual(captured[0]["name"], "verify_state")
         self.assertEqual(
             captured[0]["args"],
@@ -388,11 +344,6 @@ except FileNotFoundError:
                 "button": "left",
                 "count": 1,
             },
-        )
-        self.assertEqual(captured[2]["name"], "parse_visual_regions")
-        self.assertEqual(
-            captured[2]["args"],
-            {"capture_id": "capture-123", "options": {}},
         )
 
     def test_generated_python_sdk_can_own_the_runtime_in_process(self) -> None:

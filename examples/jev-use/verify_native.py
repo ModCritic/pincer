@@ -2,8 +2,8 @@
 
 ``--harness`` selects the AppKit (macOS), WPF or WinUI3 (Windows), or GTK3
 (Linux) harness, or the cross-platform visual-only ``canvas`` fixture, which has no
-accessibility tree and proves the OmniParser fallback (it needs the
-cua-perception extension). The canvas publishes its state to a loopback
+accessibility tree and proves the visual-region fallback (it needs a Driver
+that provides parse_visual_regions, which this fork's Driver does not). The canvas publishes its state to a loopback
 journal that this script serves; each published state is written to the task
 state file unchanged except for the schema name. For every task and language this script launches a fresh harness in
 task mode with its own state file (``CUA_<HARNESS>_TASK_STATE``), runs the

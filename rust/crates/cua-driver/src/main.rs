@@ -24,11 +24,10 @@ mod check_update_tool;
 mod cli;
 mod doctor;
 mod driver_service_http;
-mod extension_manager;
 mod history_runtime;
+mod install_extension_tool;
 mod mcp_envelope;
 mod mcp_http;
-mod perception_cli;
 mod private_worker;
 mod proxy;
 mod release_channel;
@@ -243,7 +242,7 @@ fn maybe_init_pip() {
 
 fn register_host_tools(registry: &mut cua_driver_core::tool::ToolRegistry) {
     history_runtime::register_host_tools(registry);
-    extension_manager::register_host_tools(registry);
+    install_extension_tool::register_host_tools(registry);
 }
 
 /// Construct the canonical SDK-owned runtime for the CLI or daemon host.
@@ -425,9 +424,6 @@ mod mcp_runtime_selection_tests {
 #[cfg(target_os = "macos")]
 fn main() {
     cua_driver_core::build_info::init(env!("CUA_DRIVER_GIT_SHA"));
-    cua_driver_sdk::configure_perception_client_resolver(
-        extension_manager::perception_client_resolver(),
-    );
     if let Some(code) = platform_macos::permissions::gate::run_permission_probe_if_requested() {
         std::process::exit(code);
     }
@@ -721,12 +717,6 @@ fn main() {
         cli::Command::Skills { subcommand, flags } => {
             skills::run(&subcommand, &flags);
         }
-        cli::Command::Extension { args } => {
-            extension_manager::run(&args);
-        }
-        cli::Command::Perception { args } => {
-            perception_cli::run(&args);
-        }
         cli::Command::CursorTheme { args } => {
             run_cursor_theme_command(&args);
         }
@@ -789,9 +779,6 @@ fn main() -> anyhow::Result<()> {
     {
         std::process::exit(code);
     }
-    cua_driver_sdk::configure_perception_client_resolver(
-        extension_manager::perception_client_resolver(),
-    );
     if let Some(code) = history_runtime::run_offline_purge_if_requested() {
         std::process::exit(code);
     }
@@ -993,14 +980,6 @@ fn main() -> anyhow::Result<()> {
         }
         cli::Command::Skills { subcommand, flags } => {
             skills::run(&subcommand, &flags);
-            Ok(())
-        }
-        cli::Command::Extension { args } => {
-            extension_manager::run(&args);
-            Ok(())
-        }
-        cli::Command::Perception { args } => {
-            perception_cli::run(&args);
             Ok(())
         }
         cli::Command::CursorTheme { args } => {

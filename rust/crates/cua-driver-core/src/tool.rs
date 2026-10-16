@@ -791,7 +791,6 @@ pub fn default_capabilities_for(tool_name: &str) -> Vec<String> {
             "screen.capture",
             "screen.capture.window",
         ],
-        "parse_visual_regions" => &["screen.perception.visual_regions"],
 
         // ── apps / windows ───────────────────────────────────────────
         "launch_app" => &["app.launch"],
@@ -1396,32 +1395,6 @@ impl ToolRegistry {
         self.register(Box::new(crate::script_tool::RunScriptTool::new(
             self.replay_registry.clone(),
         )));
-    }
-
-    pub fn register_perception_tool(
-        &mut self,
-        client: impl Into<crate::perception_client::PerceptionClientHandle>,
-    ) {
-        let captures = self.capture_service();
-        let resolve_binding = Arc::new(move |args: &Value| {
-            captures.binding_from_args(args).map_err(|error| {
-                crate::perception_client::error(
-                    cua_driver_contract::VisualParseErrorCode::CaptureGenerationMismatch,
-                    "capture session binding is unavailable",
-                    false,
-                    Some(error.to_string()),
-                )
-            })
-        });
-        self.register_perception_tool_with_binding_resolver(client, resolve_binding);
-    }
-
-    pub fn register_perception_tool_with_binding_resolver(
-        &mut self,
-        client: impl Into<crate::perception_client::PerceptionClientHandle>,
-        resolve_binding: crate::perception_tools::CaptureBindingResolver,
-    ) {
-        crate::perception_tools::register_perception_tool(self, client, resolve_binding);
     }
 
     /// Wire up the replay tool's weak self-reference.
@@ -2939,15 +2912,6 @@ impl ToolRegistry {
                     "direction": "network_to_system",
                 }),
                 "Allow Cua to install ffmpeg using the detected system package manager".to_owned(),
-            ),
-            "install_extension" if args.get("confirm").and_then(Value::as_bool) == Some(true) => (
-                serde_json::json!({
-                    "kind": "extension_install",
-                    "extension": "perception",
-                    "direction": "local_catalog_to_driver",
-                }),
-                "Allow Cua to install the reviewed perception extension into the Driver home"
-                    .to_owned(),
             ),
             _ => {
                 return Err(protected_scope_refusal(
@@ -6433,7 +6397,6 @@ mod capability_tests {
         "browser_pointer",
         "history_status",
         "history_query",
-        "parse_visual_regions",
     ];
 
     /// All capability tokens in the canonical vocabulary. Any token
@@ -6465,7 +6428,6 @@ mod capability_tests {
         "screen.capture.registry.read",
         "screen.dimensions",
         "screen.cursor.position",
-        "screen.perception.visual_regions",
         // accessibility
         "accessibility.tree",
         "accessibility.tree.structured",
@@ -6510,7 +6472,6 @@ mod capability_tests {
         "recording.replay",
         "recording.install_dependency",
         "extension.install",
-        "visual.regions.parse",
         // page
         "page.action",
         // browser-tool v1

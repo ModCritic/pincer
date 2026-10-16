@@ -8,7 +8,6 @@
 //!   cua-driver describe <tool>              → print tool schema
 //!   cua-driver call <tool> [json-args]      → invoke tool, print result
 //!   cua-driver <tool> [json-args]           → shorthand for call (snake_case names)
-//!   cua-driver perception parse ...         → parse a local PNG without action authority
 //!
 //! Cursor-overlay flags (--cursor-theme, --no-overlay, etc.) are consumed by
 //! `CursorConfig::from_args()` and are ignored here.
@@ -193,14 +192,6 @@ pub enum Command {
         subcommand: String,
         flags: Vec<String>,
     },
-    /// Authenticated lifecycle for optional target-specific extensions.
-    Extension {
-        args: Vec<String>,
-    },
-    /// Local-file-only visual parsing through the installed extension.
-    Perception {
-        args: Vec<String>,
-    },
     /// Trusted local cursor-theme authoring and installation workflow. The
     /// actual parser/compiler is a separate short-lived executable so Lottie,
     /// ZIP, and JSON are not linked into the privileged daemon.
@@ -377,33 +368,6 @@ pub fn parse_command() -> Command {
         println!("  cua-driver skills status        Report local install state + per-agent link state. Read-only.");
         println!("  cua-driver skills path          Print where the local skill pack lives.");
         println!("  --from main                     (install only) Fetch latest from main branch instead of the tagged release.");
-        println!();
-        println!("extension options (SIGNED TARGET-SPECIFIC CATALOGS):");
-        println!(
-            "  Verified installs check publisher identity plus exact catalog, archive, manifest,"
-        );
-        println!(
-            "  file, original/converted model hashes, component notices, and source revisions."
-        );
-        println!(
-            "  Ed25519 key validity windows and publisher-signed key rotation prevent rollback."
-        );
-        println!("  Inspect previews license, corresponding source, and provenance first.");
-        println!("  Install, update, and remove support macOS, Linux, and Windows.");
-        println!("  cua-driver extension list [--json]");
-        println!("  cua-driver extension inspect <name> --catalog <catalog.json> [--json]");
-        println!("  cua-driver extension status [name] [--self-test] [--json]");
-        println!("  cua-driver extension install <name> --catalog <catalog.json>");
-        println!("  cua-driver extension update <name> --catalog <catalog.json>");
-        println!("  cua-driver extension remove <name>");
-        println!(
-            "  Developer only: replace --catalog with --archive <tar.gz> --allow-unsigned-local"
-        );
-        println!("  Compatibility aliases: extension info <name>; extension path <name>");
-        println!();
-        println!("local perception (read-only, no Driver action authority):");
-        println!("  cua-driver perception parse --image <png> --capture <capture.json> --json");
-        println!("  The capture file supplies source metadata only; the image is never registered as a reusable capture.");
         println!();
         println!("agent authorization (serve only):");
         println!("  --permission-mode <mode>        standard (default), bounded, or unrestricted.");
@@ -860,24 +824,6 @@ pub fn parse_command() -> Command {
                 }
             }
             Command::Skills { subcommand, flags }
-        }
-        Some("extension") => {
-            let index = args
-                .iter()
-                .position(|value| value == "extension")
-                .expect("extension positional is present");
-            Command::Extension {
-                args: args[index + 1..].to_vec(),
-            }
-        }
-        Some("perception") => {
-            let index = args
-                .iter()
-                .position(|value| value == "perception")
-                .expect("perception positional is present");
-            Command::Perception {
-                args: args[index + 1..].to_vec(),
-            }
         }
         Some("cursor-theme") => {
             let index = args
@@ -1955,26 +1901,7 @@ pub fn build_manifest() -> serde_json::Value {
               "args": [ { "name": "subcommand", "type": "positional-string", "description": "enable | disable | status | kick" } ] },
             { "name": "skills",
               "description": "Manage the cua-driver agent skill pack (install / update / uninstall / status / path).",
-              "args": [ { "name": "subcommand", "type": "positional-string", "description": "install | update | uninstall | status | path. Default: status." } ] },
-            { "name": "extension",
-              "description": "Inspect and manage signed, target-specific optional extensions on macOS, Linux, and Windows. Verified installs bind publisher identity, Ed25519 key validity and signed rotation metadata, provenance, component licenses/notices, corresponding-source revisions, and exact catalog, archive, manifest, file, original-model, and converted-model hashes.",
-              "args": [
-                  { "name": "subcommand", "type": "positional-string", "description": "list | inspect | status | install | update | remove. Default: list." },
-                  { "name": "name", "type": "positional-string", "description": "Registry extension name." },
-                  { "name": "--catalog", "type": "string", "description": "Signed local catalog; its target-specific archive path is resolved relative to this file." },
-                  { "name": "--archive", "type": "string", "description": "Developer-only unsigned local archive; requires --allow-unsigned-local and cannot claim verified identity." },
-                  { "name": "--allow-unsigned-local", "type": "flag", "description": "Explicitly opt into an unverified developer install." },
-                  { "name": "--self-test", "type": "flag", "description": "Run the installed extension self-test during status." },
-                  { "name": "--json", "type": "flag", "description": "Emit machine-readable inspection output." }
-              ] },
-            { "name": "perception",
-              "description": "Parse a local PNG through the installed optional perception extension without creating Driver capture or action authority.",
-              "args": [
-                  { "name": "subcommand", "type": "positional-string", "description": "Only: parse." },
-                  { "name": "--image", "type": "string", "description": "Local PNG path." },
-                  { "name": "--capture", "type": "string", "description": "Local capture source metadata JSON path." },
-                  { "name": "--json", "type": "flag", "description": "Required; emit canonical visual-regions JSON with local-input provenance." }
-              ] }
+              "args": [ { "name": "subcommand", "type": "positional-string", "description": "install | update | uninstall | status | path. Default: status." } ] }
         ]
     })
 }
@@ -3861,8 +3788,6 @@ const HELP_SUBCOMMANDS: &[&str] = &[
     "autostart",
     "skills",
     "manifest",
-    "extension",
-    "perception",
     "channel",
     "cursor-theme",
     "cursor",
@@ -4021,7 +3946,6 @@ const CLI_DEFAULT_SUBCOMMANDS: &[(&str, &str)] = &[
     ("recording", "status"),
     ("config", "show"),
     ("skills", "status"),
-    ("extension", "list"),
     ("channel", "status"),
 ];
 
@@ -4379,35 +4303,6 @@ fn cli_docs_literal() -> serde_json::Value {
                 ]
             },
             {
-                "name": "extension",
-                "abstract": "Inspect and manage signed, target-specific optional extensions.",
-                "discussion": "Verified installs bind a pinned publisher identity and Ed25519 key validity/rotation state to exact catalog, archive, manifest, file, original-model, and converted-model hashes plus component licenses/notices and corresponding-source revisions. Inspect previews license, source, and provenance before mutation. Explicit developer-only unsigned installs remain visibly unverified. Install, update, and remove use platform-specific ownership and link/reparse-point checks on macOS, Linux, and Windows.",
-                "arguments": no_args,
-                "options": no_options,
-                "flags": no_flags,
-                "subcommands": [
-                    {"name":"list","abstract":"List registry-known extensions and local state.","discussion":"","arguments":[],"options":[],"flags":[{"name":"json","short_name":null,"help":"Emit machine-readable output.","default_value":false}],"subcommands":[]},
-                    {"name":"info","abstract":"Compatibility alias for installed extension status.","discussion":"","arguments":[{"name":"name","help":"Registry extension name.","type":"String","is_optional":false}],"options":[],"flags":[{"name":"json","short_name":null,"help":"Emit machine-readable output.","default_value":false}],"subcommands":[]},
-                    {"name":"inspect","abstract":"Verify and preview license, source, provenance, and hashes without mutation.","discussion":"","arguments":[{"name":"name","help":"Registry extension name.","type":"String","is_optional":false}],"options":[{"name":"catalog","short_name":null,"help":"Signed local catalog.","type":"Path","default_value":null,"is_optional":true},{"name":"archive","short_name":null,"help":"Developer-only unsigned local archive.","type":"Path","default_value":null,"is_optional":true}],"flags":[{"name":"allow-unsigned-local","short_name":null,"help":"Explicitly select developer-only unverified mode.","default_value":false},{"name":"json","short_name":null,"help":"Emit machine-readable output.","default_value":false}],"subcommands":[]},
-                    {"name":"status","abstract":"Verify installed integrity and optionally run the self-test hook.","discussion":"","arguments":[{"name":"name","help":"Optional registry extension name.","type":"String","is_optional":true}],"options":[],"flags":[{"name":"self-test","short_name":null,"help":"Run the extension self-test hook.","default_value":false},{"name":"json","short_name":null,"help":"Emit machine-readable output.","default_value":false}],"subcommands":[]},
-                    {"name":"install","abstract":"Verify, stage, and durably activate an extension.","discussion":"Supported on macOS, Linux, and Windows with platform ownership and link/reparse-point checks.","arguments":[{"name":"name","help":"Registry extension name.","type":"String","is_optional":false}],"options":[{"name":"catalog","short_name":null,"help":"Signed local catalog.","type":"Path","default_value":null,"is_optional":true},{"name":"archive","short_name":null,"help":"Developer-only unsigned local archive.","type":"Path","default_value":null,"is_optional":true}],"flags":[{"name":"allow-unsigned-local","short_name":null,"help":"Explicitly select developer-only unverified mode.","default_value":false}],"subcommands":[]},
-                    {"name":"update","abstract":"Verify and atomically activate a newer extension version.","discussion":"Supported on macOS, Linux, and Windows with platform ownership and link/reparse-point checks.","arguments":[{"name":"name","help":"Registry extension name.","type":"String","is_optional":false}],"options":[{"name":"catalog","short_name":null,"help":"Signed local catalog.","type":"Path","default_value":null,"is_optional":true},{"name":"archive","short_name":null,"help":"Developer-only unsigned local archive.","type":"Path","default_value":null,"is_optional":true}],"flags":[{"name":"allow-unsigned-local","short_name":null,"help":"Explicitly select developer-only unverified mode.","default_value":false}],"subcommands":[]},
-                    {"name":"remove","abstract":"Remove only a fully validated, manager-owned extension tree.","discussion":"Supported on macOS, Linux, and Windows with platform ownership and link/reparse-point checks.","arguments":[{"name":"name","help":"Registry extension name.","type":"String","is_optional":false}],"options":[],"flags":[],"subcommands":[]},
-                    {"name":"path","abstract":"Compatibility command that prints the exact active version directory.","discussion":"","arguments":[{"name":"name","help":"Registry extension name.","type":"String","is_optional":false}],"options":[],"flags":[],"subcommands":[]}
-                ]
-            },
-            {
-                "name": "perception",
-                "abstract": "Parse a local PNG with the installed optional perception extension.",
-                "discussion": "This read-only local-input mode does not create a Driver capture. Its visual-regions JSON marks the result ineligible for Driver action authority.",
-                "arguments": no_args,
-                "options": no_options,
-                "flags": no_flags,
-                "subcommands": [
-                    {"name":"parse","abstract":"Parse one local PNG into canonical visual regions.","discussion":"Requires --json. The capture file supplies source metadata only.","arguments":[],"options":[{"name":"image","short_name":null,"help":"Local PNG path.","type":"Path","default_value":null,"is_optional":false},{"name":"capture","short_name":null,"help":"Local capture source metadata JSON path.","type":"Path","default_value":null,"is_optional":false}],"flags":[{"name":"json","short_name":null,"help":"Emit canonical visual-regions JSON with local-input provenance.","default_value":false}],"subcommands":[]}
-                ]
-            },
-            {
                 "name": "manifest",
                 "abstract": "Emit a stable JSON description of the CLI surface.",
                 "discussion": "Consumers can use this instead of hardcoding launch arguments such as the MCP invocation.",
@@ -4555,17 +4450,6 @@ const CLI_EXAMPLES: &[(&str, &[(&str, &str)])] = &[
     ("skills uninstall", &[("cua-driver skills uninstall --all", "Remove the links and the local copy")]),
     ("skills status", &[("cua-driver skills status", "Report skill-pack and link state")]),
     ("skills path", &[("cua-driver skills path", "Print the skill-pack path")]),
-    ("extension", &[("cua-driver extension list", "List known extensions")]),
-    ("extension list", &[("cua-driver extension list --json", "List extensions as JSON")]),
-    ("extension info", &[("cua-driver extension info cua-perception", "Show an installed extension")]),
-    ("extension inspect", &[("cua-driver extension inspect cua-perception --catalog catalog.json", "Preview license, source and provenance")]),
-    ("extension status", &[("cua-driver extension status cua-perception --self-test", "Verify an extension and run its self-test")]),
-    ("extension install", &[("cua-driver extension install cua-perception --catalog catalog.json", "Install from a signed catalog")]),
-    ("extension update", &[("cua-driver extension update cua-perception --catalog catalog.json", "Activate a newer version")]),
-    ("extension remove", &[("cua-driver extension remove cua-perception", "Remove an extension")]),
-    ("extension path", &[("cua-driver extension path cua-perception", "Print the active version directory")]),
-    ("perception", &[("cua-driver perception parse --image screen.png --capture capture.json --json", "Parse a PNG into visual regions")]),
-    ("perception parse", &[("cua-driver perception parse --image screen.png --capture capture.json --json", "Parse a PNG into visual regions")]),
     ("manifest", &[("cua-driver manifest --pretty", "Print the CLI surface as JSON")]),
     ("cursor-theme", &[("cua-driver cursor-theme list", "List cursor themes")]),
     ("cursor", &[("cua-driver cursor motion --session demo --style magnetic", "Use the magnetic cursor motion")]),
@@ -5418,7 +5302,7 @@ mod tests {
             &["list-tools"],
             &["describe", "click"],
             &["dump-docs", "--type", "cli"],
-            &["extension", "inspect", "cua-perception"],
+            &["skills", "status"],
             &["telemetry", "status"],
             &["click", "{}"],
             &["--help"],

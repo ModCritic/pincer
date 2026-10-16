@@ -593,10 +593,6 @@ impl PerceptionCapture {
         self.0.encoded_dimensions
     }
 
-    pub(crate) fn screenshot_to_action(&self) -> ScreenshotToActionTransform {
-        self.0.screenshot_to_action
-    }
-
     pub fn created_at(&self) -> Duration {
         self.0.created_at
     }

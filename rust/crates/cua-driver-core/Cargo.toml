@@ -56,7 +56,7 @@ fs2 = { workspace = true }
 hmac = { workspace = true }
 # Validate the raw wire payload; serde permits some shapes the schema rejects.
 jsonschema = { version = "0.46", default-features = false }
-# Private per-request working directory for the optional perception worker.
+# Temporary files and directories.
 tempfile = "3"
 rquickjs = { version = "0.14", default-features = false, features = ["std"], optional = true }
 
@@ -64,8 +64,7 @@ rquickjs = { version = "0.14", default-features = false, features = ["std"], opt
 libc = "0.2"
 
 # Used by `cursor_sampler::sample_cursor` to poll the OS mouse position
-# during video recording, and by `perception_client::containment` for the
-# worker's Job Object. Same version as platform-windows uses to avoid a
+# during video recording. Same version as platform-windows uses to avoid a
 # duplicate crate version.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
