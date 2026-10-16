@@ -874,9 +874,7 @@ pub fn advertised_risk_for(tool: &str) -> RiskAssessment {
         | "get_agent_cursor_state"
         | "get_recording_state"
         | "health_report"
-        | "probe"
-        // Refuses every request; this build ships no installable extensions.
-        | "install_extension" => RiskClass::R0,
+        | "probe" => RiskClass::R0,
 
         // Local reversible control and lifecycle operations.
         "click"
@@ -1935,17 +1933,6 @@ mod tests {
         assert_eq!(
             ids("install_ffmpeg", serde_json::json!({"confirm": true})),
             vec!["file_transfer_and_output"]
-        );
-        assert_eq!(
-            ids("install_extension", serde_json::json!({})),
-            Vec::<&str>::new()
-        );
-        assert_eq!(
-            ids(
-                "install_extension",
-                serde_json::json!({"name": "perception", "confirm": true})
-            ),
-            Vec::<&str>::new()
         );
         assert_eq!(
             ids("get_browser_state", serde_json::json!({})),

@@ -24,7 +24,6 @@ mod cli;
 mod doctor;
 mod driver_service_http;
 mod history_runtime;
-mod install_extension_tool;
 mod mcp_envelope;
 mod mcp_http;
 mod private_worker;
@@ -237,7 +236,6 @@ fn maybe_init_pip() {
 
 fn register_host_tools(registry: &mut cua_driver_core::tool::ToolRegistry) {
     history_runtime::register_host_tools(registry);
-    install_extension_tool::register_host_tools(registry);
 }
 
 /// Construct the canonical SDK-owned runtime for the CLI or daemon host.

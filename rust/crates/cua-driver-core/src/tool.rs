@@ -829,7 +829,6 @@ pub fn default_capabilities_for(tool_name: &str) -> Vec<String> {
         "run_steps" => &["input.batch"],
         "run_script" => &["input.script"],
         "install_ffmpeg" => &["recording.install_dependency"],
-        "install_extension" => &["extension.install"],
 
         // ── cross-platform page ──────────────────────────────────────
         "page" => &["page.action"],
@@ -6379,7 +6378,6 @@ mod capability_tests {
         "get_recording_state",
         "replay_trajectory",
         "install_ffmpeg",
-        "install_extension",
         // misc
         "page",
         "probe",
@@ -6469,7 +6467,6 @@ mod capability_tests {
         "recording.state",
         "recording.replay",
         "recording.install_dependency",
-        "extension.install",
         // page
         "page.action",
         // browser-tool v1

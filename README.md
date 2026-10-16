@@ -18,9 +18,8 @@ Changes from upstream:
   crop for `get_desktop_state`.
 - PostHog telemetry is removed at compile time.
 - The optional perception extension is removed, together with the
-  `parse_visual_regions` tool, the extension installer, and the
-  `cua-perception` worker. `install_extension` remains and refuses every
-  request.
+  `parse_visual_regions` tool, the extension installer, the
+  `install_extension` tool, and the `cua-perception` worker.
 - The update check is removed: the startup check, the `check-update`,
   `update` and `channel` commands, and the `check_for_update` tool. The
   driver never looks up releases or runs Cua's installer, so it cannot
