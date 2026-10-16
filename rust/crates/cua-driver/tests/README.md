@@ -11,7 +11,7 @@ OS permissions live in their own crate:
 
 The few `#[ignore]` tests left here need real input or real per-user state.
 Each is either selected by a canonical runner or listed with a reason in
-`libs/cua-driver/tests/manual-e2e-allowlist.txt`.
+`tests/manual-e2e-allowlist.txt`.
 
 ## Naming
 

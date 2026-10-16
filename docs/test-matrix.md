@@ -1,6 +1,6 @@
 # CUA Driver Test Matrix
 
-This is the source map for the Rust test suites in `libs/cua-driver`. It uses
+This is the source map for the Rust test suites in this repository. It uses
 two top-level test classes:
 
 1. **Unit and deterministic protocol tests.** These do not depend on a repo-local

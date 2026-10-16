@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// The Rust workspace root (`libs/cua-driver/rust`).
+/// The Rust workspace root (`rust/`).
 pub fn workspace_root() -> PathBuf {
     if let Some(root) = std::env::var_os("CUA_TEST_WORKSPACE_ROOT") {
         return PathBuf::from(root);

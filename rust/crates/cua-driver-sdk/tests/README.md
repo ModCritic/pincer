@@ -8,7 +8,7 @@ features. That dependency path selects ashpd's `async-io` backend, reproducing
 the feature-unification constraint of an async-io embedding host without
 requiring the complete downstream application.
 
-From `libs/cua-driver/rust` on Linux:
+From `rust/` on Linux:
 
 ```bash
 cargo test -p cua-driver-sdk --test async_io_embedding --locked

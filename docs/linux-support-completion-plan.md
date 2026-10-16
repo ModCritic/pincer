@@ -1,7 +1,7 @@
 # Linux support completion plan
 
 **Status:** Historical implementation plan. Current outcomes live in
-`action-support.md`; remaining work lives in the
+`action-support.md`; remaining work lives in upstream's
 [public platform roadmap](https://cua.ai/docs/cua-driver/concepts/platform-support).
 
 **Scope:** Linux driver behavior, canonical Rust E2E evidence, and release validation
@@ -80,12 +80,12 @@ Update stale internal references before changing behavior.
 
 **Work**
 
-- Mark stale sections of `libs/cua-driver/docs/test-harness-convergence-plan.md`
+- Mark stale sections of `docs/test-harness-convergence-plan.md`
   as superseded by current evidence.
 - Rewrite `nix/cua-driver/tests/README.md`; it currently names deleted fixtures.
 - Remove the empty `nix/cua-driver/tests/wayland/` directory if it is still empty.
 - Add the experimental nested-compositor row to
-  `libs/cua-driver/docs/action-support.md` and link it from the public platform
+  `docs/action-support.md` and link it from the public platform
   support page.
 - Replace misleading "EIS compositor" wording. The current route is a private
   Unix socket protocol, not libei/EIS.

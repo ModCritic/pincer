@@ -18,7 +18,7 @@ explicitly provisions the corresponding environment.
 The host checkout is the only checkout that commits or pushes. Sync it with:
 
 ```bash
-libs/cua-driver/scripts/sync-vm-worktree.sh push user@host '~/cua'
+scripts/sync-vm-worktree.sh push user@host '~/cua'
 ```
 
 The sync writes `.cua-e2e-source-sha` after transferring the worktree. The

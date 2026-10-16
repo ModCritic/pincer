@@ -11,7 +11,7 @@
 # Native Hyprland has no automated lane. The maintainer runs these in the
 # prepared native Hyprland desktop alongside upstream's
 # `scripts/ci/linux/run-rust-e2e.sh`
-# (see libs/cua-driver/docs/test-harnesses-guide.md, Hyprland validation).
+# (see docs/test-harnesses-guide.md, Hyprland validation).
 hyprland_foreground_test::foreground_action_refused_while_independent_virtual_pointer_holds_primary_grab | Manual native-Hyprland gate: needs a live Hyprland compositor with the Cua plugin; RFC 3550 foreground grab refusal
 hyprland_foreground_test::foreground_drag_focus_loss_does_not_release_into_successor | Manual native-Hyprland gate: needs a live Hyprland compositor with the Cua plugin; RFC 3550 drag focus-loss safety
 hyprland_foreground_test::foreground_drag_focus_loss_does_not_release_into_same_client_sibling | Manual native-Hyprland gate: needs a live Hyprland compositor with the Cua plugin; RFC 3550 drag focus-loss safety

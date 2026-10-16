@@ -1,18 +1,18 @@
-# Local-development recipe. Build only from an explicit Cua monorepo checkout.
+# Local-development recipe. Build only from an explicit Pincer checkout.
 # shellcheck shell=bash disable=SC2034,SC2154
 pkgname=cua-hyprland-plugin-local
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Discovery-only Cua integration for an exact local Hyprland ABI'
 arch=('x86_64' 'aarch64')
-url='https://github.com/trycua/cua'
+url='https://github.com/ModCritic/pincer'
 license=('MIT')
 makedepends=('cmake' 'ninja' 'pkgconf' 'binutils')
 options=('!strip' '!debug' '!lto')
 source=()
 sha256sums=()
 
-: "${CUA_SOURCE_ROOT:?Set CUA_SOURCE_ROOT to the Cua monorepo root}"
+: "${CUA_SOURCE_ROOT:?Set CUA_SOURCE_ROOT to the root of a Pincer checkout}"
 : "${CUA_HYPRLAND_PACKAGE_VERSION:?Set CUA_HYPRLAND_PACKAGE_VERSION to the exact pacman package version}"
 _source_root="$(realpath -e -- "$CUA_SOURCE_ROOT")"
 _plugin_source="${_source_root}/hyprland-plugin"

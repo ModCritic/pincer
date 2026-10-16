@@ -3,7 +3,7 @@
 /// How the agent cursor travels between targets.
 ///
 /// Each style is a port of a motion-lab candidate
-/// (`libs/cua-driver/tools/cursor-gallery/motion-lab/`); the lab id is
+/// (`tools/cursor-gallery/motion-lab/`); the lab id is
 /// accepted as an alias.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the macOS test fixture apps (AppKit + SwiftUI + WKWebView + Electron + Tauri)
-# into app bundles under libs/cua-driver/rust/test-apps/harness-* —
+# into app bundles under rust/test-apps/harness-*,
 # matching the convention used by windows.ps1 for the Windows WPF + WinUI3 +
 # WebView2 apps. WKWebView is the Apple-WebKit host; Electron is the shared
 # Chromium harness used across Windows, Linux, and macOS. Tauri is the shared

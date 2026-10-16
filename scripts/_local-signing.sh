@@ -25,9 +25,9 @@ print_local_signing_bootstrap() {
     echo "  security set-keychain-settings \"\$SIGNING_KEYCHAIN\"" >&2
     echo "  security unlock-keychain \"\$SIGNING_KEYCHAIN\"" >&2
     echo "  export CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN=\"\$SIGNING_KEYCHAIN\"" >&2
-    echo "  bash libs/cua-driver/scripts/install-local.sh --require-stable-signing" >&2
+    echo "  bash scripts/install-local.sh --require-stable-signing" >&2
     echo "If the certificate is newly created, authorize its private key for codesign as described in:" >&2
-    echo "  libs/cua-driver/scripts/README.md#stable-macos-local-signing" >&2
+    echo "  scripts/README.md#stable-macos-local-signing" >&2
 }
 
 # Echoes the `codesign --sign` argument: a matching identity's SHA-1 when

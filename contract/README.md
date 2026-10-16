@@ -121,7 +121,7 @@ generate or maintain separate MCP transports.
 
 ## Generate and verify
 
-From `libs/cua-driver/rust`:
+From `rust/`:
 
 ```bash
 cargo run -p cua-driver-contract --bin cua-contract-gen -- all

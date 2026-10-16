@@ -2,8 +2,8 @@
 //
 // `examples/export_golden.rs` writes them to `fixtures/golden.json`;
 // `tests/golden.rs` checks the fixture still matches this crate, and
-// `libs/typescript/cursor-motion/tests/golden.test.ts` checks the TypeScript port
-// against the same file.
+// upstream's `libs/typescript/cursor-motion/tests/golden.test.ts` checks the
+// TypeScript port against the same file.
 
 use cua_cursor_motion::effects::{self, EffectFrame};
 use cua_cursor_motion::{

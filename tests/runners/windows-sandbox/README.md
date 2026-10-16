@@ -3,7 +3,7 @@
 This runner exists only for local smoke checks and must not be treated as the
 canonical Windows desktop test entrypoint.
 
-Run it from `libs/cua-driver` on a Windows host with Windows Sandbox enabled:
+Run it from the repository root on a Windows host with Windows Sandbox enabled:
 
 ```powershell
 .\tests\runners\windows-sandbox\run-tests-in-sandbox.ps1
@@ -11,5 +11,5 @@ Run it from `libs/cua-driver` on a Windows host with Windows Sandbox enabled:
 ```
 
 The host script builds selected Rust test binaries and Windows fixtures, maps
-`libs/cua-driver` into the sandbox as `C:\cua-driver`, and streams logs from the
+the repository root into the sandbox as `C:\cua-driver`, and streams logs from the
 inside-sandbox runner.

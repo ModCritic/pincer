@@ -77,7 +77,7 @@ Driver runtime or cua-spacesd, release a Fleet claim, or delete a pool.
 
 Synthetic parser/routing tests cover malformed input, limits, generation
 checks, raw results, close, active-session reaping, cancellation under full
-exchange load, and oversized responses. Run them from `libs/cua-driver/rust`:
+exchange load, and oversized responses. Run them from `rust/`:
 
 ```sh
 cargo test -p cua-driver --bin cua-driver driver_service_http --locked

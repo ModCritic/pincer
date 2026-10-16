@@ -312,7 +312,7 @@ try {
     process.platform === "win32" ? "ubrn.cmd" : "ubrn",
   )
   if (!existsSync(ubrn)) {
-    throw new Error("missing pinned UBRN generator; run npm ci in libs/cua-driver/typescript")
+    throw new Error("missing pinned UBRN generator; run npm ci in typescript/")
   }
   run(
     ubrn,

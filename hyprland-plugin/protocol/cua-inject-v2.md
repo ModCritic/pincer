@@ -3,7 +3,7 @@
 ## Status and scope
 
 This document defines the local protocol used by the optional Cua Hyprland
-plugin. The monorepo copy is authoritative. The current v2 foundation exposes
+plugin. This repository's copy is authoritative. The current v2 foundation exposes
 status, negotiation, and liveness only. It advertises the `discovery`
 capability and rejects every input message with typed
 `background_unavailable`.

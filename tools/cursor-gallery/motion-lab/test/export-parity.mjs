@@ -1,9 +1,9 @@
 // Export golden per-move trajectories for the styles Cua Driver ships, so the
 // Rust port (cua-cursor-motion/src/plan.rs) can be checked against the lab.
 //
-//   node libs/cua-driver/tools/cursor-gallery/motion-lab/test/export-parity.mjs
+//   node tools/cursor-gallery/motion-lab/test/export-parity.mjs
 //
-// Writes libs/cua-driver/rust/crates/cua-cursor-motion/tests/fixtures/motion_parity.json.
+// Writes rust/crates/cua-cursor-motion/tests/fixtures/motion_parity.json.
 // Every scene, seed 7, every timing mode. Moves aim at target centres and chain
 // from the previous aim, so each case is one call of the candidate's `move`.
 

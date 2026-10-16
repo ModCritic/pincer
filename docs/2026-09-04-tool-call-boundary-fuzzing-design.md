@@ -58,7 +58,7 @@ both continuous coverage and real fuzzing from one definition of each target.
 ### Where the code lives
 
 ```text
-libs/cua-driver/rust/
+rust/
   crates/cua-driver-testkit/src/boundary_fuzz.rs   target bodies + JSON generator
   crates/cua-driver-testkit/tests/tool_boundary_fuzz_smoke.rs
   fuzz/Cargo.toml                                  detached workspace, libfuzzer-sys
@@ -142,7 +142,7 @@ The workspace pins a stable toolchain, and `cargo-fuzz` wants nightly only for
 sanitizers. With `--sanitizer none` it builds on stable, so:
 
 ```bash
-cd libs/cua-driver/rust
+cd rust
 nix shell nixpkgs#cargo nixpkgs#rustc nixpkgs#cargo-fuzz --command \
   cargo fuzz run --fuzz-dir fuzz --sanitizer none mcp_request \
   fuzz/work/mcp_request fuzz/corpus/mcp_request -- -max_total_time=300

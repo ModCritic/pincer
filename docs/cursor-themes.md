@@ -298,7 +298,7 @@ timing come from the production renderer rather than a browser reimplementation.
 From the repository root:
 
 ```bash
-./libs/cua-driver/scripts/cursor-gallery.sh serve
+./scripts/cursor-gallery.sh serve
 ```
 
 Open `http://127.0.0.1:3001` to pause, replay, change speed, compare the states
@@ -309,7 +309,7 @@ Git.
 Regenerate the public documentation GIFs after changing the built-in cursor:
 
 ```bash
-./libs/cua-driver/scripts/cursor-gallery.sh export-docs
+./scripts/cursor-gallery.sh export-docs
 ```
 
 Commit both GIFs in `docs/public/img/cua-driver/cursor-themes/` with the renderer

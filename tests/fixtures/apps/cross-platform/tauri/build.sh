@@ -3,7 +3,7 @@
 #
 # The app embeds the same shared/web/index.html DOM used by Electron,
 # WebView2, and WKWebView. Build output is copied into
-# libs/cua-driver/rust/test-apps/harness-tauri/ with deterministic executable names.
+# rust/test-apps/harness-tauri/ with deterministic executable names.
 set -euo pipefail
 
 tauriDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -5,9 +5,9 @@
 **Direction:** Make the typed SDK and its owned native runtime the product
 boundary. Keep daemon and server topologies as optional adapters.
 
-**RFC:** [RFC 2549](../../../rfcs/2549-cua-driver-sdk-owned-runtime.md)
+**RFC:** RFC 2549 (`rfcs/2549-cua-driver-sdk-owned-runtime.md` in upstream's trycua/cua)
 
-**Supersedes:** [RFC 2447](../../../rfcs/2447-cua-driver-native-core-and-mcp-adapter.md)
+**Supersedes:** RFC 2447 (`rfcs/2447-cua-driver-native-core-and-mcp-adapter.md` in upstream's trycua/cua)
 
 **Related:**
 [permission adapters and session modes](permission-adapters-and-session-modes-plan.md),

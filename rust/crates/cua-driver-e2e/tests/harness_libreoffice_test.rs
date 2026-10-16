@@ -8,7 +8,7 @@
 //! opens its dropdown as a new top-level window.
 //!
 //! The canonical Windows image has no LibreOffice, so no runner selects this
-//! file; `libs/cua-driver/tests/manual-e2e-allowlist.txt` records it as manual.
+//! file; `tests/manual-e2e-allowlist.txt` records it as manual.
 //! It fails, rather than passes, when Writer, the driver, or the Writer window
 //! is missing.
 //!

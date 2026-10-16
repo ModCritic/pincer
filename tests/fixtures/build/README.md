@@ -1,7 +1,7 @@
 # test fixture build scripts
 
 These host-specific scripts stage source-built harness apps into
-`libs/cua-driver/rust/test-apps/harness-<name>/`.
+`rust/test-apps/harness-<name>/`.
 
 | Script | Host | Builds |
 | --- | --- | --- |

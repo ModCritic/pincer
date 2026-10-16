@@ -107,7 +107,7 @@ from the clean harness checkout in the disposable native Wayland session,
 using fresh paths (the journal, wire file, and control socket must not exist):
 
 ```sh
-cd libs/cua-driver/hyprland-plugin/proofs
+cd hyprland-plugin/proofs
 observer_dir=$(mktemp -d)
 python3 "$(pwd)/primary_observer_fixture.py" \
   --journal "$observer_dir/foreground.jsonl" \
@@ -202,6 +202,6 @@ modules and preserve their separate artifact identities.
 Portable regression command (Python 3.10 or newer):
 
 ```sh
-cd libs/cua-driver/hyprland-plugin/tests
+cd hyprland-plugin/tests
 python3 -m unittest discover -b -p 'production*_test.py'
 ```

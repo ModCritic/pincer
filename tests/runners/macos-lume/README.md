@@ -157,7 +157,7 @@ checkout. The sync intentionally omits `.git` and writes the exact commit to
 ```bash
 BUILDER=cua-driver-macos-e2e-builder-26.5.2
 VM_IP="$(lume get "$BUILDER" --format json | jq -r '.[0].ipAddress')"
-libs/cua-driver/scripts/sync-vm-worktree.sh push "lume@${VM_IP}" '~/cua'
+scripts/sync-vm-worktree.sh push "lume@${VM_IP}" '~/cua'
 ```
 
 Back in Terminal in the VM display, install the app with the commit embedded
@@ -192,7 +192,7 @@ keychain password in the image or repository:
 ```bash
 cd ~/cua
 export CUA_DRIVER_SOURCE_SHA="$(cat .cua-e2e-source-sha)"
-bash libs/cua-driver/scripts/install-local.sh \
+bash scripts/install-local.sh \
   --release --autostart --require-stable-signing
 
 read -r -s -p 'Keychain password: ' KEYCHAIN_PASSWORD; echo
@@ -206,7 +206,7 @@ Rerun the installer and require its `signed staged app with a stable local
 identity` message before granting permissions through the app-owned flow:
 
 ```bash
-bash libs/cua-driver/scripts/install-local.sh \
+bash scripts/install-local.sh \
   --release --autostart --require-stable-signing
 ~/.local/bin/cua-driver-local permissions grant
 ```
@@ -292,7 +292,7 @@ All five commands must succeed, and `csrutil status` must report disabled.
 
 ### Seed app-owned grants in disposable SIP-off workers
 
-The public [Run Cua Driver in a macOS Lume VM](https://cua.ai/docs/cua-driver/guides/vms-and-remote)
+Upstream's public [Run Cua Driver in a macOS Lume VM](https://cua.ai/docs/cua-driver/guides/vms-and-remote)
 guide grants macOS consent through the VM display. Keep using that prompt flow
 for reusable private seeds. For automated disposable workers that are not cloned
 from a granted seed, run the host helper after `CuaDriverLocal.app` is installed
@@ -301,7 +301,7 @@ in each running worker with a certificate-backed identity:
 ```bash
 WORKER_A=cua-driver-macos-e2e-a
 WORKER_B=cua-driver-macos-e2e-b
-libs/cua-driver/tests/runners/macos-lume/seed-tcc.sh "$WORKER_A" "$WORKER_B"
+tests/runners/macos-lume/seed-tcc.sh "$WORKER_A" "$WORKER_B"
 ```
 
 Add `--storage <name-or-path>` when the workers live outside the default Lume
@@ -340,7 +340,7 @@ on the command line:
 
 ```bash
 printf '%s\n' "$VM_SUDO_PASSWORD" \
-  | libs/cua-driver/tests/runners/macos-lume/seed-tcc.sh \
+  | tests/runners/macos-lume/seed-tcc.sh \
       --sudo-password-stdin "$WORKER_A" "$WORKER_B"
 ```
 
@@ -394,7 +394,7 @@ name and sync the exact host commit:
 ```bash
 WORKER=cua-driver-macos-e2e-YYYYMMDDTHHMMSSZ
 VM_IP="$(lume get "$WORKER" --format json | jq -r '.[0].ipAddress')"
-libs/cua-driver/scripts/sync-vm-worktree.sh push "lume@${VM_IP}" '~/cua'
+scripts/sync-vm-worktree.sh push "lume@${VM_IP}" '~/cua'
 ```
 
 Run GUI suites from Terminal in the VM display, not over SSH: GUI fixtures must
@@ -422,7 +422,7 @@ the tests wrote their evidence to:
 
 ```bash
 REMOTE_ARTIFACT_DIR=artifacts/cua-driver/macos \
-  libs/cua-driver/scripts/sync-vm-worktree.sh pull-artifacts \
+  scripts/sync-vm-worktree.sh pull-artifacts \
   "lume@${VM_IP}" '~/cua'
 lume stop "$WORKER"
 lume delete "$WORKER" --force

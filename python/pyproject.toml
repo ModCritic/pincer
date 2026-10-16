@@ -41,10 +41,10 @@ dependencies = []
 test = ["pytest"]
 
 [project.urls]
-Homepage = "https://github.com/trycua/cua"
-Documentation = "https://github.com/trycua/cua/tree/main/libs/cua-driver"
-Repository = "https://github.com/trycua/cua"
-Issues = "https://github.com/trycua/cua/issues"
+Homepage = "https://github.com/ModCritic/pincer"
+Documentation = "https://github.com/ModCritic/pincer"
+Repository = "https://github.com/ModCritic/pincer"
+Issues = "https://github.com/ModCritic/pincer/issues"
 
 [project.scripts]
 cua-driver = "cua_driver.__main__:main"

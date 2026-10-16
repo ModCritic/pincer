@@ -1,6 +1,6 @@
 # windows.ps1 - publish the cua-driver test fixture binaries.
 #
-# Outputs land in libs/cua-driver/rust/test-apps/harness-{wpf,winui3,webview,electron,tauri}/
+# Outputs land in rust/test-apps/harness-{wpf,winui3,webview,electron,tauri}/
 # so the existing sandbox runner picks them up via its mapped folder.
 #
 # Usage:

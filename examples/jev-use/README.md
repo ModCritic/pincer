@@ -39,9 +39,9 @@ You can run the complete deterministic proof without credentials or network
 access to Jev. If you have a TypeSafe API key, you can separately verify the
 same loop against the live Jev service.
 
-Follow the [setup guide](../../../../docs/content/docs/how-to-guides/driver/jev-use.mdx)
-for installation and your first run. The sections below cover the implementation,
-standalone runners, and development checks.
+Upstream's setup guide (`docs/content/docs/how-to-guides/driver/jev-use.mdx` in
+trycua/cua) covers installation and your first run. The sections below cover
+the implementation, standalone runners, and development checks.
 
 ## What the example proves
 
@@ -79,8 +79,9 @@ fixtures, and browser tasks keep sending `cua.jev_choice_request_v1`.
 
 ### Native desktop tasks
 
-`NativeAccessibilitySource` ([RFC #4268](../../../../rfcs/4268-jev-use-native-candidates.md))
-builds candidates from the native elements of one `get_window_state` call that
+`NativeAccessibilitySource` (RFC #4268,
+`rfcs/4268-jev-use-native-candidates.md` in upstream's trycua/cua) builds
+candidates from the native elements of one `get_window_state` call that
 returns the tree and the screenshot together, so element tokens and the
 `capture_id` describe the same moment. `native_roles.py` / `native_roles.ts`
 map raw macOS AX, Windows UIA, and Linux AT-SPI roles to a closed set of role
@@ -201,8 +202,8 @@ uv run --frozen python measure_native.py replay --provider s1 --reps 5 \
 (`appkit`, `wpf`, `winui3`, and `gtk3`). Measured live with Cua Driver 0.30.4
 on macOS, Windows, and Linux, with both the Python and TypeScript runners,
 TypeSafe Jev and Cua-S1 chose correctly in all 1,680 decisions at about 4,
-12, and 24 candidates. The per-harness tables are in the
-[RFC 4268 decision record](../../../../rfcs/4268-jev-use-native-candidates.md).
+12, and 24 candidates. The per-harness tables are in upstream's RFC 4268
+decision record (`rfcs/4268-jev-use-native-candidates.md` in trycua/cua).
 
 #### Choose with Cua-S1
 
@@ -218,7 +219,7 @@ reached through an SSH tunnel. The runner rejects a response whose schema,
 it resolves the selected ID to its own candidate as with every other provider.
 
 The service is not part of this example. Any server that loads the pinned
-checkpoint from [`libs/cua-s1`](../../../cua-s1/README.md), validates the
+checkpoint from upstream's `libs/cua-s1` in trycua/cua, validates the
 request with `python/choose_action.py`, and answers with
 `decision_models.choose(S1DecisionModel(...), request).to_wire()` fits the
 contract. Run the service from the same revision as the runners: an older

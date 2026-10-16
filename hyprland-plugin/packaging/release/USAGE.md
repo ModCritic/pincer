@@ -1,7 +1,7 @@
 # Install the pinned Hyprland plugin
 
 This source distribution builds the Cua production input candidate without a
-monorepo checkout. Use the exact Driver component release named by
+source checkout. Use the exact Driver component release named by
 `release_tag` in `SOURCE-PROVENANCE.json`. The Arch package version follows that
 Driver release; the plugin's CMake version is recorded as `plugin_version`.
 

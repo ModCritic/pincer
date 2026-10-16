@@ -1,6 +1,7 @@
 # Typed Driver envelopes over MCP
 
-This opt-in candidate implements the [accepted RFC 2512 transport addendum](../../../rfcs/2512-mcp-envelope-carrier.md).
+This opt-in candidate implements the accepted RFC 2512 transport addendum
+(`rfcs/2512-mcp-envelope-carrier.md` in upstream's trycua/cua).
 It is not a released SDK feature or a qualification of an existing Fleet image.
 The extension carries the canonical Driver envelopes through an existing MCP
 transport. It does not replace cua-spacesd, add agent tools, or open a port.
@@ -86,7 +87,7 @@ pool cleanup.
 
 ## Verification and release gate
 
-Run the focused deterministic tests from `libs/cua-driver/rust`:
+Run the focused deterministic tests from `rust/`:
 
 ```sh
 cargo test -p cua-driver --bin cua-driver mcp_envelope --locked

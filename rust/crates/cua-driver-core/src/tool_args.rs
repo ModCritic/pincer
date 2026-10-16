@@ -23,8 +23,8 @@
 //! Error message format: `"Missing required {kind} field: {name}"`.
 //! Used uniformly so MCP clients can pattern-match the wording.
 //!
-//! See `libs/cua-driver/rust/docs/dedup-audit.md` for the audit trail
-//! that motivated this extraction.
+//! The dedup audit that motivated this extraction is not part of this
+//! repository.
 
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};

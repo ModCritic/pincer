@@ -57,7 +57,7 @@ Options:
   -h, --help                 Show this help.
 
 Example for two workers:
-  libs/cua-driver/tests/runners/macos-lume/seed-tcc.sh \
+  tests/runners/macos-lume/seed-tcc.sh \
     cua-driver-worker-a cua-driver-worker-b
 USAGE
 }

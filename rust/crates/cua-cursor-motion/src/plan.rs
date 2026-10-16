@@ -5,7 +5,7 @@
 //! plays the same motion at any frame rate.
 //!
 //! The styles are ports of the motion lab in
-//! `libs/cua-driver/tools/cursor-gallery/motion-lab/motion/`: `candidates.js`
+//! `tools/cursor-gallery/motion-lab/motion/`: `candidates.js`
 //! (styles), `generators.js` and `math.js` (paths, profiles, durations),
 //! `rng.js` (seeded randomness) and `plan.js` (timing modes and heading).
 //! Generators work in milliseconds and hotspot coordinates like the lab, so

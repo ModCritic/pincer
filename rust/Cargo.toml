@@ -23,7 +23,7 @@ version = "0.35.4"
 edition = "2021"
 authors = ["trycua"]
 license = "MIT"
-repository = "https://github.com/trycua/cua"
+repository = "https://github.com/ModCritic/pincer"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }

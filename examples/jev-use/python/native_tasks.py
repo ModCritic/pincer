@@ -10,7 +10,7 @@ under the fallback rule, and composes them in the fixed order page, ax, visual.
 The built-in tasks drive the repository's harness applications in task mode:
 AppKit (``CUA_APPKIT_TASK_STATE``), WPF (``CUA_WPF_TASK_STATE``), WinUI3
 (``CUA_WINUI3_TASK_STATE``), and GTK3 (``CUA_GTK3_TASK_STATE``), under
-``libs/cua-driver/tests/fixtures/apps``.
+``tests/fixtures/apps``.
 Their oracle is the harness's own JSON state file, which the app rewrites on
 every change; it never depends on Driver output.
 

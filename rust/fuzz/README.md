@@ -15,7 +15,7 @@ The workspace pins a stable toolchain. `cargo fuzz` needs nightly only for
 sanitizers, so run with `--sanitizer none`:
 
 ```bash
-cd libs/cua-driver/rust
+cd rust
 nix shell nixpkgs#cargo nixpkgs#rustc nixpkgs#cargo-fuzz --command \
   cargo fuzz run --fuzz-dir fuzz --sanitizer none mcp_request \
   fuzz/work/mcp_request fuzz/corpus/mcp_request -- -max_total_time=300
@@ -39,4 +39,4 @@ fix the bug, then copy the file into `corpus/<target>/` so the smoke test keeps
 it as a regression case. Only hand-picked seeds are committed; libFuzzer's
 generated corpus entries stay local.
 
-See `libs/cua-driver/docs/2026-09-04-tool-call-boundary-fuzzing-design.md`.
+See `docs/2026-09-04-tool-call-boundary-fuzzing-design.md`.

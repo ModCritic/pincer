@@ -334,7 +334,7 @@ oracles; those recordings prove tool behavior, not cursor rendering.
 
 Update:
 
-- `libs/cua-driver/docs/cursor-themes.md`
+- `docs/cursor-themes.md`
 - the public cursor personalization page
 - `tools/cursor-gallery/README.md`
 - gallery headings, descriptions, combined-state examples, and legends

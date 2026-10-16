@@ -66,7 +66,7 @@ const manifest = JSON.parse(readFileSync(join(typescriptRoot, "package.json"), "
 const expectedVersion = manifest.devDependencies?.["uniffi-bindgen-react-native"]
 const upstreamManifestPath = join(upstreamRoot, "package.json")
 if (!existsSync(upstreamManifestPath)) {
-  throw new Error("missing pinned UBRN source; run npm ci in libs/cua-driver/typescript")
+  throw new Error("missing pinned UBRN source; run npm ci in typescript/")
 }
 const actualVersion = JSON.parse(readFileSync(upstreamManifestPath, "utf8")).version
 if (actualVersion !== expectedVersion) {

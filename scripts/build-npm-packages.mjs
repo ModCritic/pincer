@@ -93,7 +93,7 @@ for (const platform of platforms) {
     version,
     description: `Native Cua Driver SDK library for ${platform.triple}`,
     license: "MIT AND MPL-2.0",
-    repository: { type: "git", url: "git+https://github.com/trycua/cua.git" },
+    repository: { type: "git", url: "git+https://github.com/ModCritic/pincer.git" },
     os: [platform.os],
     cpu: [platform.cpu],
     files: [platform.file, runtimeFile, runtimeNotice],

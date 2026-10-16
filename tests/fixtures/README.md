@@ -2,7 +2,7 @@
 
 Deterministic host apps and shared fixtures used to verify cua-driver across
 Windows, macOS, and Linux. The fixtures are source-first: build scripts stage
-local outputs into `libs/cua-driver/rust/test-apps/harness-<name>/`; binaries are not
+local outputs into `rust/test-apps/harness-<name>/`; binaries are not
 committed.
 
 ## Layout
@@ -36,22 +36,22 @@ load `shared/web/index.html`, either directly or through a build-staged copy.
 
 ## Build
 
-Build scripts stage outputs into `libs/cua-driver/rust/test-apps/`.
+Build scripts stage outputs into `rust/test-apps/`.
 
 ```bash
 # macOS: AppKit, SwiftUI, WKWebView, Electron, Tauri
-libs/cua-driver/tests/fixtures/build/macos.sh
-libs/cua-driver/tests/fixtures/build/macos.sh --skip electron
-libs/cua-driver/tests/fixtures/build/macos.sh --only wkwebview
+tests/fixtures/build/macos.sh
+tests/fixtures/build/macos.sh --skip electron
+tests/fixtures/build/macos.sh --only wkwebview
 
 # Linux: GTK3, Electron, Tauri
-libs/cua-driver/tests/fixtures/build/linux.sh
-libs/cua-driver/tests/fixtures/build/linux.sh --skip tauri
+tests/fixtures/build/linux.sh
+tests/fixtures/build/linux.sh --skip tauri
 ```
 
 ```powershell
 # Windows: WPF, WinUI3, WebView2, Electron, Tauri
-cd libs\cua-driver\tests\fixtures
+cd tests\fixtures
 .\build\windows.ps1
 .\build\windows.ps1 -Skip winui3
 ```
@@ -65,7 +65,7 @@ Host requirements:
 
 ## Test Mapping
 
-Rust tests under `libs/cua-driver/rust/crates/cua-driver-e2e/tests/` consume the staged
+Rust tests under `rust/crates/cua-driver-e2e/tests/` consume the staged
 `rust/test-apps/harness-<name>/` outputs:
 
 - `cross_platform_behavior_test.rs`: typed Electron/Tauri action matrix.
@@ -74,7 +74,7 @@ Rust tests under `libs/cua-driver/rust/crates/cua-driver-e2e/tests/` consume the
   desktop-scope contracts.
 - `protocol_*_test.rs` and schema tests: headless protocol coverage, default.
 
-Rust integration tests under `libs/cua-driver/rust/crates/cua-driver-e2e/tests/` drive
+Rust integration tests under `rust/crates/cua-driver-e2e/tests/` drive
 the shared Electron/Tauri harnesses through the public MCP interface.
 
 ## App Coverage

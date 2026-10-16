@@ -1,7 +1,7 @@
 //! Integration test against the CuaTestHarness.Wpf .NET 8 app.
 //!
-//! Pairs of test apps live under `libs/cua-driver/tests/fixtures/`. They
-//! publish into `libs/cua-driver/rust/test-apps/harness-{wpf,winui3}/` and
+//! Pairs of test apps live under `tests/fixtures/`. They
+//! publish into `rust/test-apps/harness-{wpf,winui3}/` and
 //! get mapped into the sandbox by the legacy Windows Sandbox runner.
 //!
 //! Each scenario covers a Win32 hosting pattern the agent should handle:

@@ -57,9 +57,8 @@ $ProgressPreference = "SilentlyContinue"
 # the logic would otherwise drift.
 
 $ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
-# Rust workspace root: scripts/ is the cross-cutting installer dir at
-# libs/cua-driver/scripts/; the Cargo workspace lives one level deeper
-# under libs/cua-driver/rust/.
+# Rust workspace root: scripts/ is the cross-cutting installer dir at the
+# repository root; the Cargo workspace is its sibling, rust/.
 $RepoRoot    = (Resolve-Path "$ScriptDir\..\rust").Path
 $BinaryName  = "cua-driver-local.exe"
 $BuiltBinaryName = "cua-driver.exe"

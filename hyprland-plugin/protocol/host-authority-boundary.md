@@ -74,7 +74,7 @@ session-lifetime seats; replacing the plugin requires a desktop restart.
 
 ## Evidence and remaining gates
 
-Focused common registry coverage is available from `libs/cua-driver/rust`:
+Focused common registry coverage is available from `rust/`:
 
 ```bash
 cargo test -p cua-driver-core background_input_ --lib --locked

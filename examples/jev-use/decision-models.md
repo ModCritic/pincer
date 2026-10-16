@@ -96,8 +96,9 @@ uv run --frozen python/choose_decision.py --model jev \
 
 The S1 path runs locally and needs the separately installed `cua-s1` Python
 package with its `four-b` inference extra, which supplies PyTorch, PEFT, and
-Transformers 5. From the repository root, create that environment from the
-checked-in lock with
+Transformers 5. That package lives in upstream's trycua/cua repository, not in
+this one. From the root of a trycua/cua checkout, create that environment from
+the checked-in lock with
 `uv sync --frozen --project libs/cua-s1/python --extra four-b --extra pdf --group test`
 (Transformers 5.17.0 and torch 2.14.0), then run this chooser with
 `libs/cua-s1/python/.venv/bin/python`. This is a local source recipe, not a
@@ -109,15 +110,15 @@ standalone model. Download the base revision
 `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a` and adapter revision
 `16818868b0cc7813808aae4e87b417657046ab79` to local directories, then set
 `S1_BASE_MODEL_PATH` and `S1_ADAPTER_PATH` to them. `S1_DEVICE` defaults to
-`cpu` and `S1_DTYPE` to `float16`. The Cua-S1 README's
-[Get the weights and run inference](../../../cua-s1/README.md#get-the-weights-and-run-inference)
-section has the pinned download commands for every checkpoint, hardware
-guidance, and the expected smoke output. The 4B base needs more than 9.3 GB
-of memory, so 8 GB hosts cannot run this path.
+`cpu` and `S1_DTYPE` to `float16`. The "Get the weights and run inference"
+section of the Cua-S1 README (`libs/cua-s1/README.md` in trycua/cua) has the
+pinned download commands for every checkpoint, hardware guidance, and the
+expected smoke output. The 4B base needs more than 9.3 GB of memory, so 8 GB
+hosts cannot run this path.
 
 ```bash
 S1_DEVICE=cpu S1_DTYPE=float16 \
-  /path/to/repo/libs/cua-s1/python/.venv/bin/python \
+  /path/to/trycua-cua/libs/cua-s1/python/.venv/bin/python \
   python/choose_decision.py --model s1 \
   < fixtures/jev-choice-request-v1.json
 ```

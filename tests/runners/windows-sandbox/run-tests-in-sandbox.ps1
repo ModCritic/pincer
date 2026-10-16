@@ -2,7 +2,7 @@
 #
 # Legacy Windows Sandbox runner.
 #
-# Usage (from libs/cua-driver):
+# Usage (from the repository root):
 #   .\tests\runners\windows-sandbox\run-tests-in-sandbox.ps1 [<test-filter>]
 #
 # Steps:

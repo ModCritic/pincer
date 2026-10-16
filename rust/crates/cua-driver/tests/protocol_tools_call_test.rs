@@ -246,7 +246,7 @@ fn get_config_and_check_permissions() {
 
 #[test]
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-#[ignore = "host desktop: walks the real running apps and windows; see libs/cua-driver/tests/manual-e2e-allowlist.txt"]
+#[ignore = "host desktop: walks the real running apps and windows; see tests/manual-e2e-allowlist.txt"]
 fn get_accessibility_tree() {
     //! get_accessibility_tree returns a lightweight process+window snapshot.
     let Some(mut d) = spawn_unrestricted() else {
@@ -290,7 +290,7 @@ fn get_accessibility_tree() {
 
 #[test]
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-#[ignore = "host desktop: lists every real window; see libs/cua-driver/tests/manual-e2e-allowlist.txt"]
+#[ignore = "host desktop: lists every real window; see tests/manual-e2e-allowlist.txt"]
 fn list_windows_structured_content() {
     //! Verify list_windows returns structuredContent.windows array with expected fields.
     let Some(mut d) = spawn_unrestricted() else {
@@ -331,7 +331,7 @@ fn list_windows_structured_content() {
 
 #[test]
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-#[ignore = "host desktop: reads the real display and cursor; see libs/cua-driver/tests/manual-e2e-allowlist.txt"]
+#[ignore = "host desktop: reads the real display and cursor; see tests/manual-e2e-allowlist.txt"]
 fn get_screen_size_and_cursor_position() {
     let Some(mut d) = spawn_unrestricted() else {
         return;
@@ -383,7 +383,7 @@ fn get_screen_size_and_cursor_position() {
 
 #[test]
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-#[ignore = "host desktop: walks and captures a real window (Accessibility / Screen Recording); see libs/cua-driver/tests/manual-e2e-allowlist.txt"]
+#[ignore = "host desktop: walks and captures a real window (Accessibility / Screen Recording); see tests/manual-e2e-allowlist.txt"]
 fn get_window_state_returns_both_with_opt_out() {
     //! Perception is mode-agnostic: get_window_state returns BOTH the tree AND a
     //! screenshot by default (the deprecated `capture_mode` arg is ignored), and

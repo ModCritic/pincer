@@ -4,7 +4,7 @@ The agent cursor motions of [Cua Driver](https://cua.ai/docs/cua-driver) as a
 small Rust library: six motion styles, seven timing modes, the comet trail and
 the other effects, and an API for designing your own motions.
 
-Cua Driver plans every agent cursor move with this crate, and the
+Cua Driver plans every agent cursor move with this crate, and upstream's
 [`@trycua/cursor-motion`](https://github.com/trycua/cua/tree/main/libs/typescript/cursor-motion) web package is a port that is
 tested against the same golden trajectories. There is no runtime dependency;
 the `serde` feature adds `Serialize`/`Deserialize` to the public types.
@@ -12,17 +12,17 @@ the `serde` feature adds `Serialize`/`Deserialize` to the public types.
 ## Use it
 
 Cua Cursor Motion is not published to crates.io. It lives in the
-[trycua/cua](https://github.com/trycua/cua) repository; add it as a git
-dependency:
+[ModCritic/pincer](https://github.com/ModCritic/pincer) repository; add it
+as a git dependency:
 
 ```toml
 [dependencies]
-cua-cursor-motion = { git = "https://github.com/trycua/cua" }
+cua-cursor-motion = { git = "https://github.com/ModCritic/pincer" }
 # Pin a commit for reproducible builds, and add features = ["serde"] if needed:
-# cua-cursor-motion = { git = "https://github.com/trycua/cua", rev = "<commit>", features = ["serde"] }
+# cua-cursor-motion = { git = "https://github.com/ModCritic/pincer", rev = "<commit>", features = ["serde"] }
 ```
 
-Cargo finds the crate inside the repository's Cua Driver workspace by name.
+Cargo finds the crate inside the repository's Rust workspace by name.
 
 ## Plan a move
 
@@ -133,12 +133,12 @@ styles plus the knobs of `set_agent_cursor_motion`.
 ## Tests
 
 ```bash
-cd libs/cua-driver/rust
+cd rust
 cargo test -p cua-cursor-motion --all-features
 ```
 
 - `tests/motion_parity.rs` checks every style and timing mode against the
-  motion lab (`libs/cua-driver/tools/cursor-gallery/motion-lab/`), the design
+  motion lab (`tools/cursor-gallery/motion-lab/`), the design
   source, within 0.5 pt.
 - `tests/golden.rs` checks `fixtures/golden.json`, the trajectories that the
   TypeScript port must reproduce. Regenerate it only for an intended motion

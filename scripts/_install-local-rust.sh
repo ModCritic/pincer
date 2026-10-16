@@ -8,7 +8,7 @@
 # or runs on a non-macOS host. Do not invoke directly; flag parity with
 # the dispatcher's argv shape is maintained from there.
 #
-# Rust local installer (dev-only helper for libs/cua-driver/rust):
+# Rust local installer (dev-only helper for the rust/ workspace):
 #   --release    build the release configuration (default: debug)
 #   --autostart  register an auto-start daemon (macOS: LaunchAgent;
 #                Linux: systemd user unit). Default off; the post-install
@@ -39,9 +39,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# Rust workspace root: scripts/ is the cross-cutting installer dir at
-# libs/cua-driver/scripts/; the Cargo workspace lives one level deeper
-# under libs/cua-driver/rust/.
+# Rust workspace root: scripts/ is the cross-cutting installer dir at the
+# repository root; the Cargo workspace is its sibling, rust/.
 REPO_ROOT="$(cd "$SCRIPT_DIR/../rust" && pwd)"
 
 # Embed local-build provenance in `get_config`. An explicit value remains

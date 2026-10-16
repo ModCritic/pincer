@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage Linux-runnable test fixture apps into libs/cua-driver/rust/test-apps/harness-*/.
+# Stage Linux-runnable test fixture apps into rust/test-apps/harness-*/.
 #
 # GTK3 and GTK4 are PyGObject: real toolkit widget trees (identical AT-SPI
 # exposure to C apps), so there's no compile step. Electron and Tauri are

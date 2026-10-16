@@ -900,7 +900,7 @@ pub mod macos {
         }
 
         #[test]
-        #[ignore = "host desktop: reads the real windows, frontmost app and cursor; run by scripts/ci/macos/run-rust-e2e.sh"]
+        #[ignore = "host desktop: reads the real windows, frontmost app and cursor; run by upstream's scripts/ci/macos/run-rust-e2e.sh"]
         fn native_snapshot_reads_desktop_without_a_target() {
             let snapshot = MacosObserver::new()
                 .snapshot(TargetWindow {

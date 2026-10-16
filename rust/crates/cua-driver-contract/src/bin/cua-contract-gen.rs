@@ -40,7 +40,7 @@ fn driver_root() -> Result<PathBuf, String> {
         .and_then(Path::parent)
         .and_then(Path::parent)
         .map(Path::to_path_buf)
-        .ok_or_else(|| "could not resolve libs/cua-driver root".into())
+        .ok_or_else(|| "could not resolve the repository root".into())
 }
 
 fn write_or_check(path: &Path, expected: &str, check: bool) -> Result<(), String> {

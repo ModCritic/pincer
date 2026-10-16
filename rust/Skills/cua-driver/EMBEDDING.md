@@ -396,7 +396,7 @@ restart the driver child so it re-queries with a fresh cache.
 ## Minimal host example (copy-paste)
 
 The file below is the complete reference host: mirrored verbatim from
-`libs/cua-driver/rust/examples/embedded-host-macos/ExampleAgentHarness.swift`
+`rust/examples/embedded-host-macos/ExampleAgentHarness.swift`
 in the cua repo (which also has a build-and-run `demo.sh` covering the
 TCC-reset flow).
 It requests the two grants as the host, spawns an embedded daemon plus an MCP

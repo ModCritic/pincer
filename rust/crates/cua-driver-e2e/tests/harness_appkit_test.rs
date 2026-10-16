@@ -1,11 +1,11 @@
 //! Integration test against the CuaTestHarness.AppKit Swift app.
 //!
 //! Mirror of `harness_wpf_test.rs` for the macOS AppKit hosting pattern.
-//! The harness app lives at `libs/cua-driver/tests/fixtures/apps/macos/appkit`
-//! and is published into `libs/cua-driver/rust/test-apps/harness-appkit/`
-//! by `libs/cua-driver/tests/fixtures/build/macos.sh`.
+//! The harness app lives at `tests/fixtures/apps/macos/appkit`
+//! and is published into `rust/test-apps/harness-appkit/`
+//! by `tests/fixtures/build/macos.sh`.
 //!
-//! Scenarios (see `libs/cua-driver/tests/fixtures/shared/scenarios.json`
+//! Scenarios (see `tests/fixtures/shared/scenarios.json`
 //! `appkit` section):
 //!   - counter        : NSButton AXPress invocation increments counter
 //!   - text_body      : get_window_state extracts known marker text
@@ -14,7 +14,7 @@
 //!   - scroll_target  : scroll updates VerticalOffset label
 //!   - ns_menubar     : main menubar item enumerable (Mac-specific)
 //!
-//! Run locally (after `libs/cua-driver/tests/fixtures/build/macos.sh`):
+//! Run locally (after `tests/fixtures/build/macos.sh`):
 //!   cargo test --test harness_appkit_test -- --ignored --nocapture
 //!
 //! Tests are `#[ignore]` so they don't run in plain `cargo test`.

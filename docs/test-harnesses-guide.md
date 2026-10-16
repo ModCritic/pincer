@@ -135,37 +135,32 @@ the 34 policy cases across both apps, are no longer a merge requirement.
 Extended Python stress runs remain diagnostics for specific unresolved
 failures. This decision changes test strategy, records no new passing result,
 and does not waive the affected CI, native evidence, or release gates in
-[RFC 3550](../../../rfcs/3550-hyprland-isolated-input.md).
+RFC 3550 (`rfcs/3550-hyprland-isolated-input.md` in upstream's trycua/cua).
 
 ## Repository Map
 
 ```text
-cua/
-|-- libs/cua-driver/
-|   |-- rust/
-|   |   |-- crates/
-|   |   |   |-- cua-driver/          Rust driver and hermetic integration tests
-|   |   |   |-- cua-driver-e2e/      Desktop E2E suites the OS runners select
-|   |   |   |-- cua-driver-core/     Shared driver logic and unit tests
-|   |   |   |-- cua-driver-testkit/  Shared Rust E2E helpers and evidence capture
-|   |   |   |-- platform-linux/      Linux backend
-|   |   |   |-- platform-macos/      macOS backend
-|   |   |   |-- platform-windows/    Windows backend
-|   |   |   `-- cursor-overlay/      Cursor evidence helper
-|   |   |-- test-apps/               Ignored staged harness binaries
-|   |   `-- Cargo.toml               Rust workspace
-|   |-- tests/
-|   |   |-- fixtures/
-|   |   |   |-- shared/web/           Shared web page and external markers
-|   |   |   |-- apps/                 Repo-local fixture sources
-|   |   |   `-- build/                macOS/Linux/Windows fixture builders
-|   |   `-- runners/
-|   |       `-- macos-lume/           Maintainer Lume image setup and TCC seed helpers
-|   `-- docs/                         Test matrix, reporting, and contributor docs
-`-- scripts/ci/
-    |-- linux/run-rust-e2e.sh         Linux canonical runner
-    |-- windows/run-rust-e2e.ps1      Windows canonical runner
-    `-- macos/run-rust-e2e.sh         macOS canonical runner
+pincer/
+|-- rust/
+|   |-- crates/
+|   |   |-- cua-driver/          Rust driver and hermetic integration tests
+|   |   |-- cua-driver-e2e/      Desktop E2E suites the OS runners select
+|   |   |-- cua-driver-core/     Shared driver logic and unit tests
+|   |   |-- cua-driver-testkit/  Shared Rust E2E helpers and evidence capture
+|   |   |-- platform-linux/      Linux backend
+|   |   |-- platform-macos/      macOS backend
+|   |   |-- platform-windows/    Windows backend
+|   |   `-- cursor-overlay/      Cursor evidence helper
+|   |-- test-apps/               Ignored staged harness binaries
+|   `-- Cargo.toml               Rust workspace
+|-- tests/
+|   |-- fixtures/
+|   |   |-- shared/web/           Shared web page and external markers
+|   |   |-- apps/                 Repo-local fixture sources
+|   |   `-- build/                macOS/Linux/Windows fixture builders
+|   `-- runners/
+|       `-- macos-lume/           Maintainer Lume image setup and TCC seed helpers
+`-- docs/                         Test matrix, reporting, and contributor docs
 ```
 
 The important separation is:
@@ -233,11 +228,11 @@ from `rust/fuzz/`; see `rust/fuzz/README.md` and
 These are Rust integration tests in their own crate:
 
 ```text
-libs/cua-driver/rust/crates/cua-driver-e2e/tests/
+rust/crates/cua-driver-e2e/tests/
 ```
 
 Hermetic protocol, CLI, and schema tests stay in
-`libs/cua-driver/rust/crates/cua-driver/tests/`. A test that needs a desktop,
+`rust/crates/cua-driver/tests/`. A test that needs a desktop,
 built fixtures, installed apps, or platform permissions belongs in
 `cua-driver-e2e`. Most E2E tests are marked `#[ignore]`; the OS runner selects
 them with `cargo test -p cua-driver-e2e --test <suite> -- --ignored`. The
@@ -600,7 +595,7 @@ Scripts and their tests live next to their owner:
 - Upstream keeps its desktop runners and focused native gates in its
   monorepo-level `scripts/ci/<os>/`, which is not part of this repository.
 - Example code keeps its tests in a `tests/` directory beside it, for example
-  `libs/cua-driver/examples/agent-sdks/tests/`.
-- `libs/cua-driver/rust/test-apps/` is the staging directory for built
+  `examples/agent-sdks/tests/`.
+- `rust/test-apps/` is the staging directory for built
   harness apps, not a test directory. The fixture build scripts `cd` into it,
   so its tracked README and `.gitignore` must stay.

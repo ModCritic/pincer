@@ -10,7 +10,7 @@ Prepare a profile kit only after committing the packaging tooling and reviewing
 the measured profile:
 
 ```sh
-python3 libs/cua-driver/hyprland-plugin/packaging/release/profile_bundle.py \
+python3 hyprland-plugin/packaging/release/profile_bundle.py \
   --repo . --tooling-revision FULL_TOOLING_COMMIT_SHA \
   --profile REVIEWED_PROFILE.json --source-archive ORIGINAL_SOURCE.tar.gz \
   --output NEW_OUTPUT_DIRECTORY
@@ -74,7 +74,7 @@ After committing the source and these helpers, run the generator with Python
 `NEW_OUTPUT_DIRECTORY` with a directory that does not yet exist:
 
 ```sh
-python3 libs/cua-driver/hyprland-plugin/packaging/release/bundle.py \
+python3 hyprland-plugin/packaging/release/bundle.py \
   --repo . --revision COMMIT_SHA --driver-version DRIVER_VERSION \
   --output NEW_OUTPUT_DIRECTORY
 ```
@@ -166,7 +166,7 @@ Run the focused packaging tests with Python 3.12 or later:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
-  -s libs/cua-driver/hyprland-plugin/packaging/release -p 'test_*.py'
+  -s hyprland-plugin/packaging/release -p 'test_*.py'
 ```
 
 These tests cover deterministic archives, exclusion of unrelated and dirty

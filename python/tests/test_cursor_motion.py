@@ -1,7 +1,7 @@
 """Cua Cursor Motion through the generated Python bindings.
 
 Replays the golden trajectories that the Rust crate and the TypeScript port
-share (libs/cua-driver/rust/crates/cua-cursor-motion/fixtures/golden.json)
+share (rust/crates/cua-cursor-motion/fixtures/golden.json)
 through `plan_cursor_move` / `plan_cursor_spec` in the staged native library.
 """
 

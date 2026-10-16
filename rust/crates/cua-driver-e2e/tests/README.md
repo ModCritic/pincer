@@ -51,7 +51,7 @@ Build harness apps before running ignored tests:
 ..\..\..\..\tests\fixtures\build\windows.ps1
 ```
 
-Staged outputs are read from `libs/cua-driver/rust/test-apps/harness-<name>/`.
+Staged outputs are read from `rust/test-apps/harness-<name>/`.
 
 The canonical cross-platform matrix is
 `cross_platform_behavior_test.rs`. It runs the same external-state scenarios

@@ -67,7 +67,7 @@ cua-spacesd and Sandbox APIs are unchanged.
 
 ## Verification
 
-From `libs/cua-driver/rust`, run:
+From `rust/`, run:
 
 ```sh
 cargo check -p cua-driver-sdk --locked

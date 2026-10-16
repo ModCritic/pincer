@@ -333,7 +333,7 @@ evidence, not an interrupted held-key-stream guarantee.
 
 ## Fleet packaging lane
 
-Build an Omarchy/Arch Fleet image from the monorepo source using
+Build an Omarchy/Arch Fleet image from this repository's source using
 `packaging/arch/PKGBUILD`. Record the source SHA, exact Hyprland package version,
 plugin package version, module digest, and image identity. The lane must prove:
 

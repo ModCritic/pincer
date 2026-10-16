@@ -1,7 +1,7 @@
 //! Golden parity with the motion lab, the design source of truth.
 //!
 //! `tests/fixtures/motion_parity.json` is exported by
-//! `libs/cua-driver/tools/cursor-gallery/motion-lab/test/export-parity.mjs`: every scene,
+//! `tools/cursor-gallery/motion-lab/test/export-parity.mjs`: every scene,
 //! seed 7, each shipped style and timing mode. Each Rust trajectory must
 //! match the lab within 0.5 pt at every exported sample time.
 

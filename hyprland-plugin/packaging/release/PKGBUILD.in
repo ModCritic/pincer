@@ -5,7 +5,7 @@ pkgver=@DRIVER_VERSION@
 pkgrel=1
 pkgdesc='Cua production input candidate for pinned Hyprland 0.56.2'
 arch=('x86_64')
-url='https://github.com/trycua/cua'
+url='https://github.com/ModCritic/pincer'
 license=('MIT')
 depends=('hyprland=0.56.2-1' 'gcc-libs')
 makedepends=('cmake>=3.30' 'ninja' 'pkgconf' 'binutils' 'python>=3.11' 'gcc')
@@ -14,7 +14,7 @@ _revision='@REVISION@'
 _stem='@STEM@'
 _archive_sha256='@ARCHIVE_SHA256@'
 _manifest_sha256='@MANIFEST_SHA256@'
-source=("https://github.com/trycua/cua/releases/download/cua-driver-rs-v${pkgver}/${_stem}.tar.gz")
+source=("https://github.com/ModCritic/pincer/releases/download/cua-driver-rs-v${pkgver}/${_stem}.tar.gz")
 sha256sums=('@ARCHIVE_SHA256@')
 _cxx="${CUA_RELEASE_CXX:-/usr/bin/g++}"
 

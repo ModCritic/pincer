@@ -6,8 +6,8 @@ is built from `cursor-overlay` and is intentionally not committed.
 From the repository root:
 
 ```bash
-./libs/cua-driver/scripts/cursor-gallery.sh serve
-./libs/cua-driver/scripts/cursor-gallery.sh export-docs
+./scripts/cursor-gallery.sh serve
+./scripts/cursor-gallery.sh export-docs
 ```
 
 `serve` opens no browser and serves the gallery at `http://127.0.0.1:3001`.
@@ -28,8 +28,8 @@ the badge.
 plain ES modules (no build) and does not need the renderer assets:
 
 ```bash
-./libs/cua-driver/scripts/cursor-gallery.sh motion-lab   # http://127.0.0.1:3001/motion-lab/
-./libs/cua-driver/scripts/cursor-gallery.sh motion-test  # node --test
+./scripts/cursor-gallery.sh motion-lab   # http://127.0.0.1:3001/motion-lab/
+./scripts/cursor-gallery.sh motion-test  # node --test
 ```
 
 - `motion/` is the motion library: a pure, seeded function from

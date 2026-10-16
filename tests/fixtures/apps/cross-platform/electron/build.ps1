@@ -5,7 +5,7 @@
 # the electron runtime + our app resources, with electron.exe renamed to
 # CuaTestHarness.Electron.exe so tests get a deterministic exe name.
 #
-# Output: libs/cua-driver/rust/test-apps/harness-electron/
+# Output: rust/test-apps/harness-electron/
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"

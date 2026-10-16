@@ -272,7 +272,7 @@ mod tests {
     /// lane, which provisions Python for the Tk rows, selects it.
     #[cfg(target_os = "macos")]
     #[test]
-    #[ignore = "host desktop: spawns the host python3, which can open the Command Line Tools installer; run by scripts/ci/macos/run-rust-e2e.sh"]
+    #[ignore = "host desktop: spawns the host python3, which can open the Command Line Tools installer; run by upstream's scripts/ci/macos/run-rust-e2e.sh"]
     fn detect_finds_tk_in_a_python_process_that_imported_tkinter() {
         use std::io::BufRead;
         let spawned = std::process::Command::new("python3")

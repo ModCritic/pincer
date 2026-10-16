@@ -1,6 +1,6 @@
 # build.ps1 - stage the Tauri test harness for cua-driver tests on Windows.
 #
-# Output: libs/cua-driver/rust/test-apps/harness-tauri/CuaTestHarness.Tauri.exe
+# Output: rust/test-apps/harness-tauri/CuaTestHarness.Tauri.exe
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
