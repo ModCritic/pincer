@@ -63,19 +63,26 @@ pub fn forget_session(session: &str) {
 const X_KEYS: [&str; 3] = ["x", "from_x", "to_x"];
 const Y_KEYS: [&str; 3] = ["y", "from_y", "to_y"];
 
+/// The `(x, y)` factors from the calling session's capped desktop image back
+/// to the uncapped one, for a desktop-scope call. `None` without a recorded
+/// cap, for window-scoped pixels, and for `capture_id` actions. A tool whose
+/// points are not the top-level keys [`map_desktop_args`] rewrites (the
+/// nested path of `move_along_path`) applies these itself.
+pub fn desktop_scale_factor(args: &Value) -> Option<(f64, f64)> {
+    let desktop = args.get("scope").and_then(Value::as_str) == Some("desktop")
+        || args.get("coordinate_frame").and_then(Value::as_str) == Some("desktop");
+    if !desktop || args.get("capture_id").is_some() {
+        return None;
+    }
+    let key = session_key(args)?;
+    scales().lock().unwrap().get(key).copied()
+}
+
 /// Scale a desktop-scope action's coordinates from the session's capped
 /// desktop image back to the uncapped one. No-op without a recorded cap, for
 /// window-scoped pixels, and for `capture_id` actions.
 pub fn map_desktop_args(args: &mut Value) {
-    let desktop = args.get("scope").and_then(Value::as_str) == Some("desktop")
-        || args.get("coordinate_frame").and_then(Value::as_str) == Some("desktop");
-    if !desktop || args.get("capture_id").is_some() {
-        return;
-    }
-    let Some(key) = session_key(args) else {
-        return;
-    };
-    let Some((fx, fy)) = scales().lock().unwrap().get(key).copied() else {
+    let Some((fx, fy)) = desktop_scale_factor(args) else {
         return;
     };
     for (keys, factor) in [(X_KEYS, fx), (Y_KEYS, fy)] {
@@ -125,6 +132,29 @@ mod tests {
         let mut other = json!({"_session_id": "cap-test-b", "scope": "desktop", "x": 100});
         map_desktop_args(&mut other);
         assert_eq!(other["x"], 100);
+    }
+
+    #[test]
+    fn nested_desktop_points_can_read_the_factor() {
+        let session = json!({"_session_id": "cap-test-d"});
+        record_desktop_state(
+            &session,
+            Some(&json!({
+                "screenshot_width": 1280, "screenshot_height": 720,
+                "screenshot_original_width": 2560, "screenshot_original_height": 1440
+            })),
+        );
+        let path = json!({"_session_id": "cap-test-d", "scope": "desktop",
+            "points": [[10, 20], [30, 40]]});
+        assert_eq!(desktop_scale_factor(&path), Some((2.0, 2.0)));
+        // map_desktop_args leaves the nested points to the tool.
+        let mut mapped = path.clone();
+        map_desktop_args(&mut mapped);
+        assert_eq!(mapped, path);
+        let window = json!({"_session_id": "cap-test-d", "pid": 1, "window_id": 2});
+        assert_eq!(desktop_scale_factor(&window), None);
+        let other = json!({"_session_id": "cap-test-e", "scope": "desktop"});
+        assert_eq!(desktop_scale_factor(&other), None);
     }
 
     #[test]

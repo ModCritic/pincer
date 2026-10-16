@@ -82,6 +82,20 @@ fn path_cumulative(path: &[(i32, i32)]) -> (Vec<f64>, f64) {
     (cum, total)
 }
 
+/// Compile `expr` into a function of its one free variable `var`, with
+/// meval's built-in constants and functions (+ - * / ^, sin/cos/tan, sqrt,
+/// abs, exp, ln, pi, e, ...). `label` names the expression in errors, so
+/// `parallel_mouse_drag`'s `fn` (variable `x`) and `move_along_path`'s
+/// parametric `x`/`y` (variable `t`) share one evaluator.
+pub fn compile_expression(label: &str, expr: &str, var: &str) -> Result<impl Fn(f64) -> f64> {
+    let parsed: meval::Expr = expr
+        .parse()
+        .map_err(|e| anyhow!("invalid {label} '{expr}': {e}"))?;
+    parsed
+        .bind(var)
+        .map_err(|e| anyhow!("{label} must be in terms of {var}: {e}"))
+}
+
 /// Sample `y = f(x)` over `[x_from, x_to]` into `samples` window-local
 /// waypoints. Evaluated with meval (sin/cos/^/etc.); non-finite outputs
 /// (ln of a negative, 1/0, …) are dropped. Errors on a bad expression or
@@ -92,12 +106,7 @@ pub fn sample_function(
     x_to: f64,
     samples: u64,
 ) -> Result<Vec<(f64, f64)>> {
-    let parsed: meval::Expr = expr
-        .parse()
-        .map_err(|e| anyhow!("invalid fn '{expr}': {e}"))?;
-    let f = parsed
-        .bind("x")
-        .map_err(|e| anyhow!("fn must be in terms of x: {e}"))?;
+    let f = compile_expression("fn", expr, "x")?;
     let n = samples.max(2);
     let mut pts = Vec::with_capacity(n as usize);
     for i in 0..n {
