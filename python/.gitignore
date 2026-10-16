@@ -6,7 +6,8 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Downloaded binaries and archives
+# Staged binaries and libraries (downloads/ held archives from the removed
+# release download path)
 downloads/
 src/cua_driver/bin/
 src/cua_driver/*.dylib

@@ -31,10 +31,27 @@ agent SDK.
 
 This fork publishes no wheels. The `cua-driver` name in `pyproject.toml` is
 upstream's, so a `cua-driver` package installed from PyPI is not this fork.
-By default, `build_wheel.py` downloads upstream's release binary from GitHub
-and bundles it; `--skip-download` uses the binary already in
-`src/cua_driver/bin/` instead. Build this fork's executable from source as
-described in the [top-level README](../README.md#build-from-source).
+
+To build a wheel yourself, first build the driver and the SDK library from
+source as described in the [top-level README](../README.md#build-from-source),
+adding the `cua-driver-sdk` package. From `rust/`:
+
+```bash
+cargo build --release -p cua-driver -p cua-driver-sdk
+```
+
+On Windows, add `-p cua-driver-uia` to also bundle the UIAccess worker. Then
+run `python build_wheel.py` from this directory. It copies the binary and the
+library from `../rust/target/release` (or `$CARGO_TARGET_DIR/release`) into
+`src/cua_driver/` and builds the wheel with `python -m build`, so the `build`
+package must be installed. Use `--target-dir`, `--binary`, or
+`--native-library` to take them from somewhere else. The script never
+downloads anything.
+
+The wheel tags follow upstream's release builds. The macOS wheel is tagged
+`universal2`, so it needs a universal binary and library. The Linux wheel is
+tagged `manylinux_2_31`, but a local build only runs where the glibc is at
+least as new as on the machine that built it.
 
 The wheel contains generated UniFFI bindings, a platform-specific Rust SDK
 library, and the `cua-driver` executable. `CuaDriver.create()` loads the runtime

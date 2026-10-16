@@ -1,41 +1,36 @@
 #!/usr/bin/env python3
-"""Build script to download platform-specific cua-driver binary and create wheel.
+"""Build the cua-driver wheel from a local Rust build.
 
 This script:
 1. Detects the current platform
-2. Downloads the appropriate cua-driver-rs binary from GitHub releases
-3. Places it in src/cua_driver/bin/
-4. Builds the wheel with hatchling
+2. Copies a locally built cua-driver binary into src/cua_driver/bin/ and the
+   cua-driver-sdk UniFFI library into src/cua_driver/
+3. Builds the wheel with hatchling
+
+It never downloads anything. Build the Rust artifacts first, from rust/:
+
+    cargo build --release -p cua-driver -p cua-driver-sdk
+
+On Windows, add `-p cua-driver-uia` to also bundle the UIAccess worker.
 
 Usage:
-    python build_wheel.py [--version VERSION]
+    python build_wheel.py [--target-dir DIR] [--binary PATH]
+                          [--native-library PATH] [--arch ARCH]
 """
 
 import argparse
-import hashlib
 import os
 import platform
 import shutil
 import subprocess
 import sys
-import tarfile
-import urllib.request
-import zipfile
 from pathlib import Path
 
-
-def get_default_version() -> str:
-    """Read the wrapper package version from pyproject.toml."""
-    pyproject = Path(__file__).parent / "pyproject.toml"
-    for line in pyproject.read_text().splitlines():
-        line = line.strip()
-        if line.startswith("version = "):
-            return line.split('"', 2)[1]
-    raise RuntimeError(f"Could not read project version from {pyproject}")
+CARGO_BUILD_HINT = "cargo build --release -p cua-driver -p cua-driver-sdk"
 
 
 def get_platform_info(arch_override: str = None):
-    """Determine platform and architecture for binary selection.
+    """Determine platform and architecture for the wheel tag.
 
     Args:
         arch_override: Optional architecture override (e.g., 'arm64', 'x86_64', 'universal')
@@ -63,9 +58,8 @@ def get_platform_info(arch_override: str = None):
         else:
             raise ValueError(f"Unsupported architecture: {machine}")
 
-    # Map to cua-driver-rs release naming
     if system == "darwin":
-        # macOS uses universal binary
+        # The macOS wheel is tagged universal2
         return "darwin", "universal"
     elif system == "linux":
         return "linux", arch
@@ -81,7 +75,9 @@ def get_wheel_tag(platform_name: str, arch: str) -> str:
         # Keep this aligned with the SDK dylib's LC_BUILD_VERSION minimum.
         return "py3-none-macosx_13_0_universal2"
     if platform_name == "linux":
-        # Rust Linux release binaries are built in debian:11, whose glibc floor is 2.31.
+        # Upstream built its Linux release binaries in debian:11, whose glibc
+        # floor is 2.31. A local build only runs where the glibc is at least
+        # as new as on the host that built it.
         if arch == "x86_64":
             return "py3-none-manylinux_2_31_x86_64"
         if arch == "arm64":
@@ -95,149 +91,77 @@ def get_wheel_tag(platform_name: str, arch: str) -> str:
     raise ValueError(f"Unsupported wheel target: {platform_name}-{arch}")
 
 
-def get_release_url(version: str, platform_name: str, arch: str) -> tuple[str, list[str]]:
-    """Get the GitHub release URL and binary names for the platform.
-
-    Returns:
-        Tuple of (download_url, list_of_binary_names_in_archive)
-    """
-    base_url = f"https://github.com/trycua/cua/releases/download/cua-driver-rs-v{version}"
-
+def get_binary_names(platform_name: str) -> tuple[str, str]:
+    """Return the file names of the CLI binary and the UniFFI library."""
     if platform_name == "darwin":
-        # Universal binary tarball
-        filename = f"cua-driver-rs-{version}-darwin-universal-binary.tar.gz"
-        binary_names = ["cua-driver", "libcua_driver_sdk.dylib"]
-    elif platform_name == "linux":
-        filename = f"cua-driver-rs-{version}-linux-{arch}-binary.tar.gz"
-        binary_names = ["cua-driver", "libcua_driver_sdk.so"]
-    elif platform_name == "windows":
-        filename = f"cua-driver-rs-{version}-windows-{arch}-binary.zip"
-        # Windows includes both main executable and UIAccess worker
-        binary_names = ["cua-driver.exe", "cua-driver-uia.exe", "cua_driver_sdk.dll"]
-    else:
-        raise ValueError(f"Unknown platform: {platform_name}")
-
-    return f"{base_url}/{filename}", binary_names
+        return "cua-driver", "libcua_driver_sdk.dylib"
+    if platform_name == "linux":
+        return "cua-driver", "libcua_driver_sdk.so"
+    if platform_name == "windows":
+        return "cua-driver.exe", "cua_driver_sdk.dll"
+    raise ValueError(f"Unknown platform: {platform_name}")
 
 
-def verify_sha256(file_path: Path, expected_sha256: str) -> None:
-    """Verify file matches expected SHA256 hash."""
-    h = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    actual = h.hexdigest()
-    if actual != expected_sha256:
-        raise ValueError(
-            f"SHA256 mismatch for {file_path.name}: expected {expected_sha256}, got {actual}"
+def get_default_target_dir(script_dir: Path) -> Path:
+    """Return the Cargo target directory that `cargo build` writes to."""
+    target_dir = os.environ.get("CARGO_TARGET_DIR")
+    if target_dir:
+        return Path(target_dir)
+    return script_dir.parent / "rust" / "target"
+
+
+def require_file(path: Path, what: str) -> None:
+    """Fail with a build hint when a local build artifact is missing."""
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"{what} not found at {path}. Build it first, from rust/: "
+            f"{CARGO_BUILD_HINT}"
         )
 
 
-def get_expected_sha256(version: str, archive_name: str) -> str:
-    """Fetch and parse checksums.txt from GitHub release."""
-    checksums_url = f"https://github.com/trycua/cua/releases/download/cua-driver-rs-v{version}/checksums.txt"
-    print(f"Fetching checksums from {checksums_url}...")
+def stage_artifacts(
+    binary: Path,
+    native_library: Path,
+    package_dir: Path,
+    platform_name: str,
+) -> list[Path]:
+    """Copy the local build into the package source tree.
 
-    try:
-        with urllib.request.urlopen(checksums_url) as response:
-            content = response.read().decode("utf-8")
-
-        for line in content.splitlines():
-            line = line.strip()
-            # Skip empty lines, comments, and headers
-            if not line or line.startswith("#") or "Checksums" in line or line.startswith("```"):
-                continue
-            # Parse "SHA256  filename" format
-            parts = line.split()
-            if len(parts) >= 2:
-                sha, name = parts[0], parts[-1]
-                if name == archive_name:
-                    return sha
-
-        raise ValueError(f"SHA256 for {archive_name} not found in checksums.txt")
-    except Exception as e:
-        raise RuntimeError(f"Failed to fetch or parse checksums: {e}")
-
-
-def download_file(url: str, dest: Path, expected_sha256: str) -> None:
-    """Download a file with progress indication and SHA256 verification."""
-    print(f"Downloading {url}...")
-    try:
-        with urllib.request.urlopen(url) as response:
-            total_size = int(response.headers.get("content-length", 0))
-            dest.parent.mkdir(parents=True, exist_ok=True)
-
-            with open(dest, "wb") as f:
-                downloaded = 0
-                block_size = 8192
-                while True:
-                    chunk = response.read(block_size)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size > 0:
-                        percent = (downloaded / total_size) * 100
-                        print(f"  {percent:.1f}% ({downloaded}/{total_size} bytes)", end="\r")
-
-        print(f"\nDownloaded to {dest}")
-
-        # Verify SHA256
-        print("Verifying SHA256 checksum...")
-        verify_sha256(dest, expected_sha256)
-        print("[OK] Checksum verified")
-
-    except Exception as e:
-        if dest.exists():
-            dest.unlink()
-        raise RuntimeError(f"Failed to download {url}: {e}")
-
-
-def extract_binaries(archive_path: Path, binary_names: list[str], dest_dir: Path) -> list[Path]:
-    """Extract the binaries from the archive.
-
-    Args:
-        archive_path: Path to the archive file
-        binary_names: List of binary names to extract
-        dest_dir: Destination directory
+    The CLI binary goes to package_dir/bin/ and the UniFFI library goes
+    next to the generated bindings in package_dir. On Windows, the
+    UIAccess worker is copied too when it sits next to the binary.
 
     Returns:
-        List of paths to extracted binaries
+        List of staged paths
     """
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    extracted_paths = []
+    binary_name, library_name = get_binary_names(platform_name)
+    require_file(binary, "cua-driver binary")
+    require_file(native_library, "cua-driver-sdk library")
 
-    if archive_path.suffix == ".zip":
-        with zipfile.ZipFile(archive_path, "r") as zf:
-            for binary_name in binary_names:
-                dest_path = dest_dir / binary_name
-                # Find the binary in the zip (exact match or ends with /<binary_name>)
-                for name in zf.namelist():
-                    # Match exact name or path ending with /binary_name
-                    if name == binary_name or name.endswith(f"/{binary_name}"):
-                        with zf.open(name) as src, open(dest_path, "wb") as dst:
-                            shutil.copyfileobj(src, dst)
-                        extracted_paths.append(dest_path)
-                        print(f"Extracted binary to {dest_path}")
-                        break
-                else:
-                    raise ValueError(f"Binary {binary_name} not found in {archive_path}")
-    else:
-        # .tar.gz
-        with tarfile.open(archive_path, "r:gz") as tf:
-            for binary_name in binary_names:
-                # The -binary tarballs have the binary at the root
-                tf.extract(binary_name, dest_dir)
-                dest_path = dest_dir / binary_name
-                extracted_paths.append(dest_path)
-                print(f"Extracted binary to {dest_path}")
+    bin_dir = package_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    sources = [(binary, bin_dir / binary_name)]
+    if platform_name == "windows":
+        uia_worker = binary.parent / "cua-driver-uia.exe"
+        if uia_worker.is_file():
+            sources.append((uia_worker, bin_dir / uia_worker.name))
+        else:
+            print(f"Note: {uia_worker} not found; the UIAccess worker is not bundled.")
+    sources.append((native_library, package_dir / library_name))
+
+    staged = []
+    for source, dest in sources:
+        shutil.copy2(source, dest)
+        staged.append(dest)
+        print(f"Staged {source} -> {dest}")
 
     # Make executable on Unix
     if sys.platform != "win32":
-        for path in extracted_paths:
+        for path in staged:
             os.chmod(path, 0o755)
 
-    return extracted_paths
+    return staged
 
 
 def build_wheel(package_dir: Path, wheel_tag: str, target_arch: str = None) -> None:
@@ -275,90 +199,48 @@ def build_wheel(package_dir: Path, wheel_tag: str, target_arch: str = None) -> N
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build cua-driver Python wheel with bundled binary")
+    parser = argparse.ArgumentParser(
+        description="Build the cua-driver Python wheel from a local Rust build"
+    )
     parser.add_argument(
-        "--version",
-        help="cua-driver-rs version to download (default: pyproject.toml version)",
+        "--target-dir",
+        type=Path,
+        help="Cargo target directory to take the release build from "
+        "(default: $CARGO_TARGET_DIR, else ../rust/target)",
+    )
+    parser.add_argument(
+        "--binary",
+        type=Path,
+        help="Path to the cua-driver binary (default: <target-dir>/release/cua-driver)",
+    )
+    parser.add_argument(
+        "--native-library",
+        type=Path,
+        help="Path to the cua-driver-sdk UniFFI library "
+        "(default: <target-dir>/release/libcua_driver_sdk.so, .dylib, or cua_driver_sdk.dll)",
     )
     parser.add_argument(
         "--arch",
         help="Architecture override (e.g., 'arm64', 'x86_64', 'universal')",
     )
-    parser.add_argument(
-        "--skip-download",
-        action="store_true",
-        help="Skip download and use existing binary in bin/ (for local testing)",
-    )
     args = parser.parse_args()
-    version = args.version or get_default_version()
 
     # Determine paths
     script_dir = Path(__file__).parent
-    bin_dir = script_dir / "src" / "cua_driver" / "bin"
-    download_dir = script_dir / "downloads"
+    package_dir = script_dir / "src" / "cua_driver"
     platform_name, arch = get_platform_info(args.arch)
     wheel_tag = get_wheel_tag(platform_name, arch)
+    print(f"Building for {platform_name}-{arch}")
     print(f"Wheel tag: {wheel_tag}")
 
-    if not args.skip_download:
-        # Get platform info and download URL
-        print(f"Building for {platform_name}-{arch}")
+    binary_name, library_name = get_binary_names(platform_name)
+    release_dir = (args.target_dir or get_default_target_dir(script_dir)) / "release"
+    binary = args.binary or release_dir / binary_name
+    native_library = args.native_library or release_dir / library_name
 
-        url, binary_names = get_release_url(version, platform_name, arch)
-        archive_name = url.split("/")[-1]
-        archive_path = download_dir / archive_name
-
-        # Get expected SHA256 from checksums.txt
-        expected_sha256 = get_expected_sha256(version, archive_name)
-
-        # Download the release archive (or verify cached)
-        if not archive_path.exists():
-            download_file(url, archive_path, expected_sha256)
-        else:
-            print(f"Using cached archive: {archive_path}")
-            # Verify cached archive too
-            print("Verifying cached archive SHA256...")
-            verify_sha256(archive_path, expected_sha256)
-            print("[OK] Cached archive checksum verified")
-
-        # Extract binaries
-        extracted = extract_binaries(archive_path, binary_names, bin_dir)
-        native_library = next(
-            path for path in extracted if path.suffix in {".dylib", ".so", ".dll"}
-        )
-        shutil.move(native_library, script_dir / "src" / "cua_driver" / native_library.name)
-    else:
-        print("Skipping download (using existing binary)")
-
-    # Verify main binary exists
-    expected_binary = "cua-driver.exe" if sys.platform == "win32" else "cua-driver"
-    binary_path = bin_dir / expected_binary
-    if not binary_path.exists():
-        raise FileNotFoundError(
-            f"Binary not found at {binary_path}. "
-            f"Run without --skip-download or place binary manually."
-        )
-
-    native_library_name = {
-        "darwin": "libcua_driver_sdk.dylib",
-        "linux": "libcua_driver_sdk.so",
-        "windows": "cua_driver_sdk.dll",
-    }[platform_name]
-    native_library_path = script_dir / "src" / "cua_driver" / native_library_name
-    if not native_library_path.exists():
-        raise FileNotFoundError(
-            f"UniFFI library not found at {native_library_path}. "
-            "Use a current release asset or stage a local release build."
-        )
-
-    print(f"\nBinary ready at: {binary_path}")
-    print(f"Binary size: {binary_path.stat().st_size / 1024 / 1024:.2f} MB")
-
-    # List all binaries in bin directory
-    print(f"\nAll binaries in {bin_dir}:")
-    for binary in bin_dir.iterdir():
-        if binary.is_file():
-            print(f"  - {binary.name} ({binary.stat().st_size / 1024 / 1024:.2f} MB)")
+    staged = stage_artifacts(binary, native_library, package_dir, platform_name)
+    for path in staged:
+        print(f"  - {path.name} ({path.stat().st_size / 1024 / 1024:.2f} MB)")
 
     # Build the wheel (pass target arch for cross-compilation)
     build_wheel(script_dir, wheel_tag, target_arch=arch)
