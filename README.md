@@ -5,6 +5,28 @@ Background computer-use driver for any agents. Speaks MCP over stdio; drives nat
 See [MCP protocol and skills](docs/mcp-protocol-and-skills.md) for the modern
 stdio profile, legacy compatibility, bundled skill resources, and HTTP limits.
 
+## About this fork
+
+This repository is a fork of `libs/cua-driver` from
+[trycua/cua](https://github.com/trycua/cua) at commit `e6a244a8d`. It is
+licensed under the MIT License; see [LICENSE](LICENSE).
+
+Changes from upstream:
+
+- Linux gains a `capture_series` tool, which takes screenshots on a schedule
+  and can stop early once the image stops changing, and an optional `region`
+  crop for `get_desktop_state`.
+- PostHog telemetry is removed at compile time.
+- The optional perception extension is removed, together with the
+  `parse_visual_regions` tool, the extension installer, and the
+  `cua-perception` worker. `install_extension` remains and refuses every
+  request.
+
+The automatic update check still contacts cua.ai and GitHub. Set
+`CUA_DRIVER_RS_UPDATE_CHECK=false` to turn it off. The `check-update`,
+`update`, and `skills install` commands and the `check_for_update` tool
+contact them whenever they are used.
+
 **[Documentation](https://cua.ai/docs/cua-driver)** - Installation, guides, and API reference.
 
 ## Integration surfaces
