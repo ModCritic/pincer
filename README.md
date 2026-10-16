@@ -1,15 +1,19 @@
-# Cua Driver
-
-Background computer-use driver for any agents. Speaks MCP over stdio; drives native macOS apps without stealing focus.
-
-See [MCP protocol and skills](docs/mcp-protocol-and-skills.md) for the modern
-stdio profile, legacy compatibility, bundled skill resources, and HTTP limits.
+<div align="center">
+  <img src="docs/pincer-logo.svg" alt="Pincer logo" width="160">
+  <h1>Pincer</h1>
+  <p>Linux desktop control for AI agents over MCP.</p>
+</div>
 
 ## About this fork
 
-This repository is a fork of `libs/cua-driver` from
+Pincer is a fork of Cua Driver, taken from `libs/cua-driver` in
 [trycua/cua](https://github.com/trycua/cua) at commit `e6a244a8d`. It is
 licensed under the MIT License; see [LICENSE](LICENSE).
+
+The project is named Pincer, but the binary, crate names, CLI name, and
+environment variable prefixes are still `cua-driver` and `CUA_DRIVER_*`.
+Renaming them is out of scope for now, so every command in this repository
+still uses `cua-driver`.
 
 Changes from upstream:
 
@@ -34,37 +38,153 @@ a browser on this machine through its loopback debugging port.
 `install_ffmpeg` with `confirm: true` runs the system package manager, which
 downloads ffmpeg from that package manager's sources.
 
-**[Documentation](https://cua.ai/docs/cua-driver)** - Installation, guides, and API reference.
+This fork publishes no release binaries, Python wheels, or npm packages.
+Build it from source as described below. The fork's own changes target Linux;
+the macOS and Windows code from upstream is still in the tree.
+
+See [MCP protocol and skills](docs/mcp-protocol-and-skills.md) for the modern
+stdio profile, legacy compatibility, bundled skill resources, and HTTP limits.
+
+## Build from source
+
+1. Install [rustup](https://rustup.rs/). `rust/rust-toolchain.toml` pins Rust
+   1.97.1 with the `rustfmt` component. rustup installs that toolchain the
+   first time you run `cargo` in `rust/`, unless its auto-install setting is
+   disabled; `rustup toolchain install` run in `rust/` installs it up front.
+2. Build the driver.
+
+   ```bash
+   cd rust
+   cargo build --release -p cua-driver
+   ```
+
+3. The binary is `rust/target/release/cua-driver` (`cua-driver.exe` on
+   Windows). If `CARGO_TARGET_DIR` is set, it is
+   `$CARGO_TARGET_DIR/release/cua-driver` instead. The workspace uses Cargo's
+   standard `release` profile.
+4. Check that the driver can reach the current graphical session.
+
+   ```bash
+   rust/target/release/cua-driver doctor
+   ```
+
+On Linux, the driver must run in the graphical user's session and share its
+AT-SPI session bus.
+
+## Connect an agent
+
+Register the binary with Claude Code for your user account, using its
+absolute path.
+
+```bash
+claude mcp add --scope user pincer -- /path/to/cua-driver mcp --no-overlay
+```
+
+`--no-overlay` turns off the agent cursor overlay; leave it out to keep the
+overlay. On Linux and Windows, `cua-driver mcp` owns its runtime directly and
+shuts it down when stdin closes.
+
+On Linux, you can also deny the driver network access by starting it with
+`unshare -cn`, which runs it in a new user and network namespace whose only
+interface is a loopback device that is down.
+
+```bash
+claude mcp add --scope user pincer -- \
+  unshare -cn /path/to/cua-driver mcp --no-overlay
+```
+
+This needs unprivileged user namespaces. Inside the namespace the driver
+cannot open TCP/IP connections, including to a browser's loopback debugging
+port, so the browser tools do not work. Abstract Unix sockets are isolated as
+well (see `network_namespaces(7)`); Unix sockets with a filesystem path are
+not.
+
+`cua-driver mcp-config --client <name>` prints setup for other MCP clients.
+
+### Claude Code computer-use compatibility
+
+If you want Claude Code's vision/computer-use-style flow to ground on window
+screenshots from the driver, register the compatibility mode.
+
+```bash
+claude mcp add --transport stdio cua-computer-use -- /path/to/cua-driver mcp --claude-code-computer-use-compat
+```
+
+This keeps the driver's normal MCP tools and changes only `screenshot`, which
+requires `pid` and `window_id` and captures that window only.
+
+Use MCP for this Claude Code vision/computer-use-style path. CLI screenshots
+still work as driver calls, but they do not expose the
+`mcp__cua-computer-use__screenshot` tool name that Claude Code appears to use
+as the image-grounding cue.
+
+### Muse Code
+
+[Muse Code](https://research.meta.ai/blog/introducing-muse-code-and-muse-spark-1-2)
+can use the driver as a local stdio MCP server on macOS and Linux. Merge the
+following entry into `$XDG_CONFIG_HOME/muse/settings.json`, or
+`~/.config/muse/settings.json` when `XDG_CONFIG_HOME` is not set:
+
+```json
+{
+  "mcp_servers": {
+    "cua-driver": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "/absolute/path/to/cua-driver",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Use the absolute path to the binary you built. Merge the `cua-driver` entry
+with any existing `mcp_servers` instead of replacing the settings file. Start
+a new Muse session after saving the file; Muse loads MCP servers at session
+startup.
+
+## Agent skill pack
+
+The skill pack in `rust/Skills/cua-driver` is compiled into the binary. The
+MCP server serves it as resources, and `cua-driver skills install` writes the
+same copy into detected agent directories without downloading anything. The
+direct installer keeps only the host OS document unless `--all-platforms` is
+used. The `@cua/driver` skill on ClawHub is upstream's, not this fork's.
 
 ## Integration surfaces
 
-- **Cua as an agent MCP or CLI:** MCP-capable agents connect directly to
+- **Agent MCP or CLI:** MCP-capable agents connect directly to
   `cua-driver mcp`; shell-oriented agents and automation can use
-  `cua-driver call`. No generated Cua language client is required.
-- **Cua as an application SDK:** Python applications import `cua_driver`;
-  TypeScript applications import `@trycua/cua-driver`. Both package roots call
-  the same in-process native runtime through generated UniFFI bindings. The
-  safe Rust SDK and generated bindings sit above a versioned C ABI; they do not
-  require a daemon for direct application use.
+  `cua-driver call`. No generated language client is required.
+- **Application SDK:** Python applications import `cua_driver`; TypeScript
+  applications import `@trycua/cua-driver`. Both package roots call the same
+  in-process native runtime through generated UniFFI bindings. The safe Rust
+  SDK and generated bindings sit above a versioned C ABI; they do not require
+  a daemon for direct application use.
 
 The language packages are for client applications, not agents. They contain no
 language-native MCP facade and have no `/sdk`, `/mcp`, or `/native` public
 suffix. MCP remains implemented by the `cua-driver` executable as the
 runtime-neutral agent boundary.
 
-## Computer History macOS preview
+The package names in `python/pyproject.toml` (`cua-driver`) and
+`typescript/package.json` (`@trycua/cua-driver`) are upstream's. This fork
+publishes neither, so a package installed under those names from PyPI or npm
+is not this fork.
 
-Nightly macOS builds can provide an opt-in, encrypted history of actions
-performed through Cua Driver. The preview stores a strict metadata allowlist,
-stays local, and exposes permission-gated `history_status` and `history_query`
-tools for read-only agent hydration. It never stores screenshots, typed text,
+## Computer History preview
+
+Upstream's opt-in, encrypted history of actions performed through the driver
+is still in the tree. The preview stores a strict metadata allowlist, stays
+local, and exposes permission-gated `history_status` and `history_query` tools
+for read-only agent hydration. It never stores screenshots, typed text,
 clipboard contents, raw arguments or results, accessibility trees, paths,
 window titles, or URLs.
 
-See [Try the Computer History macOS
-preview](docs/computer-history-preview.md) for installation, lifecycle,
-inspection, deletion, and stable-channel return instructions. The [architecture
-and staged plan](docs/computer-history-architecture.md) defines the format,
+[Try the Computer History desktop preview](docs/computer-history-preview.md)
+covers enabling, inspection, and deletion; its install and uninstall commands
+fetch upstream builds and do not apply to this fork. The [architecture and
+staged plan](docs/computer-history-architecture.md) defines the format,
 security boundary, release gates, and later NVIDIA OpenShell integration.
 
 ## Permission modes
@@ -87,48 +207,33 @@ cua-driver mcp --grant existing-profile
 ```
 
 An embedding application can instead provide `DriverAuthorizationHost`, and a
-bounded runtime can declare `kind: existing_profile` in its manifest. Cua
-Driver does not render its own authorization modal or banner.
+bounded runtime can declare `kind: existing_profile` in its manifest. The
+driver does not render its own authorization modal or banner.
 
-See the hosted [permission mode
-reference](https://cua.ai/docs/cua-driver/guides/permissions).
+See [`rust/Skills/cua-driver/RUNTIME.md`](rust/Skills/cua-driver/RUNTIME.md)
+for the permission modes, capability manifests, and authorization rules.
 
-## Repository Layout
+## Repository layout
 
-| Path                            | Purpose                                                                |
-| ------------------------------- | ---------------------------------------------------------------------- |
-| `rust/`                         | Cargo workspace for the daemon, UniFFI SDK, platform crates, and tests |
-| `python/`                       | Python SDK, bundled-binary wrapper, and package tests                  |
-| `contract/`                     | Experimental generated SDK contract and fixtures                       |
-| `typescript/`                   | Generated TypeScript SDK                                               |
-| `tests/fixtures/`               | Source-built GUI harness apps and shared fixtures                      |
-| `rust/crates/cua-driver/tests/` | Hermetic Rust integration tests for the driver                         |
-| `rust/crates/cua-driver-e2e/tests/` | Desktop E2E suites for the GUI harnesses                       |
-| `scripts/`                      | Install, uninstall, local build, and VM sync helpers                   |
-| `docs/`                         | Small repo-local specs that are not part of the hosted docs site       |
+| Path                                | Purpose                                                                |
+| ----------------------------------- | ---------------------------------------------------------------------- |
+| `rust/`                             | Cargo workspace for the daemon, UniFFI SDK, platform crates, and tests |
+| `python/`                           | Python SDK, bundled-binary wrapper, and package tests                  |
+| `contract/`                         | Experimental generated SDK contract and fixtures                       |
+| `typescript/`                       | Generated TypeScript SDK                                               |
+| `tests/fixtures/`                   | Source-built GUI harness apps and shared fixtures                      |
+| `rust/crates/cua-driver/tests/`     | Hermetic Rust integration tests for the driver                         |
+| `rust/crates/cua-driver-e2e/tests/` | Desktop E2E suites for the GUI harnesses                               |
+| `scripts/`                          | Install, uninstall, local build, and VM sync helpers                   |
+| `docs/`                             | Repo-local specs, design notes, and historical plans                   |
 
 Start with `rust/README.md`, `rust/crates/cua-driver-e2e/tests/README.md`, and
 `tests/fixtures/README.md` when changing driver behavior or tests.
 
-The canonical GUI runners execute the complete Rust harness catalog:
-
-```text
-Linux X11/session: scripts/ci/linux/run-rust-e2e.sh
-Linux Sway:        scripts/ci/linux/run-rust-e2e-wayland.sh
-Linux nested:      scripts/ci/linux/run-rust-e2e-inject.sh
-Linux GNOME/KDE:   scripts/ci/linux/run-rust-e2e-desktop.sh <gnome|kde>
-Linux real Xorg:   scripts/ci/linux/run-rust-e2e-desktop.sh xorg
-Windows:           .\scripts\ci\windows\run-rust-e2e.ps1 -RequireGui
-macOS:             scripts/ci/macos/run-rust-e2e.sh
-```
-
-The Sway runner creates a controlled stock-wlroots session; Nix owns the Linux
-source/package gate and the optional nested `cua-compositor` session. GNOME,
-KDE, real Xorg, Windows, and macOS use an existing graphical login (Windows:
-an interactive console or RDP session; macOS: a logged-in session with
-Accessibility and Screen Recording). See
-[`docs/test-harnesses-guide.md`](docs/test-harnesses-guide.md) and, for macOS in
-Lume, [`tests/runners/macos-lume/README.md`](tests/runners/macos-lume/README.md).
+Upstream drives the complete Rust harness catalog from canonical GUI runner
+scripts under `scripts/ci/`; those scripts are not part of this repository.
+See [`docs/test-harnesses-guide.md`](docs/test-harnesses-guide.md) and, for
+macOS in Lume, [`tests/runners/macos-lume/README.md`](tests/runners/macos-lume/README.md).
 Keep build artifacts, VM logs, and local verification journals out of git
 unless they become a stable fixture or contributor doc.
 
@@ -143,44 +248,16 @@ runtime in the application process; the daemon-compatible `connect()` path is
 retained for external clients. The stable native boundary is declared in
 [`rust/include/cua_driver_abi.h`](rust/include/cua_driver_abi.h). That header is
 generated from the Rust `#[repr(C)]` exports with
-`cargo run -p cua-driver-bindgen --bin cua-driver-abi-header`; CI runs the same
-command with `--check` so the implementation and distributed header cannot
-drift. UniFFI separately generates its private FFI scaffolding and the Python
-and TypeScript SDK bindings; that implementation-specific scaffolding is not
-the stable public `cua_driver_*_v1` C contract.
-Python wheels and the root/native npm packages are assembled from the same
-`cua-driver-rs-v*` release artifacts and publish with the exact Rust release
-version; `.github/scripts/validate_release_versions.py` rejects source drift.
+`cargo run -p cua-driver-bindgen --bin cua-driver-abi-header`; running the
+same command with `--check` confirms that the implementation and the header
+have not drifted. UniFFI separately generates its private FFI scaffolding and
+the Python and TypeScript SDK bindings; that implementation-specific
+scaffolding is not the stable public `cua_driver_*_v1` C contract.
 
 For direct agent integrations, see the
 [`examples/agent-sdks`](examples/agent-sdks/README.md) Codex and Claude Agent
 SDK examples. They connect the agent to `cua-driver mcp` without importing a
-generated Cua client.
-
-## Muse Code
-
-[Muse Code](https://research.meta.ai/blog/introducing-muse-code-and-muse-spark-1-2)
-can use Cua Driver as a local stdio MCP server on macOS and Linux. Merge the
-following entry into `$XDG_CONFIG_HOME/muse/settings.json`, or
-`~/.config/muse/settings.json` when `XDG_CONFIG_HOME` is not set:
-
-```json
-{
-  "mcp_servers": {
-    "cua-driver": {
-      "enabled": true,
-      "transport": "stdio",
-      "command": "/absolute/path/to/cua-driver",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-Use the installed binary's absolute path, which `command -v cua-driver` prints.
-Merge the `cua-driver` entry with any existing `mcp_servers` instead of
-replacing the settings file. Start a new Muse session after saving the file;
-Muse loads MCP servers at session startup.
+generated client.
 
 Contributor documentation:
 
@@ -192,25 +269,11 @@ Contributor documentation:
 - `docs/linux-desktop-validation.md` covers representative Linux sessions.
 - `docs/linux-support-completion-plan.md` preserves the historical Linux plan.
 
-## Claude Code computer-use compatibility
-
-Standard Claude Code MCP registration:
-
-```bash
-claude mcp add --transport stdio cua-driver -- cua-driver mcp
-```
-
-If you want Claude Code's vision/computer-use-style flow to ground on CuaDriver window screenshots, register the compatibility mode:
-
-```bash
-claude mcp add --transport stdio cua-computer-use -- cua-driver mcp --claude-code-computer-use-compat
-```
-
-This keeps CuaDriver's normal MCP tools and changes only `screenshot`, which requires `pid` and `window_id` and captures that window only.
-
-Use MCP for this Claude Code vision/computer-use-style path. CLI screenshots still work as CuaDriver calls, but they do not expose the `mcp__cua-computer-use__screenshot` tool name that Claude Code appears to use as the image-grounding cue.
-
 ## macOS process identity and permissions
+
+This fork ships no prebuilt `CuaDriver.app`. On macOS,
+`scripts/install-local.sh` builds a separate `CuaDriverLocal.app` from this
+checkout.
 
 macOS attributes Accessibility and Screen Recording grants to a responsible app identity, not simply to an executable path. Use one of these supported launch modes:
 
@@ -222,45 +285,3 @@ macOS attributes Accessibility and Screen Recording grants to a responsible app 
 - **Embedded:** have the macOS app that owns the grants use the generated `EmbeddedCuaDriverHost` to spawn a private daemon and return both SDK and MCP connection details. The daemon stays in the app's responsibility chain and inherits its grants. A gateway, terminal, or unrelated helper must not spawn the daemon on the app's behalf. `@trycua/cua-driver/embedded` is an organizational alias for the same Rust host exported at the package root; it has no separate lifecycle implementation.
 
 Directly spawning a raw `cua-driver serve` outside `CuaDriver.app` without embedded mode is unsupported: it has no stable bundle identity for TCC attribution. Do not grant permissions to arbitrary binary paths or rely on that configuration in production. See [`rust/Skills/cua-driver/EMBEDDING.md`](rust/Skills/cua-driver/EMBEDDING.md) for the embedding contract and examples.
-
-## Publishing the agent skill to ClawHub
-
-The canonical skill source is `rust/Skills/cua-driver`. It is published as one
-cross-platform ClawHub skill at `@cua/driver`; the bundle includes the
-macOS, Windows, and Linux documents. Direct installs through `cua-driver skills
-install` still keep only the host OS document unless `--all-platforms` is used.
-
-ClawHub releases have their own explicit license boundary. The repository stays
-under MIT, while every skill copy published through ClawHub is distributed
-under MIT-0. Before a release, retain an internal record that Cua AI has the
-right to distribute every bundled file under MIT-0.
-
-Pull requests that change the skill run a publish dry-run with the pinned
-ClawHub CLI. A real release is available only through the
-`ClawHub: cua-driver skill` workflow's manual dispatch. The publish job requires
-all of the following:
-
-1. Dispatch the workflow from `main`.
-2. Enter a version that matches both `rust/Cargo.toml` and the `version` field
-   in `rust/Skills/cua-driver/SKILL.md`.
-3. Confirm the MIT-0 rights check in the workflow form.
-4. Configure a repository Actions secret named `CLAWHUB_TOKEN` for a publisher
-   that can release under the selected owner. The default owner is `cua`.
-
-The workflow pins the ClawHub CLI, records the source repository, commit, ref,
-and path, and uploads the JSON publish result as an Actions artifact.
-
-After publishing, inspect and scan the exact version, then install it into an
-empty work directory:
-
-```bash
-npx --yes clawhub@0.23.1 inspect @cua/driver --version 0.8.3 --files
-npx --yes clawhub@0.23.1 scan --slug driver --version 0.8.3 --update
-npx --yes clawhub@0.23.1 --workdir /tmp/cua-driver-clawhub-smoke \
-  install @cua/driver
-```
-
-Confirm that `MACOS.md`, `WINDOWS.md`, and `LINUX.md` are present, run
-`cua-driver doctor`, and perform a read-only `list_apps` call through OpenClaw.
-If a release is faulty, publish the last known-good content as a new patch
-version. Do not delete the current latest version before a replacement exists.

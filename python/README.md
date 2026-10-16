@@ -1,6 +1,7 @@
 # cua-driver Python SDK
 
 Rust-backed Python SDK and bundled executable for
+[Pincer](https://github.com/ModCritic/pincer), a fork of
 [Cua Driver](https://github.com/trycua/cua/tree/main/libs/cua-driver).
 
 ## Product boundary
@@ -28,8 +29,12 @@ agent SDK.
 
 ## Installation
 
-Install and usage docs live at https://cua.ai/docs/cua-driver/quickstart
-and https://cua.ai/docs/reference/cua-driver/mcp-tools.
+This fork publishes no wheels. The `cua-driver` name in `pyproject.toml` is
+upstream's, so a `cua-driver` package installed from PyPI is not this fork.
+By default, `build_wheel.py` downloads upstream's release binary from GitHub
+and bundles it; `--skip-download` uses the binary already in
+`src/cua_driver/bin/` instead. Build this fork's executable from source as
+described in the [top-level README](../README.md#build-from-source).
 
 The wheel contains generated UniFFI bindings, a platform-specific Rust SDK
 library, and the `cua-driver` executable. `CuaDriver.create()` loads the runtime

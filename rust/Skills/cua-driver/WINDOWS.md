@@ -442,14 +442,13 @@ your prior tool calls earned.
 ## Prerequisites: check before starting
 
 1. **`cua-driver` is on `$PATH`**: `Get-Command cua-driver` or
-   `where.exe cua-driver`. Install location:
-   `%LOCALAPPDATA%\Programs\trycua\cua-driver-rs\bin\cua-driver.exe`,
-   added to the user PATH by the install script.
-   If missing, point the user at:
-   ```powershell
-   irm https://cua.ai/driver/install.ps1 | iex
-   ```
-   and stop.
+   `where.exe cua-driver`. A source build is at
+   `rust\target\release\cua-driver.exe` in the user's checkout and is on
+   PATH only if the user put it there; `scripts\install-local.ps1` installs
+   it as `cua-driver-local.exe` instead.
+   If it is missing, point the user at the build steps in the Pincer README
+   (https://github.com/ModCritic/pincer) and stop. Do not suggest upstream
+   Cua's installer; it installs a different build.
 2. **The runtime owner must run in an interactive session (Session 1+),
    NOT Session 0.** This is the daemon for one-shot CLI/service mode and the
    MCP process for bare stdio MCP. Windows isolates services into Session 0 with no

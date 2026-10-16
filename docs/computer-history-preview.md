@@ -10,13 +10,20 @@ performed through Cua Driver. It does not watch unrelated desktop activity.
 ## Before you start
 
 - Use macOS, Windows, or Linux in an interactive desktop session.
-- Install a Cua Driver nightly that includes Computer History.
+- Use a build that includes Computer History. For Pincer, build from source;
+  see the [README](../README.md#build-from-source).
 - Grant Cua Driver the usual permissions required for the actions you want it
   to perform. Computer History does not add permission to perform an action.
 - On Linux, run a desktop Secret Service implementation such as GNOME
   Keyring. The preview fails closed if no unlocked Secret Service is available.
 
 ## Install or switch to the nightly channel
+
+> [!NOTE]
+> The commands in this section run upstream Cua's installer from cua.ai and
+> install upstream Cua Driver, not Pincer. To try Computer History with this
+> fork, build it from source as described in the
+> [README](../README.md#build-from-source).
 
 For a fresh macOS or Linux installation, run:
 
@@ -132,6 +139,10 @@ cua-driver history delete --yes
 This is cryptographic deletion. Cua Driver does not claim physical erasure from
 APFS snapshots, backups, copied ciphertext, SSD wear leveling, or memory that a
 process already decrypted.
+
+The uninstall commands below run upstream Cua's uninstaller from cua.ai.
+They remove an upstream installation and do not apply to a source build of
+Pincer.
 
 To purge history while uninstalling on macOS or Linux, run:
 

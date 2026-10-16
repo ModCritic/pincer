@@ -1,9 +1,8 @@
 # Cua Driver agent skill
 
 This cross-agent skill teaches an AI agent to operate native applications on
-macOS, Windows, and Linux with the
-[`cua-driver`](https://github.com/trycua/cua/tree/main/libs/cua-driver/rust)
-CLI or MCP server.
+macOS, Windows, and Linux with the `cua-driver` CLI or MCP server from
+[Pincer](https://github.com/ModCritic/pincer), a fork of Cua Driver.
 
 It covers the canonical snapshot-action-verify loop, exact window addressing,
 accessibility and pixel actions, background/foreground delivery, typed browser
@@ -11,19 +10,21 @@ automation, session recording, and platform-specific limitations. The skill
 defaults to background delivery and requires structured refusal or observed
 failure before a caller escalates to foreground input.
 
-## Install Cua Driver
+## Build the driver
 
-macOS or Linux:
+Pincer publishes no release binaries. Build the driver from a checkout of
+https://github.com/ModCritic/pincer with the Rust toolchain that
+`rust/rust-toolchain.toml` pins.
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://cua.ai/driver/install.sh)"
+cd rust
+cargo build --release -p cua-driver
 ```
 
-Windows PowerShell:
-
-```powershell
-irm https://cua.ai/driver/install.ps1 | iex
-```
+The binary is `rust/target/release/cua-driver` (`cua-driver.exe` on Windows),
+or `$CARGO_TARGET_DIR/release/cua-driver` when `CARGO_TARGET_DIR` is set. The
+binary keeps the upstream name `cua-driver`. Do not install upstream Cua
+Driver to get it; upstream releases are a different build.
 
 Then verify the current host:
 
@@ -31,20 +32,15 @@ Then verify the current host:
 cua-driver doctor
 ```
 
-On macOS, the installed `CuaDriver.app` needs Accessibility and Screen
-Recording permission. On Windows, the daemon must run in an interactive user
+On macOS, the app bundle that runs the driver (`CuaDriverLocal.app` after
+`scripts/install-local.sh`) needs Accessibility and Screen Recording
+permission. On Windows, the daemon must run in an interactive user
 desktop rather than Session 0. On Linux, the daemon must share the graphical
 session and AT-SPI session bus.
 
 ## Install the skill
 
-From ClawHub:
-
-```bash
-clawhub install @cua/driver
-```
-
-Or let the installed driver add the skill it was built with to detected agent
+Let the driver add the skill it was built with to detected agent
 directories. It writes the copy bundled in the binary and downloads nothing:
 
 ```bash
@@ -99,19 +95,19 @@ missing. See `RECORDING.md`.
 
 ## Updates and source builds
 
-The skill is versioned with Cua Driver releases. Back up personal edits before updating: updates replace the installed pack.
+The skill is versioned with the driver binary it is bundled in. Back up personal edits before updating: updates replace the installed pack.
 The pack version does not identify the running daemon; inspect the live tool
 schema when versions differ. A source build bundles the pack from its own
 checkout, so `cua-driver skills install` run from that build installs the
 matching pack.
 
-From a local checkout, `libs/cua-driver/scripts/install-local.sh` installs the
-source-built macOS driver as `cua-driver-local` and `CuaDriverLocal.app`, without
-replacing the release installation. Keep standalone and embedded identity rules from
+From a local checkout, `scripts/install-local.sh` installs the source-built
+macOS driver as `cua-driver-local` and `CuaDriverLocal.app`, without replacing
+an existing `cua-driver` installation. Keep standalone and embedded identity rules from
 `MACOS.md` and `EMBEDDING.md`; launching a raw binary is not a substitute for
 the stable app identity that owns macOS TCC grants.
 
 ## License
 
-Repository source files are MIT licensed. Copies published through ClawHub are
-distributed under MIT-0, as required for ClawHub skills.
+Repository source files are MIT licensed. The `@cua/driver` skill on ClawHub
+is upstream's copy, not this pack.

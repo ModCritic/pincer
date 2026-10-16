@@ -26,7 +26,7 @@ metadata:
       - name: CUA_DRIVER_RS_MCP_HTTP_TOKEN
         required: false
         description: Required host-generated bearer token when the local MCP HTTP endpoint is enabled.
-    homepage: https://cua.ai/docs/cua-driver
+    homepage: https://github.com/ModCritic/pincer
 ---
 
 # cua-driver
