@@ -1,6 +1,7 @@
 //! `capture_series`: screenshots on a fixed schedule measured from one start
 //! time, each optionally cropped to a region, capped on its long edge, and
-//! kept only when it changed.
+//! kept only when it changed. The series can end early once the frames stop
+//! changing.
 //!
 //! Platform adapters supply raw frames through [`FrameSource`]. Scheduling,
 //! cropping, scaling, change detection, file output and the reply live here
@@ -93,6 +94,9 @@ pub struct SeriesRequest {
     pub return_frames: ReturnFrames,
     pub max_inline_images: usize,
     pub change_threshold: f64,
+    /// End the series once no frame has differed from the one before it for
+    /// this long. The first frame starts the clock; a change restarts it.
+    pub stop_after_unchanged_ms: Option<u64>,
 }
 
 /// One raw frame from a platform capture.
@@ -336,6 +340,14 @@ impl SeriesRequest {
                 .filter(|value| (0.0..=1.0).contains(value))
                 .ok_or("`change_threshold` must be a number from 0 to 1")?,
         };
+        let stop_after_unchanged_ms = match integer_arg(args, "stop_after_unchanged_ms")? {
+            Some(value) if value > MAX_SPAN_MS => {
+                return Err(format!(
+                    "`stop_after_unchanged_ms` must be 0 to {MAX_SPAN_MS}"
+                ))
+            }
+            value => value,
+        };
         if output == Output::Inline
             && return_frames == ReturnFrames::All
             && offsets_ms.len() > max_inline_images
@@ -356,6 +368,7 @@ impl SeriesRequest {
             return_frames,
             max_inline_images,
             change_threshold,
+            stop_after_unchanged_ms,
         })
     }
 }
@@ -602,19 +615,49 @@ struct FrameOutcome {
     image: Rgba8Image,
     record: FrameRecord,
     inline: Option<Vec<u8>>,
+    /// Differs from the previous frame (always true for the first one).
+    moved: bool,
+    /// Ends the series under `stop_after_unchanged_ms`.
+    stops: bool,
+}
+
+/// The `stop_after_unchanged_ms` clock as it stands when a frame is taken.
+#[derive(Clone, Copy)]
+struct StopClock {
+    limit_ms: u64,
+    /// `t_ms` of the frame that started the current unchanged stretch.
+    quiet_since_ms: u64,
 }
 
 fn capture_one(
     source: &dyn FrameSource,
     request: &SeriesRequest,
     reference: Option<&Rgba8Image>,
+    previous: Option<&Rgba8Image>,
+    clock: Option<StopClock>,
     mut record: FrameRecord,
-    is_last: bool,
+    scheduled_last: bool,
 ) -> Result<FrameOutcome> {
     let raw = source.capture(request.region)?;
     let image = prepare_frame(raw, request.region, request.max_image_dimension)?;
     let diff = reference.map(|reference| diff_fraction(reference, &image));
     let changed = diff.is_none_or(|diff| diff > request.change_threshold);
+    // The stop clock always compares with the previous frame. That is also
+    // the reference unless `changed` skipped the previous frame.
+    let moved = match previous {
+        None => true,
+        Some(previous) if reference.is_some_and(|reference| std::ptr::eq(reference, previous)) => {
+            changed
+        }
+        Some(previous) => diff_fraction(previous, &image) > request.change_threshold,
+    };
+    // Reaching the limit on the last scheduled frame is not an early stop.
+    let stops = !scheduled_last
+        && !moved
+        && clock.is_some_and(|clock| {
+            record.t_ms.saturating_sub(clock.quiet_since_ms) >= clock.limit_ms
+        });
+    let is_last = scheduled_last || stops;
     let keep = match request.return_frames {
         ReturnFrames::All => true,
         ReturnFrames::Changed => changed,
@@ -642,6 +685,8 @@ fn capture_one(
         image,
         record,
         inline,
+        moved,
+        stops,
     })
 }
 
@@ -671,6 +716,11 @@ pub async fn run(request: SeriesRequest, source: Arc<dyn FrameSource>) -> ToolRe
     let mut records: Vec<FrameRecord> = Vec::with_capacity(total);
     let mut inline: Vec<(usize, Vec<u8>)> = Vec::new();
     let mut reference: Option<Arc<Rgba8Image>> = None;
+    // Kept only for `stop_after_unchanged_ms`, with the (index, t_ms) of the
+    // frame that started the current unchanged stretch.
+    let mut previous: Option<Arc<Rgba8Image>> = None;
+    let mut quiet_since: Option<(usize, u64)> = None;
+    let mut stop_reason: Option<String> = None;
     // Every frame is scheduled against this one monotonic start, so a slow
     // capture delays only the frames whose time it overran.
     let start = tokio::time::Instant::now();
@@ -698,14 +748,23 @@ pub async fn run(request: SeriesRequest, source: Arc<dyn FrameSource>) -> ToolRe
         let job_source = source.clone();
         let job_request = request.clone();
         let job_reference = reference.clone();
-        let is_last = index + 1 == total;
+        let job_previous = previous.clone();
+        let clock = request.stop_after_unchanged_ms.zip(quiet_since).map(
+            |(limit_ms, (_, quiet_since_ms))| StopClock {
+                limit_ms,
+                quiet_since_ms,
+            },
+        );
+        let scheduled_last = index + 1 == total;
         let outcome = tokio::task::spawn_blocking(move || {
             capture_one(
                 job_source.as_ref(),
                 &job_request,
                 job_reference.as_deref(),
+                job_previous.as_deref(),
+                clock,
                 record,
-                is_last,
+                scheduled_last,
             )
         })
         .await
@@ -717,8 +776,25 @@ pub async fn run(request: SeriesRequest, source: Arc<dyn FrameSource>) -> ToolRe
         };
         // `changed` compares with the last kept frame; the other modes
         // compare with the previous frame.
+        let image = Arc::new(outcome.image);
         if request.return_frames != ReturnFrames::Changed || outcome.record.returned {
-            reference = Some(Arc::new(outcome.image));
+            reference = Some(image.clone());
+        }
+        if let Some(limit) = request.stop_after_unchanged_ms {
+            let t_ms = outcome.record.t_ms;
+            if outcome.moved {
+                quiet_since = Some((index, t_ms));
+            }
+            if outcome.stops {
+                let (since_index, since_ms) = quiet_since.unwrap_or((0, 0));
+                stop_reason = Some(format!(
+                    "no frame changed for {} ms (frames {}-{}); stop_after_unchanged_ms is {limit}",
+                    t_ms.saturating_sub(since_ms),
+                    since_index + 1,
+                    index + 1
+                ));
+            }
+            previous = Some(image);
         }
         records.push(outcome.record);
         if let Some(bytes) = outcome.inline {
@@ -730,8 +806,17 @@ pub async fn run(request: SeriesRequest, source: Arc<dyn FrameSource>) -> ToolRe
                 records[evicted].returned = false;
             }
         }
+        if stop_reason.is_some() {
+            break;
+        }
     }
-    success(&request, source.as_ref(), records, inline)
+    success(
+        &request,
+        source.as_ref(),
+        records,
+        inline,
+        stop_reason.as_deref(),
+    )
 }
 
 fn summary_header(
@@ -769,8 +854,13 @@ fn summary_header(
     )
 }
 
-fn structured(request: &SeriesRequest, source: &dyn FrameSource, records: &[FrameRecord]) -> Value {
-    json!({
+fn structured(
+    request: &SeriesRequest,
+    source: &dyn FrameSource,
+    records: &[FrameRecord],
+    stop_reason: Option<&str>,
+) -> Value {
+    let mut value = json!({
         "target": source.label(),
         "region": request.region.map(|region| json!({
             "x": region.x, "y": region.y, "width": region.width, "height": region.height,
@@ -782,11 +872,17 @@ fn structured(request: &SeriesRequest, source: &dyn FrameSource, records: &[Fram
             Output::Inline => None,
         },
         "return_frames": request.return_frames.name(),
+        "scheduled_count": request.offsets_ms.len(),
         "frame_count": records.len(),
         "returned_count": records.iter().filter(|record| record.returned).count(),
         "late_count": records.iter().filter(|record| record.late).count(),
+        "stopped_early": stop_reason.is_some(),
         "frames": records.iter().map(FrameRecord::json).collect::<Vec<_>>(),
-    })
+    });
+    if let Some(reason) = stop_reason {
+        value["stop_reason"] = json!(reason);
+    }
+    value
 }
 
 fn success(
@@ -794,9 +890,17 @@ fn success(
     source: &dyn FrameSource,
     records: Vec<FrameRecord>,
     inline: Vec<(usize, Vec<u8>)>,
+    stop_reason: Option<&str>,
 ) -> ToolResult {
     use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
     let mut lines = vec![summary_header(request, source, &records)];
+    if let Some(reason) = stop_reason {
+        lines.push(format!(
+            "Stopped early after frame {} of {}: {reason}.",
+            records.len(),
+            request.offsets_ms.len()
+        ));
+    }
     lines.extend(records.iter().map(FrameRecord::line));
     let mut content = vec![Content::text(lines.join("\n"))];
     for (_, bytes) in inline {
@@ -809,7 +913,7 @@ fn success(
     ToolResult {
         content,
         is_error: None,
-        structured_content: Some(structured(request, source, &records)),
+        structured_content: Some(structured(request, source, &records, stop_reason)),
         action_record: None,
     }
 }
@@ -830,7 +934,7 @@ fn failure(
         lines.push(summary_header(request, source, records));
         lines.extend(records.iter().map(FrameRecord::line));
     }
-    let mut value = structured(request, source, records);
+    let mut value = structured(request, source, records, None);
     value["code"] = json!("capture_failed");
     value["failed_frame"] = json!(index + 1);
     value["error"] = json!(error.to_string());
@@ -1196,6 +1300,12 @@ mod tests {
         assert_eq!(defaults.return_frames, ReturnFrames::All);
         assert_eq!(defaults.max_inline_images, DEFAULT_MAX_INLINE_IMAGES);
         assert_eq!(defaults.change_threshold, DEFAULT_CHANGE_THRESHOLD);
+        assert_eq!(defaults.stop_after_unchanged_ms, None);
+        for value in [0, 2000, MAX_SPAN_MS] {
+            let request =
+                SeriesRequest::parse(&json!({ "stop_after_unchanged_ms": value })).unwrap();
+            assert_eq!(request.stop_after_unchanged_ms, Some(value));
+        }
 
         for (value, expected) in [
             (json!({"quality": 50}), "only to format \"jpeg\""),
@@ -1210,6 +1320,22 @@ mod tests {
             ),
             (json!({"max_inline_images": 31}), "1 to 30"),
             (json!({"change_threshold": 1.5}), "from 0 to 1"),
+            (
+                json!({"stop_after_unchanged_ms": -1}),
+                "non-negative integer",
+            ),
+            (
+                json!({"stop_after_unchanged_ms": 2.5}),
+                "non-negative integer",
+            ),
+            (
+                json!({"stop_after_unchanged_ms": "2000"}),
+                "non-negative integer",
+            ),
+            (
+                json!({"stop_after_unchanged_ms": 600_001}),
+                "`stop_after_unchanged_ms` must be 0 to 600000",
+            ),
             (json!({"count": 11}), "exceed max_inline_images 10"),
             (
                 json!({"output": "files", "out_dir": "/nonexistent/cua-capture-series"}),
@@ -1403,6 +1529,199 @@ mod tests {
         let result = run(last, source).await;
         assert_eq!(image_count(&result), 1);
         assert_eq!(frames_of(&result)[2]["returned"], true);
+    }
+
+    fn structured_of(result: &ToolResult) -> &Value {
+        result.structured_content.as_ref().unwrap()
+    }
+
+    fn text_of(result: &ToolResult) -> &str {
+        let Content::Text { text, .. } = &result.content[0] else {
+            panic!("first content block is not text");
+        };
+        text
+    }
+
+    /// Offsets 100 ms apart, so a stop limit between two of them is never
+    /// reached early by scheduling jitter.
+    fn spaced(count: u64) -> Vec<u64> {
+        (0..count).map(|index| index * 100).collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_still_series_stops_once_nothing_changed_for_the_limit() {
+        let source = FakeSource::new(vec![solid(1); 8], Duration::ZERO);
+        let request = SeriesRequest::parse(&json!({
+            "offsets_ms": spaced(8), "stop_after_unchanged_ms": 250
+        }))
+        .unwrap();
+        let result = run(request, source).await;
+        assert_eq!(result.is_error, None, "{:?}", result.content);
+        let structured = structured_of(&result);
+        // The first frame starts the clock at 0 ms; frame 4 at 300 ms is the
+        // first one 250 ms or more after it.
+        assert_eq!(structured["frame_count"], 4);
+        assert_eq!(structured["scheduled_count"], 8);
+        assert_eq!(structured["stopped_early"], true);
+        let reason = structured["stop_reason"].as_str().unwrap();
+        assert!(reason.contains("(frames 1-4)"), "{reason}");
+        assert!(
+            reason.contains("stop_after_unchanged_ms is 250"),
+            "{reason}"
+        );
+        assert!(
+            text_of(&result).contains("Stopped early after frame 4 of 8"),
+            "{}",
+            text_of(&result)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_change_restarts_the_unchanged_clock() {
+        let frames = vec![
+            solid(1),
+            solid(1),
+            solid(2),
+            solid(2),
+            solid(2),
+            solid(2),
+            solid(2),
+            solid(2),
+        ];
+        let source = FakeSource::new(frames, Duration::ZERO);
+        let request = SeriesRequest::parse(&json!({
+            "offsets_ms": spaced(8), "stop_after_unchanged_ms": 250
+        }))
+        .unwrap();
+        let result = run(request, source).await;
+        let structured = structured_of(&result);
+        // Frame 3 changed at 200 ms, so the stop comes at frame 6 (500 ms).
+        assert_eq!(structured["frame_count"], 6);
+        assert_eq!(structured["stopped_early"], true);
+        let reason = structured["stop_reason"].as_str().unwrap();
+        assert!(reason.contains("(frames 3-6)"), "{reason}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_series_that_keeps_changing_runs_its_full_schedule() {
+        let source = FakeSource::new((0..5).map(solid).collect(), Duration::ZERO);
+        let request = SeriesRequest::parse(&json!({
+            "count": 5, "interval_ms": 0, "stop_after_unchanged_ms": 0
+        }))
+        .unwrap();
+        let result = run(request, source).await;
+        let structured = structured_of(&result);
+        assert_eq!(structured["frame_count"], 5);
+        assert_eq!(structured["stopped_early"], false);
+        assert!(structured.get("stop_reason").is_none());
+        assert!(!text_of(&result).contains("Stopped early"));
+
+        // Reaching the limit only on the last scheduled frame is not early.
+        let source = FakeSource::new(vec![solid(1); 4], Duration::ZERO);
+        let request = SeriesRequest::parse(&json!({
+            "offsets_ms": spaced(4), "stop_after_unchanged_ms": 300
+        }))
+        .unwrap();
+        let result = run(request, source).await;
+        assert_eq!(structured_of(&result)["frame_count"], 4);
+        assert_eq!(structured_of(&result)["stopped_early"], false);
+
+        // Without the option the series never stops early, even when still.
+        let source = FakeSource::new(vec![solid(1); 5], Duration::ZERO);
+        let request = SeriesRequest::parse(&json!({"count": 5, "interval_ms": 0})).unwrap();
+        let result = run(request, source).await;
+        assert_eq!(structured_of(&result)["frame_count"], 5);
+        assert_eq!(structured_of(&result)["stopped_early"], false);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn zero_stops_at_the_first_frame_that_matches_the_one_before_it() {
+        let frames = vec![solid(1), solid(2), solid(2), solid(3)];
+        let source = FakeSource::new(frames, Duration::ZERO);
+        let request = SeriesRequest::parse(&json!({
+            "count": 4, "interval_ms": 0, "stop_after_unchanged_ms": 0
+        }))
+        .unwrap();
+        let result = run(request, source).await;
+        assert_eq!(structured_of(&result)["frame_count"], 3);
+        assert_eq!(structured_of(&result)["stopped_early"], true);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn last_returns_the_frame_that_ended_the_series() {
+        let source = FakeSource::new(vec![solid(1); 8], Duration::ZERO);
+        let request = SeriesRequest::parse(&json!({
+            "offsets_ms": spaced(8), "stop_after_unchanged_ms": 250,
+            "return_frames": "last"
+        }))
+        .unwrap();
+        let result = run(request, source).await;
+        let returned: Vec<bool> = frames_of(&result)
+            .iter()
+            .map(|frame| frame["returned"].as_bool().unwrap())
+            .collect();
+        assert_eq!(returned, vec![false, false, false, true]);
+        assert_eq!(image_count(&result), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_stop_clock_compares_with_the_previous_frame_in_changed_mode() {
+        // Each frame whitens 4 more of the 200 pixels: 0.02 against the
+        // previous frame, under the 0.03 threshold, but 0.04 against the
+        // frame kept two steps earlier.
+        let creeping = |step: u32| {
+            rgba(20, 10, move |x, y| {
+                if y * 20 + x < step * 4 {
+                    [255, 255, 255, 255]
+                } else {
+                    [0, 0, 0, 255]
+                }
+            })
+        };
+        let source = FakeSource::new((0..8).map(creeping).collect(), Duration::ZERO);
+        let request = SeriesRequest::parse(&json!({
+            "offsets_ms": spaced(8), "stop_after_unchanged_ms": 250,
+            "return_frames": "changed", "change_threshold": 0.03
+        }))
+        .unwrap();
+        let result = run(request, source).await;
+        let frames = frames_of(&result);
+        assert_eq!(frames.len(), 4);
+        assert_eq!(structured_of(&result)["stopped_early"], true);
+        // `changed` still measures against the last kept frame.
+        let returned: Vec<bool> = frames
+            .iter()
+            .map(|frame| frame["returned"].as_bool().unwrap())
+            .collect();
+        assert_eq!(returned, vec![true, false, true, false]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn files_written_before_an_early_stop_stay() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_str().unwrap().to_owned();
+        let source = FakeSource::new(vec![solid(1); 8], Duration::ZERO);
+        let request = SeriesRequest::parse(&json!({
+            "offsets_ms": spaced(8), "stop_after_unchanged_ms": 250,
+            "output": "files", "out_dir": dir
+        }))
+        .unwrap();
+        let result = run(request, source).await;
+        assert_eq!(result.is_error, None);
+        let mut names: Vec<String> = std::fs::read_dir(temp.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "frame-0001.png",
+                "frame-0002.png",
+                "frame-0003.png",
+                "frame-0004.png"
+            ]
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

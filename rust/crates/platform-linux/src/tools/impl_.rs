@@ -13934,7 +13934,9 @@ impl Tool for CaptureSeriesTool {
                 `change_threshold` of its pixels) or last. Inline replies carry at most \
                 `max_inline_images`; `output:\"files\"` writes new frame-0001.png, ... into \
                 `out_dir` instead. Each frame reports t_ms, and late when the previous capture \
-                overran its slot. At most 120 frames within 600000 ms."
+                overran its slot. `stop_after_unchanged_ms` ends the series early once no frame \
+                has differed from the one before it for that long. At most 120 frames within \
+                600000 ms."
                 .into(),
             input_schema: json!({"type":"object","properties":{
                 "session": cua_driver_core::tool_schema::session_schema(),
@@ -13953,7 +13955,8 @@ impl Tool for CaptureSeriesTool {
                 "out_dir":{"type":"string","description":"Absolute path of an existing directory, not a symlink. Frame files that already exist are never overwritten; the call refuses instead."},
                 "return_frames":{"type":"string","enum":["all","changed","last"],"description":"Which frames to return (default all)."},
                 "max_inline_images":{"type":"integer","minimum":1,"maximum":30,"description":"Most images in an inline reply (default 10). For changed, the first and the latest frames are kept."},
-                "change_threshold":{"type":"number","minimum":0,"maximum":1,"description":"Fraction of pixels that must differ for a frame to count as changed (default 0.001), measured on the cropped, capped frame."}
+                "change_threshold":{"type":"number","minimum":0,"maximum":1,"description":"Fraction of pixels that must differ for a frame to count as changed (default 0.001), measured on the cropped, capped frame."},
+                "stop_after_unchanged_ms":{"type":"integer","minimum":0,"maximum":600000,"description":"End early once no frame has differed from the previous frame (per change_threshold) for this long. The first frame starts the clock and any change restarts it. The reply then reports stopped_early and stop_reason."}
             },"additionalProperties":false}),
             read_only: true,
             destructive: false,
