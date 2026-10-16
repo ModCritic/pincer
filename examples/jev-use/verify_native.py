@@ -18,10 +18,10 @@ before the task controls; the harness confirms the density in its state file
 (#4312). ``measure_native.py`` turns the runner logs into an accuracy table.
 
 Build the harness first, from the repository root:
-``libs/cua-driver/tests/fixtures/build/macos.sh --only appkit``,
-``libs/cua-driver/tests/fixtures/build/windows.ps1 -Targets wpf`` (or
+``tests/fixtures/build/macos.sh --only appkit``,
+``tests/fixtures/build/windows.ps1 -Targets wpf`` (or
 ``-Targets winui3``), or
-``libs/cua-driver/tests/fixtures/build/linux.sh --only gtk3``.
+``tests/fixtures/build/linux.sh --only gtk3``.
 """
 
 from __future__ import annotations
@@ -40,8 +40,8 @@ from pathlib import Path
 from typing import Callable, NamedTuple
 
 BASE = Path(__file__).resolve().parent
-REPO = BASE.parents[3]
-TEST_APPS = REPO / "libs/cua-driver/rust/test-apps"
+REPO = BASE.parents[1]
+TEST_APPS = REPO / "rust/test-apps"
 NOTE_TEXT = "jev-use native note"
 
 
@@ -81,7 +81,7 @@ HARNESSES = {
         density_env="CUA_GTK3_TASK_DENSITY",
     ),
     "canvas": Harness(
-        REPO / "libs/cua-driver/tests/fixtures/apps/cross-platform/visual-only-canvas/main.py", "",
+        REPO / "tests/fixtures/apps/cross-platform/visual-only-canvas/main.py", "",
         "Cua Visual-Only Canvas Fixture", "cua.visual_canvas_task_state_v1", "CUA_CANVAS_TASK_STATE",
         journal=True, max_depth=1,
     ),

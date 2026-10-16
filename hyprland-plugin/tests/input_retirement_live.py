@@ -100,12 +100,12 @@ def preflight(args):
     for name, actual in artifacts.items():
         if actual != getattr(args, name + "_sha256"):
             raise ValueError("artifact digest does not match selected candidate: " + name)
-    root = Path(__file__).resolve().parents[4]
+    root = Path(__file__).resolve().parents[2]
     head = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     if head != args.source_sha:
         raise ValueError("harness checkout differs from selected source SHA")
-    dirty = subprocess.check_output(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=normal",
-                                    "--", "libs/cua-driver"], text=True)
+    dirty = subprocess.check_output(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=normal"],
+                                    text=True)
     if dirty:
         raise ValueError("commit the candidate Driver/plugin/harness changes before native certification")
     plan = json.loads(args.plan.read_text())

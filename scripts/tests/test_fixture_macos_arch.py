@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-BUILD_SCRIPT = REPO_ROOT / "libs/cua-driver/tests/fixtures/build/macos.sh"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BUILD_SCRIPT = REPO_ROOT / "tests/fixtures/build/macos.sh"
 
 FAKE_UNAME = '#!/usr/bin/env bash\nprintf "%s\\n" "$FAKE_UNAME_ARCH"\n'
 FAKE_XCRUN = """#!/usr/bin/env bash

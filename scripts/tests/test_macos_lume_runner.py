@@ -20,20 +20,26 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-RUN_ALL = REPO_ROOT / "libs/cua-driver/tests/runners/macos-lume/run-all.sh"
-SEED_TCC = REPO_ROOT / "libs/cua-driver/tests/runners/macos-lume/seed-tcc.sh"
-SEED_TCC_GUEST = REPO_ROOT / "libs/cua-driver/tests/runners/macos-lume/seed-tcc-guest.sh"
-HARNESS_GUIDE = REPO_ROOT / "libs/cua-driver/docs/test-harnesses-guide.md"
-RUNNER_GUIDE = REPO_ROOT / "libs/cua-driver/tests/runners/macos-lume/README.md"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+RUN_ALL = REPO_ROOT / "tests/runners/macos-lume/run-all.sh"
+SEED_TCC = REPO_ROOT / "tests/runners/macos-lume/seed-tcc.sh"
+SEED_TCC_GUEST = REPO_ROOT / "tests/runners/macos-lume/seed-tcc-guest.sh"
+HARNESS_GUIDE = REPO_ROOT / "docs/test-harnesses-guide.md"
+RUNNER_GUIDE = REPO_ROOT / "tests/runners/macos-lume/README.md"
 RUN_RUST_E2E = REPO_ROOT / "scripts/ci/macos/run-rust-e2e.sh"
-ELECTRON_BUILD = REPO_ROOT / "libs/cua-driver/tests/fixtures/apps/cross-platform/electron/build.sh"
+ELECTRON_BUILD = REPO_ROOT / "tests/fixtures/apps/cross-platform/electron/build.sh"
 ELECTRON_LOCK = (
-    REPO_ROOT / "libs/cua-driver/tests/fixtures/apps/cross-platform/electron/package-lock.json"
+    REPO_ROOT / "tests/fixtures/apps/cross-platform/electron/package-lock.json"
 )
-TAURI_BUILD = REPO_ROOT / "libs/cua-driver/tests/fixtures/apps/cross-platform/tauri/build.sh"
+TAURI_BUILD = REPO_ROOT / "tests/fixtures/apps/cross-platform/tauri/build.sh"
 
 requires_jq = pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
+# run-rust-e2e.sh lived in upstream's monorepo-level scripts/ci/, which this
+# repository does not include, so its tests skip while it is absent.
+requires_run_rust_e2e = pytest.mark.skipif(
+    not RUN_RUST_E2E.is_file(), reason="upstream's scripts/ci is not part of this repository"
+)
+RUN_RUST_E2E_PARAM = pytest.param(RUN_RUST_E2E, marks=requires_run_rust_e2e)
 
 
 def _write_executable(path: Path, body: str) -> None:
@@ -95,14 +101,14 @@ def _fields(output: str) -> dict[str, str]:
 
 @pytest.mark.parametrize(
     "script",
-    [RUN_ALL, RUN_RUST_E2E, SEED_TCC, SEED_TCC_GUEST, ELECTRON_BUILD, TAURI_BUILD],
+    [RUN_ALL, RUN_RUST_E2E_PARAM, SEED_TCC, SEED_TCC_GUEST, ELECTRON_BUILD, TAURI_BUILD],
     ids=lambda path: f"{path.parent.name}/{path.name}",
 )
 def test_runner_scripts_have_valid_bash_syntax(script: Path) -> None:
     assert subprocess.run(["bash", "-n", str(script)], check=False).returncode == 0
 
 
-@pytest.mark.parametrize("script", [RUN_ALL, RUN_RUST_E2E], ids=lambda path: path.name)
+@pytest.mark.parametrize("script", [RUN_ALL, RUN_RUST_E2E_PARAM], ids=lambda path: path.name)
 def test_library_only_mode_fails_closed_when_script_is_executed(script: Path) -> None:
     completed = subprocess.run(
         ["bash", str(script)],
@@ -309,7 +315,7 @@ def test_lume_runner_accepts_modern_tk(tmp_path: Path, patchlevel: str) -> None:
     assert completed.returncode == 0, completed.stderr
 
 
-@pytest.mark.parametrize("script", [RUN_ALL, RUN_RUST_E2E], ids=lambda path: path.name)
+@pytest.mark.parametrize("script", [RUN_ALL, RUN_RUST_E2E_PARAM], ids=lambda path: path.name)
 def test_no_permission_mode_check_pipes_into_grep(script: Path) -> None:
     text = script.read_text(encoding="utf-8")
     assert re.search(r"\|\s*grep\s+[^\n]*-q", text) is None
@@ -856,8 +862,9 @@ def test_artifact_history_is_never_overwritten(tmp_path: Path) -> None:
     assert (artifact_dir / "results.jsonl").is_file()
 
 
+@requires_run_rust_e2e
 def test_run_rust_e2e_reads_binaries_from_the_configured_target_dir(tmp_path: Path) -> None:
-    rust_root = REPO_ROOT / "libs/cua-driver/rust"
+    rust_root = REPO_ROOT / "rust"
     default = _run(RUN_RUST_E2E, "resolved_build_target_dir", env={"CARGO_TARGET_DIR": ""})
     absolute = _run(
         RUN_RUST_E2E, "resolved_build_target_dir", env={"CARGO_TARGET_DIR": str(tmp_path / "t")}
@@ -972,6 +979,7 @@ def test_swiftui_retry_cell_and_harness_must_agree(args: list[str]) -> None:
     assert _parse(args)["status"] == "2"
 
 
+@requires_run_rust_e2e
 def test_native_swiftui_selector_matches_exactly_one_owned_cell() -> None:
     completed = _run(
         RUN_RUST_E2E,
@@ -2009,6 +2017,7 @@ def test_the_trap_leaves_an_unclaimed_daemon_alone(tmp_path: Path) -> None:
 
 
 @requires_jq
+@requires_run_rust_e2e
 def test_failure_record_separates_cells_lanes_videos_and_preflight(tmp_path: Path) -> None:
     record_file = tmp_path / "failures.json"
     completed = _run(
@@ -2038,6 +2047,7 @@ def test_failure_record_separates_cells_lanes_videos_and_preflight(tmp_path: Pat
 
 
 @requires_jq
+@requires_run_rust_e2e
 def test_a_green_run_writes_an_empty_failure_record(tmp_path: Path) -> None:
     record_file = tmp_path / "failures.json"
     completed = _run(
@@ -2054,6 +2064,7 @@ def test_a_green_run_writes_an_empty_failure_record(tmp_path: Path) -> None:
     assert record["report_failed"] is False
 
 
+@requires_run_rust_e2e
 def test_namespaced_lane_writes_a_complete_artifact_safe_log(tmp_path: Path) -> None:
     selector = "snapshot_publication::harness_appkit_pending_snapshot_cannot_retarget_token"
     completed = _run(
@@ -2071,6 +2082,7 @@ def test_namespaced_lane_writes_a_complete_artifact_safe_log(tmp_path: Path) -> 
     assert log.read_text() == f"--exact\n{selector}\nstderr\n"
 
 
+@requires_run_rust_e2e
 @pytest.mark.parametrize("character", list('":<>|*?\r\n/\\'))
 def test_lane_log_replaces_nonportable_characters(tmp_path: Path, character: str) -> None:
     completed = _run(
@@ -2085,6 +2097,7 @@ def test_lane_log_replaces_nonportable_characters(tmp_path: Path, character: str
     assert log.read_text() == "evidence\n"
 
 
+@requires_run_rust_e2e
 def test_lane_bookkeeping_records_only_failing_lanes(tmp_path: Path) -> None:
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()

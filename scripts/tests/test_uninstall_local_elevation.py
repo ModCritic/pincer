@@ -23,8 +23,8 @@ from pathlib import Path
 import pytest
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-SCRIPTS = REPO_ROOT / "libs/cua-driver/scripts"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS = REPO_ROOT / "scripts"
 UNINSTALL_LOCAL = SCRIPTS / "uninstall-local.ps1"
 
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")

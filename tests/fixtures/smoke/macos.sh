@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # macOS cua-driver per-tool smoke test.
 #
-# Spawns the built AppKit harness app from libs/cua-driver/rust/test-apps/harness-appkit
-# (source lives under libs/cua-driver/tests/fixtures/apps/macos),
+# Spawns the built AppKit harness app from rust/test-apps/harness-appkit
+# (source lives under tests/fixtures/apps/macos),
 # runs every cua-driver tool against it with sensible JSON args, and reports
 # PASS / FAIL / SKIP in a sorted table.
 #
@@ -14,17 +14,17 @@
 # surface in ~30 seconds.
 #
 # Prereqs:
-#   - libs/cua-driver/tests/fixtures/build/macos.sh must have been run
+#   - tests/fixtures/build/macos.sh must have been run
 #   - cua-driver binary built (this script uses target/release if present)
 #   - TCC Accessibility permission granted to the cua-driver binary
 #     (otherwise AX-using tools return empty trees, which scores as PASS
 #     because the call exits cleanly — flagged in output)
 set -u
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../.." && pwd)"
-DRIVER="$ROOT/libs/cua-driver/rust/target/release/cua-driver"
-[[ -x "$DRIVER" ]] || DRIVER="$ROOT/libs/cua-driver/rust/target/debug/cua-driver"
-HARNESS_APP="$ROOT/libs/cua-driver/rust/test-apps/harness-appkit/CuaTestHarness.AppKit.app"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+DRIVER="$ROOT/rust/target/release/cua-driver"
+[[ -x "$DRIVER" ]] || DRIVER="$ROOT/rust/target/debug/cua-driver"
+HARNESS_APP="$ROOT/rust/test-apps/harness-appkit/CuaTestHarness.AppKit.app"
 HARNESS_EXE="$HARNESS_APP/Contents/MacOS/CuaTestHarness.AppKit"
 
 # macOS ships bash 3.2 (no associative arrays). Accumulate results as
@@ -74,13 +74,13 @@ echo "============================================================"
 
 if [[ ! -x "$DRIVER" ]]; then
     echo "ERROR: cua-driver binary not found at $DRIVER" >&2
-    echo "       Run: cd libs/cua-driver/rust && cargo build --release -p cua-driver" >&2
+    echo "       Run: cd rust && cargo build --release -p cua-driver" >&2
     exit 1
 fi
 
 if [[ ! -x "$HARNESS_EXE" ]]; then
     echo "ERROR: AppKit harness not built at $HARNESS_EXE" >&2
-    echo "       Run: libs/cua-driver/tests/fixtures/build/macos.sh" >&2
+    echo "       Run: tests/fixtures/build/macos.sh" >&2
     exit 1
 fi
 

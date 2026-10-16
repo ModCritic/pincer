@@ -6,9 +6,9 @@ from pathlib import Path
 import subprocess
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-UNINSTALL_LOCAL = REPO_ROOT / "libs/cua-driver/scripts/uninstall-local.sh"
-SCRIPTS = REPO_ROOT / "libs/cua-driver/scripts"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+UNINSTALL_LOCAL = REPO_ROOT / "scripts/uninstall-local.sh"
+SCRIPTS = REPO_ROOT / "scripts"
 
 
 def _executable(path: Path, body: str) -> None:

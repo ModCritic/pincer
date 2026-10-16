@@ -6,8 +6,8 @@ import subprocess
 import pytest
 
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-SCRIPTS = sorted((REPO_ROOT / "libs/cua-driver/scripts").glob("*.sh"))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS = sorted((REPO_ROOT / "scripts").glob("*.sh"))
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda path: path.name)
