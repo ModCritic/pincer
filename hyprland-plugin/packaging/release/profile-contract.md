@@ -25,8 +25,8 @@ Schema 1 remains restricted to the original Driver 0.24.0 source revision
 but allows an explicitly reviewed full source revision and stable Driver version,
 with separately selected archive and manifest SHA-256 digests. Both schemas
 preserve the selected archive and manifest bytes. The archive stem and package
-version follow that validated source identity throughout generation, download
-recipe export, and lifecycle checks.
+version follow that validated source identity throughout generation and
+lifecycle checks.
 
 The reviewer selects the source digests as trust roots. An archive inventory,
 embedded manifest, or environment measurement cannot authorize its own source.
@@ -86,8 +86,6 @@ compatibility claim. Before publication, resolve the exact component tag
 source revision. A mismatched candidate needs the proper component release and
 a profile bound to that exact source. Reuse qualification only for unchanged
 source and package bytes; changed bytes require the affected qualification anew.
-Download recipe generation only prepares a reviewable future URL; it does not
-verify a remote tag or authorize publication.
 Manual publication must use the certified package bytes;
 unattended distribution requires an enforced artifact-to-evidence gate.
 

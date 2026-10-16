@@ -136,7 +136,7 @@ class LockFixture(SessionFault):
         assert stat.S_ISREG(info.st_mode) and os.access(path, os.X_OK)
         assert [info.st_dev, info.st_ino, info.st_uid] == [expected[k] for k in ('device', 'inode', 'uid')]
         assert hashlib.sha256(path.read_bytes()).hexdigest() == expected['sha256']
-        source = self.args.source / 'libs/cua-driver/hyprland-plugin/tests/session_lock_fixture.c'
+        source = self.args.source / 'hyprland-plugin/tests/session_lock_fixture.c'
         assert source.resolve(strict=True) == source
         assert hashlib.sha256(source.read_bytes()).hexdigest() == expected['source_sha256']
 

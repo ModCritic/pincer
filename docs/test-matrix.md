@@ -194,21 +194,15 @@ allowed, and the desktop-side-effect oracles pass.
 
 ## CI And Local Entry Points
 
-| Gate | Environment | Entry point |
-| --- | --- | --- |
-| Linux unit/source | Nix Linux CI | `nix build .#checks.x86_64-linux.cua-driver-build .#checks.x86_64-linux.cua-driver-linux-rust-unit` |
-| Windows unit/compile | `windows-latest` | Package-scoped `cargo test --all-targets --no-run --locked` |
-| Windows Harness E2E | Active Windows user session | `scripts/ci/windows/run-rust-e2e.ps1 -RequireGui` |
-| Linux X11 Harness E2E | Nix X11 session | `scripts/ci/linux/run-rust-e2e.sh` |
-| Linux Sway Harness E2E | Controlled wlroots session | `scripts/ci/linux/run-rust-e2e-wayland.sh` |
-| Linux nested-compositor E2E | Controlled experimental session | `scripts/ci/linux/run-rust-e2e-inject.sh` |
-| Linux representative desktop E2E | Existing GNOME, KDE, or Xorg login | `scripts/ci/linux/run-rust-e2e-desktop.sh <desktop>` |
-| macOS Harness E2E | Maintainer Lume SIP-off worker with a logged-in session and inherited grants, or a disposable worker prepared with the checked-in macOS consent seed helper | `libs/cua-driver/tests/runners/macos-lume/run-all.sh` |
+Upstream gates these suites in its CI and through canonical runner scripts in
+its monorepo-level `scripts/ci/`, none of which are part of this repository.
+Run individual suites with `cargo test`; see
+[`rust/crates/cua-driver-e2e/tests/README.md`](../rust/crates/cua-driver-e2e/tests/README.md)
+for the harness builds and environment variables they need.
 
-Workflows select private execution lanes. Rust source owns scenario definitions,
-fixture oracles, and result records. OS runners only build the driver, stage the
-local harnesses, establish the desktop session, collect evidence, and publish
-the shared report.
+Rust source owns scenario definitions, fixture oracles, and result records. OS
+runners only build the driver, stage the local harnesses, establish the desktop
+session, collect evidence, and publish the shared report.
 
 ## Evidence And Ownership
 

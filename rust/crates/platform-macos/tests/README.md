@@ -15,7 +15,9 @@ implementation, not the public SDK authorization/lifecycle boundary.
 
 ## Build and authorize
 
-From the repository root, build an independently identified fixture application:
+Upstream builds an independently identified fixture application with its
+monorepo-level `scripts/ci/macos/build-embedded-menu-fixture.sh`, which is not
+part of this repository:
 
 ```bash
 bash scripts/ci/macos/build-embedded-menu-fixture.sh \

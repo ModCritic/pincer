@@ -234,7 +234,7 @@ Start with `rust/README.md`, `rust/crates/cua-driver-e2e/tests/README.md`, and
 Upstream drives the complete Rust harness catalog from canonical GUI runner
 scripts under `scripts/ci/`; those scripts are not part of this repository.
 See [`docs/test-harnesses-guide.md`](docs/test-harnesses-guide.md) and, for
-macOS in Lume, [`tests/runners/macos-lume/README.md`](tests/runners/macos-lume/README.md).
+preparing a macOS Lume worker, [`tests/runners/macos-lume/README.md`](tests/runners/macos-lume/README.md).
 Keep build artifacts, VM logs, and local verification journals out of git
 unless they become a stable fixture or contributor doc.
 

@@ -12,7 +12,7 @@ import subprocess
 import tarfile
 import tomllib
 
-PLUGIN = "libs/cua-driver/hyprland-plugin/"
+PLUGIN = "hyprland-plugin/"
 RELEASE = PLUGIN + "packaging/release/"
 # Deliberate allowlist: adding source or build fixtures requires release review.
 # No directory traversal, live harnesses, documentation/evidence, or worktree reads.
@@ -108,7 +108,7 @@ def generate(repo, revision, driver_version, output, *, release_assets=False):
         raise ValueError("source revision must name a commit")
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", driver_version):
         raise ValueError("driver version must be a stable numeric release version")
-    cargo = tomllib.loads(committed_file(repo, revision, "libs/cua-driver/rust/Cargo.toml").decode())
+    cargo = tomllib.loads(committed_file(repo, revision, "rust/Cargo.toml").decode())
     if cargo["workspace"]["package"]["version"] != driver_version:
         raise ValueError("driver version does not match committed Cargo.toml")
     if release_assets:
@@ -116,7 +116,9 @@ def generate(repo, revision, driver_version, output, *, release_assets=False):
         if git(repo, "rev-parse", "--verify", f"{tag}^{{commit}}").decode().strip() != revision:
             raise ValueError("source revision does not match the exact Driver release tag")
     payload = {name: committed_file(repo, revision, PLUGIN + name) for name in SOURCE_FILES}
-    payload["LICENSE.md"] = committed_file(repo, revision, "LICENSE.md")
+    # The archive keeps the LICENSE.md name that the recipe, verifier and
+    # profile tooling expect; this repository ships the file as LICENSE.
+    payload["LICENSE.md"] = committed_file(repo, revision, "LICENSE")
     payload["verify.py"] = committed_file(repo, revision, RELEASE + "verify.py")
     version = re.search(rb"project\(cua_hyprland_plugin VERSION ([0-9.]+) LANGUAGES CXX\)", payload["CMakeLists.txt"])
     if not version:

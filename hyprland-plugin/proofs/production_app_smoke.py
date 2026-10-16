@@ -238,9 +238,9 @@ def provenance(args, app_profile=None):
     return {**product, 'harness': harness, 'artifact': artifact,
             'source_versions': {
                 'driver': re.search(r'(?m)^version = "([^"]+)"',
-                                    (source / 'libs/cua-driver/rust/Cargo.toml').read_text())[1],
+                                    (source / 'rust/Cargo.toml').read_text())[1],
                 'plugin': re.search(r'project\(cua_hyprland_plugin VERSION ([\d.]+)',
-                                    (source / 'libs/cua-driver/hyprland-plugin/CMakeLists.txt').read_text())[1]},
+                                    (source / 'hyprland-plugin/CMakeLists.txt').read_text())[1]},
             'driver_version': read([str(args.driver), '--version']),
             'app_profile': app_profile, 'packages': packages, 'app_files': app_files,
             'files': {name: digest(path) for name, path in files.items()},

@@ -60,7 +60,7 @@ if [[ ${#rsync_ssh_argv[@]} -eq 0 ]]; then
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "$script_dir/../../.." && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
 source_sha="$(git -C "$repo_root" rev-parse HEAD)"
 if [[ "$mode" == push ]] && [[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=normal)" ]]; then
   if [[ "${ALLOW_DIRTY_SYNC:-}" != 1 ]]; then
@@ -93,7 +93,7 @@ exclude_args=(
   --exclude=credentials/
   --exclude=secrets/
   --exclude=target/
-  --exclude=libs/cua-driver/rust/test-apps/
+  --exclude=rust/test-apps/
   --exclude=node_modules/
   --exclude=.venv/
   --exclude=__pycache__/
@@ -127,7 +127,7 @@ tar_exclude_args=(
   --exclude '*/secrets'
   --exclude '*/secrets/*'
   --exclude ./target
-  --exclude ./libs/cua-driver/rust/test-apps
+  --exclude ./rust/test-apps
   --exclude ./node_modules
   --exclude ./.venv
   --exclude '*/__pycache__'
@@ -184,12 +184,12 @@ ensure_remote_runtime_dirs() {
   case "$remote_os" in
     windows)
       "${rsync_ssh_argv[@]}" "$target" \
-        "powershell -NoProfile -Command \"New-Item -ItemType Directory -Force '$remote_dir/libs/cua-driver/rust/test-apps' | Out-Null\""
+        "powershell -NoProfile -Command \"New-Item -ItemType Directory -Force '$remote_dir/rust/test-apps' | Out-Null\""
       ;;
     posix)
       remote_path=${remote_dir/#\~/'$HOME'}
       "${rsync_ssh_argv[@]}" "$target" \
-        "mkdir -p \"$remote_path/libs/cua-driver/rust/test-apps\""
+        "mkdir -p \"$remote_path/rust/test-apps\""
       ;;
   esac
 }

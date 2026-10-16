@@ -27,7 +27,9 @@ canonical preflight validates that marker when the VM intentionally has no
 
 ## Run
 
-Start the command from the graphical user's systemd user manager or an
+Upstream runs these environments through its monorepo-level
+`scripts/ci/linux/run-rust-e2e-desktop.sh` wrapper, which is not part of this
+repository. Start it from the graphical user's systemd user manager or an
 equivalent terminal inside that user's session. The wrapper rejects the wrong
 desktop generation before building fixtures.
 

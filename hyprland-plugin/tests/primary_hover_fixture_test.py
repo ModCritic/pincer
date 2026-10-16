@@ -56,7 +56,7 @@ class BinaryPreflightTests(unittest.TestCase):
     def test_alias_replaced_inode_wrong_hash_or_unreviewed_source_fails(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            source = root / 'libs/cua-driver/hyprland-plugin/tests/primary_hover_fixture.c'
+            source = root / 'hyprland-plugin/tests/primary_hover_fixture.c'
             source.parent.mkdir(parents=True)
             source.write_text('reviewed fixture source')
             binary = root / 'primary_hover_fixture'

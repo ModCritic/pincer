@@ -234,7 +234,7 @@ class HoverFixture:
         assert [info.st_dev, info.st_ino, info.st_uid] == [expected[k] for k in ('device', 'inode', 'uid')]
         assert hashlib.sha256(path.read_bytes()).hexdigest() == expected['sha256']
         source_root = getattr(self.args, 'harness_source', None) or self.args.source
-        source = source_root / 'libs/cua-driver/hyprland-plugin/tests/primary_hover_fixture.c'
+        source = source_root / 'hyprland-plugin/tests/primary_hover_fixture.c'
         assert source.resolve(strict=True) == source
         assert hashlib.sha256(source.read_bytes()).hexdigest() == expected['source_sha256']
 

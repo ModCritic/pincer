@@ -270,7 +270,7 @@ class SessionFault:
         for identity in self.plan['identities'].values():
             assert identity['uid'] == os.getuid() and _identity(identity['pid']) == identity, 'process identity changed'
         app_process_identity(spec['app'], spec['target']['pid'])
-        fixture = self.args.source / 'libs/cua-driver/tests/fixtures/apps/linux/isolated-input/main.py'
+        fixture = self.args.source / 'tests/fixtures/apps/linux/isolated-input/main.py'
         assert fixture.resolve(strict=True) == fixture, 'canonical source fixture required'
         assert hashlib.sha256(fixture.read_bytes()).hexdigest() == self.plan['foreground_fixture']['sha256']
         argv = [x.decode() for x in Path(f'/proc/{self.plan["foreground"]["pid"]}/cmdline').read_bytes().split(b'\0') if x]

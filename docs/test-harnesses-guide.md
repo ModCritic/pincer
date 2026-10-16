@@ -17,23 +17,21 @@ There are two main test layers:
 The Rust tests are the source of truth. Python tests, old shell runners, and
 historical recording scripts are not part of the canonical E2E path.
 
-The canonical E2E command on every OS runs the complete matrix and takes no
-suite selector:
+Upstream runs the complete matrix on every OS with a canonical command that
+takes no suite selector:
 
 ```text
 Linux:  scripts/ci/linux/run-rust-e2e.sh
 Windows: .\scripts\ci\windows\run-rust-e2e.ps1 -RequireGui
-macOS:  libs/cua-driver/tests/runners/macos-lume/run-all.sh
+macOS:  scripts/ci/macos/run-rust-e2e.sh
 ```
 
-[`scripts/ci/README.md`](../../../scripts/ci/README.md#canonical-and-supporting-runners)
-lists every runner as canonical, scoped, or supporting. The Windows convenience
-wrapper in `tests/runners/windows/` and the legacy `tests/runners/windows-sandbox/`
-runner are supporting runners, not canonical entrypoints.
-
-The OS workflow may fan the complete matrix out into independent jobs for
-reporting and failure isolation. That is an execution detail; contributors
-should think of it as one canonical suite.
+Those runners live in upstream's monorepo-level `scripts/ci/` and are not part
+of this repository, so this guide's references to them describe upstream's
+process. Here, run the suites with `cargo test` as described in
+[`rust/crates/cua-driver-e2e/tests/README.md`](../rust/crates/cua-driver-e2e/tests/README.md).
+The legacy `tests/runners/windows-sandbox/` runner is a supporting runner, not a
+canonical entrypoint.
 
 ### Evidence authority
 
@@ -42,18 +40,9 @@ SHA. A one-off app smoke, manually assembled script, video, or environment
 replay can diagnose a failure or provide release presentation evidence, but it
 does not replace the complete matrix.
 
-Windows and Linux use the repository's GitHub-hosted workflows when their
-strict environment preflights pass. Windows Azure RDP runs are optional
-environment-parity replays or a fallback when the hosted preflight cannot prove
-a required capability. macOS uses the logged-in Lume maintainer wrapper.
-The macOS wrapper always runs the standalone Chrome/Edge matrix after the
-repo-local matrix. For browser-facing changes or browser-use release
-certification on Windows and Linux, also run
-`.github/workflows/e2e-rust-standalone-browsers.yml`.
-
 Historical `*-plan.md` and release evidence documents record
 what was run at that time. They are not current execution instructions and do
-not override this guide or `scripts/ci/README.md`.
+not override this guide.
 
 ### Hyprland validation decision (2026-09-07)
 
@@ -171,7 +160,7 @@ cua/
 |   |   |   |-- apps/                 Repo-local fixture sources
 |   |   |   `-- build/                macOS/Linux/Windows fixture builders
 |   |   `-- runners/
-|   |       `-- macos-lume/           Maintainer Lume setup and guest entrypoint
+|   |       `-- macos-lume/           Maintainer Lume image setup and TCC seed helpers
 |   `-- docs/                         Test matrix, reporting, and contributor docs
 `-- scripts/ci/
     |-- linux/run-rust-e2e.sh         Linux canonical runner
@@ -279,7 +268,7 @@ invocation.
 
 ### Windows
 
-Runner: `scripts/ci/windows/run-rust-e2e.ps1`
+Upstream runner: `scripts/ci/windows/run-rust-e2e.ps1`
 
 | Runner area       | Rust test                         | Real harness or app                            |
 | ----------------- | --------------------------------- | ---------------------------------------------- |
@@ -304,18 +293,9 @@ background delivery is tested.
 
 ### macOS
 
-Canonical runner: `libs/cua-driver/tests/runners/macos-lume/run-all.sh`
-
-Canonical Actions wrapper: manually dispatch
-`.github/workflows/e2e-rust-macos.yml` in `lume` mode at the exact source SHA. It runs the
-logged-in Lume wrapper, including its standalone browser matrix, and emits the certification
-artifact consumed by protected evidence workflows.
-
-Supplemental hosted runner: manually dispatch
-`.github/workflows/e2e-rust-macos.yml` with an exact 40-character source SHA.
-Its probe must pass before independent shared, native, capture, and browser
-jobs run. The browser job runs the standalone installed Chrome/Edge matrix that
-the Lume gate runs after its repo-local matrix.
+Upstream runner: `scripts/ci/macos/run-rust-e2e.sh`, which upstream ran in a
+logged-in Lume worker through a `run-all.sh` wrapper. This repository keeps
+only the Lume image setup and TCC seed helpers in `tests/runners/macos-lume/`.
 
 | Runner area               | Rust test                              | Real harness or app                     |
 | ------------------------- | -------------------------------------- | --------------------------------------- |
@@ -335,21 +315,6 @@ The WKWebView host runs the same typed shared-web catalog as Electron and
 Tauri. Calculator and TextEdit add typed supporting rows for built-in app
 launch focus and native Cocoa background value delivery. They run in the
 canonical logged-in macOS lane, but they do not replace repo-local fixtures.
-The maintainer wrapper provisions the exact source build and verifies the
-private Lume seed's TCC/signing contract before delegating the behavior matrix
-to `scripts/ci/macos/run-rust-e2e.sh`.
-
-The hosted wrapper uses the same behavior matrix on fresh `macos-26` runners.
-It requires the GitHub-hosted Aqua session and SIP-off VirtualMac environment,
-creates a temporary code-signing Keychain, installs a certificate-signed local
-app, seeds only Accessibility and Screen Capture for that app's exact csreq, and
-verifies that permission status is attributed to the driver daemon before any
-test begins. The browser lane additionally requires the image's vendor-signed
-Google Chrome and Microsoft Edge and fails closed when either is missing. The
-temporary certificate trust is removed during job cleanup.
-Hosted results remain supplemental until the image and signing
-identity provide the same release-parity guarantees as the maintained Lume
-seed.
 
 Workers cloned from a granted private seed verify and reuse its app-owned TCC
 identity. A disposable SIP-disabled Lume worker without inherited grants must
@@ -362,7 +327,7 @@ prove live capture and input; database rows alone do not certify the desktop.
 
 ### Linux
 
-Runner: `scripts/ci/linux/run-rust-e2e.sh`
+Upstream runner: `scripts/ci/linux/run-rust-e2e.sh`
 
 | Runner area       | Rust test                         | Real harness or app       |
 | ----------------- | --------------------------------- | ------------------------- |
@@ -606,9 +571,8 @@ When adding a new scenario:
 4. Add the scenario to `docs/test-matrix.md` and this guide when it changes the
    cross-OS structure.
 5. Update only the OS runner selection when the test is platform-specific.
-   Every `#[ignore]` test must be selected by a runner or workflow, or listed
-   with a reason in `tests/manual-e2e-allowlist.txt`;
-   `.github/scripts/tests/test_cua_driver_e2e_inventory.py` enforces this.
+   List every `#[ignore]` test that no runner selects, with a reason, in
+   `tests/manual-e2e-allowlist.txt`.
 6. Run the smallest Rust test locally, then run the OS command before
    calling the matrix complete.
 
@@ -633,8 +597,8 @@ CI filters stay the same. Prefer Rust's default module file lookup over
 
 Scripts and their tests live next to their owner:
 
-- Desktop runners and focused native gates live in `scripts/ci/<os>/`, for
-  example `scripts/ci/linux/run-mpx-recovery-e2e.py`.
+- Upstream keeps its desktop runners and focused native gates in its
+  monorepo-level `scripts/ci/<os>/`, which is not part of this repository.
 - Example code keeps its tests in a `tests/` directory beside it, for example
   `libs/cua-driver/examples/agent-sdks/tests/`.
 - `libs/cua-driver/rust/test-apps/` is the staging directory for built

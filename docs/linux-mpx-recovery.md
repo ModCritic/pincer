@@ -37,6 +37,10 @@ can still leave devices until the next standalone daemon starts.
 
 ## Reproduce the focused native gate
 
+The focused gate is upstream's `scripts/ci/linux/run-mpx-recovery-e2e.py`,
+which lives in its monorepo-level `scripts/ci/` and is not part of this
+repository. Upstream runs it as follows.
+
 Use a disposable real Xorg desktop with libinput, readable/writable
 `/dev/uinput`, `xinput`, Python GTK3 bindings, and its session bus. Xvfb and
 TigerVNC do not support the needed device hotplug path.

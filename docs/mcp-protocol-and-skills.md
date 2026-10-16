@@ -117,21 +117,3 @@ rejects modern metadata and discovery requests. Use stdio for `2026-07-28`.
 Modern HTTP requires a reviewed application-handle contract so sessions can
 survive connection changes without weakening client isolation. OAuth and
 gateway ownership remain in RFC #3197.
-
-## Reproduce the protocol check
-
-From the repository root, install the isolated test dependencies and point the
-probe at the source-built candidate:
-
-```sh
-npm ci --ignore-scripts --prefix .github/scripts/cua-driver-mcp-compat/modern-client
-CUA_DRIVER_BINARY=/absolute/path/to/cua-driver \
-  node .github/scripts/cua-driver-mcp-compat/verify-modern.mjs
-```
-
-The probe uses `@modelcontextprotocol/client` 2.0.0 with the modern version
-pinned. It verifies discovery, a read-only tool call, skill enumeration and
-retrieval, complete resource bytes and hashes, and invalid-request rejection.
-It uses isolated state and makes no model or account calls. CI runs this probe
-on Linux, macOS, and Windows. This proves server/SDK interoperability, not
-native skill activation in a particular host.

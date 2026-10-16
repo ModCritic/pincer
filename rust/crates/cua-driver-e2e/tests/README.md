@@ -2,8 +2,11 @@
 
 Tests in this crate drive a built `cua-driver` binary against real desktops,
 staged harness apps, and installed apps. Most are marked `#[ignore]` because
-they need an interactive desktop; the canonical OS runners select them. The
-few non-ignored tests are hermetic oracle and parser checks.
+they need an interactive desktop; upstream's canonical OS runners select them.
+Those runners live in upstream's monorepo-level `scripts/ci/` and are not part
+of this repository, so run the suites here with `cargo test` as shown under
+[Running](#running). The few non-ignored tests are hermetic oracle and parser
+checks.
 
 Hermetic protocol, CLI, and schema tests stay with the driver in
 `../../cua-driver/tests/`. Put a new test here when it needs a desktop, a
@@ -82,18 +85,18 @@ cargo test -p cua-driver-e2e --test harness_appkit_test -- --ignored --nocapture
 cargo test -p cua-driver-e2e --test desktop_scope_macos_test -- --ignored --nocapture
 ```
 
-The canonical Windows E2E entrypoint is
+Upstream's canonical Windows E2E entrypoint is
 `scripts/ci/windows/run-rust-e2e.ps1 -RequireGui`.
 It runs the complete Rust harness matrix; internal lane selectors are retained
 only for focused diagnosis. Optional
 external-app suites remain separate.
 
-The canonical macOS E2E entrypoint is
-`libs/cua-driver/tests/runners/macos-lume/run-all.sh`. It runs in a disposable
-clone of the private maintainer seed, or in a SIP-off worker prepared with the
-checked-in macOS consent seed helper. It requires a logged-in user session and
-verifies the installed driver's Accessibility and Screen Recording grants before
-delegating to `scripts/ci/macos/run-rust-e2e.sh`.
+Upstream ran the macOS matrix through `scripts/ci/macos/run-rust-e2e.sh` in a
+disposable Lume worker with a logged-in user session and the installed
+driver's Accessibility and Screen Recording grants.
+[`tests/runners/macos-lume/README.md`](../../../../tests/runners/macos-lume/README.md)
+covers preparing such a worker, including the checked-in macOS consent seed
+helper.
 
 For focused macOS runs on a workstation shared with other driver clients,
 start a TCC-authorized daemon on a dedicated socket and set
@@ -122,21 +125,10 @@ running ignored GUI tests.
 Set `CUA_REQUIRE_GUI=1` on dedicated GUI runners to turn these desktop
 self-skips into hard failures with the full desktop-state diagnostic.
 
-The repository-level runners are the preferred entrypoints for the canonical
-matrix:
-
-```bash
-scripts/ci/linux/run-rust-e2e.sh
-```
-
-```powershell
-.\scripts\ci\windows\run-rust-e2e.ps1 -RequireGui
-```
-
 ## Optional External Apps
 
 These suites are Rust source-of-truth coverage for real installed apps, but they
-are not part of the canonical run-all path because they depend on software or
+are not part of the canonical complete run because they depend on software or
 desktop state outside the repo-local fixtures:
 
 - `harness_libreoffice_test.rs`: Windows LibreOffice Writer, the only coverage
@@ -150,10 +142,9 @@ desktop state outside the repo-local fixtures:
   targeting, mutation, frame, tab, ambiguity, and isolated-profile rows. The
   harness owns a fresh browser profile and creates adversarial tabs and windows
   through the browser endpoint instead of relying on browser command-line
-  handoff behavior. Run it through the cross-platform
+  handoff behavior. Upstream runs it through its cross-platform
   `scripts/ci/run-rust-standalone-browser-e2e.sh`, which stages the Electron
   foreground sentinel when needed and opts pure Wayland runs into the native
   backend. Non-macOS runs prove that standard mode refuses existing-profile
   attachment before running the authorized success rows with a disposable
-  unrestricted daemon. The macOS Lume `run-all.sh` acceptance run always
-  includes the success rows.
+  unrestricted daemon.

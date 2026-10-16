@@ -709,9 +709,9 @@ its starting Space and always restores it in a trap/finally path.
 
 The repository's canonical signed/TCC acceptance remains
 [`tests/runners/macos-lume/README.md`](../tests/runners/macos-lume/README.md)
-and [`run-all.sh`](../tests/runners/macos-lume/run-all.sh). It provides the
-logged-in Aqua session, certificate-backed `CuaDriverLocal.app`, normal TCC
-grant flow, and exact-source checks.
+and upstream's `run-all.sh` entrypoint, which this repository does not
+include. It provides the logged-in Aqua session, certificate-backed
+`CuaDriverLocal.app`, normal TCC grant flow, and exact-source checks.
 
 After focused Namespace evidence passes, add the new fixture rows to the Lume
 entrypoint and run once on the final candidate SHA. Preserve its existing

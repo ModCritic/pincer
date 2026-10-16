@@ -33,13 +33,6 @@ committing if you do that.
 Keep the `CUA_DRIVER_*` policy and permission-mode environment variables unset
 while fuzzing so the process-default authorization path stays reproducible.
 
-The `Fuzz: Cua Driver tool-call boundary` GitHub Actions workflow
-(`.github/workflows/fuzz-cua-driver.yml`) runs every target for two minutes on
-pull requests that touch the boundary crates, fifteen minutes nightly, and a
-chosen budget on manual dispatch. A crash fails that target's job, prints the
-panic and reproduce command in the job summary, and uploads the crash file and
-log as an artifact.
-
 A crash lands in `artifacts/<target>/`. Reproduce it with
 `cargo fuzz run --fuzz-dir fuzz --sanitizer none <target> artifacts/<target>/<file>`,
 fix the bug, then copy the file into `corpus/<target>/` so the smoke test keeps

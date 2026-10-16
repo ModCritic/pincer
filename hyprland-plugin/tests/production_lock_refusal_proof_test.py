@@ -89,7 +89,7 @@ class PlanTests(unittest.TestCase):
             binary = root / 'session_lock_fixture'
             binary.write_bytes(b'fixture')
             binary.chmod(0o700)
-            source = root / 'libs/cua-driver/hyprland-plugin/tests/session_lock_fixture.c'
+            source = root / 'hyprland-plugin/tests/session_lock_fixture.c'
             source.parent.mkdir(parents=True)
             source.write_bytes(b'fixture source')
             info = binary.stat()

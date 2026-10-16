@@ -15,7 +15,7 @@ sha256sums=()
 : "${CUA_SOURCE_ROOT:?Set CUA_SOURCE_ROOT to the Cua monorepo root}"
 : "${CUA_HYPRLAND_PACKAGE_VERSION:?Set CUA_HYPRLAND_PACKAGE_VERSION to the exact pacman package version}"
 _source_root="$(realpath -e -- "$CUA_SOURCE_ROOT")"
-_plugin_source="${_source_root}/libs/cua-driver/hyprland-plugin"
+_plugin_source="${_source_root}/hyprland-plugin"
 _hyprland_package_version="$CUA_HYPRLAND_PACKAGE_VERSION"
 _hyprland_header_version="${CUA_HYPRLAND_HEADER_VERSION:-0.56.2}"
 depends=("hyprland=${_hyprland_package_version}")
@@ -59,6 +59,6 @@ check() {
 
 package() {
   DESTDIR="$pkgdir" cmake --install "$srcdir/build" --prefix /usr
-  install -Dm644 "$_source_root/LICENSE.md" \
+  install -Dm644 "$_source_root/LICENSE" \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

@@ -6,20 +6,24 @@ and upload the validated artifacts.
 
 ## Canonical Invocation
 
-The contributor-facing invocation runs the complete matrix on every OS and
-takes no suite selector:
+Upstream's contributor-facing invocation runs the complete matrix on every OS
+and takes no suite selector:
 
 ```text
 Windows: scripts/ci/windows/run-rust-e2e.ps1 -RequireGui
 Linux:   scripts/ci/linux/run-rust-e2e.sh
-macOS:   libs/cua-driver/tests/runners/macos-lume/run-all.sh
+macOS:   scripts/ci/macos/run-rust-e2e.sh
 ```
 
-Automated workflows may set a private lane value to fan that matrix into
+Those runners live in upstream's monorepo-level `scripts/ci/` and are not part
+of this repository, so the runner steps below describe upstream's process.
+The `cua-e2e-report` binary and the typed records it validates are part of
+this repository.
+
+Upstream's runners may set a private lane value to fan that matrix into
 shared, native, and capture jobs so one failure does not hide another lane.
-The maintainer-run macOS Lume gate runs the complete matrix by default. These
-are execution partitions, not public suite choices or separate behavioral
-sources of truth.
+These are execution partitions, not public suite choices or separate
+behavioral sources of truth.
 
 ## Execution Order
 

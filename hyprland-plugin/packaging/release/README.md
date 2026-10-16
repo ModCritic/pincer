@@ -101,15 +101,8 @@ only two uniquely named archives:
 - `cua-hyprland-plugin-DRIVER_VERSION-COMMIT_SHA-build-kit.tar.gz`: `PKGBUILD`,
   `SOURCE-PROVENANCE.json`, operator `README.md`, `lifecycle.py`, and `SHA256SUMS`.
 
-The Driver release workflow generates these assets for the stable component
-tag push, which is also the run that publishes the release, from the same
-source as the native Driver builds. The tag and committed Cargo version must
-match that source. Nightly and manual build-only runs do not generate plugin
-release assets. A source that contains no bundler produces Driver-only assets.
-If a tag contains a bundler but generation fails, publication is blocked.
-Publication waits for this job and includes both archives in the component
-release checksums. The kit's `SHA256SUMS` remains inside its archive to avoid
-colliding with other release assets. Existing output directories are refused.
+The kit's `SHA256SUMS` remains inside its archive to avoid colliding with
+other release assets. Existing output directories are refused.
 
 The default local preparation mode does not require a tag. Neither mode resolves
 a generic latest release. Review the generated assets before publication.

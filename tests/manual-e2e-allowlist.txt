@@ -1,16 +1,16 @@
 # Ignored cua-driver and cua-driver-e2e integration tests that no canonical
 # runner selects.
 #
-# .github/scripts/tests/test_cua_driver_e2e_inventory.py fails when an
-# #[ignore] test under libs/cua-driver/rust/crates/cua-driver/tests or
-# libs/cua-driver/rust/crates/cua-driver-e2e/tests is neither selected by a
-# runner or workflow nor listed here. It also fails when an entry
-# here no longer names an ignored test or is routed after all.
+# Upstream's CI checked that every #[ignore] test under
+# rust/crates/cua-driver/tests or rust/crates/cua-driver-e2e/tests is either
+# selected by a runner or listed here. This repository has no such check;
+# keep the list current by hand.
 #
 # Format: <test binary>::<test function> | <why it stays manual>
 
 # Native Hyprland has no automated lane. The maintainer runs these in the
-# prepared native Hyprland desktop alongside `scripts/ci/linux/run-rust-e2e.sh`
+# prepared native Hyprland desktop alongside upstream's
+# `scripts/ci/linux/run-rust-e2e.sh`
 # (see libs/cua-driver/docs/test-harnesses-guide.md, Hyprland validation).
 hyprland_foreground_test::foreground_action_refused_while_independent_virtual_pointer_holds_primary_grab | Manual native-Hyprland gate: needs a live Hyprland compositor with the Cua plugin; RFC 3550 foreground grab refusal
 hyprland_foreground_test::foreground_drag_focus_loss_does_not_release_into_successor | Manual native-Hyprland gate: needs a live Hyprland compositor with the Cua plugin; RFC 3550 drag focus-loss safety
@@ -21,9 +21,9 @@ hyprland_native_observation_test::native_window_capture_and_background_ax_keep_e
 harness_libreoffice_test::harness_lo_vcl_font_color_expand_opens_picker | Optional Windows suite that needs LibreOffice Writer installed; under review in the lane-3 prune (#4094)
 
 
-# macOS-only browser regressions that failed on their first routed run. Restore
-# them to the Darwin list in scripts/ci/run-rust-standalone-browser-e2e.sh with
-# the product fix.
+# macOS-only browser regressions that failed on their first routed run.
+# Upstream restores them to the Darwin list in its
+# scripts/ci/run-rust-standalone-browser-e2e.sh with the product fix.
 standalone_browser_behavior_test::standalone_browser_generic_type_text_completion | Fails on first routed run: native snapshot omits the page editor (#4126)
 standalone_browser_behavior_test::standalone_browser_web_type_text_verification | Fails on first routed run: native snapshot omits the page editor (#4126)
 

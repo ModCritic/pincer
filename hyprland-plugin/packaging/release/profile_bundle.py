@@ -11,7 +11,7 @@ import tarfile
 
 import profile_verify as verify
 
-RELEASE = "libs/cua-driver/hyprland-plugin/packaging/release/"
+RELEASE = "hyprland-plugin/packaging/release/"
 
 
 def committed_file(repo, revision, name):

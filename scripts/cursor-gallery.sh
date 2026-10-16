@@ -113,7 +113,7 @@ export_docs() {
   wait_for_url "http://127.0.0.1:$http_port/"
   wait_for_url "http://127.0.0.1:$cdp_port/json/version"
   CDP_ENDPOINT="http://127.0.0.1:$cdp_port" \
-    PAGE_URL="http://127.0.0.1:$http_port/libs/cua-driver/tools/cursor-gallery/" \
+    PAGE_URL="http://127.0.0.1:$http_port/tools/cursor-gallery/" \
     FRAME_URL_ROOT="http://127.0.0.1:$http_port/target/cursor-gallery/renderer-frames" \
     node --experimental-websocket "$GALLERY_DIR/capture-gallery.mjs" "$capture_dir"
 
