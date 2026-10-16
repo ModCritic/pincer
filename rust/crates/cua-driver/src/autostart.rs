@@ -7,9 +7,9 @@
 //!
 //! - **Windows**: Scheduled Task `cua-driver-serve` registered with
 //!   `LogonType: Interactive` so it lands in a Session 1+ logon (never
-//!   Session 0). Equivalent to what `scripts/install.ps1 -AutoStart`
-//!   does — the install script can call out to this subcommand to
-//!   keep the registration logic in one place.
+//!   Session 0). `scripts/install-local.ps1 -AutoStart` registers its
+//!   task by calling this subcommand, so the registration logic lives
+//!   in one place.
 //! - **macOS / Linux**: not implemented yet. Returns an error pointing
 //!   the user at the manual recipe (`launchctl` / `systemctl --user`).
 //!   `scripts/install-local.sh --autostart` covers the manual path
@@ -22,11 +22,10 @@
 //! Rust before you've even configured the principal, with multiple BSTR
 //! marshalling steps and a lot of "this method takes a VARIANT, that
 //! one takes a BSTR" footguns. Shelling out to PowerShell's
-//! `Register-ScheduledTask` cmdlet — which itself uses Task Scheduler
-//! 2.0 under the hood — gets us identical behavior in 5 lines and stays
-//! exactly in lock-step with what `scripts/install.ps1` does (literally
-//! the same command). When `install.ps1` evolves, this code follows it
-//! for free.
+//! `Register-ScheduledTask` cmdlet, which itself uses Task Scheduler
+//! 2.0 under the hood, gets us identical behavior in 5 lines. Upstream
+//! Cua's release installer (`scripts/install.ps1`, which this fork
+//! removed) ran the same command.
 
 use anyhow::{anyhow, Result};
 
@@ -272,10 +271,11 @@ mod platform {
     use super::*;
     use std::process::Command;
 
-    /// Inline PowerShell that mirrors `install.ps1::Register-CuaDriverAutostart`
-    /// exactly. Kept as a single one-liner so a quick `gh-blame` diff against
-    /// install.ps1 surfaces any divergence; the moment install.ps1 changes
-    /// shape, this script needs the same edit.
+    /// Inline PowerShell that registers the autostart task. It started as a
+    /// copy of `Register-CuaDriverAutostart` in upstream Cua's `install.ps1`,
+    /// which this fork removed. This is now the only copy:
+    /// `scripts/install-local.ps1` registers its task by running
+    /// `autostart enable`.
     ///
     /// **Hidden-console launch (issue #1645):** the task action wraps
     /// `cua-driver.exe serve` in `powershell -WindowStyle Hidden` +
@@ -295,8 +295,8 @@ mod platform {
     /// boundary cleanly. Trade-off: `Register-ScheduledTask -RunLevel
     /// Highest` requires the caller to already be at High IL, so this
     /// function emits an actionable error when invoked from a non-elevated
-    /// shell. Users opt into autostart via the installer's `-AutoStart`
-    /// flag or `cua-driver autostart enable`, both of which prompt for
+    /// shell. Users opt into autostart via `scripts/install-local.ps1
+    /// -AutoStart` or `cua-driver autostart enable`, both of which prompt for
     /// elevation when needed.
     ///
     /// **Account-name format**: on domain-joined machines USERDOMAIN holds the
@@ -345,8 +345,8 @@ Register-ScheduledTask -Force -TaskName $env:CUA_DRIVER_AS_TASK -Action $action 
 
     pub fn enable(exe: &str) -> Result<()> {
         // First attempt: register directly. Works when called from an
-        // already-elevated context (install.ps1's self-elevated child shell,
-        // or a user running cua-driver autostart enable from an admin
+        // already-elevated context (a user running cua-driver autostart
+        // enable, or scripts/install-local.ps1 -AutoStart, from an admin
         // PowerShell). Pass the binary path via env var so the script
         // doesn't need shell-quoting acrobatics for paths with spaces.
         let out = Command::new("powershell")
@@ -407,8 +407,10 @@ Register-ScheduledTask -Force -TaskName $env:CUA_DRIVER_AS_TASK -Action $action 
             Err(anyhow!(
                 "self-elevation for autostart registration failed (exit {}). The UAC \
                  prompt was probably dismissed. Re-run `cua-driver autostart enable` \
-                 and accept the prompt, or run install.ps1 -AutoStart which has the \
-                 same self-elevation flow. See https://github.com/trycua/cua/issues/1602.",
+                 and accept the prompt. For a local build installed with \
+                 scripts/install-local.ps1, re-running scripts/install-local.ps1 -AutoStart \
+                 goes through the same self-elevation flow. See \
+                 https://github.com/trycua/cua/issues/1602.",
                 elevated_status.code().unwrap_or(-1)
             ))
         }

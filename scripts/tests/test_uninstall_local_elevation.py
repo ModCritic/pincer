@@ -320,9 +320,10 @@ def test_uninstall_local_parses(tmp_path: Path) -> None:
 
 @requires_powershell
 def test_script_path_is_populated_when_invoked_from_a_file(tmp_path: Path) -> None:
-    # The re-exec depends on this: unlike uninstall.ps1 under `irm | iex`,
-    # uninstall-local.ps1 is always started from a file path, so it can hand
-    # its own path to Start-Process -Verb RunAs without materializing a copy.
+    # The re-exec depends on this: unlike upstream Cua's uninstall.ps1 under
+    # `irm | iex`, uninstall-local.ps1 is always started from a file path, so
+    # it can hand its own path to Start-Process -Verb RunAs without
+    # materializing a copy.
     probe = tmp_path / "probe.ps1"
     probe.write_text("Write-Output $MyInvocation.MyCommand.Path\n", encoding="utf-8")
     result = subprocess.run(
