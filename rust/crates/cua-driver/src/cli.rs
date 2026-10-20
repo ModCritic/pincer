@@ -791,6 +791,14 @@ pub fn parse_command() -> Command {
                 process::exit(64);
             }
         },
+        // Pincer removed upstream's update check, self-update and release
+        // channels. Without this arm the old command names would fall
+        // through to the implicit tool call below and report that the
+        // daemon is not running.
+        Some(removed @ ("update" | "check-update" | "channel")) => {
+            eprintln!("{}", removed_update_command_message(removed));
+            process::exit(64);
+        }
         Some(first) => {
             // Implicit call: unrecognised first positional → treat as tool name.
             // Same parse-error handling as the explicit `call` branch above. See #1637.
@@ -825,6 +833,16 @@ pub fn parse_command() -> Command {
             }
         }
     }
+}
+
+/// What `cua-driver update`, `check-update` and `channel` print instead of
+/// running: Pincer is updated by rebuilding it from the repository.
+fn removed_update_command_message(command: &str) -> String {
+    format!(
+        "cua-driver {command}: this command was removed in Pincer, which does not check for or install updates.\n\
+         To update, pull the repository and rebuild it as described in the README:\n\
+         https://github.com/ModCritic/pincer#build-from-source"
+    )
 }
 
 const CURSOR_MOTION_USAGE: &str = "Usage: cua-driver cursor motion --session <label> [--style <name>] [--timing native|fitts|fixed|relaxed|steady|calm|deliberate] [--effects trail=on,glow=off,...] [--glide-ms <ms>]";

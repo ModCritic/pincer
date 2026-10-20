@@ -27,8 +27,9 @@ Changes from upstream:
 - The update check is removed: the startup check, the `check-update`,
   `update` and `channel` commands, and the `check_for_update` tool. The
   driver never looks up releases or runs Cua's installer, so it cannot
-  replace itself with an upstream build. `CUA_DRIVER_RS_UPDATE_CHECK` no
-  longer has any effect.
+  replace itself with an upstream build. The removed commands exit with a
+  note to pull and rebuild instead. `CUA_DRIVER_RS_UPDATE_CHECK` no longer
+  has any effect.
 - `skills install` and `skills update` write the skill pack built into the
   binary instead of downloading it from GitHub, so they work offline.
   `--from main` is refused.
