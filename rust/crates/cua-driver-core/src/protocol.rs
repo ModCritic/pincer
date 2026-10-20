@@ -401,7 +401,7 @@ Efficient loop:
 
 Use the narrowest semantic route first: `set_window_frame` plus `list_windows` for geometry, typed browser tools for pages, clipboard tools for the clipboard. Stay in the background; `delivery_mode:"foreground"` only if refused or unverifiable.
 
-Chrome/Edge/Brave page: `get_browser_state({{pid, window_id}})`, its `detail.next_call` (`browser_prepare`) if refused, then `browser_click`/`browser_type`/`browser_pointer` (hover, drag); never desktop pointer tools.
+Chrome/Edge/Brave page: `get_browser_state({{pid, window_id}})`, its `detail.next_call` (`browser_prepare`) if refused (ask the user first when it attaches to their own browser profile), then `browser_click`/`browser_type`/`browser_pointer` (hover, drag); never desktop pointer tools.
 
 `start_session` is optional; repeat a short `session` label on every call that accepts it.
 

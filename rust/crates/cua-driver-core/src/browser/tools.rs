@@ -612,12 +612,15 @@ impl BrowserPrepareTool {
     pub fn new(engine: Arc<BrowserEngine>) -> Self {
         let def = ToolDef {
             name: "browser_prepare".into(),
-            description: "Attach the browser tools to a browser. For a page in the user's \
-                running Chrome, Edge or Brave, call it once with pid, window_id, session and \
-                strategy {\"kind\":\"existing_profile\"} when get_browser_state refuses with \
-                browser_consent_required or browser_requires_setup; then call \
-                get_browser_state again and act with browser_click, browser_type or \
-                browser_pointer. It attaches, or refuses with nothing changed and says why. \
+            description: "Attach the browser tools to a browser. When the task does not need \
+                the user's logins, prefer a driver-owned isolated profile: allow_launch=true and \
+                profile {\"mode\":\"isolated_new\"}. Attaching to the user's running Chrome, \
+                Edge or Brave (pid, window_id, session and strategy \
+                {\"kind\":\"existing_profile\"}, as in get_browser_state's detail.next_call) \
+                reaches their logged-in profile, so ask the user first; it is refused unless the \
+                runtime authorizes it (below). Then call get_browser_state again and act with \
+                browser_click, browser_type or browser_pointer. It attaches, or refuses with \
+                nothing changed and says why. \
                 pid is required for an existing process or existing-profile attachment, \
                 and optional only for allow_launch=true with an isolated profile. Existing \
                 endpoints are detected without side effects. Acting setup \

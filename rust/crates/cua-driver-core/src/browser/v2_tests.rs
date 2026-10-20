@@ -1201,8 +1201,9 @@ async fn standalone_consumer_bind_without_grant_refuses_before_endpoint_discover
         refusal["refusal"]["detail"]["next_action"],
         "browser_prepare"
     );
-    // The refusal names the exact call that attaches, so an agent does not
-    // read it as a request for the user's approval (Bench v2 PR-02).
+    // The refusal names the exact call that attaches, so an agent that has
+    // the user's agreement does not stall or fall back to desktop pointer
+    // tools (Bench v2 PR-02).
     assert_eq!(
         refusal["refusal"]["detail"]["next_call"],
         json!({
@@ -1217,7 +1218,10 @@ async fn standalone_consumer_bind_without_grant_refuses_before_endpoint_discover
     );
     let message = refusal["refusal"]["message"].as_str().unwrap();
     assert!(message.contains("not attached to this browser window yet"));
-    assert!(message.contains("Call browser_prepare"));
+    assert!(message.contains("ask the user first"));
+    assert!(message.contains("call browser_prepare with this pid and window_id"));
+    assert!(message.contains("--grant existing-profile"));
+    assert!(message.contains("\"isolated_new\""));
     assert!(!message.contains("approval before"));
     assert!(
         !managed_discovery_invoked.load(Ordering::SeqCst),

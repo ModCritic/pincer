@@ -97,7 +97,8 @@ pub(crate) fn refusal_for(
              the user's pointer alone. Call get_browser_state with pid {pid} and window_id {wid}, \
              then browser_pointer (hover, drag, scroll, double or right click), browser_click or \
              browser_type with its target_id and tab_id. If get_browser_state refuses, make the \
-             browser_prepare call in its detail.next_call. If browser_prepare refuses too, this \
+             browser_prepare call in its detail.next_call, after asking the user if it attaches to \
+             their own browser profile. If browser_prepare refuses too, this \
              page cannot be driven in the background right now: say so rather than taking the \
              user's pointer.",
             app = under.app_name,

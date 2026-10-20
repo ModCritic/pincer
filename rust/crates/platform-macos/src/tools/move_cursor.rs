@@ -320,7 +320,8 @@ const BROWSER_HOVER_NOTE: &str = "This is a web browser page: hover it with the 
      which reach the page without the user's pointer. Call get_browser_state with this pid and \
      window_id, then browser_pointer with action \"hover\" and the element's ref (or viewport \
      x,y) from that snapshot. If get_browser_state refuses, make the browser_prepare call in its \
-     detail.next_call. A desktop-scope move_cursor would move the user's pointer and refuses \
+     detail.next_call, after asking the user if it attaches to their own browser profile. \
+     A desktop-scope move_cursor would move the user's pointer and refuses \
      over a background app.";
 
 /// What a window-target move does not do for a background app.

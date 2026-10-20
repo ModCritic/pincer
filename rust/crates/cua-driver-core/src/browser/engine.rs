@@ -173,16 +173,22 @@ pub(super) fn unsupported_engine_refusal(
     }))
 }
 
-/// What an agent reads when a user's own browser is not attached yet. Agents
-/// read the old "requires explicit existing-profile approval" wording as a
-/// request for the user's approval and gave up, or fell back to desktop pointer
-/// tools that move the user's pointer (Bench v2 PR-02: 23 of 28 trials stopped
-/// here without calling browser_prepare). Name the call that attaches instead.
+/// What an agent reads when a user's own browser is not attached yet.
+/// Attaching exposes the user's logged-in profile, so the agent asks the user
+/// first and otherwise prefers a driver-owned isolated profile. The message
+/// still names the exact call, because agents that read only an approval
+/// requirement gave up or fell back to desktop pointer tools that move the
+/// user's pointer (Bench v2 PR-02: 23 of 28 trials stopped here without
+/// calling browser_prepare).
 const CONSUMER_PROFILE_NOT_ATTACHED: &str = "Cua is not attached to this browser window yet. \
-     Call browser_prepare with this pid and window_id and strategy {\"kind\":\"existing_profile\"} \
-     (detail.next_call has the exact arguments). It attaches the browser tools, or refuses \
-     with nothing changed and says why; any approval the host requires is handled there. \
-     Do not switch to desktop pointer tools for this page: they move the user's pointer.";
+     Attaching gives Cua the user's logged-in profile, so ask the user first; with their \
+     agreement, call browser_prepare with this pid and window_id and strategy \
+     {\"kind\":\"existing_profile\"} (detail.next_call has the exact arguments). That call is \
+     refused, with nothing changed, unless the runtime was started with --grant \
+     existing-profile or its host authorizes the attachment. If the task does not need the \
+     user's logins, call browser_prepare with allow_launch true and profile \
+     {\"mode\":\"isolated_new\"} instead. Do not switch to desktop pointer tools for this \
+     page: they move the user's pointer.";
 
 /// Add the exact `browser_prepare` call to a not-yet-attached refusal.
 fn with_existing_profile_next_call(
