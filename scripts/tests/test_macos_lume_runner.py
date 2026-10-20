@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -34,6 +35,18 @@ def _write_executable(path: Path, body: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"#!/bin/sh\n{body}", encoding="utf-8")
     path.chmod(0o755)
+
+
+def _forward_jq(fake_bin: Path) -> None:
+    """Expose the jq that requires_jq found to a test that narrows PATH.
+
+    requires_jq searches the full PATH, but jq often lives outside /usr/bin
+    and /bin (Homebrew, ~/.local/bin), so a narrowed PATH alone would fail
+    such a run with "jq is not on PATH" instead of testing the script.
+    """
+    jq = shutil.which("jq")
+    assert jq is not None
+    _write_executable(fake_bin / "jq", f'exec {shlex.quote(jq)} "$@"\n')
 
 
 # --------------------------------------------------------------------------
@@ -364,6 +377,7 @@ def test_tcc_host_seed_runs_the_guest_helper_once_per_vm(tmp_path: Path) -> None
     fake_scp = fake_bin / "scp"
     fake_ssh = fake_bin / "ssh"
     log = tmp_path / "transport.log"
+    _forward_jq(fake_bin)
     _write_executable(
         fake_lume,
         """printf 'lume %s\n' "$*" >> "$CUA_TEST_TRANSPORT_LOG"
