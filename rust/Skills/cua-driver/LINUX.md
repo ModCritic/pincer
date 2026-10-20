@@ -162,8 +162,8 @@ deadline with the text length instead of using a flat one (0.04 s per
 character leaves margin over those rates). A terminal can still be echoing when the call returns; read the
 result again before retyping text that looks truncated.
 
-**Pointer paths.** `move_along_path` glides the real pointer (XTest, the
-same route as `move_cursor` with `scope:"desktop"`) along `segments` (a
+**Pointer paths.** `move_along_path` glides the real pointer, by the same
+route as `move_cursor` with `scope:"desktop"`, along `segments` (a
 `start` plus line, quad, cubic and arc pieces), `points` (a polyline;
 `smooth:true` makes it a Catmull-Rom curve), or `parametric` x(t), y(t) for
 circles and spirals. `button` holds a button for the whole path (drawing in a
@@ -174,7 +174,10 @@ paint program, a curved drag); without it the glide only hovers, and
 any input. `scope:"desktop"` takes `get_desktop_state` pixels; window scope
 takes `pid` + `window_id` and that window's screenshot pixels, and brings the
 window to front first. The reply ends with one JSON line: segments, samples,
-length, measured duration, start and end. Native Wayland refuses the tool.
+length, measured duration, start and end. On native Wayland the glide goes
+through the wlroots virtual pointer, or libei on GNOME and KDE in builds with
+the `portal-input` feature, and takes only `scope:"desktop"` without
+`pid`/`window_id`; `button` and `click_at_end` work there too.
 
 **Change over time and partial captures.** `capture_series` takes timed
 screenshots of the desktop or one window in one call (`count` frames

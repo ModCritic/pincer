@@ -2235,6 +2235,215 @@ fn drag_vptr(
     Ok(())
 }
 
+// ── Pointer paths (move_along_path) ─────────────────────────────────────────
+
+/// A pointer path refused before any input was sent, because a sample lies
+/// outside the pointer area or off every powered monitor.
+#[derive(Debug)]
+pub struct PointerPathRefused(pub String);
+
+impl std::fmt::Display for PointerPathRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for PointerPathRefused {}
+
+/// Glide the real pointer through `gesture`, whose points are desktop-frame
+/// pixels (the `get_desktop_state` frame), on the schedule shared with X11
+/// ([`crate::input::run_pointer_path`]). Goes through the wlroots virtual
+/// pointer, or libei on compositors without one, like `move_cursor` and
+/// `drag` with scope "desktop". Every sample is checked against the pointer
+/// area before any input is sent. Returns the measured glide time.
+pub fn pointer_path_desktop(
+    space: &DesktopInputSpace,
+    gesture: &crate::input::PointerPathGesture,
+) -> anyhow::Result<std::time::Duration> {
+    let points = gesture
+        .points
+        .iter()
+        .map(|&(x, y)| space.input_layout(x, y))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(|error| PointerPathRefused(error.to_string()))?;
+    let gesture = crate::input::PointerPathGesture {
+        points,
+        ..gesture.clone()
+    };
+    with_libei_fallback(
+        || pointer_path_vptr(&gesture, space.snapshot.as_ref()),
+        || {
+            libei_wait_pointer_ready()?;
+            libei_pointer_path(&gesture)
+        },
+    )
+}
+
+/// `points` relative to `origin`, after checking that every one lies inside
+/// the `width` x `height` pointer area there. A pointer route would clamp an
+/// outside point to the edge and bend the path, so it is refused instead.
+fn path_in_pointer_area(
+    points: &[(i32, i32)],
+    origin: (i32, i32),
+    width: u32,
+    height: u32,
+) -> anyhow::Result<Vec<(i32, i32)>> {
+    let relative: Vec<(i32, i32)> = points
+        .iter()
+        .map(|&(x, y)| (x.saturating_sub(origin.0), y.saturating_sub(origin.1)))
+        .collect();
+    let as_f64: Vec<(f64, f64)> = relative
+        .iter()
+        .map(|&(x, y)| (f64::from(x), f64::from(y)))
+        .collect();
+    crate::input::path::check_on_screen(&as_f64, width, height)
+        .map_err(|error| PointerPathRefused(error.to_string()))?;
+    Ok(relative)
+}
+
+/// [`crate::input::PathPointer`] over one wlroots virtual pointer. Points
+/// are in its `motion_absolute` space, already checked to be inside it.
+struct VptrPathPointer<'a> {
+    session: &'a mut VptrSession,
+    positioned: bool,
+}
+
+impl VptrPathPointer<'_> {
+    fn button(&mut self, button: u8, state: ButtonState) -> anyhow::Result<()> {
+        self.session
+            .vptr
+            .button(event_time_ms(), evdev_pointer_button(button), state);
+        self.session.vptr.frame();
+        self.session.queue.roundtrip(&mut self.session.state)?;
+        Ok(())
+    }
+}
+
+impl crate::input::PathPointer for VptrPathPointer<'_> {
+    fn move_to(&mut self, (x, y): (i32, i32)) -> anyhow::Result<()> {
+        let (px, py) = (x as u32, y as u32);
+        if !self.positioned {
+            // Approach the first sample from the next pixel, so the
+            // compositor picks the surface under it (see `point_at`).
+            self.session.point_at(px, py)?;
+            self.positioned = true;
+            return Ok(());
+        }
+        let (w, h) = (self.session.output_w, self.session.output_h);
+        self.session
+            .vptr
+            .motion_absolute(event_time_ms(), px, py, w, h);
+        self.session.vptr.frame();
+        Ok(())
+    }
+
+    fn press(&mut self, button: u8, _point: (i32, i32)) -> anyhow::Result<()> {
+        self.button(button, ButtonState::Pressed)
+    }
+
+    fn release(&mut self, button: u8, _point: (i32, i32)) -> anyhow::Result<()> {
+        self.button(button, ButtonState::Released)
+    }
+
+    fn flush(&mut self) -> anyhow::Result<()> {
+        self.session.queue.roundtrip(&mut self.session.state)?;
+        Ok(())
+    }
+
+    fn finish(&mut self) -> anyhow::Result<()> {
+        self.flush()
+    }
+}
+
+/// wlroots virtual-pointer implementation of [`pointer_path_desktop`], with
+/// points in layout coordinates.
+fn pointer_path_vptr(
+    gesture: &crate::input::PointerPathGesture,
+    snapshot: Option<&hyprland::DesktopSnapshot>,
+) -> anyhow::Result<std::time::Duration> {
+    let mut session = open_vptr_session_in(None, snapshot)?;
+    let origin = (session.origin_x, session.origin_y);
+    let points = path_in_pointer_area(&gesture.points, origin, session.output_w, session.output_h)?;
+    let gesture = crate::input::PointerPathGesture {
+        points,
+        ..gesture.clone()
+    };
+    // Give the compositor time to set up the new device, as click and drag do.
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    let glide = crate::input::run_pointer_path(
+        &gesture,
+        &mut VptrPathPointer {
+            session: &mut session,
+            positioned: false,
+        },
+    )?;
+    let &(x, y) = gesture.points.last().expect("non-empty");
+    record_synth_cursor(origin.0 + x, origin.1 + y);
+    session.vptr.destroy();
+    session.queue.roundtrip(&mut session.state)?;
+    Ok(glide)
+}
+
+/// [`crate::input::PathPointer`] over the libei worker. Each call already
+/// waits for EIS to acknowledge it, so there is nothing left to flush.
+#[cfg(feature = "portal-input")]
+struct LibeiPathPointer;
+
+#[cfg(feature = "portal-input")]
+impl crate::input::PathPointer for LibeiPathPointer {
+    fn move_to(&mut self, (x, y): (i32, i32)) -> anyhow::Result<()> {
+        libei::move_absolute(f64::from(x), f64::from(y))
+    }
+
+    fn press(&mut self, button: u8, (x, y): (i32, i32)) -> anyhow::Result<()> {
+        libei::pointer_button(
+            f64::from(x),
+            f64::from(y),
+            cua_button_to_libei(button),
+            true,
+        )
+    }
+
+    fn release(&mut self, button: u8, (x, y): (i32, i32)) -> anyhow::Result<()> {
+        libei::pointer_button(
+            f64::from(x),
+            f64::from(y),
+            cua_button_to_libei(button),
+            false,
+        )
+    }
+
+    fn flush(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn finish(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+/// libei implementation of [`pointer_path_desktop`], with points in layout
+/// coordinates. The pointer area is the first output, as for
+/// `libei_move_absolute`.
+#[cfg(feature = "portal-input")]
+fn libei_pointer_path(
+    gesture: &crate::input::PointerPathGesture,
+) -> anyhow::Result<std::time::Duration> {
+    let (w, h) = output_dimensions()?;
+    path_in_pointer_area(&gesture.points, (0, 0), w, h)?;
+    let glide = crate::input::run_pointer_path(gesture, &mut LibeiPathPointer)?;
+    let &(x, y) = gesture.points.last().expect("non-empty");
+    record_synth_cursor(x, y);
+    Ok(glide)
+}
+
+#[cfg(not(feature = "portal-input"))]
+fn libei_pointer_path(
+    _gesture: &crate::input::PointerPathGesture,
+) -> anyhow::Result<std::time::Duration> {
+    unreachable!("libei fallback compiled out (no portal-input feature)")
+}
+
 /// Type Unicode text into the focused Wayland surface via `wtype` (the
 /// virtual-keyboard tool — `zwp_virtual_keyboard_v1` under the hood; it builds
 /// the xkb keymap and resolves shift levels for us). This mirrors the X11
@@ -4295,5 +4504,30 @@ mod tests {
         assert!(parse_inject_geometry("geometry 1").is_err());
         assert!(parse_inject_geometry("err target-not-found").is_err());
         assert!(parse_inject_geometry("ok").is_err());
+    }
+
+    /// move_along_path samples go to the pointer relative to its area, and a
+    /// path that leaves the area is refused whole rather than clamped.
+    #[test]
+    fn pointer_path_samples_are_checked_against_the_pointer_area() {
+        use super::path_in_pointer_area;
+        assert_eq!(
+            path_in_pointer_area(&[(0, 0), (1279, 719)], (0, 0), 1280, 720).unwrap(),
+            vec![(0, 0), (1279, 719)]
+        );
+        // A pointer area whose layout origin is left of and above (0, 0).
+        assert_eq!(
+            path_in_pointer_area(&[(-1920, -100), (100, 50)], (-1920, -100), 3200, 1180).unwrap(),
+            vec![(0, 0), (2020, 150)]
+        );
+        let error =
+            path_in_pointer_area(&[(10, 10), (1280, 10), (-1, 5)], (0, 0), 1280, 720).unwrap_err();
+        assert!(
+            error.downcast_ref::<super::PointerPathRefused>().is_some(),
+            "an off-area path is a refusal, not an input failure"
+        );
+        let error = error.to_string();
+        assert!(error.contains("sample 1"), "{error}");
+        assert!(error.contains("2 of 3 samples"), "{error}");
     }
 }

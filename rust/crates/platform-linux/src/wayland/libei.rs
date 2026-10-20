@@ -113,6 +113,13 @@ enum Cmd {
         y: f64,
         reply: Sender<anyhow::Result<()>>,
     },
+    PointerButton {
+        x: f64,
+        y: f64,
+        button: Button,
+        pressed: bool,
+        reply: Sender<anyhow::Result<()>>,
+    },
     Scroll {
         dx: f64,
         dy: f64,
@@ -281,6 +288,24 @@ pub fn move_absolute(x: f64, y: f64) -> anyhow::Result<()> {
     let (tx_r, rx_r) = bounded(1);
     tx()?
         .send(Cmd::MoveAbsolute { x, y, reply: tx_r })
+        .map_err(|e| anyhow::anyhow!("libei worker channel closed: {e}"))?;
+    wait_for_reply(rx_r)
+}
+
+/// Move the cursor to absolute (x, y) and press or release `button` there,
+/// leaving it in that state, so a caller can hold a button across several
+/// [`move_absolute`] calls. Blocks until the EIS server has received it.
+pub fn pointer_button(x: f64, y: f64, button: Button, pressed: bool) -> anyhow::Result<()> {
+    ensure_started()?;
+    let (tx_r, rx_r) = bounded(1);
+    tx()?
+        .send(Cmd::PointerButton {
+            x,
+            y,
+            button,
+            pressed,
+            reply: tx_r,
+        })
         .map_err(|e| anyhow::anyhow!("libei worker channel closed: {e}"))?;
     wait_for_reply(rx_r)
 }
@@ -947,9 +972,10 @@ impl EisState {
         }
         match cmd {
             Cmd::WaitReady { interface, .. } => self.device_with_interface(interface).is_some(),
-            Cmd::Click { .. } | Cmd::MoveAbsolute { .. } | Cmd::Drag { .. } => {
-                self.device_with_interface("ei_pointer_absolute").is_some()
-            }
+            Cmd::Click { .. }
+            | Cmd::MoveAbsolute { .. }
+            | Cmd::PointerButton { .. }
+            | Cmd::Drag { .. } => self.device_with_interface("ei_pointer_absolute").is_some(),
             Cmd::Scroll { .. } => self.device_with_interface("ei_scroll").is_some(),
             Cmd::PressKey { .. } | Cmd::KeySequence { .. } => {
                 self.device_with_interface("ei_keyboard").is_some()
@@ -969,6 +995,7 @@ impl EisState {
             Cmd::WaitReady { reply, .. }
             | Cmd::Click { reply, .. }
             | Cmd::MoveAbsolute { reply, .. }
+            | Cmd::PointerButton { reply, .. }
             | Cmd::Scroll { reply, .. }
             | Cmd::TypeText { reply, .. }
             | Cmd::PressKey { reply, .. }
@@ -1072,6 +1099,28 @@ impl EisState {
                     }
                 }
                 btn.button(button.to_evdev(), reis::ei::button::ButtonState::Released);
+                device.frame(serial, event_time_us());
+            }
+            Cmd::PointerButton {
+                x,
+                y,
+                button,
+                pressed,
+                ..
+            } => {
+                let (device, rel_x, rel_y) = self.pointer_device_for(*x, *y)?;
+                let serial = self.last_serial;
+                let ptr_abs =
+                    require_device_interface::<reis::ei::PointerAbsolute>(&self.devices, &device)?;
+                let btn = require_device_interface::<reis::ei::Button>(&self.devices, &device)?;
+                let state = if *pressed {
+                    reis::ei::button::ButtonState::Press
+                } else {
+                    reis::ei::button::ButtonState::Released
+                };
+
+                ptr_abs.motion_absolute(rel_x, rel_y);
+                btn.button(button.to_evdev(), state);
                 device.frame(serial, event_time_us());
             }
             Cmd::MoveAbsolute { x, y, .. } => {

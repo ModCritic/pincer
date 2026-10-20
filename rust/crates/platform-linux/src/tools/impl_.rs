@@ -13131,9 +13131,12 @@ impl Tool for MoveCursorTool {
 // ── move_along_path ───────────────────────────────────────────────────────────
 
 /// Glides the real pointer along a sampled path (see `crate::input::path`).
-/// Delivery is XTest, the route `move_cursor` scope=desktop and foreground
-/// drags use; the session's MPX virtual pointer is never used, because the
-/// point of this tool is the visible system pointer.
+/// On X11, delivery is XTest, the route `move_cursor` scope=desktop and
+/// foreground drags use; the session's MPX virtual pointer is never used,
+/// because the point of this tool is the visible system pointer. On Wayland
+/// it is the route of `move_cursor` scope=desktop (the wlroots virtual
+/// pointer, else libei), for desktop scope only. Both share the timing of
+/// `crate::input::run_pointer_path`.
 pub struct MoveAlongPathTool {
     state: Arc<ToolState>,
 }
@@ -13225,7 +13228,7 @@ impl Tool for MoveAlongPathTool {
             description: "Glide the real OS pointer along a path: line, quad, cubic and arc segments, a \
                 polyline (optionally smoothed), or a parametric x(t), y(t). Optionally hold a button \
                 along it (draw, drag) or click at the end. Samples are evenly spaced along the path and \
-                timed by duration_ms and easing. X11 only."
+                timed by duration_ms and easing. On Wayland, only scope \"desktop\" without pid/window_id."
                 .into(),
             input_schema: move_along_path_schema(),
             read_only: false,
@@ -13237,17 +13240,7 @@ impl Tool for MoveAlongPathTool {
 
     async fn invoke(&self, args: Value) -> ToolResult {
         use crate::input::path;
-        if crate::wayland::wayland_input_enabled() {
-            return ToolResult::error(
-                "move_along_path is not supported on Wayland: it needs the X11 XTest pointer. \
-                 Use drag, or move_cursor with scope \"desktop\". No input was sent.",
-            )
-            .with_structured(json!({
-                "code": "unsupported_platform",
-                "tool": "move_along_path",
-                "effect": "refused",
-            }));
-        }
+        let wayland = crate::wayland::wayland_input_enabled();
         let scope = args.opt_str("scope");
         if let Some(other) = scope
             .as_deref()
@@ -13268,6 +13261,20 @@ impl Tool for MoveAlongPathTool {
             },
             _ => return move_along_path_refusal("pid and window_id go together"),
         };
+        if wayland && target.is_some() {
+            // Window pixels need the window's screen origin and a verified
+            // way to raise it, which Wayland compositors do not reliably
+            // give, so only desktop pixels are accepted.
+            return ToolResult::error(
+                "move_along_path on Wayland only takes scope \"desktop\" without pid or \
+                 window_id, in get_desktop_state pixels. No input was sent.",
+            )
+            .with_structured(json!({
+                "code": "unsupported_platform",
+                "tool": "move_along_path",
+                "effect": "refused",
+            }));
+        }
         if target.is_none() && !desktop_pixels {
             return move_along_path_refusal(
                 "window scope needs pid and window_id (window-local screenshot pixels); \
@@ -13333,13 +13340,17 @@ impl Tool for MoveAlongPathTool {
             .iter()
             .map(|(x, y)| (origin.0 + x * scale.0, origin.1 + y * scale.1))
             .collect();
-        let (width, height) = match tokio::task::spawn_blocking(x11_screen_size).await {
-            Ok(Ok(size)) => size,
-            Ok(Err(error)) => return ToolResult::error(error.to_string()),
-            Err(error) => return ToolResult::error(format!("Task error: {error}")),
-        };
-        if let Err(error) = path::check_on_screen(&screen, width, height) {
-            return move_along_path_refusal(error.to_string());
+        // On Wayland the backend checks the samples against its own pointer
+        // area, before it sends any input.
+        if !wayland {
+            let (width, height) = match tokio::task::spawn_blocking(x11_screen_size).await {
+                Ok(Ok(size)) => size,
+                Ok(Err(error)) => return ToolResult::error(error.to_string()),
+                Err(error) => return ToolResult::error(format!("Task error: {error}")),
+            };
+            if let Err(error) = path::check_on_screen(&screen, width, height) {
+                return move_along_path_refusal(error.to_string());
+            }
         }
 
         let gesture = crate::input::PointerPathGesture {
@@ -13353,6 +13364,15 @@ impl Tool for MoveAlongPathTool {
         };
         let budget = std::time::Duration::from_millis(request.duration_ms + 15_000);
         let result = match target {
+            // Like move_cursor and drag on Wayland: libei can wait for portal
+            // consent, which the X11 budget does not allow for.
+            None if wayland => {
+                tokio::task::spawn_blocking(move || {
+                    let space = crate::wayland::DesktopInputSpace::current()?;
+                    crate::wayland::pointer_path_desktop(&space, &gesture)
+                })
+                .await
+            }
             None => {
                 spawn_blocking_bounded("move_along_path", budget, move || {
                     crate::input::send_pointer_path_xtest(&gesture)
@@ -13373,7 +13393,12 @@ impl Tool for MoveAlongPathTool {
         };
         let elapsed = match result {
             Ok(Ok(elapsed)) => elapsed,
-            Ok(Err(error)) => return input_error_result(error),
+            Ok(Err(error)) => {
+                if let Some(refused) = error.downcast_ref::<crate::wayland::PointerPathRefused>() {
+                    return move_along_path_refusal(refused.to_string());
+                }
+                return input_error_result(error);
+            }
             Err(error) => return ToolResult::error(format!("Task error: {error}")),
         };
 
@@ -13407,7 +13432,13 @@ impl Tool for MoveAlongPathTool {
         ))
         .with_structured(json!({
             "scope": if windowed { "window" } else { "desktop" },
-            "path": if windowed { "x11_xtest_fg" } else { "xtest_desktop" },
+            "path": if windowed {
+                "x11_xtest_fg"
+            } else if wayland {
+                "wayland_desktop"
+            } else {
+                "xtest_desktop"
+            },
             "delivery_mode": if windowed { "foreground" } else { "not_applicable" },
             "effect": "unverifiable",
             "stats": stats,

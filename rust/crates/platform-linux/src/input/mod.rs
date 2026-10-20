@@ -4010,39 +4010,51 @@ pub struct PointerPathGesture {
     pub click_at_end: Option<(u8, usize)>,
 }
 
-/// Glide the real X11 pointer through `gesture.points` with XTest, each
-/// sample at its scheduled time from one monotonic start, so a slow event
-/// never shifts the ones after it. With a button, it is pressed at the first
-/// sample and released at the last; the release is attempted even when a
-/// motion request fails, so no button is left held. Returns the glide's
-/// measured duration, from the first sample to the last.
-pub fn send_pointer_path_xtest(gesture: &PointerPathGesture) -> Result<Duration> {
-    use x11rb::protocol::xtest::ConnectionExt as _;
+/// The route a pointer path's input takes: XTest on X11, the wlroots virtual
+/// pointer or libei on Wayland. [`run_pointer_path`] owns the timing, so
+/// every route glides on the same schedule. Points are in the route's own
+/// coordinates, and buttons use X numbering (1 left, 2 middle, 3 right).
+pub trait PathPointer {
+    /// Queue a motion to `point`.
+    fn move_to(&mut self, point: (i32, i32)) -> Result<()>;
+    /// Press `button` at `point`, returning once the route has accepted it.
+    fn press(&mut self, button: u8, point: (i32, i32)) -> Result<()>;
+    /// Release `button` at `point`, returning once the route has accepted it.
+    fn release(&mut self, button: u8, point: (i32, i32)) -> Result<()>;
+    /// Send what is queued.
+    fn flush(&mut self) -> Result<()>;
+    /// Wait until everything sent so far has been delivered.
+    fn finish(&mut self) -> Result<()>;
+}
+
+/// Glide `pointer` through `gesture.points`, each sample at its scheduled
+/// time from one monotonic start, so a slow event never shifts the ones
+/// after it. With a button, it is pressed at the first sample and released
+/// at the last; the release is attempted even when a motion fails, so no
+/// button is left held. Returns the glide's measured duration, from the
+/// first sample to the last.
+pub fn run_pointer_path(
+    gesture: &PointerPathGesture,
+    pointer: &mut dyn PathPointer,
+) -> Result<Duration> {
     let points = &gesture.points;
     anyhow::ensure!(
         !points.is_empty() && points.len() == gesture.offsets_ms.len(),
         "a pointer path needs one time per sample"
     );
-    let (conn, screen_num) = connect_x11_for_input()?;
-    let root = conn.setup().roots[screen_num].root;
-    let motion = |(x, y): (i32, i32)| {
-        conn.xtest_fake_input(MOTION_NOTIFY_EVENT, 0, 0, root, x as i16, y as i16, 0)
-    };
     let mut button_pressed = false;
     let mut last_sent = points[0];
     let mut glide_time = Duration::ZERO;
 
     let gesture_result = (|| -> Result<()> {
-        motion(points[0])?;
+        pointer.move_to(points[0])?;
         if let Some(button) = gesture.button {
-            let (x, y) = points[0];
             // Confirm the press before the first motion, so the target sees
             // the button go down where the path starts.
-            conn.xtest_fake_input(BUTTON_PRESS_EVENT, button, 0, root, x as i16, y as i16, 0)?
-                .check()?;
+            pointer.press(button, points[0])?;
             button_pressed = true;
         } else {
-            conn.flush()?;
+            pointer.flush()?;
         }
         let start = std::time::Instant::now();
         for (&point, &offset) in points.iter().zip(&gesture.offsets_ms).skip(1) {
@@ -4054,49 +4066,22 @@ pub fn send_pointer_path_xtest(gesture: &PointerPathGesture) -> Result<Duration>
             // Rounding can repeat a pixel; a motion that does not move is
             // only noise for the target.
             if point != last_sent {
-                motion(point)?;
-                conn.flush()?;
+                pointer.move_to(point)?;
+                pointer.flush()?;
                 last_sent = point;
             }
         }
         glide_time = start.elapsed();
         let end = *points.last().expect("non-empty");
         if let Some(button) = gesture.button {
-            conn.xtest_fake_input(
-                BUTTON_RELEASE_EVENT,
-                button,
-                0,
-                root,
-                end.0 as i16,
-                end.1 as i16,
-                0,
-            )?
-            .check()?;
+            pointer.release(button, end)?;
             button_pressed = false;
         }
         if let Some((button, count)) = gesture.click_at_end {
             for click_index in 0..count.max(1) {
-                conn.xtest_fake_input(
-                    BUTTON_PRESS_EVENT,
-                    button,
-                    0,
-                    root,
-                    end.0 as i16,
-                    end.1 as i16,
-                    0,
-                )?
-                .check()?;
+                pointer.press(button, end)?;
                 sleep(Duration::from_millis(CLICK_DELAY_MS));
-                conn.xtest_fake_input(
-                    BUTTON_RELEASE_EVENT,
-                    button,
-                    0,
-                    root,
-                    end.0 as i16,
-                    end.1 as i16,
-                    0,
-                )?
-                .check()?;
+                pointer.release(button, end)?;
                 if click_index + 1 < count {
                     sleep(Duration::from_millis(DOUBLE_CLICK_DELAY_MS));
                 }
@@ -4105,31 +4090,72 @@ pub fn send_pointer_path_xtest(gesture: &PointerPathGesture) -> Result<Duration>
         Ok(())
     })();
 
-    let mut cleanup_result: Result<()> = Ok(());
-    if let (true, Some(button)) = (button_pressed, gesture.button) {
-        cleanup_result = (|| -> Result<()> {
-            conn.xtest_fake_input(
-                BUTTON_RELEASE_EVENT,
-                button,
-                0,
-                root,
-                last_sent.0 as i16,
-                last_sent.1 as i16,
-                0,
-            )?
-            .check()?;
-            Ok(())
-        })();
-    }
-    // Deliver everything queued before this short-lived connection closes.
-    let completion_result = (|| -> Result<()> {
-        conn.get_input_focus()?.reply()?;
-        Ok(())
-    })();
+    let cleanup_result = match (button_pressed, gesture.button) {
+        (true, Some(button)) => pointer.release(button, last_sent),
+        _ => Ok(()),
+    };
+    // Deliver everything queued before the route closes.
+    let completion_result = pointer.finish();
     gesture_result?;
     cleanup_result?;
     completion_result?;
     Ok(glide_time)
+}
+
+/// [`PathPointer`] over XTest on the root window of a short-lived X
+/// connection, the route `move_cursor` scope=desktop and foreground drags use.
+struct XTestPathPointer {
+    conn: RustConnection,
+    root: Window,
+}
+
+impl XTestPathPointer {
+    fn fake(&self, event: u8, detail: u8, (x, y): (i32, i32)) -> Result<()> {
+        use x11rb::protocol::xtest::ConnectionExt as _;
+        self.conn
+            .xtest_fake_input(event, detail, 0, self.root, x as i16, y as i16, 0)?;
+        Ok(())
+    }
+
+    fn fake_checked(&self, event: u8, detail: u8, (x, y): (i32, i32)) -> Result<()> {
+        use x11rb::protocol::xtest::ConnectionExt as _;
+        self.conn
+            .xtest_fake_input(event, detail, 0, self.root, x as i16, y as i16, 0)?
+            .check()?;
+        Ok(())
+    }
+}
+
+impl PathPointer for XTestPathPointer {
+    fn move_to(&mut self, point: (i32, i32)) -> Result<()> {
+        self.fake(MOTION_NOTIFY_EVENT, 0, point)
+    }
+
+    fn press(&mut self, button: u8, point: (i32, i32)) -> Result<()> {
+        self.fake_checked(BUTTON_PRESS_EVENT, button, point)
+    }
+
+    fn release(&mut self, button: u8, point: (i32, i32)) -> Result<()> {
+        self.fake_checked(BUTTON_RELEASE_EVENT, button, point)
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.conn.flush()?;
+        Ok(())
+    }
+
+    fn finish(&mut self) -> Result<()> {
+        self.conn.get_input_focus()?.reply()?;
+        Ok(())
+    }
+}
+
+/// Glide the real X11 pointer through `gesture.points` with XTest, on the
+/// schedule of [`run_pointer_path`].
+pub fn send_pointer_path_xtest(gesture: &PointerPathGesture) -> Result<Duration> {
+    let (conn, screen_num) = connect_x11_for_input()?;
+    let root = conn.setup().roots[screen_num].root;
+    run_pointer_path(gesture, &mut XTestPathPointer { conn, root })
 }
 
 /// Send a named key press to a window.
@@ -5247,5 +5273,172 @@ mod path_tests {
         let (cum, total) = path_cumulative(&path);
         assert!((total - 0.0).abs() < 1e-9);
         assert_eq!(point_on_path(&path, &cum, total, 0.3), (5, 5));
+    }
+}
+
+#[cfg(test)]
+mod pointer_path_driver_tests {
+    use super::{run_pointer_path, PathPointer, PointerPathGesture};
+    use anyhow::{bail, Result};
+    use std::time::{Duration, Instant};
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum Event {
+        Move((i32, i32)),
+        Press(u8, (i32, i32)),
+        Release(u8, (i32, i32)),
+        Flush,
+        Finish,
+    }
+
+    /// Records what the driver asks of a route, and when, and can fail the
+    /// motion with a given index.
+    struct Recorder {
+        events: Vec<Event>,
+        move_times: Vec<Instant>,
+        fail_move: Option<usize>,
+    }
+
+    impl Recorder {
+        fn new() -> Self {
+            Self {
+                events: Vec::new(),
+                move_times: Vec::new(),
+                fail_move: None,
+            }
+        }
+    }
+
+    impl PathPointer for Recorder {
+        fn move_to(&mut self, point: (i32, i32)) -> Result<()> {
+            if self.fail_move == Some(self.move_times.len()) {
+                bail!("motion {} failed", self.move_times.len());
+            }
+            self.move_times.push(Instant::now());
+            self.events.push(Event::Move(point));
+            Ok(())
+        }
+        fn press(&mut self, button: u8, point: (i32, i32)) -> Result<()> {
+            self.events.push(Event::Press(button, point));
+            Ok(())
+        }
+        fn release(&mut self, button: u8, point: (i32, i32)) -> Result<()> {
+            self.events.push(Event::Release(button, point));
+            Ok(())
+        }
+        fn flush(&mut self) -> Result<()> {
+            self.events.push(Event::Flush);
+            Ok(())
+        }
+        fn finish(&mut self) -> Result<()> {
+            self.events.push(Event::Finish);
+            Ok(())
+        }
+    }
+
+    fn gesture(points: &[(i32, i32)], offsets_ms: &[f64]) -> PointerPathGesture {
+        PointerPathGesture {
+            points: points.to_vec(),
+            offsets_ms: offsets_ms.to_vec(),
+            button: None,
+            click_at_end: None,
+        }
+    }
+
+    #[test]
+    fn hover_glide_moves_through_each_new_pixel_without_buttons() {
+        let mut route = Recorder::new();
+        let glide = gesture(&[(10, 10), (12, 10), (12, 10), (14, 11)], &[0.0; 4]);
+        run_pointer_path(&glide, &mut route).unwrap();
+        assert_eq!(
+            route.events,
+            vec![
+                Event::Move((10, 10)),
+                Event::Flush,
+                Event::Move((12, 10)),
+                Event::Flush,
+                Event::Move((14, 11)),
+                Event::Flush,
+                Event::Finish,
+            ],
+            "a repeated pixel sends nothing"
+        );
+    }
+
+    #[test]
+    fn held_button_goes_down_at_the_start_and_up_at_the_end() {
+        let mut route = Recorder::new();
+        let mut glide = gesture(&[(0, 0), (5, 5)], &[0.0, 0.0]);
+        glide.button = Some(3);
+        run_pointer_path(&glide, &mut route).unwrap();
+        assert_eq!(
+            route.events,
+            vec![
+                Event::Move((0, 0)),
+                Event::Press(3, (0, 0)),
+                Event::Move((5, 5)),
+                Event::Flush,
+                Event::Release(3, (5, 5)),
+                Event::Finish,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_motion_still_releases_the_held_button() {
+        let mut route = Recorder::new();
+        route.fail_move = Some(2);
+        let mut glide = gesture(&[(0, 0), (1, 0), (2, 0)], &[0.0; 3]);
+        glide.button = Some(1);
+        let error = run_pointer_path(&glide, &mut route).unwrap_err();
+        assert!(error.to_string().contains("motion 2 failed"), "{error}");
+        assert_eq!(
+            &route.events[route.events.len() - 2..],
+            &[Event::Release(1, (1, 0)), Event::Finish],
+            "released where the pointer last went"
+        );
+    }
+
+    #[test]
+    fn double_click_at_end_presses_twice_at_the_last_point() {
+        let mut route = Recorder::new();
+        let mut glide = gesture(&[(0, 0), (8, 8)], &[0.0, 0.0]);
+        glide.click_at_end = Some((1, 2));
+        run_pointer_path(&glide, &mut route).unwrap();
+        assert_eq!(
+            &route.events[4..],
+            &[
+                Event::Press(1, (8, 8)),
+                Event::Release(1, (8, 8)),
+                Event::Press(1, (8, 8)),
+                Event::Release(1, (8, 8)),
+                Event::Finish,
+            ]
+        );
+    }
+
+    #[test]
+    fn samples_follow_one_monotonic_schedule() {
+        let mut route = Recorder::new();
+        let offsets = [0.0, 30.0, 60.0, 90.0];
+        let glide = gesture(&[(0, 0), (1, 0), (2, 0), (3, 0)], &offsets);
+        let elapsed = run_pointer_path(&glide, &mut route).unwrap();
+        let start = route.move_times[0];
+        for (time, offset) in route.move_times.iter().zip(offsets).skip(1) {
+            let at = time.duration_since(start);
+            assert!(
+                at >= Duration::from_secs_f64(offset / 1000.0),
+                "a sample went out early: {at:?} before {offset} ms"
+            );
+        }
+        assert!(elapsed >= Duration::from_millis(90), "{elapsed:?}");
+    }
+
+    #[test]
+    fn mismatched_times_send_nothing() {
+        let mut route = Recorder::new();
+        let glide = gesture(&[(0, 0), (1, 0)], &[0.0]);
+        assert!(run_pointer_path(&glide, &mut route).is_err());
+        assert!(route.events.is_empty());
     }
 }
