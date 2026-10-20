@@ -20,11 +20,9 @@ public partial class MainWindow : Window
         try
         {
             // Read the CDP port from CUA_WEBVIEW_CDP_PORT (default 9222).
-            // cua-driver's `page` tool routes JS execution through CDP when
-            // `--remote-debugging-port` is exposed; this is the analogue of
-            // launching Chrome with --remote-debugging-port for the same
-            // path. Setting it on WebView2 is essential for testing the
-            // page tool against this host.
+            // This is the analogue of launching Chrome with
+            // --remote-debugging-port, for tests that reach this host's
+            // page through CDP.
             // Validate the CDP port — Chromium accepts --remote-debugging-port=0
             // (means "pick an ephemeral port") but the harness tests expect a
             // fixed port and don't read DevToolsActivePort. Reject 0 + any

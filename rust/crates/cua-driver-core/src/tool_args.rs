@@ -12,8 +12,7 @@
 //! - `require_*` — bails with a `ToolResult::error` if the field is
 //!   missing or the wrong type. Narrowing casts (i64 → i32, u64 → u32)
 //!   go through `try_from` and surface an actionable range error
-//!   instead of silently truncating — the same CodeRabbit fix landed
-//!   on PR #1666's page tool now applies uniformly.
+//!   instead of silently truncating.
 //! - `opt_*` — returns `Option<T>` / `Result<Option<T>>` for callers
 //!   that already have a sensible default. Range-checked variants
 //!   return `Result<Option<T>>` because "the user passed a value but

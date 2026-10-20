@@ -18,7 +18,7 @@ Each is either selected by a canonical runner or listed with a reason in
 | Prefix | Purpose |
 | --- | --- |
 | `protocol_*_test.rs` | MCP/CLI protocol and schema behavior |
-| `session_capture_scope_test.rs` | Per-session policy isolation, escalation, lifecycle, and retired config key |
+| `session_capture_scope_test.rs` | Refusal of the removed `capture_scope` session input and the retired config key |
 | `schema_*_test.rs` | Generated schema consistency |
 | `*_cli_test.rs` | CLI verbs driven through the built binary |
 

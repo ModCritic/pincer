@@ -76,8 +76,8 @@ impl Tool for GetConfigTool {
             // sharing its package version.
             "source_sha": option_env!("CUA_DRIVER_SOURCE_SHA"),
             "platform": "macos",
-            // capture_mode is deprecated; capture_scope is retired from
-            // persistent config. Actions select a target per call.
+            // capture_mode and capture_scope are not stored settings.
+            // Actions select a target per call.
             "max_image_dimension": max_image_dimension,
             "agent_cursor": {
                 "enabled": cursor_enabled,

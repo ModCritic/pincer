@@ -6,9 +6,7 @@
 //! visible to the next. MCP in-session visibility is owned by
 //! `protocol_tools_call_test::get_config_and_check_permissions`.
 //!
-//! Uses `max_image_dimension` as the persisted key. `capture_mode` /
-//! `capture_scope` are NO LONGER settings (`capture_scope` is per-session), so
-//! `max_image_dimension` is the remaining
+//! Uses `max_image_dimension` as the persisted key: it is the remaining
 //! disk-persisted config field and the right probe for this transport behavior.
 //!
 //! The test is `#[ignore]`: an anonymous CLI `set_config` mutates the real

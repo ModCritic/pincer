@@ -149,10 +149,8 @@ test(
       const driver = CuaDriver.connect(socketPath)
       const expectedMethods = [
         "startSession",
-        "escalateSession",
         "getSession",
         "listSessions",
-        "getSessionState",
         "endSession",
         "getDesktopState",
         "listApps",
@@ -174,6 +172,8 @@ test(
         true,
       )
       assert.equal(typeof driver.parseVisualRegions, "undefined")
+      assert.equal(typeof driver.escalateSession, "undefined")
+      assert.equal(typeof driver.getSessionState, "undefined")
       const verificationResult = await driver.verifyState(
         VerifyStateInput.new({
           pid: 123n,
@@ -207,7 +207,7 @@ test(
       const state = await driver.getWindowState(sdk.GetWindowStateInput.new({
         pid: 42, windowId: 123n, session: "node-run", query: "Save",
         includeScreenshot: true, includeAccessibilityTree: true,
-        maxElements: 10, maxDepth: 3, maxDimension: 800, maxImageDimension: 1600,
+        maxElements: 10, maxDepth: 3, maxImageDimension: 1600,
       }))
       assert.equal(state.snapshotId, "snapshot-1")
       assert.equal(state.elements[0].label, "Save")
@@ -256,7 +256,7 @@ test(
       assert.deepEqual(requests[4].args, {
         pid: 42, window_id: 123, session: "node-run", query: "Save",
         include_screenshot: true, include_accessibility_tree: true,
-        max_elements: 10, max_depth: 3, max_dimension: 800, max_image_dimension: 1600,
+        max_elements: 10, max_depth: 3, max_image_dimension: 1600,
         full_output: true,
       })
       assert.deepEqual(requests[5].args, {

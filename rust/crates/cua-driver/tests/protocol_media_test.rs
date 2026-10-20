@@ -467,7 +467,7 @@ fn replay_trajectory() {
     std::fs::create_dir_all(&turn_dir).unwrap();
     std::fs::write(
         turn_dir.join("action.json"),
-        r#"{"tool":"start_session","arguments":{"session":"replay-protocol","capture_scope":"auto"}}"#,
+        r#"{"tool":"start_session","arguments":{"session":"replay-protocol"}}"#,
     )
     .unwrap();
 

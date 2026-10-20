@@ -207,14 +207,6 @@ impl SessionManifest {
                 "browser_target" | "authenticated_browser_tab" => {
                     self.authorize_resource_origin(resource)
                 }
-                // `escalate_session` always expands a browser-scoped session
-                // to desktop scope; it has no caller-selectable capture_scope
-                // argument. Require the immutable manifest's display grant
-                // directly instead of keying enforcement on a field the tool
-                // can never send.
-                "session_capture_scope" => self.desktop_display.then_some(()).ok_or_else(|| {
-                    "desktop capture escalation is outside the capability manifest".to_owned()
-                }),
                 "session_trajectory_recording" => Ok(()),
                 _ => refused(),
             },
@@ -977,7 +969,6 @@ pub fn load_manifest(path: &Path) -> Result<SessionManifest, String> {
         }
         if !browser_origins.is_empty() {
             const ORIGIN_BYPASS_TOOLS: &[&str] = &[
-                "page",
                 "click",
                 "double_click",
                 "right_click",
@@ -1391,14 +1382,14 @@ resources: {}
 allow:
   tools: [start_session, get_browser_state]
 deny:
-  tools: [page]
+  tools: [kill_app]
 ask:
   tools: [browser_download]
 "#,
         )
         .unwrap();
         assert_eq!(loaded.decision("start_session"), ManifestDecision::Allow);
-        assert_eq!(loaded.decision("page"), ManifestDecision::Deny);
+        assert_eq!(loaded.decision("kill_app"), ManifestDecision::Deny);
         assert_eq!(loaded.decision("browser_download"), ManifestDecision::Deny);
         assert_eq!(loaded.decision("click"), ManifestDecision::Undeclared);
     }
@@ -1407,7 +1398,7 @@ ask:
     #[test]
     fn version_three_removes_mode_and_ask_and_allows_optional_lifetimes() {
         let loaded =
-            manifest("version: 3\nallow:\n  tools: [get_config]\ndeny:\n  tools: [page]\n")
+            manifest("version: 3\nallow:\n  tools: [get_config]\ndeny:\n  tools: [kill_app]\n")
                 .unwrap();
         assert_eq!(loaded.version(), 3);
         assert_eq!(loaded.expires_unix_ms(), None);
@@ -1428,7 +1419,7 @@ ask:
                 .contains("must not declare mode")
         );
         assert!(
-            manifest("version: 3\nallow:\n  tools: [get_config]\nask:\n  tools: [page]\n")
+            manifest("version: 3\nallow:\n  tools: [get_config]\nask:\n  tools: [kill_app]\n")
                 .unwrap_err()
                 .contains("does not support ask.tools")
         );
@@ -1677,56 +1668,6 @@ allow:
                 &serde_json::json!({
                     "kind": "authenticated_browser_tab",
                     "live_origin": "about:blank"
-                }),
-            )
-            .unwrap();
-    }
-
-    #[cfg(feature = "yaml")]
-    #[test]
-    fn desktop_escalation_requires_the_manifest_display_grant() {
-        let without_display = manifest(
-            r#"
-version: 1
-mode: bounded
-expires_after: 8h
-idle_timeout: 30m
-resources: {}
-allow:
-  tools: [escalate_session]
-"#,
-        )
-        .unwrap();
-        assert!(without_display
-            .authorize_protected_resource(
-                "private_observation",
-                &serde_json::json!({
-                    "kind": "session_capture_scope",
-                    "capture_scope": "desktop"
-                }),
-            )
-            .is_err());
-
-        let with_display = manifest(
-            r#"
-version: 1
-mode: bounded
-expires_after: 8h
-idle_timeout: 30m
-resources:
-  desktop:
-    display: true
-allow:
-  tools: [escalate_session]
-"#,
-        )
-        .unwrap();
-        with_display
-            .authorize_protected_resource(
-                "private_observation",
-                &serde_json::json!({
-                    "kind": "session_capture_scope",
-                    "capture_scope": "desktop"
                 }),
             )
             .unwrap();
@@ -1993,7 +1934,7 @@ allow:
         assert!(loaded.is_idle_expired());
         assert!(loaded.commit_authorized_dispatch().is_err());
 
-        for bypass_tool in ["page", "verify_state"] {
+        for bypass_tool in ["click", "verify_state"] {
             let policy = format!(
                 r#"
 version: 1

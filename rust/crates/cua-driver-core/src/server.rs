@@ -288,13 +288,6 @@ pub struct ToolCompletionObservation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolOperation {
     NotApplicable,
-    ExecuteJavascript,
-    GetText,
-    QueryDom,
-    ClickElement,
-    InsertText,
-    TypeKeystrokes,
-    EnableJavascriptAppleEvents,
     BrowserBind,
     BrowserSnapshotDomRefsV1,
     BrowserSnapshotSemanticV2,
@@ -326,13 +319,6 @@ impl ToolOperation {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::NotApplicable => "not_applicable",
-            Self::ExecuteJavascript => "execute_javascript",
-            Self::GetText => "get_text",
-            Self::QueryDom => "query_dom",
-            Self::ClickElement => "click_element",
-            Self::InsertText => "insert_text",
-            Self::TypeKeystrokes => "type_keystrokes",
-            Self::EnableJavascriptAppleEvents => "enable_javascript_apple_events",
             Self::BrowserBind => "browser_bind",
             Self::BrowserSnapshotDomRefsV1 => "browser_snapshot_dom_refs_v1",
             Self::BrowserSnapshotSemanticV2 => "browser_snapshot_semantic_v2",
@@ -368,16 +354,6 @@ pub fn tool_operation(tool_name: &str, args: Option<&serde_json::Value>) -> Tool
             .and_then(serde_json::Value::as_str)
     };
     match crate::tool::renamed_tool(tool_name).unwrap_or(tool_name) {
-        "page" => match string_arg("action") {
-            Some("execute_javascript") => ToolOperation::ExecuteJavascript,
-            Some("get_text") => ToolOperation::GetText,
-            Some("query_dom") => ToolOperation::QueryDom,
-            Some("click_element") => ToolOperation::ClickElement,
-            Some("insert_text") => ToolOperation::InsertText,
-            Some("type_keystrokes") => ToolOperation::TypeKeystrokes,
-            Some("enable_javascript_apple_events") => ToolOperation::EnableJavascriptAppleEvents,
-            _ => ToolOperation::Other,
-        },
         "get_browser_state" => {
             if string_arg("target_id").is_some() {
                 match string_arg("snapshot_format") {
@@ -457,15 +433,6 @@ pub fn tool_operation(tool_name: &str, args: Option<&serde_json::Value>) -> Tool
 /// per-call telemetry one definition without retaining selectors, text, URLs,
 /// or any other tool argument.
 pub fn is_computer_action(tool_name: &str, operation: ToolOperation) -> bool {
-    if tool_name == "page" {
-        return matches!(
-            operation,
-            ToolOperation::ClickElement
-                | ToolOperation::InsertText
-                | ToolOperation::TypeKeystrokes
-                | ToolOperation::EnableJavascriptAppleEvents
-        );
-    }
     if tool_name == "browser_dialog" {
         return matches!(
             operation,
@@ -1296,39 +1263,7 @@ mod observation_tests {
     }
 
     #[test]
-    fn page_operation_is_closed_and_retains_no_argument_content() {
-        for (action, expected, computer_action) in [
-            (
-                "execute_javascript",
-                ToolOperation::ExecuteJavascript,
-                false,
-            ),
-            ("get_text", ToolOperation::GetText, false),
-            ("query_dom", ToolOperation::QueryDom, false),
-            ("click_element", ToolOperation::ClickElement, true),
-            ("insert_text", ToolOperation::InsertText, true),
-            ("type_keystrokes", ToolOperation::TypeKeystrokes, true),
-            (
-                "enable_javascript_apple_events",
-                ToolOperation::EnableJavascriptAppleEvents,
-                true,
-            ),
-            ("private-custom-action", ToolOperation::Other, false),
-        ] {
-            let args = serde_json::json!({
-                "action": action,
-                "selector": "private selector",
-                "script": "private script",
-                "text": "private typed text"
-            });
-            let operation = tool_operation("page", Some(&args));
-            assert_eq!(operation, expected);
-            assert_eq!(is_computer_action("page", operation), computer_action);
-            let debug = format!("{operation:?}");
-            for forbidden in ["private selector", "private script", "private typed text"] {
-                assert!(!debug.contains(forbidden));
-            }
-        }
+    fn plain_tools_have_no_operation() {
         assert_eq!(
             tool_operation("click", Some(&serde_json::json!({"action": "private"}))),
             ToolOperation::NotApplicable

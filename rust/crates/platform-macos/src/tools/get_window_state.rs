@@ -44,7 +44,6 @@ fn def() -> &'static ToolDef {
                 "pid": { "type": "integer", "description": "Target process ID." },
                 "window_id": { "type": "integer", "description": "Target window ID from list_windows." },
                 "query": { "type": "string", "description": "Case-insensitive substring filter: returns matching rows plus ancestors; element_index values are not renumbered. Try this before a full read." },
-                "capture_mode": cua_driver_core::capture_mode::capture_mode_schema(),
                 "include_accessibility_tree": {
                     "type": "boolean",
                     "description": "Default true. False skips the AX walk and returns the screenshot plus window metadata. Both this and include_screenshot false is an error."
@@ -68,11 +67,6 @@ fn def() -> &'static ToolDef {
                     "description": "Cap on walk depth. Default 25."
                 },
                 "timeout_ms": cua_driver_core::tool_schema::timeout_ms_schema(),
-                "max_dimension": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Optional cap on the returned screenshot's long edge, in pixels (aspect ratio preserved) — the cheap path for a small preview / thumbnail. Applied on top of the session/global max_image_dimension ceiling; the tighter of the two wins. Omit for the configured default."
-                },
                 "max_image_dimension": {
                     "type": "integer",
                     "minimum": 0,
@@ -202,13 +196,11 @@ impl Tool for GetWindowStateTool {
                 .session_config
                 .effective_max_image_dimension(session_id.as_deref(), &cfg)
         };
-        // `capture_mode` is DEPRECATED and ignored — get_window_state always
-        // returns BOTH the tree and a screenshot now, so the agent grounds on
-        // both and cross-checks (the AX tree lies often enough that a grounding
-        // screenshot should always be present). The modality is chosen at action
-        // time: an element ax action (element_index) or element px action (x,y).
-        // We don't even read the arg; it stays in the schema only so old callers
-        // don't trip additionalProperties:false.
+        // get_window_state returns BOTH the tree and a screenshot, so the agent
+        // grounds on both and cross-checks (the AX tree lies often enough that a
+        // grounding screenshot should always be present). The modality is chosen
+        // at action time: an element ax action (element_index) or element px
+        // action (x,y).
         //
         // `include_screenshot` (default true) is the perf opt-out: set false to
         // skip the grab and return the tree only — the cheap path when you're
@@ -233,12 +225,7 @@ impl Tool for GetWindowStateTool {
                  screenshot_out_file to force a capture.",
             );
         }
-        // Optional per-call cap on the returned screenshot's long edge, folded
-        // with the session/global ceiling below (the tighter wins).
-        let max_dimension = args
-            .get("max_dimension")
-            .and_then(|v| v.as_u64())
-            .map(|v| v.max(1) as u32);
+        // Optional per-call override of the returned screenshot's long edge.
         let max_image_dimension = args
             .get("max_image_dimension")
             .and_then(|v| v.as_u64())
@@ -337,11 +324,10 @@ impl Tool for GetWindowStateTool {
         // screenshot_out_file). With `screenshot_out_file` set, write to disk and
         // surface the path instead of embedding base64; otherwise embed base64.
         // The portable `max_image_dimension` is an explicit per-call override,
-        // including 0 for native resolution. Without it, preserve the existing
-        // configured ceiling and legacy `max_dimension` tighter-cap behavior.
+        // including 0 for native resolution. Without it, the configured
+        // ceiling applies.
         let max_dim = cua_driver_core::image_utils::ImageDimensionLimits {
             configured: effective_max_dim,
-            legacy_max_dimension: max_dimension,
             max_image_dimension,
         }
         .resolve();
@@ -1268,8 +1254,8 @@ mod window_scope_contract_tests {
         }
     }
 
-    /// The capture-only fold-in: get_window_state advertises the new
-    /// `include_accessibility_tree` / `max_dimension` controls, keeps pid +
+    /// The capture-only fold-in: get_window_state advertises the
+    /// `include_accessibility_tree` / `max_image_dimension` controls, keeps pid +
     /// window_id required (schema not loosened), and documents the degenerate
     /// both-false case in its description.
     #[test]
@@ -1279,10 +1265,6 @@ mod window_scope_contract_tests {
         assert!(
             props.get("include_accessibility_tree").is_some(),
             "schema must advertise include_accessibility_tree"
-        );
-        assert!(
-            props.get("max_dimension").is_some(),
-            "schema must advertise max_dimension"
         );
         assert_eq!(props["max_image_dimension"]["minimum"], 0);
         let required: Vec<&str> = d.input_schema["required"]

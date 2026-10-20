@@ -270,7 +270,7 @@ Upstream runner: `scripts/ci/windows/run-rust-e2e.ps1`
 | Shared app matrix | `cross_platform_behavior_test.rs` | Electron and Tauri                             |
 | Native controls   | `harness_wpf_test.rs`             | Repo-local WPF app                             |
 | Native controls   | `harness_winui3_test.rs`          | Repo-local WinUI3 app                          |
-| Web integration   | `harness_web_test.rs`             | WebView2 and Electron                          |
+| Web integration   | `harness_web_test.rs`             | WebView2                                       |
 | Capture contract  | `capture_contract_test.rs`        | WPF plus driver tree/image output              |
 | Launch contract   | `launch_windows_test.rs`          | Repo-local Electron launch and focus behavior  |
 | Agent cursor      | `agent_cursor_windows_test.rs`    | Source-built cursor overlay and pixel evidence |
@@ -533,7 +533,7 @@ rust/crates/cua-driver-e2e/tests/
 |-- cross_platform_behavior_test.rs Shared Electron/Tauri action matrix
 |-- harness_wpf_test.rs             Windows WPF action rows
 |-- harness_winui3_test.rs          Windows WinUI3 action rows
-|-- harness_web_test.rs             WebView2/Electron page and CDP rows
+|-- harness_web_test.rs             WebView2 PX action row
 |-- harness_appkit_test.rs          macOS AppKit action rows
 |-- harness_swiftui_test.rs         macOS SwiftUI action rows
 |-- harness_gtk3_test.rs            Linux GTK3 action rows

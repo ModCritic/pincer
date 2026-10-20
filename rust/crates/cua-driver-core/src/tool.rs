@@ -689,15 +689,12 @@ fn deprecated_name_note(old: &str, new: &str) -> String {
 ///   `system.permissions.tcc.screen_recording`
 /// - `system.config.read`, `system.config.write`
 /// - `session.lifecycle.start`, `session.lifecycle.read`,
-///   `session.lifecycle.list`, `session.lifecycle.end`, plus the deprecated
-///   `session.capture_scope`, `session.capture_scope.read`, and
-///   `session.capture_scope.escalate` compatibility tokens
+///   `session.lifecycle.list`, `session.lifecycle.end`
 /// - `agent_cursor.move`, `agent_cursor.set_enabled`,
 ///   `agent_cursor.set_motion`, `agent_cursor.set_theme`,
 ///   `agent_cursor.state`
 /// - `recording.start`, `recording.stop`, `recording.state`,
 ///   `recording.replay`, `recording.install_dependency`
-/// - `page.action`
 /// - `browser.state`, `browser.prepare`, `browser.navigate`,
 ///   `browser.input.click`, `browser.input.type`, `browser.input.files`,
 ///   `browser.dialog`
@@ -793,8 +790,7 @@ pub fn default_capabilities_for(tool_name: &str) -> Vec<String> {
             // element entry — paired with the existing integer
             // `element_index`.
             "accessibility.element_tokens",
-            // capture_mode:"vision" returns a window screenshot — see
-            // platform-{macos,windows,linux}/src/tools/get_window_state.rs.
+            // get_window_state returns a window screenshot by default.
             "screen.capture",
             "screen.capture.window",
         ],
@@ -836,9 +832,6 @@ pub fn default_capabilities_for(tool_name: &str) -> Vec<String> {
         "run_steps" => &["input.batch"],
         "run_script" => &["input.script"],
         "install_ffmpeg" => &["recording.install_dependency"],
-
-        // ── cross-platform page ──────────────────────────────────────
-        "page" => &["page.action"],
 
         // ── browser-tool v1 (exact-or-refused CDP surface) ───────────
         // Additive tokens; see `crate::browser` for semantics. The
@@ -1357,20 +1350,16 @@ impl ToolRegistry {
         self.history.clone()
     }
 
-    /// Register the platform-independent lifecycle and compatibility tools
-    /// (`start_session`, `get_session`, `list_sessions`, `end_session`, and
-    /// the legacy capture-scope readers). Call alongside
+    /// Register the platform-independent lifecycle tools (`start_session`,
+    /// `get_session`, `list_sessions`, and `end_session`). Call alongside
     /// `register_recording_tools` from each platform's `register_all`.
     pub fn register_session_tools(&mut self) {
         use crate::session_tools::{
-            EndSessionTool, EscalateSessionTool, GetSessionStateTool, GetSessionTool,
-            ListSessionsTool, StartSessionTool,
+            EndSessionTool, GetSessionTool, ListSessionsTool, StartSessionTool,
         };
         self.register(Box::new(StartSessionTool));
-        self.register(Box::new(EscalateSessionTool));
         self.register(Box::new(GetSessionTool));
         self.register(Box::new(ListSessionsTool));
-        self.register(Box::new(GetSessionStateTool));
         self.register(Box::new(EndSessionTool));
         self.register_batch_tools();
     }
@@ -1796,17 +1785,6 @@ impl ToolRegistry {
             }
         }
 
-        // Reject modality violations before reserving a recording turn. A
-        // rejected action has no before/after evidence and must not leave a
-        // pending recorder entry behind.
-        if let Err(violation) = crate::capture_scope::enforce_tool(resolved_name, &args) {
-            let structured =
-                violation.as_json(args.get("session").and_then(Value::as_str).unwrap_or(""));
-            let mut result = ToolResult::error(violation.message).with_structured(structured);
-            restore_public_runtime_result(&mut result, &runtime_prefix);
-            return result;
-        }
-
         // A queued text mutation can become stale while another agent is
         // typing into the same process. Refuse that overlap before consent,
         // cursor, recording, or platform focus behavior can begin. The guard
@@ -1864,19 +1842,6 @@ impl ToolRegistry {
             }
         }
 
-        // Raw/legacy page mutations have no exact browser binding. They are
-        // not grantable through a model-time confirmation: only a trusted
-        // host's unrestricted launch acknowledgement admits them, and the
-        // legacy feature flag still applies downstream.
-        if has_adapter("browser_unbounded_script")
-            && context.mode() != crate::authorization::PermissionMode::Unrestricted
-        {
-            return protected_refusal(
-                "unbounded_operation_requires_unrestricted",
-                "legacy page mutation is unbounded and requires unrestricted mode with trusted launch-time risk acceptance",
-            );
-        }
-
         // Cua may report OS permission state, but an agent tool call never
         // manufactures a protected system prompt. Host setup happens outside
         // the model/tool stream in every permission mode.
@@ -1924,8 +1889,7 @@ impl ToolRegistry {
         }
 
         // Resource adapters run at the same canonical boundary as policy and
-        // manifest admission, after session capture-scope validation but
-        // before recording or the platform tool can observe user state. This
+        // manifest admission, before recording or the platform tool can observe user state. This
         // avoids prompting for a call the capability manifest will refuse, while
         // preserving the public arguments in the grant scope and the private
         // runtime session key in its revocation lifecycle.
@@ -2501,14 +2465,6 @@ impl ToolRegistry {
             return Err(crate::consent::ConsentError::Provider(
                 "browser observation did not attest a live top-level origin".to_owned(),
             ));
-        } else if tool_name == "escalate_session" {
-            (
-                serde_json::json!({
-                    "kind": "session_capture_scope",
-                    "capture_scope": "desktop",
-                }),
-                "Allow Cua to expand this session's observation scope".to_owned(),
-            )
         } else if let Some(window_id) = args.get("window_id").and_then(Value::as_u64) {
             let pid = args.get("pid").and_then(Value::as_i64);
             (
@@ -3455,21 +3411,13 @@ fn namespace_runtime_args(
 fn session_requiring_tool(tool_name: &str) -> bool {
     !matches!(
         tool_name,
-        "check_permissions"
-            | "health_report"
-            | "get_session"
-            | "list_sessions"
-            | "get_session_state"
-            | "end_session"
+        "check_permissions" | "health_report" | "get_session" | "list_sessions" | "end_session"
     )
 }
 
 fn session_selecting_tool(tool_name: &str) -> bool {
     session_requiring_tool(tool_name)
-        || matches!(
-            tool_name,
-            "get_session" | "list_sessions" | "get_session_state" | "end_session"
-        )
+        || matches!(tool_name, "get_session" | "list_sessions" | "end_session")
 }
 
 fn publish_action_result(result: &mut ToolResult) -> Result<(), String> {
@@ -3900,7 +3848,7 @@ mod runtime_isolation_tests {
                 read_only: false,
                 destructive: false,
                 idempotent: false,
-                open_world: name == "page",
+                open_world: false,
             },
         }));
         Arc::new(registry)
@@ -5044,50 +4992,6 @@ resources:
             last_args.lock().unwrap().as_ref().unwrap()["files"][0],
             expected
         );
-    }
-
-    #[tokio::test]
-    async fn legacy_page_mutations_require_trusted_unrestricted_launch_acceptance() {
-        let hits = Arc::new(AtomicUsize::new(0));
-        let registry = argument_registry("page", None, hits.clone());
-        let denied = registry
-            .invoke_with_context(
-                "page",
-                serde_json::json!({
-                    "action": "execute_javascript",
-                    "pid": 42,
-                    "window_id": 7,
-                    "javascript": "1 + 1",
-                    "session": "legacy"
-                }),
-                standard_context(),
-            )
-            .await;
-        assert_eq!(hits.load(Ordering::SeqCst), 0);
-        assert_eq!(
-            denied
-                .structured_content
-                .as_ref()
-                .and_then(|value| value.pointer("/refusal/code"))
-                .and_then(serde_json::Value::as_str),
-            Some("unbounded_operation_requires_unrestricted")
-        );
-
-        let allowed = registry
-            .invoke_with_context(
-                "page",
-                serde_json::json!({
-                    "action": "execute_javascript",
-                    "pid": 42,
-                    "window_id": 7,
-                    "javascript": "1 + 1",
-                    "session": "legacy"
-                }),
-                unrestricted_context(),
-            )
-            .await;
-        assert_ne!(allowed.is_error, Some(true));
-        assert_eq!(hits.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -6373,8 +6277,6 @@ mod capability_tests {
         "start_session",
         "get_session",
         "list_sessions",
-        "escalate_session",
-        "get_session_state",
         "end_session",
         // agent cursor
         "set_agent_cursor_enabled",
@@ -6388,7 +6290,6 @@ mod capability_tests {
         "replay_trajectory",
         "install_ffmpeg",
         // misc
-        "page",
         "probe",
         // browser-tool v1
         "get_browser_state",
@@ -6462,9 +6363,6 @@ mod capability_tests {
         "session.lifecycle.read",
         "session.lifecycle.list",
         "session.lifecycle.end",
-        "session.capture_scope",
-        "session.capture_scope.read",
-        "session.capture_scope.escalate",
         // agent cursor
         "agent_cursor.move",
         "agent_cursor.set_enabled",
@@ -6477,8 +6375,6 @@ mod capability_tests {
         "recording.state",
         "recording.replay",
         "recording.install_dependency",
-        // page
-        "page.action",
         // browser-tool v1
         "browser.state",
         "browser.prepare",
@@ -7234,7 +7130,6 @@ mod argument_shape_tests {
     #[test]
     fn set_config_key_value_alias_matches_the_direct_field_for_every_key() {
         for key in [
-            "capture_mode",
             "max_image_dimension",
             "experimental_pip",
             "experimental_pip_geometry",
@@ -7251,7 +7146,7 @@ mod argument_shape_tests {
             normalize_argument_aliases("set_config", &mut aliased).unwrap();
             assert_eq!(aliased, json!({key: "default"}), "{key}");
         }
-        let mut bare_key = json!({"key": "capture_mode"});
+        let mut bare_key = json!({"key": "max_image_dimension"});
         let error = normalize_argument_aliases("set_config", &mut bare_key).unwrap_err();
         assert!(error.contains("exact value"), "{error}");
         let mut bare_value = json!({"value": 1});

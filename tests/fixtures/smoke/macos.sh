@@ -143,7 +143,7 @@ if [[ -z "$WIN_ID" ]]; then
     record get_accessibility_tree SKIP "no window_id resolved"
     record zoom SKIP "no window_id resolved"
 else
-    run_tool get_window_state "{\"pid\":$HARNESS_PID,\"window_id\":$WIN_ID,\"capture_mode\":\"tree\"}"
+    run_tool get_window_state "{\"pid\":$HARNESS_PID,\"window_id\":$WIN_ID}"
     run_tool get_accessibility_tree "{\"pid\":$HARNESS_PID}"
     run_tool zoom "{\"pid\":$HARNESS_PID,\"window_id\":$WIN_ID,\"x1\":0,\"y1\":0,\"x2\":200,\"y2\":200}"
 fi

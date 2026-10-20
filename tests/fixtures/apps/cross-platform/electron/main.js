@@ -1,6 +1,6 @@
 // CuaTestHarness.Electron — minimal Electron host loading the shared
-// index.html that CuaTestHarness.WebView also loads. cua-driver's `page`
-// tool routes through CDP when --remote-debugging-port is set, so we
+// index.html that CuaTestHarness.WebView also loads. Tests that need
+// Chromium DevTools Protocol access use --remote-debugging-port, so we
 // expose one here on a configurable port.
 
 const { app, BrowserWindow, ipcMain } = require('electron');

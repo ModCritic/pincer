@@ -748,10 +748,8 @@ mod tests {
             "browser_download",
             "browser_pointer",
             "start_session",
-            "escalate_session",
             "get_session",
             "list_sessions",
-            "get_session_state",
             "end_session",
         ];
         let violations = registry.input_conformance_violations(&open);
@@ -779,10 +777,7 @@ mod tests {
         );
 
         runtime
-            .invoke(
-                "start_session",
-                serde_json::json!({"session": public, "capture_scope": "auto"}),
-            )
+            .invoke("start_session", serde_json::json!({"session": public}))
             .await
             .unwrap();
         assert!(cua_driver_core::session::has_session_activity(&internal));
@@ -823,10 +818,7 @@ mod tests {
             runtime.compatibility_context.runtime_scope_key()
         );
         runtime
-            .invoke(
-                "start_session",
-                serde_json::json!({"session": public, "capture_scope": "auto"}),
-            )
+            .invoke("start_session", serde_json::json!({"session": public}))
             .await
             .unwrap();
         let output = tempfile::tempdir().unwrap();

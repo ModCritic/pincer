@@ -154,7 +154,7 @@ fn harness_winui3_smoke() {
             println!("WinUI3 harness pid={pid}");
             let snap = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode":"ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             assert!(
                 !snap.is_error(),
@@ -263,7 +263,7 @@ fn harness_winui3_type_text() {
     run_background_case("type_text", DriverRoute::UiaValue, |pid, wid, driver| {
         let snap = driver.call(
             "get_window_state",
-            serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode":"ax"}),
+            serde_json::json!({"pid": pid as i64, "window_id": wid}),
         );
         let idx = element_index_by_id(snap.text(), "txt-input")
             .expect("txt-input not in WinUI3 snapshot");
@@ -278,7 +278,7 @@ fn harness_winui3_type_text() {
         std::thread::sleep(Duration::from_millis(500));
         let post = driver.call(
             "get_window_state",
-            serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode":"ax"}),
+            serde_json::json!({"pid": pid as i64, "window_id": wid}),
         );
         assert!(
             post.text().contains("mirror=winui3-typed"),
@@ -319,7 +319,7 @@ fn harness_winui3_type_text_foreground_single_line_application_state() {
 
         let snap = driver.call(
             "get_window_state",
-            serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode":"ax"}),
+            serde_json::json!({"pid": pid as i64, "window_id": wid}),
         );
         let idx = element_index_by_id(snap.text(), "txt-input")
             .expect("txt-input not in WinUI3 snapshot");
@@ -396,7 +396,7 @@ fn harness_winui3_type_text_multiline_application_state() {
         let snap = driver.call(
             "get_window_state",
             serde_json::json!({
-                "pid": pid as i64, "window_id": wid, "capture_mode": "ax"
+                "pid": pid as i64, "window_id": wid
             }),
         );
         let idx = element_index_by_id(snap.text(), "txt-multiline-input")
@@ -452,7 +452,7 @@ fn harness_winui3_xaml_popup_open() {
         |pid, wid, driver| {
             let snap = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode":"ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             let idx = element_index_by_id(snap.text(), "btn-open-popup").expect("btn-open-popup");
             let response = driver.call(
@@ -470,7 +470,7 @@ fn harness_winui3_xaml_popup_open() {
             std::thread::sleep(Duration::from_millis(500));
             let post = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode":"ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             assert!(
                 post.text().contains("XAML_POPUP_MARKER_v1"),
@@ -494,7 +494,7 @@ fn harness_winui3_checkbox_toggle() {
         |pid, wid, driver| {
             let snap = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode": "ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             let idx = element_index_by_id(snap.text(), "chk-agreed").expect("chk-agreed");
             let response = driver.call(
@@ -512,7 +512,7 @@ fn harness_winui3_checkbox_toggle() {
             std::thread::sleep(Duration::from_millis(400));
             let post = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode": "ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             assert!(
                 post.text().contains("agreed=True"),
@@ -533,7 +533,7 @@ fn harness_winui3_radio_select() {
         |pid, wid, driver| {
             let snap = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode": "ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             let idx = element_index_by_id(snap.text(), "rdo-high").expect("rdo-high");
             let response = driver.call(
@@ -551,7 +551,7 @@ fn harness_winui3_radio_select() {
             std::thread::sleep(Duration::from_millis(400));
             let post = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode": "ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             assert!(
                 post.text().contains("prio=High"),
@@ -583,7 +583,7 @@ fn harness_winui3_slider_set_value() {
         |pid, wid, driver| {
             let snap = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode": "ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             let idx = element_index_by_id(snap.text(), "sld-value")
             .expect("sld-value should now be in the UIA flat tree after RangeValuePattern detection fix");
@@ -599,7 +599,7 @@ fn harness_winui3_slider_set_value() {
             std::thread::sleep(Duration::from_millis(400));
             let post = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode": "ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             let text = post.text();
             let advanced = text
@@ -629,7 +629,7 @@ fn harness_winui3_combo_select() {
         |pid, wid, driver| {
             let snap = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode": "ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             let combo_idx = element_index_by_id(snap.text(), "cbo-color").expect("cbo-color");
             // Expand the dropdown via ExpandCollapse.
@@ -645,7 +645,7 @@ fn harness_winui3_combo_select() {
             // Re-snapshot — items materialize after expand.
             let snap2 = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode": "ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             let item_idx = element_index_by_id(snap2.text(), "cbo-item-orange")
                 .expect("cbo-item-orange after expand");
@@ -661,7 +661,7 @@ fn harness_winui3_combo_select() {
             std::thread::sleep(Duration::from_millis(400));
             let post = driver.call(
                 "get_window_state",
-                serde_json::json!({"pid": pid as i64, "window_id": wid, "capture_mode": "ax"}),
+                serde_json::json!({"pid": pid as i64, "window_id": wid}),
             );
             assert!(
                 post.text().contains("color=orange"),

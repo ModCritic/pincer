@@ -50,10 +50,9 @@ pub use cursor::{
     CursorReducedMotion, CursorSemantics, CursorTarget, CursorThemeSelection,
 };
 pub use inputs::{
-    ActionTarget, CaptureScope, ClickButton, ClickInput, ClickPosition, ClipboardReadInput,
-    ClipboardWriteInput, CursorMotionSelection, DesktopScope, DragInput, EndSessionInput,
-    EscalateSessionInput, EscalationReason, GetAgentCursorStateInput, GetCursorPositionInput,
-    GetDesktopStateInput, GetScreenSizeInput, GetSessionInput, GetSessionStateInput, HotkeyInput,
+    ActionTarget, ClickButton, ClickInput, ClickPosition, ClipboardReadInput, ClipboardWriteInput,
+    CursorMotionSelection, DesktopScope, DragInput, EndSessionInput, GetAgentCursorStateInput,
+    GetCursorPositionInput, GetDesktopStateInput, GetScreenSizeInput, GetSessionInput, HotkeyInput,
     InputDeliveryMode, InvokeMenuInput, LegacyClickInput, ListSessionsInput, MoveCursorInput,
     PressKeyInput, ScrollBy, ScrollDirection, ScrollInput, SetAgentCursorEnabledInput,
     SetAgentCursorMotionInput, SetAgentCursorThemeInput, SetWindowFrameInput, StartSessionInput,
@@ -66,11 +65,10 @@ pub use outputs::{
     ActionEvidenceKind, ActionResult, ActionResultValidationError, ActionRoute,
     AgentOverlayCapture, AgentOverlayCaptureStatus, ClipboardReadOutput, ClipboardWriteOutput,
     CursorMotionOutput, CursorPointOutput, CursorPositionOutput, CursorThemeOutput,
-    CursorVisualOutput, DesktopStateOutput, EffectiveScope, EndSessionOutput,
-    GetAgentCursorStateOutput, ListSessionsOutput, ScreenSizeOutput, SessionClientKindOutput,
-    SessionLifecycleState, SessionOutput, SessionStateOutput, SessionTransportOutput,
-    SetAgentCursorEnabledOutput, SetAgentCursorMotionOutput, SetAgentCursorThemeOutput,
-    StartSessionOutput, ToolOutput, TOOL_INVOCATION_FAILED_CODE,
+    CursorVisualOutput, DesktopStateOutput, EndSessionOutput, GetAgentCursorStateOutput,
+    ListSessionsOutput, ScreenSizeOutput, SessionClientKindOutput, SessionLifecycleState,
+    SessionOutput, SessionTransportOutput, SetAgentCursorEnabledOutput, SetAgentCursorMotionOutput,
+    SetAgentCursorThemeOutput, StartSessionOutput, ToolOutput, TOOL_INVOCATION_FAILED_CODE,
 };
 pub use verification::{
     BoundsExpectation, ElementPredicate, ElementSelector, PredicateOutcome, StatePredicate,
@@ -717,20 +715,7 @@ mod tests {
             .iter()
             .filter_map(Value::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(
-            required,
-            [
-                "session",
-                "capture_scope",
-                "effective_scope",
-                "desktop_capture_authorized",
-                "desktop_unlocked",
-                "escalation_reason",
-                "escalation_detail",
-                "active",
-                "revived",
-            ]
-        );
+        assert_eq!(required, ["session", "active", "revived"]);
     }
 
     #[test]

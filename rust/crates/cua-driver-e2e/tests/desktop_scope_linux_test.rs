@@ -1,6 +1,6 @@
 //! Linux **desktop-scope** (vision/foreground) modality through the SAME
-//! cua-driver interface as Windows/macOS: a strict desktop session plus a
-//! window-less screen-absolute `click` (no `pid`/`window_id`/`list_windows`).
+//! cua-driver interface as Windows/macOS: a window-less screen-absolute
+//! `click` with `scope:"desktop"` (no `pid`/`window_id`/`list_windows`).
 //! The Linux actuator warps the pointer and injects a real button press via the
 //! XTest extension — the peer of the Windows `WindowFromPoint` + macOS
 //! global-HID desktop click. (XTest delivering to the under-pointer window is
@@ -8,11 +8,11 @@
 //! is exactly what we want.)
 //!
 //! Grounds the click on the GTK3 harness increment button's screen-absolute
-//! `frame` (AT-SPI Component extents), asserts the counter advanced, plus the
-//! window-scope rejection gate.
+//! `frame` (AT-SPI Component extents) and asserts the counter advanced.
 //!
-//! A separate strict-window session observes the fixture, proving two live
-//! sessions can use different capture scopes without shared mutable config.
+//! A separate session observes the fixture with window-scope reads, proving
+//! two live sessions can select different scopes per call without shared
+//! mutable config.
 //!
 //! #[ignore] (needs an X11/Xwayland display + AT-SPI + the GTK3 harness). Run:
 //!   cargo test -p cua-driver-e2e --test desktop_scope_linux_test -- --ignored --nocapture --test-threads=1
@@ -89,7 +89,7 @@ fn ax_snapshot(driver: &mut McpDriver, session: &str, pid: u32, wid: u64) -> ser
     driver
         .call(
             "get_window_state",
-            serde_json::json!({ "session": session, "pid": pid as i64, "window_id": wid, "capture_mode": "ax" }),
+            serde_json::json!({ "session": session, "pid": pid as i64, "window_id": wid }),
         )
         .structured()
         .clone()
@@ -171,14 +171,11 @@ fn desktop_input_route() -> DriverRoute {
     }
 }
 
-fn start_scope(driver: &mut McpDriver, session: &str, scope: &str) {
-    let r = driver.call(
-        "start_session",
-        serde_json::json!({ "session": session, "capture_scope": scope }),
-    );
+fn start_session(driver: &mut McpDriver, session: &str) {
+    let r = driver.call("start_session", serde_json::json!({ "session": session }));
     assert!(
         !r.is_error(),
-        "start_session capture_scope={scope} failed: {}",
+        "start_session {session} failed: {}",
         r.text()
     );
 }
@@ -207,8 +204,8 @@ fn desktop_scope_windowless_click_lands_on_control() {
         *evidence = recording_evidence(driver.recording_dir());
         let window_session = format!("{cell_id}-window");
         let desktop_session = format!("{cell_id}-desktop");
-        start_scope(&mut driver, &window_session, "window");
-        start_scope(&mut driver, &desktop_session, "desktop");
+        start_session(&mut driver, &window_session);
+        start_session(&mut driver, &desktop_session);
         let (pid, wid) = launch(&mut driver).expect("required GTK3 harness did not launch");
 
         // Settle for the AT-SPI tree to register the button + its extents.
@@ -305,8 +302,8 @@ fn desktop_scope_windowless_scroll_lands_on_control() {
         *evidence = recording_evidence(driver.recording_dir());
         let window_session = format!("{cell_id}-window");
         let desktop_session = format!("{cell_id}-desktop");
-        start_scope(&mut driver, &window_session, "window");
-        start_scope(&mut driver, &desktop_session, "desktop");
+        start_session(&mut driver, &window_session);
+        start_session(&mut driver, &desktop_session);
         let (pid, wid) = launch(&mut driver).expect("required GTK3 harness did not launch");
         let posture = driver.call(
             "bring_to_front",
@@ -387,8 +384,8 @@ fn desktop_scope_hotkey_releases_modifiers() {
         *evidence = recording_evidence(driver.recording_dir());
         let window_session = format!("{cell_id}-window");
         let desktop_session = format!("{cell_id}-desktop");
-        start_scope(&mut driver, &window_session, "window");
-        start_scope(&mut driver, &desktop_session, "desktop");
+        start_session(&mut driver, &window_session);
+        start_session(&mut driver, &desktop_session);
         let (pid, wid) = launch(&mut driver).expect("required GTK3 harness did not launch");
         let posture = driver.call(
             "bring_to_front",
@@ -499,8 +496,8 @@ fn desktop_scope_drag_holds_and_releases_modifier() {
         *evidence = recording_evidence(driver.recording_dir());
         let window_session = format!("{cell_id}-window");
         let desktop_session = format!("{cell_id}-desktop");
-        start_scope(&mut driver, &window_session, "window");
-        start_scope(&mut driver, &desktop_session, "desktop");
+        start_session(&mut driver, &window_session);
+        start_session(&mut driver, &desktop_session);
         let (pid, wid) = launch(&mut driver).expect("required GTK3 harness did not launch");
         let posture = driver.call(
             "bring_to_front",
@@ -616,41 +613,5 @@ fn desktop_scope_drag_holds_and_releases_modifier() {
             ),
             None => Observation::delivered_with_fixture_state(Vec::new()),
         }
-    });
-}
-
-/// Negative gate: a window-less click under `capture_scope=window` is rejected.
-#[test]
-#[ignore]
-fn window_scope_rejects_windowless_click() {
-    let cell_id = "linux-window-scope-gate-px-not-applicable";
-    let case = CaseSpec::delivered(
-        cell_id,
-        "desktop",
-        "x11",
-        "window_scope_gate",
-        Targeting::Px,
-        Delivery::NotApplicable,
-        Scope::Window,
-        DriverRoute::CaptureScopeGate,
-        vec![OracleKind::Protocol],
-    );
-    execute_case(case, |evidence| {
-        let mut driver = McpDriver::spawn_named(cell_id).expect("start source-built Linux driver");
-        *evidence = recording_evidence(driver.recording_dir());
-        start_scope(&mut driver, cell_id, "window");
-        driver.start_behavior_recording();
-        let r = driver.call(
-            "click",
-            serde_json::json!({
-                "session": cell_id, "scope": "desktop", "x": 100, "y": 100
-            }),
-        );
-        assert!(
-            r.is_error() && r.structured()["code"].as_str() == Some("desktop_scope_disabled"),
-            "window-scope window-less click was NOT rejected: {}",
-            r.text()
-        );
-        Observation::delivered(vec![OracleKind::Protocol], Evidence::default())
     });
 }

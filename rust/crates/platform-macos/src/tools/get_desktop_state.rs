@@ -219,10 +219,6 @@ mod tests {
             !props.contains_key("window_id"),
             "must not accept window_id"
         );
-        assert!(
-            !props.contains_key("capture_mode"),
-            "must not accept capture_mode"
-        );
         assert!(props.contains_key("session"));
         assert!(props.contains_key("screenshot_out_file"));
         assert_eq!(

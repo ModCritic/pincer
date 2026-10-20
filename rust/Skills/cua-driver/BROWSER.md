@@ -11,8 +11,8 @@ Use this route only when the user's requested interaction method permits
 page-aware automation. GUI-only/native-input tasks stay on the native window
 or authorized desktop loop, even for Electron applications.
 
-For supported page content, prefer the typed browser tools over the legacy
-`page` tool, accessibility guesses, omnibox shortcuts, or raw pixels. The
+For supported page content, prefer the typed browser tools over
+accessibility guesses, omnibox shortcuts, or raw pixels. The
 typed route binds an exact native `(pid, window_id)` to a browser target and
 mints session-scoped tab and element capabilities.
 
@@ -511,15 +511,6 @@ Do not use `Ctrl+L`/`Cmd+L`, tab-switch shortcuts, shell launchers, or an
 activation script as a browser API. Those paths can visibly disrupt the
 user's browser. Use `browser_navigate` for an exactly bound page or the native
 AX/PX ladder for browser chrome.
-
-The legacy `page` tool remains a compatibility surface for older clients. Do
-not start new browser workflows with it: its backend and trust semantics are
-less precise than the typed browser tools, and it does not replace exact
-window binding. Its mutations are disabled by default. Only a trusted daemon
-operator can enable the temporary compatibility path with
-`CUA_DRIVER_ENABLE_LEGACY_PAGE_MUTATIONS=1` before daemon startup. Restart Cua
-Driver after changing the flag. It does not add typed endpoint ownership,
-capabilities, or existing-profile consent.
 
 ## Support boundaries
 

@@ -68,10 +68,7 @@ fn desktop_capture_does_not_require_sbin_on_path() {
         }
         let mut driver = McpDriver::spawn_daemon_proxy_unrecorded(socket.to_str().unwrap())
             .expect("connect to the owned daemon");
-        let session = driver.call(
-            "start_session",
-            json!({"session": "capture-path", "capture_scope": "desktop"}),
-        );
+        let session = driver.call("start_session", json!({"session": "capture-path"}));
         assert!(!session.is_error(), "{}", session.text());
         let png = output.path().join("desktop.png");
         let result = driver.call(

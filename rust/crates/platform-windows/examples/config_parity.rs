@@ -53,49 +53,44 @@ fn main() {
         t1.starts_with("✅ "),
         "get_config text should start with '✅ ': {t1:?}"
     );
-    // Pretty JSON should contain schema_version and capture_mode keys.
+    // Pretty JSON should contain schema_version and max_image_dimension keys.
     assert!(
-        t1.contains("\"schema_version\"") && t1.contains("\"capture_mode\""),
+        t1.contains("\"schema_version\"") && t1.contains("\"max_image_dimension\""),
         "get_config JSON missing keys: {t1:?}"
     );
     // structuredContent should have the same fields.
     let sc1 = v1.pointer("/result/structuredContent").unwrap();
     assert!(sc1.get("schema_version").is_some());
-    assert!(sc1.get("capture_mode").is_some());
     assert!(sc1.get("max_image_dimension").is_some());
     println!("get_config OK");
 
     // 2. set_config Swift-style {key, value}.
     let r2 = req(
         &mut pipe,
-        r#"{"method":"call","name":"set_config","args":{"key":"capture_mode","value":"vision"}}"#,
+        r#"{"method":"call","name":"set_config","args":{"key":"max_image_dimension","value":800}}"#,
     );
     let v2: serde_json::Value = serde_json::from_str(r2.trim()).unwrap();
-    let cm = v2
-        .pointer("/result/structuredContent/capture_mode")
-        .and_then(|s| s.as_str());
+    let md2 = v2
+        .pointer("/result/structuredContent/max_image_dimension")
+        .and_then(|n| n.as_u64());
     assert_eq!(
-        cm,
-        Some("vision"),
-        "set_config didn't update capture_mode via {{key, value}}"
+        md2,
+        Some(800),
+        "set_config didn't update max_image_dimension via {{key, value}}"
     );
-    println!("set_config Swift-style OK (capture_mode=vision)");
+    println!("set_config Swift-style OK (max_image_dimension=800)");
 
     // 3. set_config legacy per-field shape.
     let r3 = req(
         &mut pipe,
-        r#"{"method":"call","name":"set_config","args":{"capture_mode":"som","max_image_dimension":1024}}"#,
+        r#"{"method":"call","name":"set_config","args":{"max_image_dimension":1024}}"#,
     );
     let v3: serde_json::Value = serde_json::from_str(r3.trim()).unwrap();
-    let cm3 = v3
-        .pointer("/result/structuredContent/capture_mode")
-        .and_then(|s| s.as_str());
     let md3 = v3
         .pointer("/result/structuredContent/max_image_dimension")
         .and_then(|n| n.as_u64());
-    assert_eq!(cm3, Some("som"));
     assert_eq!(md3, Some(1024));
-    println!("set_config legacy OK (capture_mode=som, max=1024)");
+    println!("set_config per-field OK (max=1024)");
 
     // 4. set_config unknown key error.
     let r4 = req(
@@ -124,10 +119,10 @@ fn main() {
     // Restore defaults.
     let _ = req(
         &mut pipe,
-        r#"{"method":"call","name":"set_config","args":{"capture_mode":"som","max_image_dimension":0}}"#,
+        r#"{"method":"call","name":"set_config","args":{"max_image_dimension":0}}"#,
     );
 
-    println!("\n✅ PASS: get_config + set_config (Swift-style and legacy) verified");
+    println!("\n✅ PASS: get_config + set_config (Swift-style and per-field) verified");
 }
 
 #[cfg(not(target_os = "windows"))]

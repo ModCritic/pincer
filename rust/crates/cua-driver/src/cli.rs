@@ -4501,7 +4501,7 @@ pub fn run_config_cmd(
                 Some(k) => k,
                 None => {
                     eprintln!("Usage: cua-driver config get <key>");
-                    eprintln!("Keys: capture_mode, max_image_dimension, version, platform, cursor.motion.style, cursor.motion.timing, cursor.badges");
+                    eprintln!("Keys: max_image_dimension, version, platform, cursor.motion.style, cursor.motion.timing, cursor.badges");
                     process::exit(64);
                 }
             };
@@ -4530,7 +4530,7 @@ pub fn run_config_cmd(
                 );
             } else {
                 eprintln!("Unknown config key: {key}");
-                eprintln!("Available keys: capture_mode, max_image_dimension, version, platform, agent_cursor.enabled, cursor.motion.style, cursor.motion.timing, cursor.motion.effects, cursor.badges");
+                eprintln!("Available keys: max_image_dimension, version, platform, agent_cursor.enabled, cursor.motion.style, cursor.motion.timing, cursor.motion.effects, cursor.badges");
                 process::exit(64);
             }
         }
@@ -4575,7 +4575,6 @@ pub fn run_config_cmd(
             // The set_config tool keeps existing values if keys are absent,
             // so we send the known defaults explicitly.
             let defaults = serde_json::json!({
-                "capture_mode": "ax",
                 "max_image_dimension": 0
             });
             call("set_config", defaults);

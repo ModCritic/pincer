@@ -215,9 +215,7 @@ fn get_config_and_check_permissions() {
     }
 
     // set_config — change max_image_dimension and verify get_config reflects it.
-    // capture_mode / capture_scope are no longer persistent settings on macOS
-    // (capture_scope is per-session); max_image_dimension is the
-    // cross-platform persisted field this exercises.
+    // max_image_dimension is the cross-platform persisted field this exercises.
     d.send(&serde_json::json!({
         "jsonrpc":"2.0","id":4,"method":"tools/call",
         "params":{"name":"set_config","arguments":{"max_image_dimension": 1920}}
@@ -386,8 +384,8 @@ fn get_screen_size_and_cursor_position() {
 #[ignore = "host desktop: walks and captures a real window (Accessibility / Screen Recording); see tests/manual-e2e-allowlist.txt"]
 fn get_window_state_returns_both_with_opt_out() {
     //! Perception is mode-agnostic: get_window_state returns BOTH the tree AND a
-    //! screenshot by default (the deprecated `capture_mode` arg is ignored), and
-    //! `include_screenshot:false` is the opt-out that returns the tree only.
+    //! screenshot by default, and `include_screenshot:false` is the opt-out that
+    //! returns the tree only.
     let Some(mut d) = spawn_unrestricted() else {
         return;
     };
@@ -413,7 +411,7 @@ fn get_window_state_returns_both_with_opt_out() {
     let pid = win["pid"].as_i64().unwrap();
     let wid = win["window_id"].as_u64().unwrap();
 
-    // DEFAULT (no capture_mode): both tree AND a screenshot come back.
+    // DEFAULT: both tree AND a screenshot come back.
     d.send(&serde_json::json!({
         "jsonrpc":"2.0","id":3,"method":"tools/call",
         "params":{"name":"get_window_state","arguments":{
@@ -480,23 +478,6 @@ fn get_window_state_returns_both_with_opt_out() {
     assert!(
         tree_only["result"]["structuredContent"]["screenshot_width"].is_null(),
         "include_screenshot:false must not report screenshot_width: {tree_only:?}"
-    );
-
-    // DEPRECATED `capture_mode:"vision"` must be IGNORED — still returns the tree.
-    d.send(&serde_json::json!({
-        "jsonrpc":"2.0","id":5,"method":"tools/call",
-        "params":{"name":"get_window_state","arguments":{
-            "pid": pid, "window_id": wid, "capture_mode": "vision"
-        }}
-    }));
-    let dep = d.recv();
-    assert!(
-        dep["error"].is_null(),
-        "Protocol error: deprecated capture_mode must be accepted, not rejected: {dep:?}"
-    );
-    assert!(
-        dep["result"]["structuredContent"]["element_count"].is_number(),
-        "capture_mode=vision is ignored — the tree must still be present: {dep:?}"
     );
 }
 

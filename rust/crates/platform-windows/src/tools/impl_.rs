@@ -595,14 +595,12 @@ fn is_windowless_desktop_action(args: &serde_json::Value) -> bool {
 
 #[derive(Clone)]
 pub struct DriverConfig {
-    pub capture_mode: String,
     pub max_image_dimension: u32,
 }
 
 impl Default for DriverConfig {
     fn default() -> Self {
         Self {
-            capture_mode: "ax".into(),
             max_image_dimension: 1568,
         }
     }
@@ -613,15 +611,10 @@ impl Default for DriverConfig {
 /// construction (i.e. on every fresh `cua-driver call` process) so that a
 /// prior `set_config max_image_dimension=...` survives across stateless
 /// one-shot invocations — matching the macOS daemon's startup load. See #2008.
-/// (`capture_mode` is still loaded/persisted for back-compat but no longer
-/// affects behavior — `get_window_state` always returns tree + screenshot.)
+/// Keys are read one at a time, so unknown keys in the file (such as a
+/// `capture_mode` saved by an older build) are ignored.
 pub fn load_driver_config() -> DriverConfig {
     let mut cfg = DriverConfig::default();
-    if let Some(v) =
-        pip_preview::read_config_value("capture_mode").and_then(|v| v.as_str().map(str::to_owned))
-    {
-        cfg.capture_mode = v;
-    }
     if let Some(v) = pip_preview::read_config_value("max_image_dimension").and_then(|v| v.as_u64())
     {
         if let Ok(v32) = u32::try_from(v) {
@@ -1224,15 +1217,14 @@ impl Tool for GetWindowStateTool {
                 and cross-check (the tree lies on some surfaces). Choose the modality at \
                 ACTION time: an element ax action (element_token → \
                 accessibility rung) or an element px action (x,y → pixel rung off this \
-                screenshot). capture_mode is deprecated and ignored.\n\n\
+                screenshot).\n\n\
                 The mirror image: pass `include_accessibility_tree:false` to SKIP the \
                 UIA walk entirely and return just the screenshot plus window metadata \
                 (window_bounds, app_name, window_title) — the capture-only path for a \
                 live window preview / picture-in-picture. Setting BOTH \
                 `include_accessibility_tree:false` and `include_screenshot:false` is an \
                 error. Optional `max_image_dimension` overrides the configured screenshot \
-                long-edge limit for this call; pass 0 for native resolution. Legacy \
-                `max_dimension` remains a cap on the configured limit.\n\n\
+                long-edge limit for this call; pass 0 for native resolution.\n\n\
                 Uses `IUIAutomationCacheRequest` to batch-fetch all element properties in a \
                 single COM call (Chrome's ~5000-element tree returns in ~2-3s instead of \
                 timing out at 4s with per-property RPCs).\n\n\
@@ -1242,8 +1234,8 @@ impl Tool for GetWindowStateTool {
                 CHROMIUM COVERAGE: a browser-owned permission bubble can be \
                 composited outside the requested native window. Chromium-family \
                 snapshots therefore describe this limit in structuredContent.capture_coverage. \
-                After a verified ineffective window action, call escalate_session, take a \
-                fresh get_desktop_state snapshot, act explicitly in desktop scope if needed, \
+                After a verified ineffective window action, take a fresh \
+                get_desktop_state snapshot, act explicitly in desktop scope if needed, \
                 then verify with another fresh desktop snapshot. \
                 This is separate from page JavaScript dialogs, which remain on \
                 browser_dialog.\n\n\
@@ -1252,7 +1244,6 @@ impl Tool for GetWindowStateTool {
                 "session": cua_driver_core::tool_schema::session_schema(),
                 "pid":{"type":"integer","description":"Process ID from `list_apps`."},
                 "window_id":{"type":"integer","description":"HWND of the target window. Must belong to `pid`. Enumerate via `list_windows` or read from `launch_app`'s `windows` array."},
-                "capture_mode": cua_driver_core::capture_mode::capture_mode_schema(),
                 "include_accessibility_tree":{"type":"boolean","description":"Default true — walk the UIA tree and return it (per `tree_format`) alongside the screenshot. Set false to SKIP the UIA walk entirely and return just the screenshot plus window metadata (window_bounds, app_name, window_title) — the capture-only path for a live window preview / picture-in-picture. Mirrors include_screenshot. Setting BOTH include_accessibility_tree:false AND include_screenshot:false is an error (nothing to return)."},
                 "include_screenshot":{"type":"boolean","description":"Default true — returns a grounding screenshot alongside the tree. Set false to skip the grab and return tree only (the cheap path for re-indexing before an element ax action)."},
                 "screenshot_out_file":{"type":"string","description":"When set, write the PNG to this file path instead of embedding base64 in the response. The structured output will contain `screenshot_file_path` instead."},
@@ -1260,8 +1251,7 @@ impl Tool for GetWindowStateTool {
                 "max_elements":{"type":"integer","minimum":1,"description":"Cap on the total number of UIA nodes walked. Truncates depth-first; markdown and structured elements truncate together. Default 250 (5 000 with full_output:true); the response states when the tree was cut. Raise it to read further into a large window."},
                 "max_depth":{"type":"integer","minimum":1,"description":"Cap on the UIA-tree walk depth. Nodes whose rendered indent would exceed this are omitted. Omit for the default (25). Lower for deep menu / Electron trees."},
                 "timeout_ms": cua_driver_core::tool_schema::timeout_ms_schema(),
-                "max_image_dimension":{"type":"integer","minimum":0,"description":"Per-call long-edge limit for the returned screenshot, in pixels (aspect ratio preserved). Explicit values override configured behavior; 0 returns native resolution. Omit to preserve the configured default."},
-                "max_dimension":{"type":"integer","minimum":1,"description":"Legacy optional cap on the returned screenshot's long edge, in pixels (aspect ratio preserved). Applied on top of the configured max_image_dimension ceiling when max_image_dimension is omitted; the tighter wins."}
+                "max_image_dimension":{"type":"integer","minimum":0,"description":"Per-call long-edge limit for the returned screenshot, in pixels (aspect ratio preserved). Explicit values override configured behavior; 0 returns native resolution. Omit to preserve the configured default."}
             },"additionalProperties":false})),
             // Swift annotation: idempotent: false (each call is a fresh snapshot).
             read_only: true, destructive: false, idempotent: false, open_world: false,
@@ -1344,27 +1334,19 @@ impl Tool for GetWindowStateTool {
             },
             None => None,
         };
-        let max_dimension = args
-            .get("max_dimension")
-            .and_then(|v| v.as_u64())
-            .and_then(|v| u32::try_from(v).ok())
-            .map(|v| v.max(1));
         let max_dim = {
             let cfg = self.state.config.read().unwrap();
             cua_driver_core::image_utils::ImageDimensionLimits {
                 configured: cfg.max_image_dimension,
-                legacy_max_dimension: max_dimension,
                 max_image_dimension,
             }
             .resolve()
         };
-        // `capture_mode` is DEPRECATED and ignored — get_window_state always
-        // returns BOTH the UIA tree and a screenshot now, so the agent grounds on
-        // both and cross-checks (the UIA tree lies often enough that a grounding
-        // screenshot should always be present). The modality is chosen at action
-        // time: an element ax action (element_index) or an element px action (x,y).
-        // We don't read the arg; it stays in the schema only so old callers don't
-        // trip additionalProperties:false.
+        // get_window_state returns BOTH the UIA tree and a screenshot, so the
+        // agent grounds on both and cross-checks (the UIA tree lies often enough
+        // that a grounding screenshot should always be present). The modality is
+        // chosen at action time: an element ax action (element_index) or an
+        // element px action (x,y).
         let view = match cua_driver_core::window_state_view::ViewOptions::from_args(&args) {
             Ok(view) => view,
             Err(refusal) => return refusal,
@@ -8723,10 +8705,7 @@ impl Tool for GetConfigTool {
                 Current schema (Windows):\n\n  \
                 {\n    \"schema_version\": 1,\n    \"version\": \"<crate version>\",\n    \
                 \"source_sha\": \"<maintainer build commit or null>\",\n    \"platform\": \"windows\",\n    \
-                \"capture_mode\": \"ax\" | \"vision\" (DEPRECATED, ignored),\n    \
-                \"max_image_dimension\": 0\n  }\n\n\
-                `capture_mode` is deprecated and no longer affects behavior — \
-                `get_window_state` always returns both the UIA tree and a screenshot.".into(),
+                \"max_image_dimension\": 0\n  }".into(),
             input_schema: json!({"type":"object","properties":{},"additionalProperties":false}),
             read_only: true, destructive: false, idempotent: true, open_world: false,
         })
@@ -8746,7 +8725,6 @@ impl Tool for GetConfigTool {
             "version":             env!("CARGO_PKG_VERSION"),
             "source_sha":          option_env!("CUA_DRIVER_SOURCE_SHA"),
             "platform":            "windows",
-            "capture_mode":        cfg.capture_mode,
             "max_image_dimension": cfg.max_image_dimension,
             "agent_cursor":        { "enabled": cursor_enabled },
             "cursor":              {
@@ -8785,9 +8763,6 @@ impl Tool for SetConfigTool {
             description: "Write a setting into the persistent driver config. Values take \
                 effect immediately. Pass each setting as its own field.\n\n\
                 Known keys:\n\
-                - `capture_mode` (string: `vision` | `ax` | `som`) — DEPRECATED and ignored; \
-                  `get_window_state` always returns both the UIA tree and a screenshot. Still \
-                  accepted/persisted for back-compat but has no effect.\n\
                 - `max_image_dimension` (integer)\n\
                 - `experimental_pip` (boolean; persisted to config.json, applies on next daemon restart — Windows backend stubbed today, see issue #1729)\n\
                 - `experimental_pip_geometry` (string `WxH` or `WxH+X+Y`; persisted; applies on next daemon restart)\n\n\
@@ -8795,7 +8770,6 @@ impl Tool for SetConfigTool {
                 - `cursor.badges` (`minimal` default, `verbose`, or `off`) — agent cursor badge; applies to every cursor at once.\n\n\
                 Returns the full updated config in the same shape as `get_config`.".into(),
             input_schema: with_cursor_motion_config_properties(json!({"type":"object","properties":{
-                "capture_mode":{"type":"string","enum":["ax","vision"],"description":"DEPRECATED and ignored — get_window_state always returns both the UIA tree and a screenshot. Still accepted/persisted for back-compat but has no effect. (\"som\"/\"screenshot\" still decode as deprecated aliases.)"},
                 "max_image_dimension":{"type":"integer","description":"Max dimension for screenshot resizing (0 = no limit)."},
                 "experimental_pip":{"type":"boolean","description":"Enables PiP preview (applies next restart)."},
                 "experimental_pip_geometry":{"type":"string","description":"PiP window size + optional position."}
@@ -8824,15 +8798,6 @@ impl Tool for SetConfigTool {
             Err(message) => return ToolResult::error(message),
         };
         let mut applied = !motion_keys.is_empty() || badge_key.is_some();
-        if let Some(mode) = args.get("capture_mode").and_then(|v| v.as_str()) {
-            cfg.capture_mode = mode.to_owned();
-            if let Err(e) =
-                pip_preview::write_config_key("capture_mode", Value::String(mode.to_owned()))
-            {
-                tracing::warn!("set_config: failed to persist capture_mode: {e}");
-            }
-            applied = true;
-        }
         if let Some(dim) = args.get("max_image_dimension").and_then(|v| v.as_u64()) {
             cfg.max_image_dimension = dim as u32;
             if let Err(e) = pip_preview::write_config_key("max_image_dimension", Value::from(dim)) {
@@ -8884,7 +8849,6 @@ impl Tool for SetConfigTool {
             "version":             env!("CARGO_PKG_VERSION"),
             "source_sha":          option_env!("CUA_DRIVER_SOURCE_SHA"),
             "platform":            "windows",
-            "capture_mode":        cfg.capture_mode,
             "max_image_dimension": cfg.max_image_dimension,
             "agent_cursor":        { "enabled": cursor_enabled },
             "experimental_pip":    pip_enabled,
@@ -10431,11 +10395,6 @@ pub fn build_registry_with_provider(
     let _: &TypeTextCharsTool = &TypeTextCharsTool {
         _state: state.clone(),
     }; // touch struct so it stays in this crate for now
-       // Cross-platform `page` tool definition lives in mcp-server; Windows plugs
-       // in its UIA TextPattern + FindAll backend (CDP for execute_javascript).
-    r.register(Box::new(cua_driver_core::page::PageTool::new(
-        std::sync::Arc::new(super::page::WindowsPageBackend::new()),
-    )));
     let browser_engine = cua_driver_core::browser::BrowserEngine::new_with_runtime_services(
         std::sync::Arc::new(crate::browser_platform::WindowsBrowserPlatform::new(
             state.cursor_registry.clone(),

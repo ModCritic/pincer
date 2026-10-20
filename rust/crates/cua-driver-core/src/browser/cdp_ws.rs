@@ -489,7 +489,8 @@ fn loopback_port(url: &str) -> Option<u16> {
 }
 
 /// Whether an existing-profile grant owns the DevTools listener used by this
-/// URL. The legacy page route consults this before opening its own page socket.
+/// URL. Unrestricted pool access consults this before opening its own page
+/// socket.
 pub fn endpoint_port_is_grant_owned(url: &str) -> bool {
     loopback_port(url).is_some_and(|port| claimed_ports().lock().unwrap().contains_key(&port))
 }
@@ -810,7 +811,7 @@ impl CdpPool {
     }
 
     /// Drop a (likely dead) unrestricted connection so the next call
-    /// redials. Grant-owned sockets are never evicted by the legacy route.
+    /// redials. Grant-owned sockets are never evicted by unrestricted access.
     pub async fn evict(&self, ws_url: &str) {
         let mut conns = self.inner.conns.lock().await;
         if conns

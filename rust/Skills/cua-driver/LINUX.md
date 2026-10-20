@@ -45,7 +45,7 @@ attested window capture.
 1. Read any returned tree and `degraded_reason`; semantic interaction may still
    be possible without pixels.
 2. Do not retry a window-pixel action without a valid window image. Changing
-   `capture_mode`, inventing bounds, or repeatedly increasing timeouts cannot
+   configuration, inventing bounds, or repeatedly increasing timeouts cannot
    establish surface identity.
 3. If the task permits full-display capture and visible desktop control,
    explain the broader scope and obtain authorization if not already given.

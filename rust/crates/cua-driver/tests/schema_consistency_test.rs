@@ -6,7 +6,7 @@
 //! Because this test compiles+runs against whichever platform crate is active,
 //! the SAME file guards macOS, Linux, and Windows in their respective CI lanes:
 //! the moment one platform's hand-written schema drifts from the shared canon
-//! (a stale `capture_mode` enum, a `session` param with the wrong shape, a
+//! (a stale shared enum, a `session` param with the wrong shape, a
 //! `required` set that diverges), or registers an unclassified tool, this fails.
 //!
 //! This is the codified form of the manual macOS↔Windows diff that surfaced the

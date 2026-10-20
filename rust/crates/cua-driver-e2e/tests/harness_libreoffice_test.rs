@@ -174,7 +174,7 @@ fn harness_lo_vcl_font_color_expand_opens_picker() {
         "get_window_state",
         serde_json::json!({
             "pid": pid as i64, "window_id": wid,
-            "capture_mode": "ax", "query": "Font Color"
+            "query": "Font Color"
         }),
     );
     let text = snap.text();

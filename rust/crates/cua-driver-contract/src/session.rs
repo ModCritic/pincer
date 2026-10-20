@@ -2,16 +2,15 @@
 // Copyright (c) 2026 Cua AI, Inc.
 
 use crate::{
-    CursorAction, CursorSemantics, EndSessionInput, EndSessionOutput, EscalateSessionInput,
-    GetSessionInput, GetSessionStateInput, ListSessionsInput, ListSessionsOutput, Platform,
-    SchemaMode, SessionOutput, SessionStateOutput, StartSessionInput, StartSessionOutput,
-    ToolAnnotations, ToolContract, ToolInput, ToolOutput,
+    CursorAction, CursorSemantics, EndSessionInput, EndSessionOutput, GetSessionInput,
+    ListSessionsInput, ListSessionsOutput, Platform, SchemaMode, SessionOutput, StartSessionInput,
+    StartSessionOutput, ToolAnnotations, ToolContract, ToolInput, ToolOutput,
 };
 
 const ALL_PLATFORMS: [Platform; 3] = [Platform::Macos, Platform::Windows, Platform::Linux];
 
 pub fn contracts() -> Vec<ToolContract> {
-    vec![start(), escalate(), get(), list(), get_state(), end()]
+    vec![start(), get(), list(), end()]
 }
 
 fn contract<I: ToolInput, O: ToolOutput>(
@@ -40,38 +39,10 @@ fn contract<I: ToolInput, O: ToolOutput>(
 fn start() -> ToolContract {
     contract::<StartSessionInput, StartSessionOutput>(
         "start_session",
-        "Optionally create or return a lifecycle session before acting. For multi-call work, prefer a short public `session` label and repeat it on every call that accepts it; an omitted value uses the authenticated transport lease's implicit session instead. This tool is optional because an ordinary action can create or reuse a named run directly. Use it to set the initial cursor theme before acting or to revive a public name after it has ended; ordinary actions never revive ended names. `capture_scope` is deprecated compatibility input; new callers select window or desktop modality per action. Idempotent.",
-        &["session.lifecycle.start", "session.capture_scope"],
+        "Optionally create or return a lifecycle session before acting. For multi-call work, prefer a short public `session` label and repeat it on every call that accepts it; an omitted value uses the authenticated transport lease's implicit session instead. This tool is optional because an ordinary action can create or reuse a named run directly. Use it to set the initial cursor theme before acting or to revive a public name after it has ended; ordinary actions never revive ended names. Idempotent.",
+        &["session.lifecycle.start"],
         ToolAnnotations {
             read_only: false,
-            destructive: false,
-            idempotent: true,
-            open_world: false,
-        },
-    )
-}
-
-fn escalate() -> ToolContract {
-    contract::<EscalateSessionInput, SessionStateOutput>(
-        "escalate_session",
-        "Deprecated compatibility tool for legacy capture-scope sessions. New callers select window or desktop modality on each action. No deescalate_session tool exists.",
-        &["session.capture_scope.escalate"],
-        ToolAnnotations {
-            read_only: false,
-            destructive: false,
-            idempotent: false,
-            open_world: false,
-        },
-    )
-}
-
-fn get_state() -> ToolContract {
-    contract::<GetSessionStateInput, SessionStateOutput>(
-        "get_session_state",
-        "Deprecated compatibility alias that reads a live legacy session's capture policy. Use get_session for lifecycle state.",
-        &["session.capture_scope.read"],
-        ToolAnnotations {
-            read_only: true,
             destructive: false,
             idempotent: true,
             open_world: false,

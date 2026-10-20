@@ -2159,7 +2159,6 @@ fn wait_for_native_omnibox_value(fixture: &mut BrowserFixture, expected: &str) {
             serde_json::json!({
                 "pid": fixture.pid as i64,
                 "window_id": fixture.window_id,
-                "capture_mode": "ax",
             }),
         );
         let (_, _, _, value) = native_omnibox(&snapshot);
@@ -2196,7 +2195,6 @@ fn run_native_omnibox_select_all(spec: &BrowserSpec) {
             serde_json::json!({
                 "pid": fixture.pid as i64,
                 "window_id": fixture.window_id,
-                "capture_mode": "ax",
             }),
         );
         let (index, x, y, _) = native_omnibox(&snapshot);
@@ -2273,7 +2271,6 @@ fn generic_editor_coordinates(fixture: &mut BrowserFixture) -> (f64, f64) {
         serde_json::json!({
             "pid": fixture.pid as i64,
             "window_id": fixture.window_id,
-            "capture_mode": "vision",
         }),
     );
     assert!(!state.is_error(), "native browser snapshot: {}", state.raw);

@@ -93,8 +93,8 @@ stub_tool!(
 );
 
 stub_tool!(get_window_state_m, GetWindowStateTool, "get_window_state",
-    "Always returns BOTH the element tree AND a screenshot — ground on both and cross-check (the tree lies on some surfaces). Choose the modality at ACTION time: an element ax action (element_token → accessibility rung) or an element px action (x,y → pixel rung off this screenshot). capture_mode is deprecated and ignored.",
-    serde_json::json!({"type":"object","required":["pid","window_id"],"properties":{"session": cua_driver_core::tool_schema::session_schema(),"pid":{"type":"integer"},"window_id":{"type":"integer"},"query":{"type":"string"},"capture_mode": cua_driver_core::capture_mode::capture_mode_schema(),"include_screenshot":{"type":"boolean","description":"Default true — returns a grounding screenshot alongside the tree. Set false to skip the grab and return tree only (the cheap path for re-indexing before an element ax action)."}},"additionalProperties":false}));
+    "Always returns BOTH the element tree AND a screenshot — ground on both and cross-check (the tree lies on some surfaces). Choose the modality at ACTION time: an element ax action (element_token → accessibility rung) or an element px action (x,y → pixel rung off this screenshot).",
+    serde_json::json!({"type":"object","required":["pid","window_id"],"properties":{"session": cua_driver_core::tool_schema::session_schema(),"pid":{"type":"integer"},"window_id":{"type":"integer"},"query":{"type":"string"},"include_screenshot":{"type":"boolean","description":"Default true — returns a grounding screenshot alongside the tree. Set false to skip the grab and return tree only (the cheap path for re-indexing before an element ax action)."}},"additionalProperties":false}));
 
 stub_tool!(
     launch_app_m,
@@ -235,7 +235,7 @@ stub_tool!(
     SetConfigTool,
     "set_config",
     "Update cua-driver-rs configuration.",
-    serde_json::json!({"type":"object","properties":{"capture_mode":{"type":"string","enum":["ax","vision"]},"max_image_dimension":{"type":"integer"}},"additionalProperties":false})
+    serde_json::json!({"type":"object","properties":{"max_image_dimension":{"type":"integer"}},"additionalProperties":false})
 );
 
 stub_tool!(get_ax_tree_m, GetAccessibilityTreeTool, "get_accessibility_tree",

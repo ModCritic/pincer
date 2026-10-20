@@ -102,10 +102,7 @@ fn launch(label: &str) -> Option<TkFixture> {
         .find_window(pid, &title)
         .expect("find the exact Tk fixture window");
     let session = format!("{label}-session");
-    let started = driver.call(
-        "start_session",
-        json!({"session": session, "capture_scope": "window"}),
-    );
+    let started = driver.call("start_session", json!({"session": session}));
     assert!(!started.is_error(), "start_session: {}", started.text());
     Some(TkFixture {
         driver,

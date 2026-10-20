@@ -40,7 +40,7 @@ Foreground and background are separate resolved actions, but they should not
 need unrelated illustrations. A maintainable asset system uses:
 
 1. a base intent glyph or animation (`click`, `type`, `scroll`, `drag`);
-2. a targeting treatment (`ax`, `px`, `desktop`, `page`, `browser`);
+2. a targeting treatment (`ax`, `px`, `desktop`, `browser`);
 3. a host-rendered delivery chip (`background`, `foreground`);
 4. a small qualifier where it changes the visible gesture (`right`, `double`,
    `down`, `page`, and so on).
@@ -55,7 +55,6 @@ need unrelated illustrations. A maintainable asset system uses:
 | `px`              | Window-local pixel action                             | Window target plus `x`/`y` coordinates    |
 | `focused`         | Acts on the target's currently focused control        | No element or point supplied              |
 | `desktop`         | Screen-absolute action                                | `scope:"desktop"` without a window target |
-| `page`            | Legacy page/DOM action                                | A `page[action=…]` operation              |
 | `browser_trusted` | Typed browser action through trusted CDP Input events | `input_route:"trusted"` or omitted        |
 | `browser_dom`     | Explicit synthetic DOM event                          | `input_route:"dom_event"`                 |
 
@@ -132,20 +131,6 @@ For example, all `native.scroll.*` actions share one scroll animation.
 Delivery and targeting are composable host-rendered badge chips rather than
 theme animations.
 
-## Page compound actions
-
-The public `page` tool contains seven operations:
-
-| Resolved action key                   | Effect                                    | Platform note                                              |
-| ------------------------------------- | ----------------------------------------- | ---------------------------------------------------------- |
-| `page.get_text`                       | Read visible page text                    | Cross-platform                                             |
-| `page.query_dom`                      | Query elements with a CSS selector        | Cross-platform                                             |
-| `page.execute_javascript`             | Execute JavaScript                        | Cross-platform where a supported page backend is available |
-| `page.click_element`                  | Click a CSS-selected element              | Cross-platform                                             |
-| `page.insert_text`                    | Insert text at current DOM focus          | macOS implementation currently documented                  |
-| `page.type_keystrokes`                | Dispatch durable per-character key events | macOS implementation currently documented                  |
-| `page.enable_javascript_apple_events` | Enable Safari JavaScript automation       | macOS only                                                 |
-
 ## Typed browser actions
 
 | Public tool               | Resolved action keys                                                                                                           |
@@ -174,8 +159,6 @@ distinct resolved action IDs.
 | `get_session`              | `session.inspect.one`                                 |
 | `list_sessions`            | `session.inspect.list`                                |
 | `end_session`              | `session.end`                                         |
-| `escalate_session`         | `session.legacy.escalate.desktop`                     |
-| `get_session_state`        | `session.legacy.inspect_capture`                      |
 | `start_recording`          | `recording.start.trajectory`, `recording.start.video` |
 | `stop_recording`           | `recording.stop`                                      |
 | `get_recording_state`      | `recording.inspect`                                   |
@@ -192,8 +175,8 @@ distinct resolved action IDs.
 
 ## Complete public tool-name union
 
-The source-built macOS registry contains 48 tools. Windows adds
-`debug_window_info`. Linux adds four low-level pointer tools. The union is 53
+The source-built macOS registry contains 45 tools. Windows adds
+`debug_window_info`. Linux adds four low-level pointer tools. The union is 50
 public tool names.
 
 |   # | Tool                       | Category                    | Platform                              | Primary icon intent                                                   |
@@ -227,32 +210,29 @@ public tool names.
 |  27 | `set_config`               | Configuration               | All                                   | Config update                                                         |
 |  28 | `get_accessibility_tree`   | Inspection                  | All                                   | Desktop accessibility inspect                                         |
 |  29 | `zoom`                     | Inspection                  | All                                   | Zoom/crop                                                             |
-|  30 | `page`                     | Page/DOM                    | All, with operation-specific limits   | Use the seven page operation icons                                    |
-|  31 | `get_browser_state`        | Typed browser               | All                                   | Bind or snapshot                                                      |
-|  32 | `browser_prepare`          | Typed browser               | All                                   | Browser preparation/profile                                           |
-|  33 | `browser_navigate`         | Typed browser               | All                                   | Navigate                                                              |
-|  34 | `browser_click`            | Typed browser               | All                                   | Browser click plus route                                              |
-|  35 | `browser_type`             | Typed browser               | All                                   | Browser type plus mode                                                |
-|  36 | `browser_dialog`           | Typed browser               | All                                   | Inspect/accept/dismiss dialog                                         |
-|  37 | `browser_set_input_files`  | Typed browser               | All                                   | Upload/attach files                                                   |
-|  38 | `browser_download`         | Typed browser               | All                                   | Download                                                              |
-|  39 | `browser_pointer`          | Typed browser               | All                                   | Use the ten browser-pointer operation icons                           |
-|  40 | `start_recording`          | Recording                   | All                                   | Start trajectory/video recording                                      |
-|  41 | `stop_recording`           | Recording                   | All                                   | Stop recording                                                        |
-|  42 | `get_recording_state`      | Recording                   | All                                   | Recording inspect                                                     |
-|  43 | `replay_trajectory`        | Recording                   | All                                   | Replay                                                                |
-|  44 | `install_ffmpeg`           | Maintenance                 | Windows/Linux; no-op when unnecessary | Plan/install dependency                                               |
-|  45 | `start_session`            | Session lifecycle           | All                                   | Optional implicit or named lifecycle start                            |
-|  46 | `get_session`              | Session lifecycle           | All                                   | Inspect one visible lifecycle session                                 |
-|  47 | `list_sessions`            | Session lifecycle           | All                                   | List transport-visible lifecycle sessions                             |
-|  48 | `end_session`              | Session lifecycle           | All                                   | End session                                                           |
-|  49 | `escalate_session`         | Legacy session compatibility | All                                  | Deprecated capture-scope escalation                                   |
-|  50 | `get_session_state`        | Legacy session compatibility | All                                  | Deprecated capture-scope inspect                                      |
-|  51 | `debug_window_info`        | Diagnostic                  | Windows only                          | Window diagnostic                                                     |
-|  52 | `mouse_button_down`        | Low-level pointer           | Linux only                            | Hold button                                                           |
-|  53 | `mouse_drag`               | Low-level pointer           | Linux only                            | Move held pointer                                                     |
-|  54 | `mouse_button_up`          | Low-level pointer           | Linux only                            | Release button                                                        |
-|  55 | `parallel_mouse_drag`      | Multi-pointer               | Linux only                            | Concurrent drags                                                      |
+|  30 | `get_browser_state`        | Typed browser               | All                                   | Bind or snapshot                                                      |
+|  31 | `browser_prepare`          | Typed browser               | All                                   | Browser preparation/profile                                           |
+|  32 | `browser_navigate`         | Typed browser               | All                                   | Navigate                                                              |
+|  33 | `browser_click`            | Typed browser               | All                                   | Browser click plus route                                              |
+|  34 | `browser_type`             | Typed browser               | All                                   | Browser type plus mode                                                |
+|  35 | `browser_dialog`           | Typed browser               | All                                   | Inspect/accept/dismiss dialog                                         |
+|  36 | `browser_set_input_files`  | Typed browser               | All                                   | Upload/attach files                                                   |
+|  37 | `browser_download`         | Typed browser               | All                                   | Download                                                              |
+|  38 | `browser_pointer`          | Typed browser               | All                                   | Use the ten browser-pointer operation icons                           |
+|  39 | `start_recording`          | Recording                   | All                                   | Start trajectory/video recording                                      |
+|  40 | `stop_recording`           | Recording                   | All                                   | Stop recording                                                        |
+|  41 | `get_recording_state`      | Recording                   | All                                   | Recording inspect                                                     |
+|  42 | `replay_trajectory`        | Recording                   | All                                   | Replay                                                                |
+|  43 | `install_ffmpeg`           | Maintenance                 | Windows/Linux; no-op when unnecessary | Plan/install dependency                                               |
+|  44 | `start_session`            | Session lifecycle           | All                                   | Optional implicit or named lifecycle start                            |
+|  45 | `get_session`              | Session lifecycle           | All                                   | Inspect one visible lifecycle session                                 |
+|  46 | `list_sessions`            | Session lifecycle           | All                                   | List transport-visible lifecycle sessions                             |
+|  47 | `end_session`              | Session lifecycle           | All                                   | End session                                                           |
+|  48 | `debug_window_info`        | Diagnostic                  | Windows only                          | Window diagnostic                                                     |
+|  49 | `mouse_button_down`        | Low-level pointer           | Linux only                            | Hold button                                                           |
+|  50 | `mouse_drag`               | Low-level pointer           | Linux only                            | Move held pointer                                                     |
+|  51 | `mouse_button_up`          | Low-level pointer           | Linux only                            | Release button                                                        |
+|  52 | `parallel_mouse_drag`      | Multi-pointer               | Linux only                            | Concurrent drags                                                      |
 
 ## Linux low-level pointer action keys
 
@@ -274,8 +254,9 @@ linux.parallel_mouse_drag.fixed_background
   `get_window_state`; full-display capture is `get_desktop_state`.
 - `check_for_update` is removed in this fork, together with the update check,
   so it needs no icon.
-- Deprecated `get_window_state.capture_mode` values are accepted but ignored.
-  They do not represent distinct actions and should not receive icons.
+- The legacy `page`, `escalate_session` and `get_session_state` tools and the
+  `capture_mode`, `capture_scope` and `max_dimension` parameters are removed in
+  this fork, so they need no icons.
 - Internal platform delivery paths such as `cgevent`, `x11_atspi`, `msaa`, and
   `key_events_fg` are result metadata, not public requested actions. They may
   be shown in diagnostics, but should not expand the primary icon catalog.

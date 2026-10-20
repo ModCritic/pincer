@@ -2456,100 +2456,6 @@ const FfiConverterTypeEndSessionOutput = (() => {
     return new FFIConverter();
 })();
 
-export enum EscalationReason {
-    AxTreePixelMismatch,
-    BackgroundDeliveryFailed,
-    ForegroundIneffective,
-    NoWindowTarget,
-    Other
-}
-
-const FfiConverterTypeEscalationReason = (() => {
-    const ordinalConverter = FfiConverterInt32;
-    type TypeName = EscalationReason;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            switch (ordinalConverter.read(from)) {
-                case 1: return EscalationReason.AxTreePixelMismatch;
-                case 2: return EscalationReason.BackgroundDeliveryFailed;
-                case 3: return EscalationReason.ForegroundIneffective;
-                case 4: return EscalationReason.NoWindowTarget;
-                case 5: return EscalationReason.Other;
-                default: throw new UniffiInternalError.UnexpectedEnumCase();
-            }
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            switch (value) {
-                case EscalationReason.AxTreePixelMismatch: return ordinalConverter.write(1, into);
-                case EscalationReason.BackgroundDeliveryFailed: return ordinalConverter.write(2, into);
-                case EscalationReason.ForegroundIneffective: return ordinalConverter.write(3, into);
-                case EscalationReason.NoWindowTarget: return ordinalConverter.write(4, into);
-                case EscalationReason.Other: return ordinalConverter.write(5, into);
-            }
-        }
-        allocationSize(value: TypeName): number {
-            return ordinalConverter.allocationSize(0);
-        }
-    }
-    return new FFIConverter();
-})();
-
-export type EscalateSessionInput = {
-    /**
-     * Public label of the legacy capture-scope session to escalate.
-     */
-    session: string,
-    /**
-     * Why the window-scoped attempt failed and desktop capture is needed.
-     */
-    reason: EscalationReason,
-    /**
-     * Optional bounded diagnostic detail. Never use secrets or page content.
-     */
-    detail?: string
-}
-
-/**
- * Generated factory for {@link EscalateSessionInput} record objects.
- */
-export const EscalateSessionInput = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<EscalateSessionInput, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<EscalateSessionInput>,
-    });
-})();
-
-const FfiConverterTypeEscalateSessionInput = (() => {
-    type TypeName = EscalateSessionInput;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                session: FfiConverterString.read(from),
-                reason: FfiConverterTypeEscalationReason.read(from),
-                detail: FfiConverterOptionalString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.session, into);
-            FfiConverterTypeEscalationReason.write(value.reason, into);
-            FfiConverterOptionalString.write(value.detail, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.session) +
-             FfiConverterTypeEscalationReason.allocationSize(value.reason) +
-             FfiConverterOptionalString.allocationSize(value.detail);
-
-        }
-    };
-    return new FFIConverter();
-})();
-
 export type GetAgentCursorStateInput = {
     /**
      * Public label of the session whose cursor to inspect.
@@ -2840,49 +2746,6 @@ const FfiConverterTypeGetSessionInput = (() => {
     return new FFIConverter();
 })();
 
-export type GetSessionStateInput = {
-    /**
-     * Optional public label. When omitted, inspect the caller's attached
-     * implicit session.
-     */
-    session?: string
-}
-
-/**
- * Generated factory for {@link GetSessionStateInput} record objects.
- */
-export const GetSessionStateInput = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<GetSessionStateInput, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<GetSessionStateInput>,
-    });
-})();
-
-const FfiConverterTypeGetSessionStateInput = (() => {
-    type TypeName = GetSessionStateInput;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                session: FfiConverterOptionalString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterOptionalString.write(value.session, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterOptionalString.allocationSize(value.session);
-
-        }
-    };
-    return new FFIConverter();
-})();
-
 export type GetWindowStateInput = {
     pid: number,
     windowId: bigint,
@@ -2893,7 +2756,6 @@ export type GetWindowStateInput = {
     screenshotOutFile?: string,
     maxElements?: number,
     maxDepth?: number,
-    maxDimension?: number,
     /**
      * Optional per-call long-edge ceiling. Zero requests native resolution;
      * omit it to preserve the configured session or global behavior.
@@ -2960,7 +2822,6 @@ const FfiConverterTypeGetWindowStateInput = (() => {
                 screenshotOutFile: FfiConverterOptionalString.read(from),
                 maxElements: FfiConverterOptionalUInt32.read(from),
                 maxDepth: FfiConverterOptionalUInt32.read(from),
-                maxDimension: FfiConverterOptionalUInt32.read(from),
                 maxImageDimension: FfiConverterOptionalUInt32.read(from),
                 timeoutMs: FfiConverterOptionalUInt32.read(from),
                 treeFormat: FfiConverterOptionalString.read(from),
@@ -2979,7 +2840,6 @@ const FfiConverterTypeGetWindowStateInput = (() => {
             FfiConverterOptionalString.write(value.screenshotOutFile, into);
             FfiConverterOptionalUInt32.write(value.maxElements, into);
             FfiConverterOptionalUInt32.write(value.maxDepth, into);
-            FfiConverterOptionalUInt32.write(value.maxDimension, into);
             FfiConverterOptionalUInt32.write(value.maxImageDimension, into);
             FfiConverterOptionalUInt32.write(value.timeoutMs, into);
             FfiConverterOptionalString.write(value.treeFormat, into);
@@ -2997,7 +2857,6 @@ const FfiConverterTypeGetWindowStateInput = (() => {
              FfiConverterOptionalString.allocationSize(value.screenshotOutFile) +
              FfiConverterOptionalUInt32.allocationSize(value.maxElements) +
              FfiConverterOptionalUInt32.allocationSize(value.maxDepth) +
-             FfiConverterOptionalUInt32.allocationSize(value.maxDimension) +
              FfiConverterOptionalUInt32.allocationSize(value.maxImageDimension) +
              FfiConverterOptionalUInt32.allocationSize(value.timeoutMs) +
              FfiConverterOptionalString.allocationSize(value.treeFormat) +
@@ -4124,141 +3983,6 @@ const FfiConverterTypeScrollInput = (() => {
     return new FFIConverter();
 })();
 
-export enum CaptureScope {
-    Auto,
-    Window,
-    Desktop
-}
-
-const FfiConverterTypeCaptureScope = (() => {
-    const ordinalConverter = FfiConverterInt32;
-    type TypeName = CaptureScope;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            switch (ordinalConverter.read(from)) {
-                case 1: return CaptureScope.Auto;
-                case 2: return CaptureScope.Window;
-                case 3: return CaptureScope.Desktop;
-                default: throw new UniffiInternalError.UnexpectedEnumCase();
-            }
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            switch (value) {
-                case CaptureScope.Auto: return ordinalConverter.write(1, into);
-                case CaptureScope.Window: return ordinalConverter.write(2, into);
-                case CaptureScope.Desktop: return ordinalConverter.write(3, into);
-            }
-        }
-        allocationSize(value: TypeName): number {
-            return ordinalConverter.allocationSize(0);
-        }
-    }
-    return new FFIConverter();
-})();
-
-export enum EffectiveScope {
-    Window,
-    Desktop
-}
-
-const FfiConverterTypeEffectiveScope = (() => {
-    const ordinalConverter = FfiConverterInt32;
-    type TypeName = EffectiveScope;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            switch (ordinalConverter.read(from)) {
-                case 1: return EffectiveScope.Window;
-                case 2: return EffectiveScope.Desktop;
-                default: throw new UniffiInternalError.UnexpectedEnumCase();
-            }
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            switch (value) {
-                case EffectiveScope.Window: return ordinalConverter.write(1, into);
-                case EffectiveScope.Desktop: return ordinalConverter.write(2, into);
-            }
-        }
-        allocationSize(value: TypeName): number {
-            return ordinalConverter.allocationSize(0);
-        }
-    }
-    return new FFIConverter();
-})();
-
-/**
- * Successful structured result shared by session state and escalation tools.
- */
-export type SessionStateOutput = {
-    session: string,
-    captureScope: CaptureScope,
-    effectiveScope: EffectiveScope,
-    /**
-     * Whether this session is authorized to use desktop-scope capture and
-     * actions. This does not report the operating system's lock-screen state.
-     */
-    desktopCaptureAuthorized: boolean,
-    /**
-     * Compatibility field: this reports whether this session has unlocked
-     * desktop capture scope. It is not an operating-system lock-screen probe.
-     */
-    desktopUnlocked: boolean,
-    escalationReason?: EscalationReason,
-    escalationDetail?: string
-}
-
-/**
- * Generated factory for {@link SessionStateOutput} record objects.
- */
-export const SessionStateOutput = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<SessionStateOutput, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<SessionStateOutput>,
-    });
-})();
-
-const FfiConverterTypeSessionStateOutput = (() => {
-    type TypeName = SessionStateOutput;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                session: FfiConverterString.read(from),
-                captureScope: FfiConverterTypeCaptureScope.read(from),
-                effectiveScope: FfiConverterTypeEffectiveScope.read(from),
-                desktopCaptureAuthorized: FfiConverterBool.read(from),
-                desktopUnlocked: FfiConverterBool.read(from),
-                escalationReason: FfiConverterOptionalTypeEscalationReason.read(from),
-                escalationDetail: FfiConverterOptionalString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.session, into);
-            FfiConverterTypeCaptureScope.write(value.captureScope, into);
-            FfiConverterTypeEffectiveScope.write(value.effectiveScope, into);
-            FfiConverterBool.write(value.desktopCaptureAuthorized, into);
-            FfiConverterBool.write(value.desktopUnlocked, into);
-            FfiConverterOptionalTypeEscalationReason.write(value.escalationReason, into);
-            FfiConverterOptionalString.write(value.escalationDetail, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.session) +
-             FfiConverterTypeCaptureScope.allocationSize(value.captureScope) +
-             FfiConverterTypeEffectiveScope.allocationSize(value.effectiveScope) +
-             FfiConverterBool.allocationSize(value.desktopCaptureAuthorized) +
-             FfiConverterBool.allocationSize(value.desktopUnlocked) +
-             FfiConverterOptionalTypeEscalationReason.allocationSize(value.escalationReason) +
-             FfiConverterOptionalString.allocationSize(value.escalationDetail);
-
-        }
-    };
-    return new FFIConverter();
-})();
-
 export type SetAgentCursorEnabledInput = {
     /**
      * Public label of the session that owns the cursor.
@@ -4774,11 +4498,6 @@ export type StartSessionInput = {
      */
     session?: string,
     /**
-     * Deprecated compatibility policy. New callers select window or desktop
-     * modality on each action instead of storing it on the session.
-     */
-    captureScope?: CaptureScope,
-    /**
      * Optional initial cursor theme. The host applies it before the cursor is
      * first made visible, avoiding a flash of the default theme.
      */
@@ -4814,20 +4533,17 @@ const FfiConverterTypeStartSessionInput = (() => {
         read(from: RustBuffer): TypeName {
             return {
                 session: FfiConverterOptionalString.read(from),
-                captureScope: FfiConverterOptionalTypeCaptureScope.read(from),
                 cursorTheme: FfiConverterOptionalTypeCursorThemeSelection.read(from),
                 cursorMotion: FfiConverterOptionalTypeCursorMotionSelection.read(from)
             };
         }
         write(value: TypeName, into: RustBuffer): void {
             FfiConverterOptionalString.write(value.session, into);
-            FfiConverterOptionalTypeCaptureScope.write(value.captureScope, into);
             FfiConverterOptionalTypeCursorThemeSelection.write(value.cursorTheme, into);
             FfiConverterOptionalTypeCursorMotionSelection.write(value.cursorMotion, into);
         }
         allocationSize(value: TypeName): number {
             return FfiConverterOptionalString.allocationSize(value.session) +
-             FfiConverterOptionalTypeCaptureScope.allocationSize(value.captureScope) +
              FfiConverterOptionalTypeCursorThemeSelection.allocationSize(value.cursorTheme) +
              FfiConverterOptionalTypeCursorMotionSelection.allocationSize(value.cursorMotion);
 
@@ -4840,7 +4556,7 @@ const FfiConverterTypeStartSessionInput = (() => {
  * Successful structured result returned by `start_session`.
  */
 export type StartSessionOutput = {
-    state: SessionStateOutput,
+    session: string,
     active: boolean,
     revived: boolean,
     /**
@@ -4870,20 +4586,20 @@ const FfiConverterTypeStartSessionOutput = (() => {
     class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
         read(from: RustBuffer): TypeName {
             return {
-                state: FfiConverterTypeSessionStateOutput.read(from),
+                session: FfiConverterString.read(from),
                 active: FfiConverterBool.read(from),
                 revived: FfiConverterBool.read(from),
                 cursorMotion: FfiConverterOptionalTypeCursorMotionSelection.read(from)
             };
         }
         write(value: TypeName, into: RustBuffer): void {
-            FfiConverterTypeSessionStateOutput.write(value.state, into);
+            FfiConverterString.write(value.session, into);
             FfiConverterBool.write(value.active, into);
             FfiConverterBool.write(value.revived, into);
             FfiConverterOptionalTypeCursorMotionSelection.write(value.cursorMotion, into);
         }
         allocationSize(value: TypeName): number {
-            return FfiConverterTypeSessionStateOutput.allocationSize(value.state) +
+            return FfiConverterString.allocationSize(value.session) +
              FfiConverterBool.allocationSize(value.active) +
              FfiConverterBool.allocationSize(value.revived) +
              FfiConverterOptionalTypeCursorMotionSelection.allocationSize(value.cursorMotion);
@@ -5572,12 +5288,6 @@ const FfiConverterOptionalTypeUnknownReason = new FfiConverterOptional(FfiConver
 // FfiConverter for ScrollBy | undefined
 const FfiConverterOptionalTypeScrollBy = new FfiConverterOptional(FfiConverterTypeScrollBy);
 
-// FfiConverter for EscalationReason | undefined
-const FfiConverterOptionalTypeEscalationReason = new FfiConverterOptional(FfiConverterTypeEscalationReason);
-
-// FfiConverter for CaptureScope | undefined
-const FfiConverterOptionalTypeCaptureScope = new FfiConverterOptional(FfiConverterTypeCaptureScope);
-
 // FfiConverter for CursorThemeSelection | undefined
 const FfiConverterOptionalTypeCursorThemeSelection = new FfiConverterOptional(FfiConverterTypeCursorThemeSelection);
 
@@ -5653,7 +5363,6 @@ export default Object.freeze({
     FfiConverterTypeActionTarget,
     FfiConverterTypeAppInfo,
     FfiConverterTypeBoundsExpectation,
-    FfiConverterTypeCaptureScope,
     FfiConverterTypeClickButton,
     FfiConverterTypeClickInput,
     FfiConverterTypeClickPosition,
@@ -5676,21 +5385,17 @@ export default Object.freeze({
     FfiConverterTypeCursorVisualOutput,
     FfiConverterTypeDesktopScope,
     FfiConverterTypeDragInput,
-    FfiConverterTypeEffectiveScope,
     FfiConverterTypeElementFrame,
     FfiConverterTypeElementPredicate,
     FfiConverterTypeElementSelector,
     FfiConverterTypeEndSessionInput,
     FfiConverterTypeEndSessionOutput,
-    FfiConverterTypeEscalateSessionInput,
-    FfiConverterTypeEscalationReason,
     FfiConverterTypeGetAgentCursorStateInput,
     FfiConverterTypeGetAgentCursorStateOutput,
     FfiConverterTypeGetCursorPositionInput,
     FfiConverterTypeGetDesktopStateInput,
     FfiConverterTypeGetScreenSizeInput,
     FfiConverterTypeGetSessionInput,
-    FfiConverterTypeGetSessionStateInput,
     FfiConverterTypeGetWindowStateInput,
     FfiConverterTypeHotkeyInput,
     FfiConverterTypeInputDeliveryMode,
@@ -5711,7 +5416,6 @@ export default Object.freeze({
     FfiConverterTypeSessionClientKindOutput,
     FfiConverterTypeSessionLifecycleState,
     FfiConverterTypeSessionOutput,
-    FfiConverterTypeSessionStateOutput,
     FfiConverterTypeSessionTransportOutput,
     FfiConverterTypeSetAgentCursorEnabledInput,
     FfiConverterTypeSetAgentCursorEnabledOutput,

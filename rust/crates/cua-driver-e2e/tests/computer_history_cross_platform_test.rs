@@ -260,8 +260,7 @@ fn wait_for_window_text(
             "get_window_state",
             json!({
                 "pid": pid,
-                "window_id": window_id,
-                "capture_mode": "ax"
+                "window_id": window_id
             }),
         );
         assert!(
@@ -542,8 +541,7 @@ fn encrypted_history_survives_restart_and_cryptographically_purges() {
             "get_window_state",
             json!({
                 "pid": pid,
-                "window_id": window_id,
-                "capture_mode": "ax"
+                "window_id": window_id
             }),
         );
         assert!(

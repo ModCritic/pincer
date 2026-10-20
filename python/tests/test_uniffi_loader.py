@@ -182,7 +182,6 @@ except FileNotFoundError:
             ClickButton,
             ClickInput,
             CuaDriver,
-            EffectiveScope,
             StatePredicate,
             StartSessionOutput,
             VerificationStatus,
@@ -190,7 +189,6 @@ except FileNotFoundError:
             WindowPredicate,
         )
 
-        self.assertIsNotNone(EffectiveScope)
         self.assertIsNotNone(StartSessionOutput)
         self.assertIs(cua_driver.CuaDriver, CuaDriver)
         self.assertFalse(hasattr(cua_driver, "AsyncCuaDriver"))
@@ -257,10 +255,8 @@ except FileNotFoundError:
             driver = CuaDriver.connect(socket_path)
             expected_methods = {
                 "start_session",
-                "escalate_session",
                 "get_session",
                 "list_sessions",
-                "get_session_state",
                 "end_session",
                 "get_desktop_state",
                 "get_screen_size",
@@ -276,6 +272,8 @@ except FileNotFoundError:
             }
             self.assertTrue(all(hasattr(driver, name) for name in expected_methods))
             self.assertFalse(hasattr(driver, "parse_visual_regions"))
+            self.assertFalse(hasattr(driver, "escalate_session"))
+            self.assertFalse(hasattr(driver, "get_session_state"))
             verification_result = asyncio.run(
                 driver.verify_state(
                     VerifyStateInput(

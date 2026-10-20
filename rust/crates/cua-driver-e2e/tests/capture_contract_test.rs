@@ -1,15 +1,14 @@
 //! `get_window_state` perception contract,
 //! asserted on each platform's native controlled-harness app.
 //!
-//! get_window_state is perception-mode-agnostic now: it ALWAYS returns BOTH the
+//! get_window_state is perception-mode-agnostic: it ALWAYS returns BOTH the
 //! element tree AND a screenshot (ground on both, cross-check the sometimes-lying
-//! tree). `capture_mode` is deprecated and ignored; the only way to suppress the
-//! screenshot is the perf opt-out `include_screenshot:false`.
+//! tree). The way to suppress the screenshot is the perf opt-out
+//! `include_screenshot:false`.
 //!
 //! Oracle, against the harness window:
 //!   * default → BOTH the tree (`btn-increment`) AND an `image` content entry.
 //!   * `include_screenshot:false` → tree present, NO `image` (the cheap path).
-//!   * `capture_mode:"vision"` (deprecated) → IGNORED; still returns both.
 //!
 //! Run explicitly:
 //!   cargo test -p cua-driver-e2e --test capture_contract_test -- --ignored --nocapture --test-threads=1
@@ -100,33 +99,7 @@ fn tree_has_marker(resp: &ToolResponse) -> bool {
         || resp.text().contains(TREE_MARKER)
 }
 
-fn snapshot(driver: &mut McpDriver, pid: u32, wid: u64, mode: &str) -> ToolResponse {
-    driver.call(
-        "get_window_state",
-        serde_json::json!({ "pid": pid as i64, "window_id": wid, "capture_mode": mode }),
-    )
-}
-
-/// Snapshot, retrying until the accessibility tree has populated (the marker
-/// appears) or the attempts are exhausted. The AX/AT-SPI tree can lag a
-/// cold-launched window by several seconds: macOS AX registration is a few
-/// hundred ms, but a freshly launched GTK3 harness needs the AT-SPI atk-bridge
-/// to register on the a11y bus, which on a cold bus (CI cold boot) can take a
-/// few seconds. The budget is ~8s so the tree-bearing modes (`ax`, `som`)
-/// reliably exercise their assertions instead of degrading to a cold-start skip.
-fn snapshot_settled(driver: &mut McpDriver, pid: u32, wid: u64, mode: &str) -> ToolResponse {
-    let mut resp = snapshot(driver, pid, wid, mode);
-    for _ in 0..16 {
-        if tree_has_marker(&resp) {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(500));
-        resp = snapshot(driver, pid, wid, mode);
-    }
-    resp
-}
-
-/// Snapshot with NO capture_mode / no extra args (the default path), retrying
+/// Snapshot with no extra args (the default path), retrying
 /// until the tree settles.
 fn snapshot_settled_default(driver: &mut McpDriver, pid: u32, wid: u64) -> ToolResponse {
     let args = serde_json::json!({ "pid": pid as i64, "window_id": wid });
@@ -408,7 +381,7 @@ fn default_returns_tree_and_screenshot() {
 }
 
 /// `include_screenshot:false` is the perf opt-out: tree present, NO image. This
-/// is the only way to suppress the screenshot now (capture_mode no longer does).
+/// is the way to suppress the screenshot.
 #[test]
 #[ignore]
 fn include_screenshot_false_returns_tree_only() {
@@ -431,34 +404,6 @@ fn include_screenshot_false_returns_tree_only() {
                 !has_image(&resp),
                 "include_screenshot:false must NOT return an image content entry: {}",
                 resp.text().chars().take(160).collect::<String>()
-            );
-        },
-    );
-}
-
-/// `capture_mode` is DEPRECATED and ignored: passing `vision` (which used to
-/// suppress the tree) must STILL return both — proving the arg has no effect.
-#[test]
-#[ignore]
-fn deprecated_capture_mode_is_ignored() {
-    run_capture_case(
-        "deprecated_mode_ignored",
-        vec![OracleKind::AxState, OracleKind::Pixels],
-        |pid, wid, driver| {
-            let resp = snapshot_settled(driver, pid, wid, "vision");
-            assert!(
-                !resp.is_error(),
-                "get_window_state(capture_mode=vision) errored: {}",
-                resp.text()
-            );
-
-            assert!(
-                tree_has_marker(&resp),
-                "deprecated capture_mode=vision suppressed the tree"
-            );
-            assert!(
-                has_image(&resp),
-                "deprecated capture_mode=vision suppressed the screenshot"
             );
         },
     );
@@ -687,8 +632,7 @@ fn background_screenshot_preserves_desktop() {
                         "get_window_state",
                         serde_json::json!({
                             "pid": pid as i64,
-                            "window_id": wid,
-                            "capture_mode": "vision"
+                            "window_id": wid
                         }),
                     )
                 },

@@ -1,8 +1,8 @@
 //! get_accessibility_tree — lightweight desktop snapshot: running apps + visible windows.
 //!
 //! This is the fast, no-TCC-grant discovery tool. For the full per-window AX subtree
-//! with interactive element indices, use `get_window_state` (or
-//! `get_window_state` with `capture_mode="ax"` to skip the screenshot).
+//! with interactive element indices, use `get_window_state` (with
+//! `include_screenshot:false` to skip the screenshot).
 
 use async_trait::async_trait;
 use cua_driver_core::{

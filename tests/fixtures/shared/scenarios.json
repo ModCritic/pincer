@@ -182,7 +182,7 @@
    "title": "CuaTestHarness WebView",
    "automation_id": "wnd-main"
   },
-  "description": "WPF host with Microsoft.Edge.WebView2 control. Loads shared/web/index.html. Exposes Chromium DevTools Protocol at default_cdp_port for cua-driver's `page` tool.",
+  "description": "WPF host with Microsoft.Edge.WebView2 control. Loads shared/web/index.html. Exposes Chromium DevTools Protocol at default_cdp_port for tests that use it.",
   "shared_dom_aids": [
    "btn-increment",
    "btn-reset",

@@ -147,10 +147,8 @@ When a cua-driver call surprises you, diagnose cua-driver first:
   no capture mode to pick. An empty tree means the surface isn't AX (a
   non-AX surface: Electron/Chromium/canvas), and the response carries
   `degraded: true`, so act by **`px`** off the screenshot that's
-  already in the same response. `capture_mode` is **deprecated and
-  ignored** (still accepted so old callers don't error, but it has no
-  effect; tree + screenshot come back regardless); don't reach for
-  `get_config` to "switch modes," there is no mode to switch.
+  already in the same response. Don't reach for `get_config` to
+  "switch modes," there is no mode to switch.
 - **`has_screenshot: false`?** The window capture failed (transient
   race against a close, or the window has no backing store yet).
   Re-snapshot; if persistent, pick a different `window_id` via
@@ -602,9 +600,7 @@ the only browser cursor displayed in that Chrome window.
 
 Browser chrome, permission prompts, downloads, file pickers, Safari, Firefox,
 and unbound embedded webviews remain native surfaces. Inspect them with
-`get_window_state` and use the AX/PX ladder in this file. The legacy `page`
-tool and Apple Events JavaScript bridge remain compatibility surfaces, not the
-starting point for new browser workflows.
+`get_window_state` and use the AX/PX ladder in this file.
 
 ## macOS common error patterns
 

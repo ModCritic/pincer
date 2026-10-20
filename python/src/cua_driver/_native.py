@@ -544,8 +544,6 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriver_end_session() != 18486:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_cua_driver_sdk_checksum_method_cuadriver_escalate_session() != 6924:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriver_execution_mode() != 2639:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_agent_cursor_state() != 45642:
@@ -557,8 +555,6 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_screen_size() != 55616:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_session() != 17834:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_session_state() != 49966:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_window_state() != 62142:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -620,8 +616,6 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_end_session() != 42785:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_escalate_session() != 34392:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_agent_cursor_state() != 60344:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_cursor_position() != 54838:
@@ -631,8 +625,6 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_screen_size() != 9763:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_session() != 54666:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_session_state() != 55370:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_window_state() != 21266:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -1355,11 +1347,6 @@ _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_end_session.argtypes = (
     cua_driver._native_contract._UniffiRustBuffer,
 )
 _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_end_session.restype = ctypes.c_uint64
-_UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_escalate_session.argtypes = (
-    ctypes.c_uint64,
-    cua_driver._native_contract._UniffiRustBuffer,
-)
-_UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_escalate_session.restype = ctypes.c_uint64
 _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_execution_mode.argtypes = (
     ctypes.c_uint64,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1390,11 +1377,6 @@ _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_get_session.argtypes = (
     cua_driver._native_contract._UniffiRustBuffer,
 )
 _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_get_session.restype = ctypes.c_uint64
-_UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_get_session_state.argtypes = (
-    ctypes.c_uint64,
-    cua_driver._native_contract._UniffiRustBuffer,
-)
-_UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_get_session_state.restype = ctypes.c_uint64
 _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_get_window_state.argtypes = (
     ctypes.c_uint64,
     cua_driver._native_contract._UniffiRustBuffer,
@@ -1542,11 +1524,6 @@ _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_end_session.argtypes
     cua_driver._native_contract._UniffiRustBuffer,
 )
 _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_end_session.restype = ctypes.c_uint64
-_UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_escalate_session.argtypes = (
-    ctypes.c_uint64,
-    cua_driver._native_contract._UniffiRustBuffer,
-)
-_UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_escalate_session.restype = ctypes.c_uint64
 _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_get_agent_cursor_state.argtypes = (
     ctypes.c_uint64,
     cua_driver._native_contract._UniffiRustBuffer,
@@ -1572,11 +1549,6 @@ _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_get_session.argtypes
     cua_driver._native_contract._UniffiRustBuffer,
 )
 _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_get_session.restype = ctypes.c_uint64
-_UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_get_session_state.argtypes = (
-    ctypes.c_uint64,
-    cua_driver._native_contract._UniffiRustBuffer,
-)
-_UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_get_session_state.restype = ctypes.c_uint64
 _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_get_window_state.argtypes = (
     ctypes.c_uint64,
     cua_driver._native_contract._UniffiRustBuffer,
@@ -1909,9 +1881,6 @@ _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_drag.restype = ctypes
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_end_session.argtypes = (
 )
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_end_session.restype = ctypes.c_uint16
-_UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_escalate_session.argtypes = (
-)
-_UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_escalate_session.restype = ctypes.c_uint16
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_execution_mode.argtypes = (
 )
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_execution_mode.restype = ctypes.c_uint16
@@ -1930,9 +1899,6 @@ _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_screen_size.resty
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_session.argtypes = (
 )
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_session.restype = ctypes.c_uint16
-_UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_session_state.argtypes = (
-)
-_UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_session_state.restype = ctypes.c_uint16
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_window_state.argtypes = (
 )
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriver_get_window_state.restype = ctypes.c_uint16
@@ -2023,9 +1989,6 @@ _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_drag.restype =
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_end_session.argtypes = (
 )
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_end_session.restype = ctypes.c_uint16
-_UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_escalate_session.argtypes = (
-)
-_UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_escalate_session.restype = ctypes.c_uint16
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_agent_cursor_state.argtypes = (
 )
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_agent_cursor_state.restype = ctypes.c_uint16
@@ -2041,9 +2004,6 @@ _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_screen_siz
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_session.argtypes = (
 )
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_session.restype = ctypes.c_uint16
-_UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_session_state.argtypes = (
-)
-_UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_session_state.restype = ctypes.c_uint16
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_window_state.argtypes = (
 )
 _UniffiLib.uniffi_cua_driver_sdk_checksum_method_cuadriversession_get_window_state.restype = ctypes.c_uint16
@@ -7537,12 +7497,6 @@ class _UniffiFfiConverterTypeSdkClientKind(_UniffiConverterRustBuffer):
 
 
 
-
-
-
-
-
-
 class CuaDriverProtocol(typing.Protocol):
 
     async def call_tool(self, name: str,arguments_json: str) -> ToolResult:
@@ -7562,8 +7516,6 @@ class CuaDriverProtocol(typing.Protocol):
         raise NotImplementedError
     async def end_session(self, input: cua_driver._native_contract.EndSessionInput) -> cua_driver._native_contract.EndSessionOutput:
         raise NotImplementedError
-    async def escalate_session(self, input: cua_driver._native_contract.EscalateSessionInput) -> cua_driver._native_contract.SessionStateOutput:
-        raise NotImplementedError
     def execution_mode(self, ) -> DriverExecutionMode:
         raise NotImplementedError
     async def get_agent_cursor_state(self, input: cua_driver._native_contract.GetAgentCursorStateInput) -> ToolResult:
@@ -7575,8 +7527,6 @@ class CuaDriverProtocol(typing.Protocol):
     async def get_screen_size(self, input: cua_driver._native_contract.GetScreenSizeInput) -> ToolResult:
         raise NotImplementedError
     async def get_session(self, input: cua_driver._native_contract.GetSessionInput) -> cua_driver._native_contract.SessionOutput:
-        raise NotImplementedError
-    async def get_session_state(self, input: cua_driver._native_contract.GetSessionStateInput) -> cua_driver._native_contract.SessionStateOutput:
         raise NotImplementedError
     async def get_window_state(self, input: cua_driver._native_contract.GetWindowStateInput) -> cua_driver._native_contract.WindowStateOutput:
         raise NotImplementedError
@@ -8090,23 +8040,6 @@ class CuaDriver(CuaDriverProtocol):
             _uniffi_lift_return,
             _uniffi_error_converter,
         )
-    async def escalate_session(self, input: cua_driver._native_contract.EscalateSessionInput) -> cua_driver._native_contract.SessionStateOutput:
-
-        cua_driver._native_contract._UniffiFfiConverterTypeEscalateSessionInput.check_lower(input)
-        _uniffi_lowered_args = (
-            self._uniffi_clone_handle(),
-            cua_driver._native_contract._UniffiFfiConverterTypeEscalateSessionInput.lower(input),
-        )
-        _uniffi_lift_return = cua_driver._native_contract._UniffiFfiConverterTypeSessionStateOutput.lift
-        _uniffi_error_converter = _UniffiFfiConverterTypeDriverError
-        return await _uniffi_rust_call_async(
-            _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_escalate_session(*_uniffi_lowered_args),
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_poll_rust_buffer,
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_complete_rust_buffer,
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_free_rust_buffer,
-            _uniffi_lift_return,
-            _uniffi_error_converter,
-        )
     def execution_mode(self, ) -> DriverExecutionMode:
         _uniffi_lowered_args = (
             self._uniffi_clone_handle(),
@@ -8198,23 +8131,6 @@ class CuaDriver(CuaDriverProtocol):
         _uniffi_error_converter = _UniffiFfiConverterTypeDriverError
         return await _uniffi_rust_call_async(
             _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_get_session(*_uniffi_lowered_args),
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_poll_rust_buffer,
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_complete_rust_buffer,
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_free_rust_buffer,
-            _uniffi_lift_return,
-            _uniffi_error_converter,
-        )
-    async def get_session_state(self, input: cua_driver._native_contract.GetSessionStateInput) -> cua_driver._native_contract.SessionStateOutput:
-
-        cua_driver._native_contract._UniffiFfiConverterTypeGetSessionStateInput.check_lower(input)
-        _uniffi_lowered_args = (
-            self._uniffi_clone_handle(),
-            cua_driver._native_contract._UniffiFfiConverterTypeGetSessionStateInput.lower(input),
-        )
-        _uniffi_lift_return = cua_driver._native_contract._UniffiFfiConverterTypeSessionStateOutput.lift
-        _uniffi_error_converter = _UniffiFfiConverterTypeDriverError
-        return await _uniffi_rust_call_async(
-            _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriver_get_session_state(*_uniffi_lowered_args),
             _UniffiLib.ffi_cua_driver_sdk_rust_future_poll_rust_buffer,
             _UniffiLib.ffi_cua_driver_sdk_rust_future_complete_rust_buffer,
             _UniffiLib.ffi_cua_driver_sdk_rust_future_free_rust_buffer,
@@ -8654,8 +8570,6 @@ class CuaDriverSessionProtocol(typing.Protocol):
         raise NotImplementedError
     async def end_session(self, input: cua_driver._native_contract.EndSessionInput) -> cua_driver._native_contract.EndSessionOutput:
         raise NotImplementedError
-    async def escalate_session(self, input: cua_driver._native_contract.EscalateSessionInput) -> cua_driver._native_contract.SessionStateOutput:
-        raise NotImplementedError
     async def get_agent_cursor_state(self, input: cua_driver._native_contract.GetAgentCursorStateInput) -> ToolResult:
         raise NotImplementedError
     async def get_cursor_position(self, input: cua_driver._native_contract.GetCursorPositionInput) -> ToolResult:
@@ -8665,8 +8579,6 @@ class CuaDriverSessionProtocol(typing.Protocol):
     async def get_screen_size(self, input: cua_driver._native_contract.GetScreenSizeInput) -> ToolResult:
         raise NotImplementedError
     async def get_session(self, input: cua_driver._native_contract.GetSessionInput) -> cua_driver._native_contract.SessionOutput:
-        raise NotImplementedError
-    async def get_session_state(self, input: cua_driver._native_contract.GetSessionStateInput) -> cua_driver._native_contract.SessionStateOutput:
         raise NotImplementedError
     async def get_window_state(self, input: cua_driver._native_contract.GetWindowStateInput) -> cua_driver._native_contract.WindowStateOutput:
         raise NotImplementedError
@@ -8848,23 +8760,6 @@ class CuaDriverSession(CuaDriverSessionProtocol):
             _uniffi_lift_return,
             _uniffi_error_converter,
         )
-    async def escalate_session(self, input: cua_driver._native_contract.EscalateSessionInput) -> cua_driver._native_contract.SessionStateOutput:
-
-        cua_driver._native_contract._UniffiFfiConverterTypeEscalateSessionInput.check_lower(input)
-        _uniffi_lowered_args = (
-            self._uniffi_clone_handle(),
-            cua_driver._native_contract._UniffiFfiConverterTypeEscalateSessionInput.lower(input),
-        )
-        _uniffi_lift_return = cua_driver._native_contract._UniffiFfiConverterTypeSessionStateOutput.lift
-        _uniffi_error_converter = _UniffiFfiConverterTypeDriverError
-        return await _uniffi_rust_call_async(
-            _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_escalate_session(*_uniffi_lowered_args),
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_poll_rust_buffer,
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_complete_rust_buffer,
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_free_rust_buffer,
-            _uniffi_lift_return,
-            _uniffi_error_converter,
-        )
     async def get_agent_cursor_state(self, input: cua_driver._native_contract.GetAgentCursorStateInput) -> ToolResult:
 
         cua_driver._native_contract._UniffiFfiConverterTypeGetAgentCursorStateInput.check_lower(input)
@@ -8944,23 +8839,6 @@ class CuaDriverSession(CuaDriverSessionProtocol):
         _uniffi_error_converter = _UniffiFfiConverterTypeDriverError
         return await _uniffi_rust_call_async(
             _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_get_session(*_uniffi_lowered_args),
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_poll_rust_buffer,
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_complete_rust_buffer,
-            _UniffiLib.ffi_cua_driver_sdk_rust_future_free_rust_buffer,
-            _uniffi_lift_return,
-            _uniffi_error_converter,
-        )
-    async def get_session_state(self, input: cua_driver._native_contract.GetSessionStateInput) -> cua_driver._native_contract.SessionStateOutput:
-
-        cua_driver._native_contract._UniffiFfiConverterTypeGetSessionStateInput.check_lower(input)
-        _uniffi_lowered_args = (
-            self._uniffi_clone_handle(),
-            cua_driver._native_contract._UniffiFfiConverterTypeGetSessionStateInput.lower(input),
-        )
-        _uniffi_lift_return = cua_driver._native_contract._UniffiFfiConverterTypeSessionStateOutput.lift
-        _uniffi_error_converter = _UniffiFfiConverterTypeDriverError
-        return await _uniffi_rust_call_async(
-            _UniffiLib.uniffi_cua_driver_sdk_fn_method_cuadriversession_get_session_state(*_uniffi_lowered_args),
             _UniffiLib.ffi_cua_driver_sdk_rust_future_poll_rust_buffer,
             _UniffiLib.ffi_cua_driver_sdk_rust_future_complete_rust_buffer,
             _UniffiLib.ffi_cua_driver_sdk_rust_future_free_rust_buffer,

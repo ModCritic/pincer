@@ -364,8 +364,7 @@ fn run_preflight() {
                 "get_window_state",
                 serde_json::json!({
                     "pid": pid,
-                    "window_id": window_id,
-                    "capture_mode": "ax"
+                    "window_id": window_id
                 }),
             );
             if preflight_state_ready(&state, fixture.ax_marker) {

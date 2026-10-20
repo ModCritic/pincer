@@ -61,7 +61,6 @@ fn all_expected_tools_registered() {
         "get_recording_state",
         "replay_trajectory",
         "run_steps",
-        "page",
     ];
     for name in expected {
         assert!(
@@ -91,37 +90,4 @@ fn tools_call_unknown_tool() {
     // Error should be in the content with isError=true, not a protocol error.
     let is_error = resp["result"]["isError"].as_bool().unwrap_or(false);
     assert!(is_error, "Expected isError=true for unknown tool");
-}
-
-#[test]
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn page_unknown_action_error() {
-    //! Verify the cross-platform `page` tool is registered and rejects an
-    //! unknown action with a meaningful error.
-    let Some(mut d) = RawDriver::spawn() else {
-        return;
-    };
-
-    d.send(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}));
-    d.recv();
-
-    d.send(&serde_json::json!({
-        "jsonrpc":"2.0","id":2,"method":"tools/call",
-        "params":{"name":"page","arguments":{
-            "pid": 1,
-            "window_id": 0,
-            "action": "definitely_not_a_real_action"
-        }}
-    }));
-    let resp = d.recv();
-
-    assert!(
-        resp["result"]["isError"].as_bool().unwrap_or(false),
-        "expected isError=true for unknown action: {resp:?}"
-    );
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(
-        text.to_ascii_lowercase().contains("unknown action"),
-        "error text should mention 'Unknown action': {text}"
-    );
 }

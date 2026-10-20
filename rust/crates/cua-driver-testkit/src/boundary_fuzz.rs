@@ -25,11 +25,11 @@
 use arbitrary::Unstructured;
 use cua_driver_contract::{
     ClickInput, ClipboardReadInput, ClipboardWriteInput, DragInput, EndSessionInput,
-    EscalateSessionInput, GetAgentCursorStateInput, GetCursorPositionInput, GetDesktopStateInput,
-    GetScreenSizeInput, GetSessionInput, GetSessionStateInput, HotkeyInput, InvokeMenuInput,
-    ListSessionsInput, MoveCursorInput, PressKeyInput, ScrollInput, SetAgentCursorEnabledInput,
-    SetAgentCursorMotionInput, SetAgentCursorThemeInput, SetWindowFrameInput, StartSessionInput,
-    ToolInput, TypeTextInput, VerifyStateInput,
+    GetAgentCursorStateInput, GetCursorPositionInput, GetDesktopStateInput, GetScreenSizeInput,
+    GetSessionInput, HotkeyInput, InvokeMenuInput, ListSessionsInput, MoveCursorInput,
+    PressKeyInput, ScrollInput, SetAgentCursorEnabledInput, SetAgentCursorMotionInput,
+    SetAgentCursorThemeInput, SetWindowFrameInput, StartSessionInput, ToolInput, TypeTextInput,
+    VerifyStateInput,
 };
 use cua_driver_core::authorization::PermissionMode;
 use cua_driver_core::protocol::{Request, Response, ToolResult};
@@ -133,7 +133,6 @@ const RUNTIME_ONLY_TOOLS: &[&str] = &[
     "list_windows",
     "kill_app",
     "set_value",
-    "page",
     "start_recording",
     "revoke_all",
 ];
@@ -473,8 +472,6 @@ macro_rules! typed_inputs {
 
 typed_inputs!(
     StartSessionInput,
-    EscalateSessionInput,
-    GetSessionStateInput,
     GetSessionInput,
     ListSessionsInput,
     SetAgentCursorEnabledInput,

@@ -4,14 +4,14 @@
 //! every tool keeps its top-level schema provider-compatible, that every
 //! advertised `enum` is string-only, that `type_text_chars` is hidden, the
 //! `list_windows.on_screen_only` knob, the `set_agent_cursor_motion` Bezier
-//! knobs, delivery and scope enums, and the `set_config.capture_mode` enum and
-//! the per-session capture-scope contract. Every advertised top-level parameter
+//! knobs, delivery and scope enums, and the absence of the removed legacy
+//! session and browser surface. Every advertised top-level parameter
 //! must carry a non-empty description: the generated Cua Driver MCP reference
 //! renders it verbatim.
 
 #![cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 
-use cua_driver_testkit::{Driver, McpDriver, RawDriver};
+use cua_driver_testkit::RawDriver;
 use std::collections::BTreeSet;
 
 /// Gemini function calling accepts `enum` only on string schemas and rejects
@@ -294,27 +294,26 @@ fn assert_tools_list_schema_shape(mut d: RawDriver) {
         schema_tools, expected_tools,
         "unexpected delivery_mode schema set"
     );
-    // Session capture scope remains advertised only for compatibility. New
-    // clients choose one typed window or desktop target on each action.
-    let capture_scope = &properties("start_session")["capture_scope"];
-    for expected in ["auto", "window", "desktop"] {
+    // The legacy session and browser surface is removed. Clients choose one
+    // typed window or desktop target on each action.
+    for removed in ["escalate_session", "get_session_state", "page"] {
         assert!(
-            enum_contains(capture_scope, expected),
-            "start_session.capture_scope should advertise {expected}: {capture_scope:?}"
+            !tools.iter().any(|tool| tool["name"] == removed),
+            "{removed} must not be advertised"
         );
     }
-    assert!(
-        tools.iter().any(|tool| tool["name"] == "escalate_session"),
-        "escalate_session missing from tools/list"
-    );
-    assert!(
-        tools.iter().any(|tool| tool["name"] == "get_session_state"),
-        "get_session_state missing from tools/list"
-    );
-    assert!(
-        properties("set_config")["capture_scope"].is_null(),
-        "persistent set_config.capture_scope must remain retired"
-    );
+    for (tool, removed) in [
+        ("start_session", "capture_scope"),
+        ("get_window_state", "capture_mode"),
+        ("get_window_state", "max_dimension"),
+        ("set_config", "capture_mode"),
+        ("set_config", "capture_scope"),
+    ] {
+        assert!(
+            properties(tool)[removed].is_null(),
+            "{tool}.{removed} must not be advertised"
+        );
+    }
     for action in [
         "click",
         "type_text",
@@ -360,77 +359,6 @@ fn assert_tools_list_schema_shape(mut d: RawDriver) {
             "set_agent_cursor_motion schema missing {knob}: {sacm_props:?}"
         );
     }
-
-    // capture_mode enum restriction. On macOS, capture_mode is a per-call param
-    // on get_window_state (removed from set_config — behavior knobs are per-call
-    // now, not settings). On Windows it is still also a set_config field.
-    #[cfg(target_os = "macos")]
-    {
-        let gws = tools
-            .iter()
-            .find(|t| t["name"] == "get_window_state")
-            .expect("get_window_state not found in tools/list");
-        assert!(
-            gws["inputSchema"]["properties"]["capture_mode"]["enum"].is_array(),
-            "get_window_state capture_mode should have enum: {:?}",
-            gws["inputSchema"]["properties"]
-        );
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let sc = tools
-            .iter()
-            .find(|t| t["name"] == "set_config")
-            .expect("set_config not found in tools/list");
-        assert!(
-            sc["inputSchema"]["properties"]["capture_mode"]["enum"].is_array(),
-            "set_config capture_mode should have enum: {:?}",
-            sc["inputSchema"]["properties"]
-        );
-    }
-}
-
-#[test]
-fn legacy_page_mutation_requires_unrestricted_launch_and_operator_opt_in() {
-    let args = serde_json::json!({
-        "action": "enable_javascript_apple_events",
-        "user_has_confirmed_enabling": false
-    });
-
-    {
-        let mut driver = McpDriver::spawn().expect("spawn default source-built driver");
-        let response = driver.call("page", args.clone());
-        assert!(response.is_error(), "mutation must refuse by default");
-        assert!(
-            response.text().contains("requires unrestricted mode"),
-            "default refusal must name the trusted launch gate: {}",
-            response.text()
-        );
-    }
-
-    let mut driver = McpDriver::spawn_with_env(&[
-        ("CUA_DRIVER_PERMISSION_MODE", "unrestricted"),
-        ("CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS", "1"),
-        ("CUA_DRIVER_ENABLE_LEGACY_PAGE_MUTATIONS", "1"),
-    ])
-    .expect("spawn source-built driver with unrestricted legacy compatibility enabled");
-    let response = driver.call("page", args);
-    assert!(
-        response.is_error(),
-        "unconfirmed mutation must still refuse"
-    );
-    assert!(
-        response
-            .text()
-            .contains("Set user_has_confirmed_enabling=true"),
-        "enabled daemon should reach the explicit confirmation gate: {}",
-        response.text()
-    );
-    assert!(
-        !response.text().contains("disabled by default"),
-        "the daemon did not observe its startup environment: {}",
-        response.text()
-    );
 }
 
 #[test]

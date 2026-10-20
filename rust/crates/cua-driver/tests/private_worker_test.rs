@@ -183,17 +183,13 @@ async fn private_worker_inherits_the_interactive_linux_display_scope() {
     let started = session
         .call_tool(
             "start_session".into(),
-            serde_json::json!({
-                "session": "worker-display-scope",
-                "capture_scope": "desktop"
-            })
-            .to_string(),
+            serde_json::json!({"session": "worker-display-scope"}).to_string(),
         )
         .await
         .unwrap();
     assert!(
         !started.is_error,
-        "worker could not declare the trusted desktop capture scope: {}",
+        "worker could not start the trusted session: {}",
         started.text
     );
     let started_structured: serde_json::Value = serde_json::from_str(
@@ -203,8 +199,7 @@ async fn private_worker_inherits_the_interactive_linux_display_scope() {
             .expect("start_session omitted structuredContent"),
     )
     .unwrap();
-    assert_eq!(started_structured["capture_scope"], "desktop");
-    assert_eq!(started_structured["effective_scope"], "desktop");
+    assert_eq!(started_structured["session"], "worker-display-scope");
     if has_x11 {
         let desktop = session
             .call_tool("get_desktop_state".into(), "{}".into())

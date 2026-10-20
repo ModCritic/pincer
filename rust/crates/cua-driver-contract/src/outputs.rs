@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Cua AI, Inc.
 
-use crate::{schema_settings, CaptureScope, EscalationReason, Platform};
+use crate::{schema_settings, Platform};
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -165,42 +165,6 @@ fn strip_schema_titles(value: &mut Value) {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, uniffi::Enum)]
 #[serde(rename_all = "snake_case")]
-pub enum EffectiveScope {
-    Window,
-    Desktop,
-}
-
-impl EffectiveScope {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Window => "window",
-            Self::Desktop => "desktop",
-        }
-    }
-}
-
-/// Successful structured result shared by session state and escalation tools.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, uniffi::Record)]
-pub struct SessionStateOutput {
-    pub session: String,
-    pub capture_scope: CaptureScope,
-    pub effective_scope: EffectiveScope,
-    /// Whether this session is authorized to use desktop-scope capture and
-    /// actions. This does not report the operating system's lock-screen state.
-    pub desktop_capture_authorized: bool,
-    /// Compatibility field: this reports whether this session has unlocked
-    /// desktop capture scope. It is not an operating-system lock-screen probe.
-    pub desktop_unlocked: bool,
-    #[schemars(required, schema_with = "nullable_escalation_reason_schema")]
-    pub escalation_reason: Option<EscalationReason>,
-    #[schemars(required, schema_with = "nullable_string_schema")]
-    pub escalation_detail: Option<String>,
-}
-
-impl ToolOutput for SessionStateOutput {}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, uniffi::Enum)]
-#[serde(rename_all = "snake_case")]
 pub enum SessionLifecycleState {
     Active,
     Ending,
@@ -255,8 +219,7 @@ impl ToolOutput for ListSessionsOutput {}
 /// Successful structured result returned by `start_session`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, uniffi::Record)]
 pub struct StartSessionOutput {
-    #[serde(flatten)]
-    pub state: SessionStateOutput,
+    pub session: String,
     pub active: bool,
     pub revived: bool,
     /// The `cursor_motion` this call applied, echoed as sent. Absent when the call did not set one.
@@ -796,24 +759,6 @@ fn nullable_string_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema
 fn nullable_cursor_point_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     let point = generator.subschema_for::<CursorPointOutput>();
     schemars::json_schema!({ "anyOf": [point, { "type": "null" }] })
-}
-
-fn nullable_escalation_reason_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({
-        "anyOf": [
-            {
-                "type": "string",
-                "enum": [
-                    "ax_tree_pixel_mismatch",
-                    "background_delivery_failed",
-                    "foreground_ineffective",
-                    "no_window_target",
-                    "other"
-                ]
-            },
-            { "type": "null" }
-        ]
-    })
 }
 
 #[cfg(test)]

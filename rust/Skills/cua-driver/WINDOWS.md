@@ -374,10 +374,7 @@ When a cua-driver surprises you, diagnose cua-driver first:
   returns **both** the UIA tree and a screenshot by default: there is no
   capture mode to pick. If the tree came back empty, the response is
   `degraded` (no UIA provider: retry once for lazy trees, see the note
-  above); act by **px** off the screenshot in the same response. The
-  `capture_mode` param is **deprecated and ignored**: it's still accepted
-  so old callers don't error, but both the tree and the image come back
-  regardless of what you pass.
+  above); act by **px** off the screenshot in the same response.
 - **`list_windows` returns Win32 windows but misses UWP / WebView2
   windows?** UIA desktop enumeration may be degraded because a provider
   is unresponsive. `list_windows` falls back to Win32-only output instead

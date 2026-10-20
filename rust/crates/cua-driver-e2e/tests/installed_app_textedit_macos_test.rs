@@ -86,8 +86,7 @@ fn background_type_on_native_cocoa_is_ax_verified() {
                     "get_window_state",
                     serde_json::json!({
                         "pid": pid,
-                        "window_id": window_id,
-                        "capture_mode": "ax"
+                        "window_id": window_id
                     }),
                 );
                 state.structured()["elements"]
@@ -144,7 +143,7 @@ fn background_type_on_native_cocoa_is_ax_verified() {
         loop {
             let state = driver.call(
                 "get_window_state",
-                serde_json::json!({ "pid": pid, "window_id": wid, "capture_mode": "ax" }),
+                serde_json::json!({ "pid": pid, "window_id": wid }),
             );
             let landed = state.structured()["elements"]
                 .as_array()

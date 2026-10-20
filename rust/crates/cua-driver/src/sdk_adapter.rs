@@ -4,17 +4,17 @@
 //! this adapter. Platform registries remain private to `cua-driver-sdk`.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
-use cua_driver_core::{server::ToolProvider, CaptureScope};
+use cua_driver_core::server::ToolProvider;
 use cua_driver_sdk::{CuaDriver, CuaDriverSession, TrustedSessionOptions};
 use serde_json::{json, Value};
 
 #[derive(Default)]
 struct PublicSessionState {
-    scopes: HashMap<String, CaptureScope>,
+    known: HashSet<String>,
     ended: HashMap<String, u64>,
     next_tombstone: u64,
 }
@@ -118,7 +118,7 @@ impl SdkAdapter {
                     return;
                 }
                 let mut sessions = hook_sessions.lock().unwrap();
-                sessions.scopes.entry(public.to_owned()).or_default();
+                sessions.known.insert(public.to_owned());
                 sessions.mark_ended(public);
             });
         // Core also revives an idle-reclaimed unnamed session on its next
@@ -214,9 +214,8 @@ impl SdkAdapter {
             self.public_sessions
                 .lock()
                 .unwrap()
-                .scopes
-                .entry(session.clone())
-                .or_default();
+                .known
+                .insert(session.clone());
         }
         let ending_tombstone = ending_session.map(|session| {
             // Mark before dispatch so a concurrently arriving legacy socket
@@ -258,16 +257,8 @@ impl SdkAdapter {
                     .rollback_ended(session, marker, previous);
             }
         } else if let Some(session) = mirror_session.as_deref() {
-            let capture_scope = value
-                .pointer("/structuredContent/capture_scope")
-                .cloned()
-                .and_then(|scope| serde_json::from_value(scope).ok());
-            let mut sessions = self.public_sessions.lock().unwrap();
             if name == "start_session" {
-                sessions.ended.remove(session);
-            }
-            if let Some(capture_scope) = capture_scope {
-                sessions.scopes.insert(session.to_owned(), capture_scope);
+                self.public_sessions.lock().unwrap().ended.remove(session);
             }
         }
         Ok(value)
@@ -292,7 +283,7 @@ impl SdkAdapter {
 
     pub fn mark_all_sessions_ended(&self) {
         let mut sessions = self.public_sessions.lock().unwrap();
-        let known = sessions.scopes.keys().cloned().collect::<Vec<_>>();
+        let known = sessions.known.iter().cloned().collect::<Vec<_>>();
         for session in known {
             sessions.mark_ended(&session);
         }
@@ -338,7 +329,6 @@ impl SdkAdapter {
         let sessions = self.public_sessions.lock().unwrap();
         cua_driver_core::session::SessionObservationState {
             ended: sessions.ended.contains_key(session),
-            capture_scope: sessions.scopes.get(session).copied().unwrap_or_default(),
         }
     }
 
@@ -537,36 +527,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn public_observation_mirror_tracks_scope_end_and_revival() {
+    async fn public_observation_mirror_tracks_end_and_revival() {
         let _runtime_guard = crate::test_runtime_lock().lock().await;
         let sdk = SdkAdapter::load(host_driver()).await.expect("SDK adapter");
         let session = "adapter-observation-scope";
 
         let started = sdk
-            .invoke_raw(
-                "start_session",
-                json!({"session": session, "capture_scope": "window"}),
-            )
+            .invoke_raw("start_session", json!({"session": session}))
             .await
             .expect("start session");
         assert_ne!(started["isError"], true);
         assert_eq!(
             sdk.public_session_observation_state(session),
-            cua_driver_core::session::SessionObservationState {
-                ended: false,
-                capture_scope: CaptureScope::Window,
-            }
+            cua_driver_core::session::SessionObservationState { ended: false }
         );
 
         sdk.end_session(session).await.expect("end session");
         assert!(sdk.public_session_observation_state(session).ended);
 
-        sdk.invoke_raw(
-            "start_session",
-            json!({"session": session, "capture_scope": "window"}),
-        )
-        .await
-        .expect("revive session");
+        sdk.invoke_raw("start_session", json!({"session": session}))
+            .await
+            .expect("revive session");
         assert!(!sdk.public_session_observation_state(session).ended);
 
         sdk.shutdown().await.expect("shutdown");
@@ -623,12 +604,9 @@ mod tests {
         let session = "same-public-label";
 
         for sdk in [&first, &second] {
-            sdk.invoke_raw(
-                "start_session",
-                json!({"session": session, "capture_scope": "auto"}),
-            )
-            .await
-            .expect("start same-label session");
+            sdk.invoke_raw("start_session", json!({"session": session}))
+                .await
+                .expect("start same-label session");
         }
 
         let evicted = cua_driver_core::session::evict_idle_with_prefix(
@@ -643,10 +621,7 @@ mod tests {
         );
 
         first
-            .invoke_raw(
-                "start_session",
-                json!({"session": session, "capture_scope": "auto"}),
-            )
+            .invoke_raw("start_session", json!({"session": session}))
             .await
             .expect("revive first session");
         assert_eq!(first.revoke_all_sessions().await, 1);
@@ -654,21 +629,6 @@ mod tests {
         assert!(
             !second.public_session_observation_state(session).ended,
             "bulk revoke must remain scoped to the owning runtime"
-        );
-
-        second
-            .invoke_raw(
-                "escalate_session",
-                json!({"session": session, "reason": "no_window_target"}),
-            )
-            .await
-            .expect("escalate second session");
-        assert_eq!(
-            second
-                .public_session_observation_state(session)
-                .capture_scope,
-            CaptureScope::Auto,
-            "capture policy remains auto while its effective scope escalates"
         );
 
         first.shutdown().await.expect("shutdown first");
@@ -680,12 +640,9 @@ mod tests {
         let _runtime_guard = crate::test_runtime_lock().lock().await;
         let sdk = SdkAdapter::load(host_driver()).await.expect("SDK adapter");
         let session = "failed-end-preserves-tombstone";
-        sdk.invoke_raw(
-            "start_session",
-            json!({"session": session, "capture_scope": "auto"}),
-        )
-        .await
-        .expect("start session");
+        sdk.invoke_raw("start_session", json!({"session": session}))
+            .await
+            .expect("start session");
 
         sdk.shutdown().await.expect("shutdown");
         assert!(sdk.public_session_observation_state(session).ended);

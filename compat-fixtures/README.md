@@ -41,6 +41,13 @@ appended as ordinal 3. `GetWindowStateInput.max_image_dimension` is appended to
 the existing record fields. Future UniFFI enum variants and record fields must
 remain append-only unless an explicit compatibility decision says otherwise.
 
+Pincer makes one such decision: it removes the legacy session surface. The
+`escalate_session` and `get_session_state` methods, their input records,
+`SessionStateOutput`, `CaptureScope`, `EffectiveScope`, `EscalationReason`,
+`StartSessionInput.capture_scope`, `GetWindowStateInput.max_dimension`, and the
+capture-policy fields of `StartSessionOutput` are gone, and the package
+fixtures no longer list them.
+
 RFC 2549 independently accepts one additive CLI change: `cua-driver mcp
 --direct`. Bare MCP behavior remains platform-defined (direct on Windows and
 Linux, signed app service on macOS), while `--socket` continues to select an

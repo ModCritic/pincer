@@ -115,8 +115,7 @@ fn snapshot(driver: &mut McpDriver, pid: u32, window_id: u64) -> ToolResponse {
         "get_window_state",
         serde_json::json!({
             "pid": pid as i64,
-            "window_id": window_id,
-            "capture_mode": "ax"
+            "window_id": window_id
         }),
     )
 }
@@ -1397,7 +1396,7 @@ fn harness_wpf_modal_messagebox() {
             let modal_snap = driver.call(
                 "get_window_state",
                 serde_json::json!({
-                    "pid": pid as i64, "window_id": modal_wid, "capture_mode": "ax"
+                    "pid": pid as i64, "window_id": modal_wid
                 }),
             );
             let modal_text = modal_snap.text();
@@ -1484,7 +1483,7 @@ fn harness_wpf_owned_popup() {
             let owned_snap = driver.call(
                 "get_window_state",
                 serde_json::json!({
-                    "pid": pid as i64, "window_id": owned_wid, "capture_mode": "ax"
+                    "pid": pid as i64, "window_id": owned_wid
                 }),
             );
             let owned_text = owned_snap.text();
@@ -1550,7 +1549,7 @@ fn harness_wpf_layered_popup_capture() {
             let cap = driver.call(
                 "get_window_state",
                 serde_json::json!({
-                    "pid": pid as i64, "window_id": layered_wid, "capture_mode": "vision"
+                    "pid": pid as i64, "window_id": layered_wid
                 }),
             );
             let img_b64 = cap.raw["result"]["content"]

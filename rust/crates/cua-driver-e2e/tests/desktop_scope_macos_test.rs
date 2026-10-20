@@ -10,9 +10,7 @@
 //! The test grounds the click on a real control: it reads the increment
 //! button's screen-absolute `frame` from a window-scope AX snapshot (the way an
 //! agent would locate it by vision in `get_desktop_state`), clicks those screen
-//! pixels window-less, and asserts the harness counter advanced. A second test
-//! asserts the `window`-scope gate rejects a window-less click
-//! (`desktop_scope_disabled`), matching the Windows contract.
+//! pixels window-less, and asserts the harness counter advanced.
 //!
 //! #[ignore] (needs a real desktop session + TCC Accessibility + the AppKit
 //! harness). Run:
@@ -24,8 +22,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use cua_driver_testkit::e2e::{
-    execute_case, recording_evidence, CaseSpec, Delivery, DriverRoute, Evidence, Observation,
-    OracleKind, Scope, Targeting,
+    execute_case, recording_evidence, CaseSpec, Delivery, DriverRoute, Observation, OracleKind,
+    Scope, Targeting,
 };
 use cua_driver_testkit::{harness_app, Driver, McpDriver};
 
@@ -101,7 +99,7 @@ fn ax_snapshot(driver: &mut McpDriver, session: &str, pid: u32, wid: u64) -> ser
     driver
         .call(
             "get_window_state",
-            serde_json::json!({ "session": session, "pid": pid as i64, "window_id": wid, "capture_mode": "ax" }),
+            serde_json::json!({ "session": session, "pid": pid as i64, "window_id": wid }),
         )
         .structured()
         .clone()
@@ -184,14 +182,11 @@ fn counter(snap: &serde_json::Value) -> Option<u64> {
     digits.parse().ok()
 }
 
-fn start_scope(driver: &mut McpDriver, session: &str, capture_scope: &str) {
-    let started = driver.call(
-        "start_session",
-        serde_json::json!({"session": session, "capture_scope": capture_scope}),
-    );
+fn start_session(driver: &mut McpDriver, session: &str) {
+    let started = driver.call("start_session", serde_json::json!({"session": session}));
     assert!(
         !started.is_error(),
-        "start_session capture_scope={capture_scope} failed: {}",
+        "start_session {session} failed: {}",
         started.text()
     );
 }
@@ -241,20 +236,8 @@ fn desktop_scope_windowless_click_lands_on_control() {
         *evidence = recording_evidence(driver.recording_dir());
         let window_session = format!("{cell_id}-window");
         let desktop_session = format!("{cell_id}-desktop");
-        for (session, capture_scope) in [
-            (window_session.as_str(), "window"),
-            (desktop_session.as_str(), "desktop"),
-        ] {
-            let started = driver.call(
-                "start_session",
-                serde_json::json!({"session": session, "capture_scope": capture_scope}),
-            );
-            assert!(
-                !started.is_error(),
-                "start_session failed: {}",
-                started.text()
-            );
-        }
+        start_session(&mut driver, &window_session);
+        start_session(&mut driver, &desktop_session);
         let (pid, wid) = launch(&mut driver).expect("required AppKit harness did not launch");
 
         // Settle for the AppKit AX tree to register the button + its frame.
@@ -326,8 +309,8 @@ fn desktop_scope_windowless_scroll_lands_on_control() {
         *evidence = recording_evidence(driver.recording_dir());
         let window_session = format!("{cell_id}-window");
         let desktop_session = format!("{cell_id}-desktop");
-        start_scope(&mut driver, &window_session, "window");
-        start_scope(&mut driver, &desktop_session, "desktop");
+        start_session(&mut driver, &window_session);
+        start_session(&mut driver, &desktop_session);
         let (pid, wid) = launch(&mut driver).expect("required AppKit harness did not launch");
 
         let mut snap = ax_snapshot(&mut driver, &window_session, pid, wid);
@@ -405,8 +388,8 @@ fn desktop_scope_hotkey_releases_modifiers() {
         *evidence = recording_evidence(driver.recording_dir());
         let window_session = format!("{cell_id}-window");
         let desktop_session = format!("{cell_id}-desktop");
-        start_scope(&mut driver, &window_session, "window");
-        start_scope(&mut driver, &desktop_session, "desktop");
+        start_session(&mut driver, &window_session);
+        start_session(&mut driver, &desktop_session);
         let (pid, wid) = launch(&mut driver).expect("required AppKit harness did not launch");
 
         let mut snap = ax_snapshot(&mut driver, &window_session, pid, wid);
@@ -496,50 +479,5 @@ fn desktop_scope_hotkey_releases_modifiers() {
             std::thread::sleep(Duration::from_millis(100));
         }
         Observation::delivered_with_fixture_state(Vec::new())
-    });
-}
-
-/// Negative gate: a window-less screen-absolute click while `capture_scope=window`
-/// must be rejected (`desktop_scope_disabled`), not silently treated as
-/// window-local pixels. Mirrors the Windows contract.
-#[test]
-#[ignore]
-fn window_scope_rejects_windowless_click() {
-    let cell_id = "macos-window-scope-gate-px-not-applicable";
-    let case = CaseSpec::delivered(
-        cell_id,
-        "desktop",
-        "quartz",
-        "window_scope_gate",
-        Targeting::Px,
-        Delivery::NotApplicable,
-        Scope::Window,
-        DriverRoute::CaptureScopeGate,
-        vec![OracleKind::Protocol],
-    );
-    execute_case(case, |evidence| {
-        let mut driver = McpDriver::spawn_macos_daemon_proxy_named(cell_id)
-            .expect("start installed macOS daemon proxy");
-        *evidence = recording_evidence(driver.recording_dir());
-        let started = driver.call(
-            "start_session",
-            serde_json::json!({"session": cell_id, "capture_scope": "window"}),
-        );
-        assert!(
-            !started.is_error(),
-            "start_session failed: {}",
-            started.text()
-        );
-        driver.start_behavior_recording();
-        let r = driver.call(
-            "click",
-            serde_json::json!({ "session": cell_id, "x": 100, "y": 100, "scope": "desktop" }),
-        );
-        assert!(
-            r.is_error() && r.structured()["code"].as_str() == Some("desktop_scope_disabled"),
-            "window-scope window-less click was NOT rejected: {}",
-            r.text()
-        );
-        Observation::delivered(vec![OracleKind::Protocol], Evidence::default())
     });
 }

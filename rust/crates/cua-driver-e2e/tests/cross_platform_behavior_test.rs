@@ -413,8 +413,7 @@ fn snapshot(fixture: &mut Fixture) -> ToolResponse {
         "get_window_state",
         serde_json::json!({
             "pid": fixture.pid as i64,
-            "window_id": fixture.wid,
-            "capture_mode": "ax"
+            "window_id": fixture.wid
         }),
     );
     refresh_wayland_window_geometry(fixture);
@@ -859,7 +858,6 @@ fn sdk_window_input(fixture: &Fixture) -> GetWindowStateInput {
         // target on slow hosts (#4149), so use the documented retry budget.
         timeout_ms: Some(5000),
         max_depth: None,
-        max_dimension: None,
         max_image_dimension: None,
         tree_format: None,
         since: None,

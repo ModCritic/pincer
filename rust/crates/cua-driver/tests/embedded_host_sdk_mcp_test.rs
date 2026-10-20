@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use cua_driver_contract::{CaptureScope, GetSessionStateInput, StartSessionInput};
+use cua_driver_contract::{GetSessionInput, StartSessionInput};
 use cua_driver_sdk::{
     CuaDriver, DriverError, EmbeddedCuaDriverHost, EmbeddedDriverHostOptions,
     EmbeddedDriverHostState, EmbeddedEnvironmentVariable,
@@ -188,14 +188,13 @@ async fn embedded_host_serves_sdk_and_mcp_with_one_contract() {
 
     let sdk_session = sdk
         .start_session(StartSessionInput {
-            session: Some("embedded-sdk-window".into()),
-            capture_scope: Some(CaptureScope::Window),
+            session: Some("embedded-sdk-session".into()),
             cursor_theme: None,
             cursor_motion: None,
         })
         .await
         .expect("start SDK-owned session");
-    assert_eq!(sdk_session.state.capture_scope, CaptureScope::Window);
+    assert_eq!(sdk_session.session, "embedded-sdk-session");
 
     writeln!(
         stdin,
@@ -206,10 +205,7 @@ async fn embedded_host_serves_sdk_and_mcp_with_one_contract() {
             "method": "tools/call",
             "params": {
                 "name": "start_session",
-                "arguments": {
-                    "session": "embedded-mcp-desktop",
-                    "capture_scope": "desktop"
-                }
+                "arguments": {"session": "embedded-mcp-session"}
             }
         })
     )
@@ -217,26 +213,26 @@ async fn embedded_host_serves_sdk_and_mcp_with_one_contract() {
     stdin.flush().unwrap();
     let mcp_started = read_json(&mut stdout);
     assert_eq!(
-        mcp_started["result"]["structuredContent"]["capture_scope"],
-        "desktop"
+        mcp_started["result"]["structuredContent"]["session"],
+        "embedded-mcp-session"
     );
 
-    // Session policy belongs to the session and ordinary lifecycle inspection
-    // is transport-scoped: the SDK and MCP connections can each inspect their
-    // own session without enumerating the other's label.
+    // Lifecycle inspection is transport-scoped: the SDK and MCP connections
+    // can each inspect their own session without enumerating the other's
+    // label.
     let sdk_state = sdk
-        .get_session_state(GetSessionStateInput {
-            session: Some("embedded-sdk-window".into()),
+        .get_session(GetSessionInput {
+            session: Some("embedded-sdk-session".into()),
         })
         .await
         .expect("read SDK session");
     let foreign = sdk
-        .get_session_state(GetSessionStateInput {
-            session: Some("embedded-mcp-desktop".into()),
+        .get_session(GetSessionInput {
+            session: Some("embedded-mcp-session".into()),
         })
         .await
         .expect_err("SDK transport must not inspect an MCP-created session");
-    assert_eq!(sdk_state.capture_scope, CaptureScope::Window);
+    assert_eq!(sdk_state.session.as_deref(), Some("embedded-sdk-session"));
     assert!(matches!(
         foreign,
         DriverError::Tool { error_code, .. } if error_code == "session_not_started"
@@ -251,7 +247,7 @@ async fn embedded_host_serves_sdk_and_mcp_with_one_contract() {
             "method": "tools/call",
             "params": {
                 "name": "get_session",
-                "arguments": {"session": "embedded-mcp-desktop"}
+                "arguments": {"session": "embedded-mcp-session"}
             }
         })
     )
@@ -260,7 +256,7 @@ async fn embedded_host_serves_sdk_and_mcp_with_one_contract() {
     let mcp_state = read_json(&mut stdout);
     assert_eq!(
         mcp_state["result"]["structuredContent"]["session"],
-        "embedded-mcp-desktop"
+        "embedded-mcp-session"
     );
 
     drop(stdin);

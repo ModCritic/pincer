@@ -143,7 +143,7 @@ fn agent_cursor_overlay_obeys_untargeted_and_targeted_z_order() {
         let capture_session = "windows-agent-cursor-desktop-capture";
         let started = driver.call(
             "start_session",
-            serde_json::json!({"session": capture_session, "capture_scope": "desktop"}),
+            serde_json::json!({"session": capture_session}),
         );
         assert!(
             !started.is_error(),
@@ -347,8 +347,7 @@ fn window_state(driver: &mut McpDriver, target: TargetWindow) -> cua_driver_test
         "get_window_state",
         serde_json::json!({
             "pid": target.pid,
-            "window_id": target.native_id,
-            "capture_mode": "ax"
+            "window_id": target.native_id
         }),
     );
     assert!(

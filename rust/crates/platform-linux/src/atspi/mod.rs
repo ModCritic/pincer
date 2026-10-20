@@ -95,8 +95,8 @@ pub struct AtspiTreeResult {
     pub elapsed_ms: u128,
 }
 
-/// Total budget for callers that did not ask for one (browser flows, the
-/// page tool, `walk_tree`). Bounds the WHOLE operation including retries —
+/// Total budget for callers that did not ask for one (browser flows,
+/// `walk_tree`). Bounds the WHOLE operation including retries —
 /// previously the cold-registry retry loop could take 4 × 25 s.
 pub const DEFAULT_WALK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
 

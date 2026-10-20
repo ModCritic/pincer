@@ -7,14 +7,13 @@
 
 use cua_driver_contract::{
     ActionResult, ClickInput, ClipboardReadInput, ClipboardWriteInput, DragInput, EndSessionInput,
-    EndSessionOutput, EscalateSessionInput, GetAgentCursorStateInput, GetCursorPositionInput,
-    GetDesktopStateInput, GetScreenSizeInput, GetSessionInput, GetSessionStateInput,
-    GetWindowStateInput, HotkeyInput, InvokeMenuInput, ListAppsInput, ListAppsOutput,
-    ListSessionsInput, ListSessionsOutput, ListWindowsInput, ListWindowsOutput, MoveCursorInput,
-    PressKeyInput, ScrollInput, SessionOutput, SessionStateOutput, SetAgentCursorEnabledInput,
-    SetAgentCursorMotionInput, SetAgentCursorThemeInput, SetWindowFrameInput, SnapshotImage,
-    StartSessionInput, StartSessionOutput, ToolInput, ToolOutput, TypeTextInput, VerifyStateInput,
-    VerifyStateOutput, WindowStateOutput,
+    EndSessionOutput, GetAgentCursorStateInput, GetCursorPositionInput, GetDesktopStateInput,
+    GetScreenSizeInput, GetSessionInput, GetWindowStateInput, HotkeyInput, InvokeMenuInput,
+    ListAppsInput, ListAppsOutput, ListSessionsInput, ListSessionsOutput, ListWindowsInput,
+    ListWindowsOutput, MoveCursorInput, PressKeyInput, ScrollInput, SessionOutput,
+    SetAgentCursorEnabledInput, SetAgentCursorMotionInput, SetAgentCursorThemeInput,
+    SetWindowFrameInput, SnapshotImage, StartSessionInput, StartSessionOutput, ToolInput,
+    ToolOutput, TypeTextInput, VerifyStateInput, VerifyStateOutput, WindowStateOutput,
 };
 use cua_driver_core::daemon::{
     is_daemon_listening, request_daemon_metadata, send_request, socket_path_for_namespace,
@@ -692,10 +691,8 @@ macro_rules! define_exported_tool_names {
         #[cfg(test)]
         const EXPORTED_TOOL_NAMES: &[&str] = &[
             <StartSessionInput as ToolInput>::TOOL_NAME,
-            <EscalateSessionInput as ToolInput>::TOOL_NAME,
             <GetSessionInput as ToolInput>::TOOL_NAME,
             <ListSessionsInput as ToolInput>::TOOL_NAME,
-            <GetSessionStateInput as ToolInput>::TOOL_NAME,
             <EndSessionInput as ToolInput>::TOOL_NAME,
             <ListAppsInput as ToolInput>::TOOL_NAME,
             <ListWindowsInput as ToolInput>::TOOL_NAME,
@@ -1468,24 +1465,6 @@ impl CuaDriver {
             .typed_success(StartSessionInput::TOOL_NAME)
     }
 
-    pub async fn escalate_session(
-        &self,
-        input: EscalateSessionInput,
-    ) -> Result<SessionStateOutput, DriverError> {
-        self.invoke_typed(EscalateSessionInput::TOOL_NAME, input)
-            .await?
-            .typed_success(EscalateSessionInput::TOOL_NAME)
-    }
-
-    pub async fn get_session_state(
-        &self,
-        input: GetSessionStateInput,
-    ) -> Result<SessionStateOutput, DriverError> {
-        self.invoke_typed(GetSessionStateInput::TOOL_NAME, input)
-            .await?
-            .typed_success(GetSessionStateInput::TOOL_NAME)
-    }
-
     pub async fn get_session(&self, input: GetSessionInput) -> Result<SessionOutput, DriverError> {
         self.invoke_typed(GetSessionInput::TOOL_NAME, input)
             .await?
@@ -1544,24 +1523,6 @@ impl CuaDriverSession {
         self.invoke_typed(StartSessionInput::TOOL_NAME, input)
             .await?
             .typed_success(StartSessionInput::TOOL_NAME)
-    }
-
-    pub async fn escalate_session(
-        &self,
-        input: EscalateSessionInput,
-    ) -> Result<SessionStateOutput, DriverError> {
-        self.invoke_typed(EscalateSessionInput::TOOL_NAME, input)
-            .await?
-            .typed_success(EscalateSessionInput::TOOL_NAME)
-    }
-
-    pub async fn get_session_state(
-        &self,
-        input: GetSessionStateInput,
-    ) -> Result<SessionStateOutput, DriverError> {
-        self.invoke_typed(GetSessionStateInput::TOOL_NAME, input)
-            .await?
-            .typed_success(GetSessionStateInput::TOOL_NAME)
     }
 
     pub async fn get_session(&self, input: GetSessionInput) -> Result<SessionOutput, DriverError> {
@@ -2228,7 +2189,6 @@ mod tests {
         driver
             .start_session(StartSessionInput {
                 session: Some(public.clone()),
-                capture_scope: None,
                 cursor_theme: None,
                 cursor_motion: None,
             })
@@ -2389,22 +2349,14 @@ mod tests {
         let first_started = first_session
             .call_tool(
                 "start_session".into(),
-                serde_json::json!({
-                    "session": "same-public-label",
-                    "capture_scope": "auto"
-                })
-                .to_string(),
+                serde_json::json!({"session": "same-public-label"}).to_string(),
             )
             .await
             .unwrap();
         let second_started = second_session
             .call_tool(
                 "start_session".into(),
-                serde_json::json!({
-                    "session": "same-public-label",
-                    "capture_scope": "window"
-                })
-                .to_string(),
+                serde_json::json!({"session": "same-public-label"}).to_string(),
             )
             .await
             .unwrap();
@@ -2466,7 +2418,7 @@ mod tests {
 
         let second_state = second_session
             .call_tool(
-                "get_session_state".into(),
+                "get_session".into(),
                 serde_json::json!({"session": "same-public-label"}).to_string(),
             )
             .await
@@ -2475,7 +2427,7 @@ mod tests {
         let structured: Value =
             serde_json::from_str(second_state.structured_json.as_deref().unwrap()).unwrap();
         assert_eq!(structured["session"], "same-public-label");
-        assert_eq!(structured["capture_scope"], "window");
+        assert_eq!(structured["state"], "active");
         let recording_state = second_session
             .call_tool(
                 "get_recording_state".into(),
@@ -2978,12 +2930,6 @@ mod tests {
                 "content": [{"type": "text", "text": "started"}],
                 "structuredContent": {
                     "session": "run-2",
-                    "capture_scope": "auto",
-                    "effective_scope": "window",
-                    "desktop_capture_authorized": false,
-                    "desktop_unlocked": false,
-                    "escalation_reason": null,
-                    "escalation_detail": null,
                     "active": true,
                     "revived": false
                 },
@@ -2995,14 +2941,13 @@ mod tests {
         let output = driver
             .start_session(StartSessionInput {
                 session: Some("run-2".into()),
-                capture_scope: Some(cua_driver_contract::CaptureScope::Auto),
                 cursor_theme: None,
                 cursor_motion: None,
             })
             .await
             .unwrap();
         assert!(output.active);
-        assert_eq!(output.state.session, "run-2");
+        assert_eq!(output.session, "run-2");
         server.join().unwrap();
     }
 

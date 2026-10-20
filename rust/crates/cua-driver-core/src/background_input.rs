@@ -292,8 +292,8 @@ pub fn decide_background_input(
                     format!(
                         "pid {} owns {} other eligible top-level window(s); process-scoped \
                          key events cannot be proven to reach window {} and could mutate a \
-                         sibling window. Use an exact element action, the page tool for \
-                         browser content, or delivery_mode:\"foreground\"",
+                         sibling window. Use an exact element action, the typed browser tools \
+                         for browser content, or delivery_mode:\"foreground\"",
                         target.pid, facts.competing_keyboard_destinations, target.window_id
                     ),
                     Some("accessibility"),

@@ -184,7 +184,6 @@ fn shared_param_canonical(name: &str) -> Option<Value> {
         "button" => button_schema(),
         "scope" => scope_schema(),
         "element_token" => element_token_schema(),
-        "capture_mode" => crate::capture_mode::capture_mode_schema(),
         "timeout_ms" => timeout_ms_schema(),
         _ => return None,
     };
@@ -237,9 +236,7 @@ fn session_guidance_is_exempt(tool_name: &str) -> bool {
         "start_session"
             | "end_session"
             | "get_session"
-            | "get_session_state"
             | "list_sessions"
-            | "escalate_session"
             | "set_agent_cursor_enabled"
             | "set_agent_cursor_motion"
             | "set_agent_cursor_theme"
@@ -393,15 +390,15 @@ mod tests {
 
     #[test]
     fn wrong_enum_is_flagged() {
-        // The exact capture_mode regression we just fixed: a stale 3-mode enum.
+        // A platform that drops one value from a shared enum drifts.
         let tool = json!({
             "type": "object",
             "properties": {
-                "capture_mode": { "type": "string", "enum": ["som", "vision", "ax"] }
+                "button": { "type": "string", "enum": ["left", "right"] }
             }
         });
-        let v = shared_schema_violations("get_window_state", &tool);
-        assert_eq!(v.len(), 1, "stale capture_mode enum must be flagged: {v:?}");
+        let v = shared_schema_violations("click", &tool);
+        assert_eq!(v.len(), 1, "stale button enum must be flagged: {v:?}");
     }
 
     #[test]

@@ -2058,7 +2058,7 @@ fn sibling_ordinal(visited: &[Visited<'_>], _parents: &[Option<usize>], pos: usi
 
 /// Render visited nodes into the markdown + node list `walk_tree` returns.
 /// Format matches the historical pyatspi output exactly so downstream parsing
-/// (`extract_text_from_markdown`, `query_dom`) is unaffected.
+/// is unaffected.
 ///
 /// `parent_at_depth` tracks the most recently emitted actionable index at
 /// each depth, so descendants can look up their parent_element_index without

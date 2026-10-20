@@ -45,7 +45,7 @@ These run without the repo-local GUI applications:
 | --- | --- | --- |
 | Core driver logic | `rust/crates/*/src/**` | Protocol values, sessions, schemas, image helpers, input helpers, configuration, telemetry, CLI behavior |
 | MCP and CLI boundary | `rust/crates/cua-driver/tests/protocol_*` | Handshake, tool registration, tool calls, media, sessions, and errors |
-| Lifecycle sessions and target migration | Core `session`, `session_tools`, `action_target`, and compatibility `capture_scope` tests plus `session_capture_scope_test.rs` | One implicit session per transport, five-minute idle policy, in-flight and exact-once cleanup, owner-scoped inspection and revival, per-call target validation, and legacy capture-scope compatibility |
+| Lifecycle sessions and target migration | Core `session`, `session_tools`, and `action_target` tests plus `session_capture_scope_test.rs` | One implicit session per transport, five-minute idle policy, in-flight and exact-once cleanup, owner-scoped inspection and revival, per-call target validation, and refusal of the removed `capture_scope` input |
 | Tool-contract gate | `schema_consistency_test.rs` | Shared tool schema parity and reviewed risk metadata across OS backends |
 | Configuration transport | `transport_config_persistence_test.rs` | CLI configuration persistence across daemon-backed processes |
 | Token and protocol surfaces | `protocol_element_token_test.rs`, related tests | JSON-RPC-visible contract behavior |
@@ -108,7 +108,7 @@ Windows native harnesses are repo-local applications built from source:
 | --- | --- | --- |
 | WPF | `harness_wpf_test.rs` | UIA controls, text, keys, pointer actions, scroll, drag, popups, menus, modal windows; foreground single-line and multiline text integrity |
 | WinUI3 | `harness_winui3_test.rs` | XAML controls, text, checkbox/radio, slider, combo, popup; foreground single-line and multiline text integrity |
-| WebView2 | `harness_web_test.rs` | Window discovery, CDP page access, JavaScript, DOM click path |
+| WebView2 | `harness_web_test.rs` | Window discovery and a background PX click on web content |
 | Desktop target | `desktop_scope_windows_test.rs` | Per-call window/desktop modality, full-display capture, screen-absolute click/scroll, and strict rejection |
 | Desktop invariants | Testkit `DesktopObserver` plus typed launch/capture/cursor owners | Cross-cutting focus, z-order, minimized-launch, screenshot, cursor, and desktop checks |
 

@@ -154,13 +154,10 @@ fn named_session_survives_across_one_shot_cli_calls() {
     assert!(driver.available(), "test daemon failed to start");
     let session = format!("synthetic-cli-lifecycle-{}", std::process::id());
 
-    let started = driver.call(
-        "start_session",
-        serde_json::json!({"session": session, "capture_scope": "window"}),
-    );
+    let started = driver.call("start_session", serde_json::json!({"session": session}));
     assert!(!started.is_error(), "start failed: {}", started.text());
 
-    let state = driver.call("get_session_state", serde_json::json!({"session": session}));
+    let state = driver.call("get_session", serde_json::json!({"session": session}));
     assert!(
         !state.is_error(),
         "named session did not survive the next CLI process: {}",
@@ -230,7 +227,7 @@ fn cli_call_strips_a_utf8_bom_from_piped_stdin_arguments() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("spawn cua-driver call");
-    let payload = serde_json::json!({"session": session, "capture_scope": "window"});
+    let payload = serde_json::json!({"session": session});
     {
         let mut stdin = child.stdin.take().expect("piped stdin");
         write!(stdin, "\u{feff}{payload}").expect("write BOM-prefixed arguments");
@@ -242,7 +239,7 @@ fn cli_call_strips_a_utf8_bom_from_piped_stdin_arguments() {
         String::from_utf8_lossy(&started.stderr)
     );
 
-    let state = driver.call("get_session_state", serde_json::json!({"session": session}));
+    let state = driver.call("get_session", serde_json::json!({"session": session}));
     assert!(
         !state.is_error(),
         "BOM-prefixed arguments were not applied: {}",
@@ -267,7 +264,7 @@ fn implicitly_started_named_session_survives_across_one_shot_cli_calls() {
         first_action.text()
     );
 
-    let state = driver.call("get_session_state", serde_json::json!({"session": session}));
+    let state = driver.call("get_session", serde_json::json!({"session": session}));
     assert!(
         !state.is_error(),
         "implicitly started session did not survive the next CLI process: {}",
@@ -287,10 +284,7 @@ fn named_cli_session_cleanup_is_isolated() {
     let second = format!("synthetic-cli-isolation-b-{}", std::process::id());
 
     for session in [&first, &second] {
-        let started = driver.call(
-            "start_session",
-            serde_json::json!({"session": session, "capture_scope": "window"}),
-        );
+        let started = driver.call("start_session", serde_json::json!({"session": session}));
         assert!(!started.is_error(), "start failed: {}", started.text());
     }
 
@@ -304,7 +298,7 @@ fn named_cli_session_cleanup_is_isolated() {
         anonymous.text()
     );
 
-    let state = driver.call("get_session_state", serde_json::json!({"session": second}));
+    let state = driver.call("get_session", serde_json::json!({"session": second}));
     assert!(
         !state.is_error(),
         "ending another named session or cleaning an anonymous call ended the survivor: {}",
@@ -321,10 +315,7 @@ fn revoke_cli_ends_the_exact_live_session() {
     let mut driver = CliDriver::new();
     assert!(driver.available(), "test daemon failed to start");
     let session = format!("revoke-cli-{}", std::process::id());
-    let started = driver.call(
-        "start_session",
-        serde_json::json!({"session": session, "capture_scope": "window"}),
-    );
+    let started = driver.call("start_session", serde_json::json!({"session": session}));
     assert!(!started.is_error(), "start failed: {}", started.text());
 
     let output = Command::new(env!("CARGO_BIN_EXE_cua-driver"))
@@ -343,7 +334,7 @@ fn revoke_cli_ends_the_exact_live_session() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let state = driver.call("get_session_state", serde_json::json!({"session": session}));
+    let state = driver.call("get_session", serde_json::json!({"session": session}));
     assert!(state.is_error());
 }
 

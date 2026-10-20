@@ -46,7 +46,7 @@ By default the tree comes back in one form, compact `tree_markdown` (`tree_forma
 - `include_screenshot:false` returns the tree only. On macOS the window keeps the pixel frame of its last screenshot while its size is unchanged, so `x,y` read off that screenshot still work; elsewhere, and after a resize, take a new screenshot before a pixel action.
 - Where advertised, `include_accessibility_tree:false` requests capture without a tree walk. It keeps the current snapshot's rows and tokens valid. `display_only:true` with it is for live previews: it also leaves your pixel frame alone, and its image cannot ground actions. Use it when you only need to look; do not use `max_elements:1` or a `query` that matches nothing for that, because those replace the snapshot with an almost empty one.
 - Row numbers belong to one read. A narrower re-read (smaller `max_elements`, `max_depth`, another `query`) can stop before a row you saw earlier, and `<new snapshot_id>:N` for that row is then out of range. Use rows printed in the read whose `snapshot_id` you use.
-- `capture_mode` is deprecated and ignored. Do not change configuration to repair a sparse tree.
+- Do not change configuration to repair a sparse tree.
 - Use `screenshot_out_file` to save a PNG instead of inlining it, then actually read the image. Use an absolute, run-scoped output path.
 
 The accessibility model may lag or disagree with rendered state: Electron text shims can echo writes, Catalyst may expose placeholders, and virtualized rows may have unusable frames. Cross-check the relevant visible outcome. An empty tree can also mean an unavailable accessibility bridge; inspect `degraded_reason` and the platform guide. Retry once for lazy initialization, not indefinitely.

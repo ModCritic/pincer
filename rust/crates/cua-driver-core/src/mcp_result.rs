@@ -332,14 +332,10 @@ mod tests {
 
     #[test]
     fn a_success_missing_required_nullable_fields_becomes_a_conforming_error() {
-        let structured = json!({
-            "session": "schema-test",
-            "capture_scope": "window",
-            "effective_scope": "window",
-            "desktop_capture_authorized": false,
-            "desktop_unlocked": false,
-        });
-        let tool = "get_session_state";
+        // `next_cursor` is required but nullable; omitting it is a schema
+        // violation even though serde would read it as `None`.
+        let structured = json!({ "sessions": [] });
+        let tool = "list_sessions";
         assert!(validate_success_output(tool, structured.clone()).is_ok());
         let result = conforming_tool_result(
             tool,
@@ -358,8 +354,8 @@ mod tests {
         );
         assert_eq!(result["structuredContent"]["execution_state"], "unknown");
         assert_eq!(
-            result["structuredContent"]["invalid_output"]["session"],
-            "schema-test"
+            result["structuredContent"]["invalid_output"]["sessions"],
+            json!([])
         );
         assert!(result["content"][0]["text"]
             .as_str()

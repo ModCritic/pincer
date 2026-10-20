@@ -164,7 +164,6 @@ pub enum AdapterProfileBehavior {
     Routine,
     GrantInStandard,
     BoundedOrUnrestricted,
-    UnrestrictedOnly,
     Denied,
 }
 
@@ -183,9 +182,7 @@ impl AdapterProfileBehavior {
                 ModeBehavior::AllowWithoutGrant
             }
             (Self::BoundedOrUnrestricted, PermissionMode::Unrestricted) => ModeBehavior::Allow,
-            (Self::UnrestrictedOnly, PermissionMode::Unrestricted) => ModeBehavior::Allow,
-            (Self::UnrestrictedOnly, PermissionMode::Standard | PermissionMode::Bounded)
-            | (Self::Denied, _) => ModeBehavior::Deny,
+            (Self::Denied, _) => ModeBehavior::Deny,
         }
     }
 }
@@ -237,8 +234,6 @@ const PRIVATE_OBSERVATION_OPERATIONS: &[&str] = &[
     "debug_window_info",
     "get_browser_state",
     "browser_dialog[action=inspect]",
-    "page[action=get_text|query_dom]",
-    "escalate_session",
     "zoom",
     "capture_series",
     "start_recording",
@@ -250,7 +245,6 @@ const PRIVATE_OBSERVATION_SCOPE_KEYS: &[&str] = &[
     "process_fingerprint",
     "window_id",
     "display_generation",
-    "capture_scope",
     "permission_mode",
     "managed_policy_sha256",
     "user_policy_sha256",
@@ -335,18 +329,6 @@ const CONSEQUENTIAL_SCOPE_KEYS: &[&str] = &[
     "permission_mode",
     "managed_policy_sha256",
     "user_policy_sha256",
-];
-
-const UNBOUNDED_SCRIPT_OPERATIONS: &[&str] = &[
-    "page[action=execute_javascript|click_element|insert_text|type_keystrokes|enable_javascript_apple_events]",
-];
-
-const LEGACY_PAGE_MUTATING_ACTIONS: &[&str] = &[
-    "execute_javascript",
-    "click_element",
-    "insert_text",
-    "type_keystrokes",
-    "enable_javascript_apple_events",
 ];
 
 const BROWSER_BOUND_INPUT_OPERATIONS: &[&str] = &[
@@ -508,23 +490,6 @@ pub const ENFORCEMENT_ADAPTERS: &[EnforcementAdapterDescriptor] = &[
         authorization_source: "built_in_standard; unattended_bounded_profile; trusted_unrestricted_mode; optional_capability_manifest_ceiling",
         enforcement_by_mode: AdapterEnforcement::uniform(RiskEnforcement::Active),
         profile_behavior: AdapterProfileBehavior::Routine,
-    },
-    EnforcementAdapterDescriptor {
-        id: "browser_unbounded_script",
-        operations: UNBOUNDED_SCRIPT_OPERATIONS,
-        state: RiskEnforcement::Active,
-        risk_class: RiskClass::R3,
-        resource_kind: "unbounded_authenticated_page_script",
-        scope_keys: &[],
-        grant_type: Some("trusted_launch_mode_gate"),
-        idle_ttl_seconds: None,
-        absolute_ttl_seconds: None,
-        authorization_requirement: "not_grantable_in_standard_or_bounded",
-        revocation_triggers: &[],
-        refusal_code: Some("unbounded_operation_requires_unrestricted"),
-        authorization_source: "unrestricted_mode_with_trusted_launch_time_risk_acknowledgement",
-        enforcement_by_mode: AdapterEnforcement::uniform(RiskEnforcement::Active),
-        profile_behavior: AdapterProfileBehavior::UnrestrictedOnly,
     },
     EnforcementAdapterDescriptor {
         id: "browser_bound_input",
@@ -708,8 +673,7 @@ pub fn adapter_ids_with_state_for_mode(
 ///
 /// A call may intentionally require more than one adapter: screenshot output
 /// is both private observation and a file write; trajectory recording is both
-/// observation and file output; arbitrary page script is both consequential
-/// and explicitly unbounded. Admission must satisfy the conjunction rather
+/// observation and file output. Admission must satisfy the conjunction rather
 /// than picking the highest-risk adapter and dropping the other boundary.
 pub fn enforcement_adapters_for_call(
     tool: &str,
@@ -745,17 +709,11 @@ pub fn enforcement_adapters_for_call(
             | "list_windows"
             | "debug_window_info"
             | "get_browser_state"
-            | "escalate_session"
             | "zoom"
             | "capture_series"
             | "start_recording"
-    ) || (tool == "page"
-        && matches!(
-            args.get("action").and_then(Value::as_str),
-            Some("get_text" | "query_dom")
-        ))
-        || (tool == "browser_dialog"
-            && args.get("action").and_then(Value::as_str) == Some("inspect"))
+    ) || (tool == "browser_dialog"
+        && args.get("action").and_then(Value::as_str) == Some("inspect"))
     {
         add("private_observation");
     }
@@ -801,15 +759,6 @@ pub fn enforcement_adapters_for_call(
         )
     {
         add("browser_consequential_action");
-    }
-
-    if tool == "page"
-        && args
-            .get("action")
-            .and_then(Value::as_str)
-            .is_some_and(|action| LEGACY_PAGE_MUTATING_ACTIONS.contains(&action))
-    {
-        add("browser_unbounded_script");
     }
 
     if BROWSER_BOUND_INPUT_OPERATIONS.contains(&tool) {
@@ -871,7 +820,6 @@ pub fn advertised_risk_for(tool: &str) -> RiskAssessment {
         | "get_config"
         | "get_session"
         | "list_sessions"
-        | "get_session_state"
         | "get_agent_cursor_state"
         | "get_recording_state"
         | "health_report"
@@ -920,7 +868,6 @@ pub fn advertised_risk_for(tool: &str) -> RiskAssessment {
         | "get_accessibility_tree"
         | "verify_state"
         | "set_config"
-        | "escalate_session"
         | "start_recording"
         | "get_browser_state"
         | "browser_prepare"
@@ -939,7 +886,6 @@ pub fn advertised_risk_for(tool: &str) -> RiskAssessment {
         | "stop_recording"
         | "replay_trajectory"
         | "install_ffmpeg"
-        | "page"
         | "browser_dialog"
         | "browser_set_input_files"
         | "browser_download" => RiskClass::R3,
@@ -990,24 +936,6 @@ pub fn classify_tool_call(tool: &str, args: &Value) -> RiskAssessment {
                 operation_sensitive: true,
             }
         }
-        "page" => {
-            let class = match args.get("action").and_then(Value::as_str) {
-                Some("get_text" | "query_dom") => RiskClass::R2,
-                _ => RiskClass::R3,
-            };
-            RiskAssessment {
-                class,
-                enforcement: if matches!(
-                    args.get("action").and_then(Value::as_str),
-                    Some("get_text" | "query_dom")
-                ) {
-                    RiskEnforcement::Active
-                } else {
-                    RiskEnforcement::MetadataOnly
-                },
-                operation_sensitive: true,
-            }
-        }
         "get_desktop_state" | "get_window_state" => RiskAssessment {
             class: if args
                 .get("screenshot_out_file")
@@ -1042,7 +970,6 @@ pub fn classify_tool_call(tool: &str, args: &Value) -> RiskAssessment {
         | "list_windows"
         | "debug_window_info"
         | "get_browser_state"
-        | "escalate_session"
         | "zoom"
         | "clipboard_read" => RiskAssessment {
             class: RiskClass::R2,
@@ -1216,7 +1143,6 @@ fn enforce_hard_invariants(
             | "get_accessibility_tree"
             | "get_window_state"
             | "verify_state"
-            | "page"
             | "browser_prepare"
     );
     if process_targeting_tool
@@ -1695,7 +1621,6 @@ mod tests {
                 "desktop_input",
                 "file_transfer_and_output",
                 "browser_consequential_action",
-                "browser_unbounded_script",
                 "browser_bound_input",
                 "process_control",
                 "os_permission_prompt",
@@ -1721,7 +1646,6 @@ mod tests {
                 "desktop_input",
                 "file_transfer_and_output",
                 "browser_consequential_action",
-                "browser_unbounded_script",
                 "browser_bound_input",
                 "process_control",
                 "os_permission_prompt",
@@ -1776,10 +1700,6 @@ mod tests {
         );
         assert_eq!(
             behavior("process_control", PermissionMode::Standard),
-            ModeBehavior::Deny
-        );
-        assert_eq!(
-            behavior("browser_unbounded_script", PermissionMode::Bounded),
             ModeBehavior::Deny
         );
         assert_eq!(
@@ -1886,12 +1806,6 @@ mod tests {
             vec!["private_observation", "file_transfer_and_output"]
         );
         assert_eq!(
-            ids("page", serde_json::json!({"action": "execute_javascript"})),
-            vec!["browser_unbounded_script"]
-        );
-        assert!(ids("page", serde_json::json!({})).is_empty());
-        assert!(ids("page", serde_json::json!({"action": "unknown"})).is_empty());
-        assert_eq!(
             ids(
                 "browser_prepare",
                 serde_json::json!({"profile": {"mode": "isolated_new"}})
@@ -1912,10 +1826,6 @@ mod tests {
         assert_eq!(
             ids("start_recording", serde_json::json!({})),
             vec!["private_observation", "file_transfer_and_output"]
-        );
-        assert_eq!(
-            ids("escalate_session", serde_json::json!({})),
-            vec!["private_observation"]
         );
         assert_eq!(
             ids("type_text_chars", serde_json::json!({})),
@@ -1997,7 +1907,6 @@ mod tests {
                 "desktop_input",
                 "file_transfer_and_output",
                 "browser_consequential_action",
-                "browser_unbounded_script",
                 "browser_bound_input",
                 "process_control",
                 "os_permission_prompt",
@@ -2023,7 +1932,6 @@ mod tests {
                 "desktop_input",
                 "file_transfer_and_output",
                 "browser_consequential_action",
-                "browser_unbounded_script",
                 "browser_bound_input",
                 "process_control",
                 "os_permission_prompt",

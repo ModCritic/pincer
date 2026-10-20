@@ -35,10 +35,9 @@ fn def() -> &'static ToolDef {
             max_image_dimension take effect immediately. The \
             experimental_pip keys are persisted to ~/.cua-driver/config.json and \
             take effect on the next daemon restart (the PiP backend is \
-            initialised once at startup).\n\nNote: capture_mode is a per-call \
-            param (on get_window_state / click), not a stored setting. Capture \
-            modality is selected by each action's target; the old \
-            capture_scope config key is retired.\n\nCursor motion defaults: \
+            initialised once at startup).\n\nCapture modality is selected by \
+            each action's target; the old capture_scope config key is \
+            retired.\n\nCursor motion defaults: \
             cursor.motion.style, cursor.motion.timing and \
             cursor.motion.effects.<trail|glow|magnet|ripple|squish> are saved to \
             ~/.cua-driver/config.json and seed sessions started afterwards. \

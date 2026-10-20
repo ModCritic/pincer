@@ -21,8 +21,7 @@ mod set_value;
 mod set_window_frame;
 mod type_text;
 // `screenshot` / `screenshot_compat` modules removed in PR #1692 —
-// `get_window_state` capture_mode:"vision" is the canonical screenshot
-// path. The capture functions they wrapped (ScreenCaptureKit, CGWindow,
+// `get_window_state` is the canonical screenshot path. The capture functions they wrapped (ScreenCaptureKit, CGWindow,
 // etc.) live elsewhere under CuaDriverCore::Capture and are reached
 // through GetWindowStateTool.
 mod check_permissions;
@@ -35,7 +34,6 @@ mod get_desktop_state;
 pub(crate) mod get_screen_size;
 mod health_report;
 mod move_cursor;
-mod page;
 mod pixel_route;
 pub(crate) mod px_frame;
 mod set_config;
@@ -632,8 +630,8 @@ pub fn config_file_path() -> std::path::PathBuf {
 
 /// Load `DriverConfig` from `~/.cua-driver/config.json`, falling back to
 /// defaults for any missing or unrecognised keys.  Called at MCP startup so
-/// that `cua-driver config set capture_mode vision` (CLI) carries over into
-/// the next MCP session without requiring a per-call `set_config`.
+/// that `cua-driver config set max_image_dimension 1024` (CLI) carries over
+/// into the next MCP session without requiring a per-call `set_config`.
 pub fn load_driver_config() -> DriverConfig {
     let mut cfg = DriverConfig::default();
     let path = config_file_path();
@@ -645,8 +643,8 @@ pub fn load_driver_config() -> DriverConfig {
         Ok(v) => v,
         Err(_) => return cfg, // malformed file — use defaults
     };
-    // `capture_mode` is per-call now; old on-disk `capture_mode` and
-    // `capture_scope` keys are intentionally inert.
+    // Old on-disk `capture_mode` and `capture_scope` keys are intentionally
+    // inert: only the keys read below have any effect.
     if let Some(v) = json.get("max_image_dimension").and_then(|v| v.as_u64()) {
         if let Ok(v32) = u32::try_from(v) {
             cfg.max_image_dimension = v32;
@@ -700,7 +698,7 @@ pub fn write_driver_config_key(key: &str, value: &serde_json::Value) -> Result<(
 /// The cua-driver daemon is one shared process: every `cua-driver mcp` proxy
 /// connects to it and shares its `ToolState`. `DriverConfig` is therefore
 /// multi-tenant AND persisted to disk — so without session scoping, session A's
-/// `set_config capture_mode=vision` clobbers session B's value and flips the
+/// `set_config max_image_dimension=...` clobbers session B's value and flips the
 /// on-disk default under everyone. These overrides fix that: a named MCP session
 /// gets an in-memory, non-persisted override keyed by its `_session_id`; the
 /// anonymous session (CLI / one-shot `call`) still writes the shared global +
@@ -1071,8 +1069,7 @@ pub fn register_all(
     // The standalone `screenshot` tool was removed (#1692). The pixel-grounding
     // screenshot the Claude Code computer-use compat loop relies on now comes
     // from `get_window_state` (which always returns BOTH the tree AND a
-    // screenshot — perception is mode-agnostic; `capture_mode` is deprecated/
-    // ignored) for a window, or `get_desktop_state` for the whole screen.
+    // screenshot — perception is mode-agnostic) for a window, or `get_desktop_state` for the whole screen.
     // `compat` no longer gates a tool swap here — the flag's live purpose is to
     // register the MCP server under the `cua-computer-use` name, which is what
     // triggers Claude Code's computer-use beta-tool injection (see cli.rs).
@@ -1124,11 +1121,6 @@ pub fn register_all(
     // Touch the struct so it stays in this crate for the alias resolver.
     let _: &type_text_chars::TypeTextCharsTool =
         &type_text_chars::TypeTextCharsTool::new(state.clone());
-    // Cross-platform `page` tool definition lives in mcp-server; macOS plugs in
-    // its Apple-Events / CDP / AX-tree backend here.
-    registry.register(Box::new(cua_driver_core::page::PageTool::new(Arc::new(
-        page::MacOsPageBackend::new(state.clone()),
-    ))));
     let browser_engine = cua_driver_core::browser::BrowserEngine::new_with_runtime_services(
         Arc::new(crate::browser::MacOsBrowserPlatform::new(
             state.cursor_registry.clone(),

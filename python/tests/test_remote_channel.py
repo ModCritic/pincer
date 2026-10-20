@@ -323,7 +323,6 @@ class NativeWindowTests(unittest.IsolatedAsyncioTestCase):
                     screenshot_out_file=None,
                     max_elements=10,
                     max_depth=3,
-                    max_dimension=800,
                     max_image_dimension=1600,
                     timeout_ms=None,
                 )
@@ -344,7 +343,6 @@ class NativeWindowTests(unittest.IsolatedAsyncioTestCase):
                     "include_accessibility_tree": True,
                     "max_elements": 10,
                     "max_depth": 3,
-                    "max_dimension": 800,
                     "max_image_dimension": 1600,
                     # The typed SDK keeps the full response unless told otherwise.
                     "full_output": True,

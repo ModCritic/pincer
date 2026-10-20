@@ -130,7 +130,7 @@ pub fn click_at_xy(
 /// Screen-absolute click posted to the GLOBAL HID tap (`CGEventTapLocation::HID`),
 /// NOT routed to any pid — the OS delivers it to whichever window owns the
 /// screen point, the macOS analogue of Windows' `WindowFromPoint` + `SendInput`
-/// desktop-scope click. This backs the `capture_scope="desktop"`, window-less
+/// desktop-scope click. This backs the desktop-scope, window-less
 /// (no pid/window_id) branch of the `click` tool: the agent has located the
 /// target by vision in `get_desktop_state` and clicks true screen pixels.
 ///

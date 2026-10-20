@@ -1,4 +1,4 @@
-//! Session lifecycle and per-session capture-scope tools.
+//! Session lifecycle tools.
 //!
 //! A session is lifecycle identity for an agent run (see [`crate::session`]).
 //! It owns the agent cursor, per-run configuration, recording, cleanup, and
@@ -7,17 +7,14 @@
 //! optional coordination mechanism inside the same trusted namespace.
 //!
 //! The daemon may mirror an explicit `session` arg into reserved transport
-//! fields, but lifecycle and policy tools accept only the public `session`
-//! name. Transport metadata can never mint or alter capture policy.
+//! fields, but lifecycle tools accept only the public `session` name.
 
-use crate::capture_scope::{bind_session, escalate_session, get_session, BindError, EscalateError};
 use crate::protocol::ToolResult;
 use crate::tool::{Tool, ToolDef};
 use crate::tool_args::parse_typed_input;
 use async_trait::async_trait;
 use cua_driver_contract::{
-    CaptureScope, CursorMotionStyle, EndSessionInput, EscalateSessionInput, EscalationReason,
-    GetSessionInput, GetSessionStateInput, ListSessionsInput, ListSessionsOutput,
+    CursorMotionStyle, EndSessionInput, GetSessionInput, ListSessionsInput, ListSessionsOutput,
     SessionClientKindOutput, SessionLifecycleState, SessionOutput, SessionTransportOutput,
     StartSessionInput,
 };
@@ -161,22 +158,13 @@ impl Tool for StartSessionTool {
         let Some(id) = session_id_of(&args) else {
             return ToolResult::error("start_session requires an authenticated transport lease or a non-empty `session` label.");
         };
-        if let Some(raw) = args.get("capture_scope") {
-            let Some(raw) = raw.as_str() else {
-                return ToolResult::error(
-                    "start_session.capture_scope must be one of: auto, window, desktop.",
-                )
-                .with_structured(json!({ "code": "invalid_capture_scope" }));
-            };
-            if CaptureScope::parse(raw).is_none() {
-                return ToolResult::error(format!(
-                    "invalid capture_scope '{raw}'; expected auto, window, or desktop"
-                ))
-                .with_structured(json!({
-                    "code": "invalid_capture_scope",
-                    "capture_scope": raw,
-                }));
-            }
+        if args.get("capture_scope").is_some() {
+            // The session schema stays open for reserved transport fields, so
+            // refuse the removed policy input instead of silently ignoring it.
+            return ToolResult::error(
+                "start_session no longer accepts capture_scope; select a window or desktop target on each action.",
+            )
+            .with_structured(json!({ "code": "invalid_arguments", "argument": "capture_scope" }));
         }
         if let Some(error) = invalid_cursor_motion(&args) {
             return error;
@@ -185,25 +173,9 @@ impl Tool for StartSessionTool {
             Ok(input) => input,
             Err(result) => return result,
         };
-        let requested = input.capture_scope;
-        let legacy_capture = requested.is_some();
         let public_label = public_label_of(&args);
         let owner = owner_transport_of(&args, &id);
         let (transport, client_kind) = crate::session::infer_transport_metadata(&owner);
-        if let Some(requested) = requested {
-            if let Some(existing) = get_session(&id) {
-                if existing.policy != requested {
-                    return ToolResult::error(
-                        "session already uses a different deprecated capture policy",
-                    )
-                    .with_structured(json!({
-                        "code": "session_policy_conflict",
-                        "capture_scope": existing.policy.as_str(),
-                        "requested_capture_scope": requested.as_str(),
-                    }));
-                }
-            }
-        }
         // Tombstone removal and owner binding are one atomic lifecycle
         // transition. A guessed public label cannot be claimed in the gap
         // between revival and activation.
@@ -222,173 +194,24 @@ impl Tool for StartSessionTool {
                     .with_structured(json!({ "code": "session_unavailable" }));
             }
         };
-        let scope = if legacy_capture {
-            match bind_session(&id, requested) {
-                Ok((bound, _)) => bound,
-                Err(BindError::Conflict {
-                    existing,
-                    requested,
-                }) => {
-                    return ToolResult::error(format!(
-                        "session '{id}' already uses capture_scope='{existing}'; capture scope is immutable until the session ends"
-                    ))
-                    .with_structured(json!({
-                        "code": "session_policy_conflict",
-                        "session": id,
-                        "capture_scope": existing.as_str(),
-                        "requested_capture_scope": requested.as_str(),
-                    }));
-                }
-                Err(BindError::Ended) => {
-                    return ToolResult::error(format!("session '{id}' could not be revived"))
-                        .with_structured(json!({ "code": "session_ended", "session": id }));
-                }
-            }
-        } else {
-            get_session(&id).unwrap_or_else(|| {
-                crate::capture_scope::SessionCaptureScope::new(CaptureScope::Auto)
-            })
-        };
         // Platform overlays keep their own late-command tombstones. Clear
-        // those only after core revival and capture-policy binding both
-        // succeeded, so a failed declaration cannot revive render state.
+        // those only after core revival succeeded, so a failed declaration
+        // cannot revive render state.
         if revived {
             crate::session::fire_session_revive_for_owner(&id, &owner);
         }
         let structured = serde_json::to_value(cua_driver_contract::StartSessionOutput {
-            state: scope.output(&response_session_label(&args, &id)),
+            session: response_session_label(&args, &id),
             active: true,
             revived,
             cursor_motion: input.cursor_motion.clone(),
         })
         .expect("start_session output serializes");
         ToolResult::text(format!(
-            "✅ Session '{}' is active{}.",
+            "✅ Session '{}' is active.",
             public_label.as_deref().unwrap_or("implicit"),
-            if legacy_capture {
-                " with deprecated capture_scope compatibility"
-            } else {
-                ""
-            }
         ))
         .with_structured(structured)
-    }
-}
-
-// ── escalate_session ─────────────────────────────────────────────────────────
-
-pub struct EscalateSessionTool;
-
-static ESCALATE_DEF: OnceLock<ToolDef> = OnceLock::new();
-
-#[async_trait]
-impl Tool for EscalateSessionTool {
-    fn def(&self) -> &ToolDef {
-        ESCALATE_DEF.get_or_init(|| session_tool_def("escalate_session"))
-    }
-
-    async fn invoke(&self, args: Value) -> ToolResult {
-        let Some(id) = session_id_of(&args) else {
-            return ToolResult::error("escalate_session requires a public `session` id.")
-                .with_structured(json!({ "code": "session_required" }));
-        };
-        if args
-            .get("reason")
-            .and_then(Value::as_str)
-            .and_then(EscalationReason::parse)
-            .is_none()
-        {
-            return ToolResult::error("escalate_session.reason is invalid.")
-                .with_structured(json!({ "code": "invalid_escalation_reason" }));
-        }
-        let input =
-            match parse_typed_input::<EscalateSessionInput>("escalate_session", args.clone()) {
-                Ok(input) => input,
-                Err(result) => return result,
-            };
-        if input
-            .detail
-            .as_ref()
-            .is_some_and(|detail| detail.chars().count() > 200)
-        {
-            return ToolResult::error("escalate_session.detail must be at most 200 characters.")
-                .with_structured(json!({ "code": "invalid_escalation_detail" }));
-        }
-        let owner = owner_transport_of(&args, &id);
-        if crate::session::session_snapshot(&id, &owner, crate::session::DEFAULT_SESSION_IDLE_TTL)
-            .is_none()
-        {
-            return ToolResult::error("session is not visible to this transport")
-                .with_structured(json!({ "code": "session_not_started" }));
-        }
-        match escalate_session(&id, input.reason, input.detail.as_deref()) {
-            Ok(state) => ToolResult::text("✅ Session escalated to desktop scope.")
-                .with_structured(state.as_json(&response_session_label(&args, &id))),
-            Err(error) => {
-                let (code, message) = match error {
-                    EscalateError::Ended => (
-                        "session_ended",
-                        format!("session '{id}' has ended; start it again before escalating"),
-                    ),
-                    EscalateError::NotStarted => (
-                        "session_not_started",
-                        format!("session '{id}' has no capture policy; call start_session first"),
-                    ),
-                    EscalateError::WindowStrict => (
-                        "desktop_scope_disabled",
-                        format!("session '{id}' is strict window scope and cannot escalate"),
-                    ),
-                    EscalateError::DesktopAlreadyActive => (
-                        "desktop_already_active",
-                        format!("session '{id}' already has effective desktop scope"),
-                    ),
-                };
-                ToolResult::error(message).with_structured(json!({
-                    "code": code,
-                    "session": id,
-                }))
-            }
-        }
-    }
-}
-
-// ── get_session_state ────────────────────────────────────────────────────────
-
-pub struct GetSessionStateTool;
-
-static GET_STATE_DEF: OnceLock<ToolDef> = OnceLock::new();
-
-#[async_trait]
-impl Tool for GetSessionStateTool {
-    fn def(&self) -> &ToolDef {
-        GET_STATE_DEF.get_or_init(|| session_tool_def("get_session_state"))
-    }
-
-    async fn invoke(&self, args: Value) -> ToolResult {
-        let Some(id) = session_id_of(&args) else {
-            return ToolResult::error("get_session_state requires a public `session` id.")
-                .with_structured(json!({ "code": "session_required" }));
-        };
-        if let Err(result) =
-            parse_typed_input::<GetSessionStateInput>("get_session_state", args.clone())
-        {
-            return result;
-        }
-        let owner = owner_transport_of(&args, &id);
-        if crate::session::session_snapshot(&id, &owner, crate::session::DEFAULT_SESSION_IDLE_TTL)
-            .is_none()
-        {
-            return ToolResult::error("session is not visible to this transport")
-                .with_structured(json!({ "code": "session_not_started" }));
-        }
-        let state = get_session(&id)
-            .unwrap_or_else(|| crate::capture_scope::SessionCaptureScope::new(CaptureScope::Auto));
-        ToolResult::text(format!(
-            "Session '{id}' uses capture_scope='{}' (effective_scope='{}'); desktop_unlocked reports desktop capture authorization, not the host lock-screen state.",
-            state.policy,
-            state.effective_scope().as_str()
-        ))
-        .with_structured(state.as_json(&response_session_label(&args, &id)))
     }
 }
 
@@ -637,7 +460,12 @@ mod tests {
             .await;
         assert_eq!(bad_effect.is_error, Some(true));
         // Nothing was started by a rejected call.
-        assert!(get_session(&id).is_none());
+        assert!(crate::session::session_snapshot(
+            &id,
+            &id,
+            crate::session::DEFAULT_SESSION_IDLE_TTL
+        )
+        .is_none());
     }
 
     #[tokio::test]
@@ -664,34 +492,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_policy_is_immutable_and_ended_id_gets_fresh_policy() {
-        let id = format!("session-tool-policy-{}", std::process::id());
-        let start = StartSessionTool;
-        let first = start
+    async fn start_session_refuses_the_removed_capture_scope_input() {
+        let id = format!("session-tool-capture-scope-{}", std::process::id());
+        let refused = StartSessionTool
             .invoke(json!({"session": id, "capture_scope": "window"}))
             .await;
-        assert_ne!(first.is_error, Some(true));
-        assert_eq!(
-            first.structured_content.as_ref().unwrap()["capture_scope"],
-            "window"
-        );
-
-        let conflict = start
-            .invoke(json!({"session": id, "capture_scope": "desktop"}))
-            .await;
-        assert_eq!(conflict.is_error, Some(true));
-        assert_eq!(result_code(&conflict), Some("session_policy_conflict"));
-
-        EndSessionTool.invoke(json!({"session": id})).await;
-        assert!(get_session(&id).is_none());
-        let revived = start
-            .invoke(json!({"session": id, "capture_scope": "desktop"}))
-            .await;
-        assert_ne!(revived.is_error, Some(true));
-        let structured = revived.structured_content.as_ref().unwrap();
-        assert_eq!(structured["capture_scope"], "desktop");
-        assert_eq!(structured["effective_scope"], "desktop");
-        assert_eq!(structured["revived"], true);
+        assert_eq!(refused.is_error, Some(true));
+        assert_eq!(result_code(&refused), Some("invalid_arguments"));
+        assert!(crate::session::session_snapshot(
+            &id,
+            &id,
+            crate::session::DEFAULT_SESSION_IDLE_TTL
+        )
+        .is_none());
     }
 
     #[tokio::test]
@@ -707,16 +520,12 @@ mod tests {
         });
         let start = StartSessionTool;
 
-        let fresh = start
-            .invoke(json!({"session": id, "capture_scope": "window"}))
-            .await;
+        let fresh = start.invoke(json!({"session": id})).await;
         assert_ne!(fresh.is_error, Some(true));
         assert_eq!(notifications.load(Ordering::SeqCst), 0);
 
         EndSessionTool.invoke(json!({"session": id})).await;
-        let revived = start
-            .invoke(json!({"session": id, "capture_scope": "desktop"}))
-            .await;
+        let revived = start.invoke(json!({"session": id})).await;
         assert_ne!(revived.is_error, Some(true));
         assert_eq!(
             revived.structured_content.as_ref().unwrap()["revived"],
@@ -724,9 +533,7 @@ mod tests {
         );
         assert_eq!(notifications.load(Ordering::SeqCst), 1);
 
-        let idempotent = start
-            .invoke(json!({"session": id, "capture_scope": "desktop"}))
-            .await;
+        let idempotent = start.invoke(json!({"session": id})).await;
         assert_ne!(idempotent.is_error, Some(true));
         assert_eq!(notifications.load(Ordering::SeqCst), 1);
         EndSessionTool.invoke(json!({"session": id})).await;
@@ -776,8 +583,7 @@ mod tests {
         let owned_args = json!({
             "session": id,
             "_public_session_label": "shared-label",
-            "_transport_session_id": owner_a,
-            "capture_scope": "auto"
+            "_transport_session_id": owner_a
         });
         let started = StartSessionTool.invoke(owned_args.clone()).await;
         assert_ne!(started.is_error, Some(true));
@@ -790,10 +596,6 @@ mod tests {
         let get = GetSessionTool.invoke(foreign.clone()).await;
         assert_eq!(get.is_error, Some(true));
         assert_eq!(result_code(&get), Some("session_not_started"));
-
-        let state = GetSessionStateTool.invoke(foreign.clone()).await;
-        assert_eq!(state.is_error, Some(true));
-        assert_eq!(result_code(&state), Some("session_not_started"));
 
         let list = ListSessionsTool
             .invoke(json!({"_transport_session_id": owner_b}))
@@ -817,61 +619,5 @@ mod tests {
         assert_eq!(result_code(&stolen), Some("session_unavailable"));
 
         EndSessionTool.invoke(owned_args).await;
-    }
-
-    #[tokio::test]
-    async fn session_state_explains_desktop_unlocked_compatibility_field() {
-        let id = format!("session-tool-scope-wording-{}", std::process::id());
-        let started = StartSessionTool
-            .invoke(json!({"session": id, "capture_scope": "auto"}))
-            .await;
-        assert_ne!(started.is_error, Some(true));
-
-        let state = GetSessionStateTool.invoke(json!({"session": id})).await;
-        assert_ne!(state.is_error, Some(true));
-        assert_eq!(
-            state.structured_content.as_ref().unwrap()["desktop_unlocked"],
-            false
-        );
-        assert_eq!(
-            state.structured_content.as_ref().unwrap()["desktop_capture_authorized"],
-            false
-        );
-        match &state.content[0] {
-            crate::protocol::Content::Text { text, .. } => assert!(text.contains(
-                "desktop_unlocked reports desktop capture authorization, not the host lock-screen state"
-            )),
-            other => panic!("expected text content, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn auto_requires_explicit_bounded_escalation() {
-        let id = format!("session-tool-auto-{}", std::process::id());
-        let started = StartSessionTool
-            .invoke(json!({"session": id, "capture_scope": "auto"}))
-            .await;
-        assert_eq!(
-            started.structured_content.as_ref().unwrap()["capture_scope"],
-            "auto"
-        );
-        let escalated = EscalateSessionTool
-            .invoke(json!({
-                "session": id,
-                "reason": "background_delivery_failed",
-                "detail": "window ladder exhausted"
-            }))
-            .await;
-        assert_ne!(escalated.is_error, Some(true));
-        let structured = escalated.structured_content.as_ref().unwrap();
-        assert_eq!(structured["effective_scope"], "desktop");
-        assert_eq!(structured["desktop_capture_authorized"], true);
-        assert_eq!(structured["desktop_unlocked"], true);
-
-        let twice = EscalateSessionTool
-            .invoke(json!({"session": id, "reason": "other"}))
-            .await;
-        assert_eq!(twice.is_error, Some(true));
-        assert_eq!(result_code(&twice), Some("desktop_already_active"));
     }
 }
