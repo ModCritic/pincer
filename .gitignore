@@ -1,0 +1,26 @@
+# Build output and caches from this repository's own tooling. The python/,
+# typescript/, rust/fuzz/, rust/test-apps/ and tests/fixtures/ directories
+# keep their own .gitignore files for outputs specific to them.
+
+# Cargo workspace (cargo build in rust/ without CARGO_TARGET_DIR)
+/rust/target/
+
+# CMake builds of the helpers (cmake -S . -B build)
+/hyprland-plugin/build/
+/kwin-target-helper/build/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# macOS Finder metadata
+.DS_Store

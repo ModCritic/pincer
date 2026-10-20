@@ -16,3 +16,10 @@ harness-winui3/
 harness-webview/
 harness-electron/
 harness-tauri/
+
+# Stages written by ../../tests/fixtures/build/linux.sh and macos.sh.
+harness-gtk3/
+harness-gtk4/
+harness-appkit/
+harness-swiftui/
+harness-wkwebview/
