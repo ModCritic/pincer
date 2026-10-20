@@ -48,10 +48,15 @@ package must be installed. Use `--target-dir`, `--binary`, or
 `--native-library` to take them from somewhere else. The script never
 downloads anything.
 
-The wheel tags follow upstream's release builds. The macOS wheel is tagged
-`universal2`, so it needs a universal binary and library. The Linux wheel is
-tagged `manylinux_2_31`, but a local build only runs where the glibc is at
-least as new as on the machine that built it.
+The wheel's platform tag comes from the build. The architecture is read from
+the binary, or taken from the host if the binary's can't be read. On Linux the
+tag is `manylinux_<glibc>_<arch>` with the glibc version of the machine that
+runs the script, since a local build only runs where the glibc is at least as
+new as where it was built. On macOS it is `macosx_13_0_arm64`, `_x86_64`, or
+`_universal2` for a universal binary; 13.0 matches `MACOSX_DEPLOYMENT_TARGET`
+in `rust/.cargo/config.toml`. On Windows it is `win_amd64` or `win_arm64`. To
+set the tag yourself, for example after building against an older glibc, pass
+`--plat-name manylinux_2_31_x86_64`.
 
 The wheel contains generated UniFFI bindings, a platform-specific Rust SDK
 library, and the `cua-driver` executable. `CuaDriver.create()` loads the runtime
@@ -215,7 +220,7 @@ exit_code = run_cua_driver(["mcp"])
 
 | Platform | Architecture | Status |
 | --- | --- | --- |
-| macOS 13+ | Universal (ARM64 + x86_64) | Supported |
+| macOS 13+ | ARM64, x86_64, or universal | Supported |
 | Linux | x86_64 | Supported |
 | Windows | x86_64 | Supported |
 | Windows | ARM64 | Supported |

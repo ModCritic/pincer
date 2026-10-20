@@ -19,12 +19,134 @@ def load_build_wheel_module():
 
 def test_wheel_tags_are_platform_specific():
     build_wheel = load_build_wheel_module()
+    tag = build_wheel.get_platform_tag
 
-    assert build_wheel.get_wheel_tag("darwin", "universal") == "py3-none-macosx_13_0_universal2"
-    assert build_wheel.get_wheel_tag("linux", "x86_64") == "py3-none-manylinux_2_31_x86_64"
-    assert build_wheel.get_wheel_tag("linux", "arm64") == "py3-none-manylinux_2_31_aarch64"
-    assert build_wheel.get_wheel_tag("windows", "x86_64") == "py3-none-win_amd64"
-    assert build_wheel.get_wheel_tag("windows", "arm64") == "py3-none-win_arm64"
+    assert tag("darwin", "universal") == "macosx_13_0_universal2"
+    assert tag("darwin", "arm64") == "macosx_13_0_arm64"
+    assert tag("darwin", "x86_64") == "macosx_13_0_x86_64"
+    assert tag("linux", "x86_64", (2, 39)) == "manylinux_2_39_x86_64"
+    assert tag("linux", "arm64", (2, 31)) == "manylinux_2_31_aarch64"
+    assert tag("windows", "x86_64") == "win_amd64"
+    assert tag("windows", "arm64") == "win_arm64"
+    assert build_wheel.get_wheel_tag("win_amd64") == "py3-none-win_amd64"
+    for platform_name in ("linux", "windows"):
+        try:
+            tag(platform_name, "universal", (2, 39))
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"accepted a universal {platform_name} build")
+
+
+def test_linux_tag_takes_the_host_glibc_version():
+    build_wheel = load_build_wheel_module()
+
+    with mock.patch.object(build_wheel.os, "confstr", return_value="glibc 2.42"):
+        assert build_wheel.get_glibc_version() == (2, 42)
+        assert build_wheel.get_platform_tag("linux", "x86_64") == "manylinux_2_42_x86_64"
+
+
+def test_missing_glibc_version_asks_for_plat_name():
+    build_wheel = load_build_wheel_module()
+
+    for confstr in (
+        mock.patch.object(build_wheel.os, "confstr", return_value=None),
+        mock.patch.object(build_wheel.os, "confstr", side_effect=ValueError),
+    ):
+        with confstr:
+            try:
+                build_wheel.get_glibc_version()
+            except ValueError as error:
+                assert "--plat-name" in str(error)
+            else:
+                raise AssertionError("accepted a host without a glibc version")
+
+
+def _elf(machine: int) -> bytes:
+    header = bytearray(64)
+    header[:6] = b"\x7fELF\x02\x01"
+    header[18:20] = machine.to_bytes(2, "little")
+    return bytes(header)
+
+
+def _thin_macho(cpu_type: int) -> bytes:
+    return b"\xcf\xfa\xed\xfe" + cpu_type.to_bytes(4, "little") + bytes(24)
+
+
+def _fat_macho(*cpu_types: int) -> bytes:
+    header = b"\xca\xfe\xba\xbe" + len(cpu_types).to_bytes(4, "big")
+    for cpu_type in cpu_types:
+        header += cpu_type.to_bytes(4, "big") + bytes(16)
+    return header + bytes(64)
+
+
+def _pe(machine: int) -> bytes:
+    header = bytearray(0x80 + 6)
+    header[:2] = b"MZ"
+    header[0x3C:0x40] = (0x80).to_bytes(4, "little")
+    header[0x80:0x84] = b"PE\0\0"
+    header[0x84:0x86] = machine.to_bytes(2, "little")
+    return bytes(header)
+
+
+def test_binary_arch_comes_from_the_executable_header():
+    build_wheel = load_build_wheel_module()
+    x86_64, arm64 = 0x01000007, 0x0100000C
+    cases = {
+        "elf-x86_64": (_elf(62), "x86_64"),
+        "elf-aarch64": (_elf(183), "arm64"),
+        "elf-riscv": (_elf(243), None),
+        "macho-arm64": (_thin_macho(arm64), "arm64"),
+        "macho-x86_64": (_thin_macho(x86_64), "x86_64"),
+        "fat-universal": (_fat_macho(x86_64, arm64), "universal"),
+        "fat-arm64": (_fat_macho(arm64), "arm64"),
+        "pe-amd64": (_pe(0x8664), "x86_64"),
+        "pe-arm64": (_pe(0xAA64), "arm64"),
+        # A Java class file shares the universal binary magic.
+        "java-class": (b"\xca\xfe\xba\xbe\x00\x00\x00\x41" + bytes(64), None),
+        "text": (b"cli", None),
+    }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, (content, expected) in cases.items():
+            path = Path(tmp) / name
+            path.write_bytes(content)
+            assert build_wheel.get_binary_arch(path) == expected, name
+
+
+def test_platform_tag_follows_the_binary_not_the_host():
+    build_wheel = load_build_wheel_module()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        binary = Path(tmp) / "cua-driver"
+        binary.write_bytes(_elf(183))
+        with mock.patch.object(build_wheel.platform, "machine", return_value="x86_64"), \
+                mock.patch.object(build_wheel.os, "confstr", return_value="glibc 2.39"):
+            assert build_wheel.select_platform_tag("linux", binary) == "manylinux_2_39_aarch64"
+
+        binary.write_bytes(b"not an executable")
+        with mock.patch.object(build_wheel.platform, "machine", return_value="AMD64"):
+            assert build_wheel.select_platform_tag("windows", binary) == "win_amd64"
+
+
+def test_plat_name_overrides_detection():
+    build_wheel = load_build_wheel_module()
+    missing = Path("/nonexistent/cua-driver")
+
+    assert (
+        build_wheel.select_platform_tag("linux", missing, "manylinux_2_31_x86_64")
+        == "manylinux_2_31_x86_64"
+    )
+    assert (
+        build_wheel.select_platform_tag("darwin", missing, "macosx-13.0-universal2")
+        == "macosx_13_0_universal2"
+    )
+    try:
+        build_wheel.select_platform_tag("linux", missing)
+    except FileNotFoundError as error:
+        assert build_wheel.CARGO_BUILD_HINT in str(error)
+    else:
+        raise AssertionError("detected a tag without a binary")
 
 
 def test_binary_names_match_cargo_outputs():
