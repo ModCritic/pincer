@@ -13,7 +13,7 @@ These are tool calls on that connection, not separate CLI invocations:
 get_recording_state({})
 start_recording({"output_dir":"/absolute/run-dir/trajectory","record_video":true})
 get_recording_state({})
-# Run the authorized workflow and verify every action.
+# Run the authorized workflow; verify at checkpoints.
 stop_recording({})
 get_recording_state({})
 ```

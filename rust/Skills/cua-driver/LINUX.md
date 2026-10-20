@@ -61,13 +61,6 @@ approval, or change security settings as a workaround. After approval, take a
 fresh capture and verify its dimensions/content before continuing. A timeout
 alone does not prove which permission or backend failed.
 
-Supporting smoke evidence: Driver 0.23.2 on KDE/KWin Wayland opened an Electron
-music app, searched, selected an album track, and showed playback through this
-desktop route after user screenshot approval. The window route returned
-`surface_identity_unproven`; desktop actions returned `global_input` and
-`unverifiable`, so screenshots and user confirmation established the result.
-This is not certification of background targeting, other compositors, or video.
-
 ## X11 observation and input details
 
 **What is open over the window.** `get_window_state` lists the pid's transient
@@ -78,7 +71,7 @@ sentence naming the call that targets each one
 the screenshot is taken from the screen (`screenshot_composited:true`) so the
 menu or dialog is visible; the window's own drawable never shows them. The
 payload states its frame (`coordinate_frame:"window"`, plus `frame_note` with `verbose:true`): `x`/`y`
-of the pointer tools are pixels of THIS screenshot. Closed menus are listed
+of the pointer tools are pixels of this screenshot. Closed menus are listed
 with a `description` ("closed menu with N items…") and are not walked;
 click the menu (a real press) and read the popup by its window_id.
 `press_key` / `hotkey` that map a new top-level report it as `window_opened`
@@ -86,14 +79,16 @@ with `window_change` evidence. Action results carry the same text as
 `summary` inside `structuredContent`, for clients that only show that.
 
 **Screenshot scale.** The window screenshot is delivered at or below 1.15
-megapixels (long edge ≤ `max_image_dimension`, 1568 by default): larger
-images are downsized before a model reads them, and its pixel coordinates
-would then be uniformly short. Pointer `x`/`y` and each element's
+megapixels (long edge ≤ `max_image_dimension`, 1568 by default), because
+models and clients with smaller image limits downsize larger images before
+the model reads them, which would make its pixel coordinates uniformly
+short. Pointer `x`/`y` and each element's
 `screenshot_frame` are pixels of the delivered image (the element's `frame`
 stays in screen coordinates, as on every platform); `frame_scale` < 1 and
 `screenshot_original_width` report the downsizing, and the driver scales your
 pixels back to the window.
-An explicit per-call `max_image_dimension` (0 = native) replaces this cap.
+An explicit per-call `max_image_dimension` (0 = native) replaces this cap,
+for a model and client that accept larger images.
 
 **Budget the pixels before you aim.** The cap is a pixel budget, so on a
 high-resolution window the delivered image is a small fraction of native and
@@ -181,6 +176,15 @@ takes `pid` + `window_id` and that window's screenshot pixels, and brings the
 window to front first. The reply ends with one JSON line: segments, samples,
 length, measured duration, start and end. Native Wayland refuses the tool.
 
+**Change over time and partial captures.** `capture_series` takes timed
+screenshots of the desktop or one window in one call (`count` frames
+`interval_ms` apart, or `offsets_ms`), and `return_frames:"changed"` keeps
+only the frames that differ. Use it to prove playback, an animation, or a
+slow state change instead of polling with repeated reads. `get_desktop_state`
+takes a `region` in full-size desktop pixels for a closer look at part of the
+screen; its `capture_id` maps the cropped pixels back for the next desktop
+action.
+
 **Cross-application drops.** A pointer action whose point lies over another
 application's window (a drag dropped onto VLC) reports that window's title
 change and the windows its pid opened as `foreign_window` / `window_change`
@@ -208,17 +212,17 @@ a systemd _system_ unit, or a VNC session running its own ad-hoc bus), the
 variable is unset, the AT-SPI registry walk comes back empty, and
 `get_window_state` reports **every** window as having no elements.
 
-cua-driver now **auto-discovers the session bus at startup** (mirroring the
-`XAUTHORITY` recovery): if `DBUS_SESSION_BUS_ADDRESS` is unset it adopts
-`/run/user/<uid>/bus`, or reads the address out of a running desktop-session
-process's `/proc/<pid>/environ` (`xfce4-session`, `gnome-session`, …). So the
-common headless cases now "just work". The two things that still must be true:
+cua-driver discovers the session bus at startup, as it does `XAUTHORITY`:
+if `DBUS_SESSION_BUS_ADDRESS` is unset it adopts `/run/user/<uid>/bus`, or
+reads the address out of a running desktop-session process's
+`/proc/<pid>/environ` (`xfce4-session`, `gnome-session`, …), which covers the
+common headless cases. Two things must still be true:
 
 1. **An accessibility bus must be running** in that session, and
    **`toolkit-accessibility` must be on**: cua-driver advertises a screen
    reader at startup to flip it, but a session with no a11y bus at all
    (`/usr/libexec/at-spi-bus-launcher`) can't expose a tree. `cua-driver
-doctor` now probes `org.a11y.Bus` for real (not just "is there a bus?")
+doctor` probes `org.a11y.Bus` for real (not just "is there a bus?")
    and tells you which of the two is missing.
 2. The daemon must run **as the desktop user** (so it can read that user's
    session-process environ and the `/run/user/<uid>/bus` socket). Running the
@@ -226,13 +230,12 @@ doctor` now probes `org.a11y.Bus` for real (not just "is there a bus?")
    "Session 0" isolation problem.
 
 `get_window_state` returns one compact markdown tree capped at 250 actionable
-nodes by default (`full_output:true` restores 5 000 nodes and both forms), and
-`since:<snapshot_id>` returns only added/changed/removed rows. The focused
-element is not reported on Linux yet, so an unchanged read says only
+nodes by default (`full_output:true` returns both forms with a 5 000-node
+limit), and `since:<snapshot_id>` returns only added/changed/removed rows. The
+focused element is not reported on Linux, so an unchanged read says only
 `no change since …`.
 
-An empty AT-SPI walk is now surfaced honestly: `get_window_state` sets
-`degraded: true` + a `degraded_reason` (instead of a bare `elements: []`) so a
+An empty AT-SPI walk sets `degraded: true` and a `degraded_reason`, so a
 caller can tell "this window genuinely has no controls" apart from "the a11y
 bridge isn't up / the daemon isn't on the session bus".
 
@@ -302,16 +305,11 @@ raw background PX possible on a standard compositor.
 
 ### Hyprland input v3 source candidate
 
-[PR #3572](https://github.com/trycua/cua/pull/3572) records dated, exact-source
-validation results for the experimental opt-in input v3 candidate. Acceptance
-requires the unchanged complete Linux canonical runner on native Hyprland and
-separate bounded qualified-app proof. The default plugin build remains
-discovery-only.
-The candidate source reports Driver `0.23.2`; published Driver `0.23.2` does not
-include these branch changes. Switching Driver channels does not install or
-enable the plugin. Build and loading require the exact Hyprland ABI and compiler
-toolchain; v3 uses `CUA_HYPRLAND_INPUT=ON`, separate from the historical
-`CUA_HYPRLAND_TEST_INPUT` experiment.
+The input v3 candidate is experimental and opt-in. The default plugin build is
+discovery-only, and the driver does not install or enable the plugin. Building
+and loading it require the exact Hyprland ABI and compiler toolchain, with
+`CUA_HYPRLAND_INPUT=ON` (not the separate `CUA_HYPRLAND_TEST_INPUT`
+experiment).
 
 Driver admits each action through its normal shared permission, resource, and
 lifecycle policy. There is no additional Omarchy approval panel or external
@@ -365,18 +363,6 @@ keymap options that leave every typing and modifier key unchanged, such as
 (`foreground_keyboard_numlock_keypad`), and for a different layout or remapped
 key (`foreground_unsupported_layout`). Ask the user to turn Caps Lock off, or
 use the equivalent non-keypad key, instead of retrying the same call.
-
-The retained bounded app evidence at source
-`f180e8828b8f31cc153e3c44eaa89a9c13c5bc68` includes instrumented Calc/Inkscape
-proof on both seats and an uninstrumented smoke. The plugin tree and
-uninstrumented module hash are unchanged at
-`1133a06e4f205cf80188a7ac9e41102f37611fea`. The proof covers recorded actions
-and observation intervals, not every application operation or release package.
-Portable tests and historical experiments do not replace complete native
-harness acceptance. Compatible release artifacts and final Fleet image
-packaging and lifecycle validation require separate evidence. Physical Omarchy
-parity requires separate acceptance; it is not a gate for publishing a validated
-Fleet image.
 
 ## Quick triage
 

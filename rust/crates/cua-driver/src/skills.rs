@@ -1193,13 +1193,21 @@ mod tests {
         let skill = std::fs::read_to_string(crate_dir.join("../../Skills/cua-driver/SKILL.md"))
             .expect("canonical skill must be readable");
 
-        assert!(
-            skill.lines().any(|line| {
-                line.starts_with("description:")
-                    && line.contains("continue, resume, or recall recent Cua activity")
-            }),
-            "skill frontmatter must trigger for recent Cua activity continuation"
-        );
+        // The history tools are registered only with --experimental-history,
+        // so the always-loaded description must not trigger the skill for
+        // recalling past activity. The policy body applies only when the
+        // tools are advertised.
+        let description = skill
+            .lines()
+            .find(|line| line.starts_with("description:"))
+            .expect("skill frontmatter must have a description")
+            .to_lowercase();
+        for trigger in ["history", "recall recent cua activity"] {
+            assert!(
+                !description.contains(trigger),
+                "skill description must not mention history: found {trigger:?}"
+            );
+        }
         assert_history_consultation_policy(&skill, "canonical skill");
     }
 

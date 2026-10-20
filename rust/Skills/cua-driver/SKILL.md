@@ -1,6 +1,6 @@
 ---
 name: cua-driver
-description: Drive a native GUI app (macOS, Windows, Linux) via the cua-driver CLI (default) or MCP server; snapshot its accessibility tree, act through snapshot-bound element tokens, native menu paths, exact window geometry, or pixel coordinates, and verify from fresh state. Use when the user asks you to operate, drive, automate, or perform a GUI task in a real application on the host, or to continue, resume, or recall recent Cua activity.
+description: Drive a native GUI app (macOS, Windows, Linux) via the cua-driver CLI (default) or MCP server; snapshot its accessibility tree, act through snapshot-bound element tokens, native menu paths, exact window geometry, or pixel coordinates, and verify from fresh state. Use when the user asks you to operate, drive, automate, or perform a GUI task in a real application on the host.
 version: 0.35.4 # x-release-please-version
 metadata:
   openclaw:
@@ -49,7 +49,7 @@ The MCP server instructions carry the same rules, so they apply even when this f
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | Check installation and capabilities       | `cua-driver --version`, `status`, `doctor`, `describe <tool>`; MCP `tools/list`                       | [Runtime](RUNTIME.md)                                 |
 | Find or open the requested app            | `list_apps`, `list_windows`, `launch_app`                                                             | Current platform guide below                          |
-| View a local file in the GUI              | `launch_app({bundle_id, urls:["file:///…"]})` opens it in that app                                    | Current platform guide below                          |
+| View a local file in the GUI              | macOS: `launch_app({bundle_id, urls:["file:///…"]})` opens it in that app. Linux and Windows send `urls` to the default handler; to pick the app, pass its `name` or `launch_path` with `additional_arguments:["<path>"]` and no `urls` | Current platform guide below                          |
 | Observe one window                        | `get_window_state({pid, window_id, query})`                                                           | [Workflow](WORKFLOW.md)                               |
 | Act on a control                          | `click` / `type_text` with a fresh `element_token` and exact window target                            | [Workflow](WORKFLOW.md)                               |
 | Act and see what changed in one call      | `run_steps({steps:[{tool,args},...], observe:{}})`; stops at the first failure                        | [Workflow](WORKFLOW.md#batch-known-actions)           |

@@ -35,26 +35,13 @@ strict no-foreground:
 | `"background"` (DEFAULT) | Never fronts and **never raises/restacks** the target: macOS-aligned (mirrors CGEvent-to-pid). **Pixel clicks**: a UIA hit-test at the point first (accessibility-channel Invoke, works on UWP / WinUI3 / Win11 packaged apps, no flash); if that misses, coordinate-injected pen/touch, **but only when the target is the _visible_ window at that point**; PostMessage for plain Win32. It returns a structured `background_unavailable` error (rather than raising or fronting) when the target is **occluded** at the point, or the event kind is known-dropped (Chromium DOM mouse + key-combos, GTK buttons, VCL/LibreOffice accelerators, terminal / WPF text with no `element_token`). **No foreground swap and no z-order raise, ever.** |
 | `"foreground"`           | SendInput with brief `SetForegroundWindow(target)` → restore. The explicit, agent-chosen rung where fronting IS allowed: required to reach occluded targets, Chromium DOM content, GTK buttons, VCL accelerators, WPF drag, terminals, and canvas / custom-drawn surfaces with no UIA peer. Implemented for **every** input tool: `type_text` (SendInput Unicode via `send_text_synthesized`) and `scroll` (SendInput wheel via `send_wheel_synthesized`) included. The activation and restoration are scoped to that action.                                                                                                                                                                                                                       |
 
-> **macOS is the source of truth: `background` never alters the screen.**
-> Earlier Windows builds "cheated" in background with three tricks that this
-> pass **removed**: (1) a z-order raise (`ZorderGuard`) to win the pointer
-> hit-test on occluded windows, (2) a full focus-activate for WPF drags, and
-> (3) a _cloaked_ (hidden) focus-grab for keystrokes/text the target would
-> otherwise drop. macOS does none of these (pure CGEvent-to-pid + focus
-> suppression), so Windows now does none either: when strict no-front /
-> no-raise delivery can't land, the tool returns `background_unavailable` and
-> **the agent (not the driver) decides** whether to escalate to
-> `delivery_mode:"foreground"` (the rung where fronting is explicitly opted
-> into). A `background` call will never raise, restack, flash, or steal focus.
-
-> **Removed: the legacy `"auto"` mode.** Earlier builds had a third
-> Windows-only `dispatch:"auto"` mode (silent SendInput fallback on
-> known-problematic targets). It was removed in the macOS-alignment pass
-> because it could front the target _without the caller opting in_:
-> breaking the no-foreground contract macOS guarantees. Any unrecognised
-> value (including a stray `"auto"`) now resolves to `"background"`. If you
-> have notes/snippets that pass `dispatch:"auto"`, switch to an explicit
-> `delivery_mode:"foreground"` for the cases that need fronting.
+A `background` call never raises, restacks, flashes, or steals focus: no
+z-order raise for occluded targets, no focus-activate for WPF drags, and no
+hidden focus-grab for keystrokes. When strict background delivery can't land,
+the tool returns `background_unavailable` and the agent decides whether to
+escalate to `delivery_mode:"foreground"`, the rung where fronting is
+explicitly opted into. Any other value, including `"auto"`, resolves to
+`"background"`; pass `delivery_mode:"foreground"` where fronting is needed.
 
 ### Always try `delivery_mode:"background"` first
 
@@ -93,7 +80,7 @@ costlier path; only use it for surfaces with no UIA peer.
 
 Errors retain their diagnostic `escalation.recommended` hint. Successful
 action results use the narrower `escalation.target` contract instead (see
-`SKILL.md` → behavior matrix). On Windows this error recommendation is
+[WORKFLOW.md](WORKFLOW.md#verify-and-stop)). On Windows this error recommendation is
 `"foreground"` because the dropped event needs the fronting rung. (Contrast
 macOS / X11, where a background pixel click can still land in the background.)
 
@@ -289,14 +276,11 @@ described above.
 ### Cross-platform schema residuals (Windows)
 
 The capture/dispatch/addressing params are a shared cross-platform
-contract (see `SKILL.md` → _Cross-platform parameter contract_). Three
+contract (see [WORKFLOW.md](WORKFLOW.md)). Three
 Windows-relevant notes:
 
-- **`session` is now accepted on every action/cursor tool.** Earlier
-  Windows builds rejected `session` via `additionalProperties:false` (it
-  was effectively a macOS-only key); the shared contract makes it
-  uniformly schema-accepted: cursor-wired where a cursor glides,
-  accepted elsewhere.
+- **`session` is accepted on every action/cursor tool**: cursor-wired
+  where a cursor glides, accepted elsewhere.
 - **`debug_window_info` is a Windows-only tool** (window-handle / class /
   rect / z-order diagnostics for triaging the click chain). It is
   deliberately not part of the cross-platform surface: there is no macOS
@@ -513,27 +497,21 @@ For an ordered action loop, use the named CLI or persistent MCP examples in
 [WORKFLOW.md](WORKFLOW.md), with an observed AUMID, PID, HWND, and fresh token.
 Do not assume the window array is populated immediately on a cold launch.
 
-## The core invariant: snapshot before AND after every action
+## Observe before acting, verify at checkpoints
 
-**Every action MUST be bracketed by `get_window_state(pid, window_id)`**:
-
-- **Before**: the pre-action snapshot resolves the `element_token`
-  you're about to use. Targets from previous turns are stale; the
-  server replaces the snapshot on every read, keyed on
+- **Before**: act with a token from the latest snapshot of the target
+  window. Each read replaces that window's snapshot, keyed on
   `(pid, window_id)`, and lists the replaced ids in
-  `invalidated_snapshot_ids`. Tokens from turn N don't resolve in turn
-  N+1, and targets from window A don't resolve against window B of
-  the same app. Skip this and element actions fail with
-  `stale_element_token`, which names the current snapshots.
-- **After**: the post-action snapshot verifies the action actually
-  landed. Without it you can't tell a silent no-op from a real
-  effect. The UIA tree change (new value, new window, disappeared
-  menu, disabled button, etc.) is your evidence that the action
-  registered. **Especially important on Windows** because the
-  layered click path can return `effect:"unverifiable"` after
+  `invalidated_snapshot_ids`; a token from a replaced snapshot, or from
+  another window of the same app, fails with `stale_element_token`,
+  which names the current snapshots.
+- **Verify**: at each checkpoint, read the UIA tree change (new value,
+  new window, disappeared menu, disabled button) with `run_steps`
+  `observe` or a `since:"latest"` read. This matters on Windows because
+  the layered click path can return `effect:"unverifiable"` after
   PostMessage even when the click did nothing (UWP silently no-ops):
-  the action result reports the route, not the task outcome. Only
-  the re-snapshot tells you if the state changed.
+  the action result reports the route, not the task outcome. A fresh
+  read is what shows whether the state changed.
 
 ## Click semantics on Windows
 

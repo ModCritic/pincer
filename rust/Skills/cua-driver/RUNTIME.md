@@ -92,7 +92,7 @@ grant, caller identity, or bearer credential.
 
 Keep the agent overlay visible while controlling pointer or keyboard input. Cursor-bearing and keyboard actions re-show it automatically. The overlay indicates activity, not proof that input landed.
 
-On Linux, ordinary `move_cursor({x,y})` moves only this synthetic cursor. The explicit desktop-pointer escape hatch must not be used unless the user asked for real-pointer control; inspect `describe move_cursor` for that tool's supported target form.
+On Linux, ordinary `move_cursor({x,y})` moves only this synthetic cursor. The real-pointer tools, `move_cursor` with `scope:"desktop"` and `move_along_path` (which also brings a targeted window to front), must not be used unless the user asked for real-pointer control; inspect `describe move_cursor` and `describe move_along_path` for their target forms.
 
 Pixel `click` already animates the cursor. Do not precede it with `move_cursor` at the same point: that adds a second glide. Use `move_cursor` to indicate a location without clicking or seed the cursor before accessibility actions.
 

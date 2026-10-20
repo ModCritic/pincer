@@ -410,8 +410,8 @@ pixel modified clicks leave it at the target like other foreground pixel
 clicks.
 
 macOS-specific residuals worth knowing (the rest of the capture/dispatch/
-addressing params are a shared cross-platform contract: see `SKILL.md` →
-_Cross-platform parameter contract_):
+addressing params are a shared cross-platform contract: see
+[WORKFLOW.md](WORKFLOW.md)):
 
 - **`check_permissions.prompt` is macOS-only and public calls are
   status-only.** Omitted `prompt` defaults to `false`; explicit `true` is
@@ -421,9 +421,6 @@ _Cross-platform parameter contract_):
   approval UI and direct ScreenCaptureKit probe. In an in-process SDK runtime,
   private embedded host, or `cua-driver mcp --direct`, the embedding host owns
   permission UX. There is no Windows/Linux equivalent.
-- **`session` always worked on macOS;** the cross-platform change is that
-  Windows/Linux stopped _rejecting_ it. No macOS-side change to how you
-  pass it.
 - **`target`** selects the action coordinate space uniformly on all platforms.
   Use `target:{"kind":"desktop","display_id":"primary"}` for
   screen-absolute pointer actions or foreground keyboard actions, and
