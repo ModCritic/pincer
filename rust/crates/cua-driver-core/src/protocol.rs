@@ -403,7 +403,7 @@ Use the narrowest semantic route first: `set_window_frame` plus `list_windows` f
 
 Chrome/Edge/Brave page: `get_browser_state({{pid, window_id}})`, its `detail.next_call` (`browser_prepare`) if refused, then `browser_click`/`browser_type`/`browser_pointer` (hover, drag); never desktop pointer tools.
 
-`start_session` is optional; repeat a short `session` label on every call that accepts it. On continuation/recent-work, call `history_status`; if ready, make one bounded initial `history_query` before broad discovery.
+`start_session` is optional; repeat a short `session` label on every call that accepts it.
 
 Details: `skill://cua-driver/SKILL.md` and {platform_skill_pointer}."#
     )
@@ -546,21 +546,18 @@ mod agent_instruction_tests {
     }
 
     #[test]
-    fn initialize_instructions_conditionally_consult_history_before_discovery() {
+    fn initialize_instructions_do_not_name_opt_in_history_tools() {
+        // history_status / history_query are registered only after history
+        // admission (--experimental-history), and their own descriptions carry
+        // the consult-first guidance, so the always-sent instructions must not
+        // name them.
         let instructions = initialize_result()["instructions"]
             .as_str()
             .expect("initialize result should carry agent instructions")
             .to_owned();
 
-        assert!(instructions.contains("continuation/recent-work"));
-        let status = instructions.find("call `history_status`").unwrap();
-        let bounded_query = instructions
-            .find("one bounded initial `history_query`")
-            .unwrap();
-        let discovery = instructions.find("broad discovery").unwrap();
-        assert!(status < bounded_query);
-        assert!(bounded_query < discovery);
-        assert!(instructions.contains("if ready"));
+        assert!(!instructions.contains("history_status"));
+        assert!(!instructions.contains("history_query"));
         assert!(instructions.split_whitespace().count() <= 200);
     }
 }

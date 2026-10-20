@@ -159,7 +159,7 @@ impl Tool for RunStepsTool {
     fn def(&self) -> &ToolDef {
         DEF.get_or_init(|| ToolDef {
             name: RUN_STEPS_TOOL.into(),
-            description: "The default way to act: run one or more action tools in ONE call, in \
+            description: "The default way to act: run one or more action tools in one call, in \
                 order, stop at the first failure, and (with `observe`) get what changed in the \
                 same response. Use it whenever you know the next action(s) and would otherwise \
                 re-read the window after them: fill three fields, click, and see the result in \
@@ -181,7 +181,7 @@ impl Tool for RunStepsTool {
                 that went stale is retried once on the element with the same role and label, if \
                 exactly one matches.\n\n\
                 Returns per-step status (`ok` or the error message) and, when `observe` is \
-                given, ONE bounded get_window_state read after the last executed step (after a \
+                given, one bounded get_window_state read after the last executed step (after a \
                 failure caused by a dialog holding focus, that dialog is read, even without \
                 `observe`). A step refused because its app ignores background input says \
                 how to re-send it; `foreground_fallback:true` retries such steps in the \
@@ -274,7 +274,7 @@ impl Tool for RunStepsTool {
                     },
                     "observe": {
                         "type": "object",
-                        "description": "Optional end-of-batch observation: arguments for ONE get_window_state call. `pid` and `window_id` default to those of the last step that names both. Defaults to since=\"latest\" (only what changed since your last read of that window with the same query/max_elements/max_depth; a full read when there is none), include_screenshot=false and max_elements=250; pass include_screenshot=true to see the window, or since=null for a full read. Omit to read nothing. {} observes the last window."
+                        "description": "Optional end-of-batch observation: arguments for one get_window_state call. `pid` and `window_id` default to those of the last step that names both. Defaults to since=\"latest\" (only what changed since your last read of that window with the same query/max_elements/max_depth; a full read when there is none), include_screenshot=false and max_elements=250; pass include_screenshot=true to see the window, or since=null for a full read. Omit to read nothing. {} observes the last window."
                     }
                 },
                 "additionalProperties": false

@@ -42,8 +42,8 @@ pub fn delivery_mode_schema() -> Value {
     // `default` advertisement is additive on top of the canon shape.
     let mut v = cua_driver_core::tool_schema::delivery_mode_schema_with(
         "Input delivery mode. 'background' (default) never activates or raises \
-         the target window. On X11 it injects via XTEST / the XInput2 master \
-         pointer (no focus steal). On Wayland it goes through libei + \
+         the target window. On X11 it uses the session's XInput2 virtual \
+         pointer and keyboard (no focus steal). On Wayland it goes through libei + \
          xdg-desktop-portal, which injects to the compositor's input focus — \
          Wayland's security model has no per-window background targeting, so a \
          specific non-focused window cannot be aimed at; when no libei backend \

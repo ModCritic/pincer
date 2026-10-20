@@ -158,14 +158,14 @@ impl Tool for RunScriptTool {
     fn def(&self) -> &ToolDef {
         DEF.get_or_init(|| ToolDef {
             name: RUN_SCRIPT_TOOL.into(),
-            description: "Run a JavaScript program that drives apps through Cua Driver, in ONE \
+            description: "Run a JavaScript program that drives apps through Cua Driver, in one \
                 call: loops, conditions, reads and checks between actions, and only the result \
                 comes back. Use it when the flow needs logic (a loop over rows, a branch on what \
                 the app shows, a retry); use run_steps for a fixed list of steps.\n\n\
                 The script is the body of an async function: use `await`, and `return` a JSON \
                 value. It runs in a sandbox with no filesystem, network, process, timers or \
                 environment; the only API is `cua`:\n\
-                - `await cua.getApp(\"TextEdit\" | \"com.apple.TextEdit\" | {pid, windowId})` → \
+                - `await cua.getApp(nameOrBundleId | {pid, windowId})` → \
                 app (follows the app's frontmost window unless a windowId is given)\n\
                 - `await cua.launch(nameOrBundleId)` → app; `cua.listApps()`, \
                 `cua.listWindows({pid?})`, `cua.sleep(ms)`, `cua.computer.target`\n\
@@ -179,7 +179,7 @@ impl Tool for RunScriptTool {
                 - app.waitFor({role?, name?, text?, gone?, value?, timeout_ms?}) and \
                 app.verify(predicate | predicates) (verify_state)\n\
                 - app.click(t), doubleClick(t), rightClick(t), typeText(text, t?), \
-                pressKey(\"return\" | \"cmd+s\", t?), hotkey([\"cmd\",\"s\"]), scroll(t, \
+                pressKey(key | \"mod+key\", t?), hotkey([mod, key]), scroll(t, \
                 direction, amount?), setValue(t, value), drag([x,y], [x,y]), zoom([x1,y1,x2,y2])\n\
                 where a target `t` is {role, name, nth?} (found fresh, waits up to 3 s), an \
                 element_token string, a row number from this app's last getState(), or [x, y] \
@@ -192,12 +192,7 @@ impl Tool for RunScriptTool {
                 Limits: `timeout_ms` wall time (default 30000, max 120000), `max_calls` driver \
                 calls (default 100, max 500), 32 MiB heap. Returns the return value, console \
                 output, and a per-call log; an error names the script line, the call and the \
-                reason.\n\n\
-                Example:\n\
-                const app = await cua.getApp(\"Calculator\");\n\
-                for (const key of [\"7\", \"multiply\", \"6\", \"equals\"]) await app.click({role: \"button\", name: key});\n\
-                const [display] = await app.query({role: \"statictext\"});\n\
-                return display.value;"
+                reason."
                 .into(),
             input_schema: json!({
                 "type": "object",

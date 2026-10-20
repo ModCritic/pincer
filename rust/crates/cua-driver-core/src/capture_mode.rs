@@ -24,12 +24,10 @@ pub fn capture_mode_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "string",
         "enum": ["ax", "vision"],
-        "description": "DEPRECATED and ignored. get_window_state always returns \
-            BOTH the element tree and a screenshot — ground on both. The modality \
-            is chosen at action time by how you address the target: an element ax \
-            action (element_token) or an element px action (x,y). \
-            Any value (including the old \"som\"/\"screenshot\" aliases) is \
-            accepted but has no effect."
+        "description": "DEPRECATED and ignored: any value is accepted and has no \
+            effect. get_window_state returns both the element tree and a screenshot by \
+            default, and the modality is chosen at action time by how you address the \
+            target: element_token or x,y."
     })
 }
 

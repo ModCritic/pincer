@@ -1077,7 +1077,7 @@ impl Tool for GetWindowStateTool {
     fn def(&self) -> &ToolDef {
         GWS_DEF.get_or_init(|| ToolDef {
             name: "get_window_state".into(),
-            description: "Walk a running app's AT-SPI tree and return it ONCE, as \
+            description: "Walk a running app's AT-SPI tree and return it as \
                 compact Markdown by default (`tree_format:\"markdown\"`). Every actionable \
                 element is tagged `[N]` (an element_index); its element_token is \
                 `<snapshot_id>:N`, where `snapshot_id` is printed in the response header and \
@@ -1092,33 +1092,30 @@ impl Tool for GetWindowStateTool {
                 When the walk stops at that budget the response says `Tree truncated at \
                 max_elements=…` and `truncated: true`; pass a larger `max_elements`, or \
                 `query` / `max_depth`, to reach the rest. `_note` is omitted unless \
-                `verbose:true`. `full_output:true` restores the previous full response: both \
+                `verbose:true`. `full_output:true` returns the full response: both \
                 representations, all metadata, and the walker's own limits (≤5 000 nodes).\n\n\
                 DIFF READS: pass `since: <snapshot_id>` from an earlier read of the same window \
                 to get only what changed: `+` added rows, `~` changed rows, `-` removed rows \
                 (their ids are the old snapshot's), or `no change since …`. Rows not listed keep \
                 their previous `[N]` unless a `reindexed:` line says otherwise. The response \
-                carries a NEW snapshot_id: use it in element_tokens. An unknown, expired, \
+                carries a new snapshot_id: use it in element_tokens. An unknown, expired, \
                 other-window or differently-scoped (query/max_elements/max_depth) `since` falls \
                 back to a full read and `since_status` says why. The focused element is not \
                 reported on Linux yet.\n\n\
-                Always returns BOTH the element tree AND a screenshot — ground on \
+                By default returns both the element tree and a screenshot; ground on \
                 both and cross-check (the tree lies on some surfaces). Choose the \
-                modality at ACTION time: an element ax action \
+                modality at action time: an element ax action \
                 (element_token → accessibility rung) or an element px \
-                action (x,y → pixel rung off this screenshot). capture_mode is \
-                deprecated and ignored. On Wayland, where output capture cannot prove \
+                action (x,y → pixel rung off this screenshot). On Wayland, where output capture cannot prove \
                 the requested surface's identity, the truthful tree is returned without \
                 a screenshot and `screenshot_error.code` is \
                 `surface_identity_unproven`.\n\n\
-                The mirror image: pass `include_accessibility_tree:false` to SKIP \
-                the AT-SPI walk entirely and return just the screenshot plus \
-                window metadata (window_bounds, app_name, window_title) — the \
-                capture-only path for a live window preview / picture-in-picture. \
-                Setting BOTH `include_accessibility_tree:false` and \
-                `include_screenshot:false` is an error. Optional `max_dimension` \
-                caps the returned screenshot's long edge in pixels for a cheap \
-                thumbnail.\n\n\
+                Pass `include_accessibility_tree:false` to skip \
+                the AT-SPI walk and return just the screenshot plus \
+                window metadata (window_bounds, app_name, window_title), or \
+                `include_screenshot:false` for the tree only; setting both to false is an \
+                error. A per-call `max_image_dimension` caps the returned screenshot's long \
+                edge for a cheap thumbnail.\n\n\
                 Optional `max_elements` / `max_depth` bound the AT-SPI walk \
                 (Electron / large web apps produce 10k+ element trees). Markdown and \
                 structured elements are truncated identically. Default: `max_elements` 250.\n\n\
@@ -1127,7 +1124,7 @@ impl Tool for GetWindowStateTool {
                 cold-start budget so Chromium/Electron can finish publishing its \
                 initial tree. Explicit values are always honored. Large apps \
                 (LibreOffice, GIMP, file managers) can exceed the budget; \
-                the call then returns the PARTIAL tree with `truncated: true`, \
+                the call then returns the partial tree with `truncated: true`, \
                 `truncation_reason`, `nodes_visited`/`nodes_pending` and \
                 `elements_complete: false`. Every element listed is real and \
                 clickable; elements after the cut are simply missing. Retry with a \
@@ -1153,7 +1150,7 @@ impl Tool for GetWindowStateTool {
                 "window_id":{"type":"integer","description":"Native window identifier from list_windows, or the `popup.window_id` a click / right_click result named (an open context menu / popover; its menu items then get element indices). Omitted: the pid's open popup menu when one is mapped, else its focused / active / largest window."},
                 "capture_mode": cua_driver_core::capture_mode::capture_mode_schema(),
                 "include_accessibility_tree":{"type":"boolean",
-                    "description":"Default true — walk the AT-SPI tree and return it (per `tree_format`) alongside the screenshot. Set false to SKIP the AT-SPI walk entirely and return just the screenshot plus window metadata (window_bounds, app_name, window_title) — the capture-only path for a live window preview / picture-in-picture. Mirrors include_screenshot. Setting BOTH include_accessibility_tree:false AND include_screenshot:false is an error (nothing to return)."},
+                    "description":"Default true: walk the AT-SPI tree and return it (per `tree_format`) alongside the screenshot. Set false to skip the AT-SPI walk and return just the screenshot plus window metadata (window_bounds, app_name, window_title). Setting both include_accessibility_tree:false and include_screenshot:false is an error (nothing to return)."},
                 "include_screenshot":{"type":"boolean",
                     "description":"Default true — returns a grounding screenshot alongside the tree. Set false to skip the grab and return tree only (the cheap path for re-indexing before an element ax action)."},
                 "screenshot_out_file":{"type":"string",
@@ -1162,7 +1159,7 @@ impl Tool for GetWindowStateTool {
                 "max_elements":{"type":"integer","minimum":1,"description":"Cap on total AT-SPI nodes walked. Default 250 (5 000 with full_output:true); the response states when the tree was cut. Raise it to read further into a large window."},
                 "max_depth":{"type":"integer","minimum":1,"description":"Cap on the AT-SPI tree walk depth. Omit for the default (uncapped). Lower for deeply nested apps."},
                 "timeout_ms": cua_driver_core::tool_schema::timeout_ms_schema(),
-                "max_dimension":{"type":"integer","minimum":1,"description":"Legacy optional cap on the returned screenshot's long edge. Applied on top of the configured max_image_dimension ceiling when max_image_dimension is omitted."},
+                "max_dimension":{"type":"integer","minimum":1,"description":"Optional extra cap on the returned screenshot's long edge, applied on top of the configured ceiling when max_image_dimension is omitted. Prefer max_image_dimension."},
                 "max_image_dimension":{"type":"integer","minimum":0,"description":"Per-call long-edge override. This value wins over configured and legacy limits; 0 returns native-resolution PNG bytes. Omit to preserve configured behavior."}
             },"additionalProperties":false})),
             read_only: true, destructive: false, idempotent: false, open_world: false,
@@ -6407,17 +6404,15 @@ impl Tool for ClickTool {
                 selected through its container: `selected: ...`), else presses the real \
                 virtual pointer there. A click that opens a popup menu names it (`popup: \
                 {window_id, bounds}`): pass that window_id to get_window_state to index its \
-                items. The token is stale once the next get_window_state of the same \
-                window replaces its snapshot — \
-                re-snapshot every turn before clicking.\n\n\
+                items. The token goes stale once a newer get_window_state of the same \
+                window replaces its snapshot; the click then fails with a stale error that \
+                names the current snapshot.\n\n\
                 After a zoom call, pass from_zoom=true to auto-translate zoom-image coords \
                 back to full-window space.\n\n\
                 `count`: 1 (default), 2 for a double-click, 3 for a triple-click (selects a \
                 line / paragraph in editors) — one press train with real double-click cadence, \
                 in background and foreground alike; there is no separate triple_click tool.\n\n\
-                button: \"left\" (default), \"right\", or \"middle\". Defaults to left so the \
-                field is fully back-compat. X11: routes through XSendEvent ButtonPress/Release \
-                with the matching button code. Native Wayland: only left-button is supported \
+                button: \"left\" (default), \"right\", or \"middle\". Native Wayland: only left-button is supported \
                 via the virtual-pointer protocol — right/middle return an error rather than \
                 silently degrading to left. `modifier` holds ctrl/shift/alt/super for the \
                 click on X11. Native Wayland refuses modified pointer clicks until its input \
@@ -6431,7 +6426,7 @@ impl Tool for ClickTool {
                     "session": cua_driver_core::tool_schema::session_schema(),
                     "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
                     "pid":{"type":"integer","description":"Target process ID. Required unless scope is \"desktop\" or element_token is supplied (the token carries the pid)."},
-                    "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y or element_index; optional with element_token (the token carries it)."},
+                    "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                     "x":{"type":"number","description":"Window-local pixel X of the target window's own get_window_state screenshot (0..screenshot_width). For get_desktop_state pixels pass scope:\"desktop\" (or coordinate_frame:\"desktop\")."},
                     "y":{"type":"number","description":"Window-local pixel Y of the target window's own get_window_state screenshot (0..screenshot_height); see x."},
                     "element_token": cua_driver_core::tool_schema::element_token_schema(),
@@ -6439,7 +6434,7 @@ impl Tool for ClickTool {
                     // Shape matches the shared button_schema() canon (string +
                     // [left,right,middle]); kept inline to carry the Linux/Wayland
                     // back-compat prose the click button-schema test asserts on.
-                    "button":{"type":"string","enum":["left","right","middle"],"description":"Mouse button. Default: \"left\" (legacy back-compat). X11: routed via ButtonPress/Release with the matching evdev code. Native Wayland: only left-button is supported via the virtual-pointer protocol; right/middle return an error."},
+                    "button":{"type":"string","enum":["left","right","middle"],"description":"Mouse button. Default: \"left\". Native Wayland: only left-button is supported via the virtual-pointer protocol; right/middle return an error."},
                     "count":{"type":"integer","minimum":1,"description":"Number of clicks in one press train: 1 (default), 2 = double-click, 3 = triple-click (line/paragraph selection). There is no separate triple_click tool — pass count: 3 here."},
                     "modifier": cua_driver_core::tool_schema::modifier_schema(),
                     "from_zoom":{"type":"boolean","description":"Set true after a zoom call to auto-translate zoom-image pixel coordinates back to full-window space."},
@@ -7457,7 +7452,9 @@ impl Tool for TypeTextTool {
     fn def(&self) -> &ToolDef {
         TYPE_DEF.get_or_init(|| ToolDef {
             name: "type_text".into(),
-            description: "Type text to a window via XSendEvent (KeyPress/KeyRelease). No focus steal.".into(),
+            description: "Type text into a window without stealing focus: through AT-SPI \
+                editable text (the element_token's field when given), a terminal's pty, or real \
+                key events from the session's virtual keyboard.".into(),
             input_schema: json!({
                 "type":"object","required":["text"],"properties":{
                     "session": cua_driver_core::tool_schema::session_schema(),
@@ -8392,12 +8389,13 @@ impl Tool for PressKeyTool {
     fn def(&self) -> &ToolDef {
         PRESS_DEF.get_or_init(|| ToolDef {
             name: "press_key".into(),
-            description: "Press a key via XSendEvent to a window. No focus steal.".into(),
+            description: "Press one key, with optional held modifiers, in a window without \
+                stealing focus (real key events from the session's virtual keyboard).".into(),
             input_schema: json!({
                 "type":"object","required":["key"],"properties":{
                     "session": cua_driver_core::tool_schema::session_schema(),
                     "pid":{"type":"integer","description":"Target process ID. Omit with scope \"desktop\" to send the key to the focused application."},
-                    "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y or element_index; optional with element_token (the token carries it)."},
+                    "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                     "key":{"type":"string","description":"Key name: enter/return, tab, escape, space, backspace, delete, insert, home, end, pageup, pagedown, up, down, left, right, f1-f12, or any single ASCII character."},
                     "modifiers":{"type":"array","items":{"type":"string"},"description":"Modifier keys held while the key is pressed: ctrl, shift, alt, super."},
                     "element_token": cua_driver_core::tool_schema::element_token_schema(),
@@ -8821,7 +8819,7 @@ impl Tool for HotkeyTool {
             name: "hotkey".into(),
             description: "Press a combination of keys simultaneously, e.g. [\"ctrl\",\"c\"] for Copy. \
                 Delivered to the target window without focus steal (real key events from a virtual \
-                master keyboard on X11); target does NOT need to be frontmost. Window-manager chords \
+                master keyboard on X11); target does not need to be frontmost. Window-manager chords \
                 cannot reach the WM that way: alt+F4 on a window target closes that window through \
                 the WM (_NET_CLOSE_WINDOW, effect confirmed when it unmaps); super+*, alt+tab, \
                 ctrl+alt+* and other WM bindings are refused with code wm_chord_unavailable — use \
@@ -8830,7 +8828,7 @@ impl Tool for HotkeyTool {
                 "type":"object","required":["keys"],"properties":{
                     "session": cua_driver_core::tool_schema::session_schema(),
                     "pid":{"type":"integer","description":"Target process ID. Omit with scope \"desktop\" to send the chord to the focused application."},
-                    "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y or element_index; optional with element_token (the token carries it)."},
+                    "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                     "keys":{"type":"array","items":{"type":"string"},"minItems":2,
                         "description":"Modifier(s) + one non-modifier key, e.g. [\"ctrl\",\"c\"]."},
                     "element_token": cua_driver_core::tool_schema::element_token_schema(),
@@ -9268,7 +9266,8 @@ impl Tool for SetValueTool {
     fn def(&self) -> &ToolDef {
         SV_DEF.get_or_init(|| ToolDef {
             name: "set_value".into(),
-            description: "Set value of an AT-SPI element via SetValue action.".into(),
+            description: "Set an element's value through AT-SPI EditableText or Value, else by \
+                typing into the field (see `value`).".into(),
             input_schema: json!({
                 "type":"object","required":["value"],"properties":{
                     "session": cua_driver_core::tool_schema::session_schema(),
@@ -9717,8 +9716,9 @@ impl Tool for ScrollTool {
     fn def(&self) -> &ToolDef {
         SCROLL_DEF.get_or_init(|| ToolDef {
             name: "scroll".into(),
-            description: "Scroll the target pid's focused region via XSendEvent Button4/5. \
-                direction required; by defaults to line, amount defaults to 3.".into(),
+            description: "Scroll a window without stealing focus: real wheel steps from the \
+                session's virtual pointer over the element_token or x,y point, else the window's \
+                center. direction required; by defaults to line, amount defaults to 3.".into(),
             input_schema: json!({
                 // `pid` is conditionally required (validated in code), so only
                 // `direction` is pinned — matches the scroll→["direction"] canon
@@ -10288,7 +10288,7 @@ impl Tool for DoubleClickTool {
                 "session": cua_driver_core::tool_schema::session_schema(),
                 "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
                 "pid":{"type":"integer","description":"Target process ID. Optional with element_token (the token carries the pid)."},
-                "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y or element_index; optional with element_token (the token carries it)."},
+                "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                 "x":{"type":"number","description":"Window-local pixel X of the target window's own get_window_state screenshot (0..screenshot_width). For get_desktop_state pixels pass scope:\"desktop\" (or coordinate_frame:\"desktop\")."},
                 "y":{"type":"number","description":"Window-local pixel Y of the target window's own get_window_state screenshot (0..screenshot_height); see x."},
                 "coordinate_frame": coordinate_frame_schema(),
@@ -10574,7 +10574,7 @@ impl Tool for RightClickTool {
                 "session": cua_driver_core::tool_schema::session_schema(),
                 "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
                 "pid":{"type":"integer","description":"Target process ID. Optional with element_token (the token carries the pid)."},
-                "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y or element_index; optional with element_token (the token carries it)."},
+                "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                 "x":{"type":"number","description":"Window-local pixel X of the target window's own get_window_state screenshot (0..screenshot_width). For get_desktop_state pixels pass scope:\"desktop\" (or coordinate_frame:\"desktop\")."},
                 "y":{"type":"number","description":"Window-local pixel Y of the target window's own get_window_state screenshot (0..screenshot_height); see x."},
                 "coordinate_frame": coordinate_frame_schema(),
@@ -12452,9 +12452,10 @@ impl Tool for GetScreenSizeTool {
     fn def(&self) -> &ToolDef {
         GSS_DEF.get_or_init(|| ToolDef {
             name: "get_screen_size".into(),
-            description: "Return the logical size of the main display in points plus its backing \
-                scale factor. Agents click in points; Retina displays have scale_factor 2.0. \
-                Requires no TCC permissions."
+            description: "Return the desktop size and a scale factor. On X11 this is the \
+                pixel size of the whole X screen (every monitor) with scale_factor 1.0; on \
+                Hyprland it is the logical desktop frame of the powered monitors with the \
+                output scale, plus a per-monitor list."
                 .into(),
             input_schema: json!({"type":"object","properties":{
                 "session": cua_driver_core::tool_schema::session_schema()
@@ -12962,7 +12963,9 @@ impl Tool for GetCursorPositionTool {
         GCP_DEF.get_or_init(|| ToolDef {
             name: "get_cursor_position".into(),
             description:
-                "Return the current mouse cursor position in screen points (origin top-left)."
+                "Return the pointer position in desktop pixels (origin top-left). On Wayland \
+                 compositors other than Hyprland it is only the last position this process moved \
+                 the pointer to (`source: \"synthetic\"`)."
                     .into(),
             input_schema: json!({"type":"object","properties":{
                 "session": cua_driver_core::tool_schema::session_schema()
@@ -13644,7 +13647,9 @@ impl Tool for CheckPermissionsTool {
     fn def(&self) -> &ToolDef {
         PERMS_DEF.get_or_init(|| ToolDef {
             name: "check_permissions".into(),
-            description: "Check required permissions for cua-driver-rs on Linux.".into(),
+            description: "Report whether X11, a Wayland session, and the AT-SPI accessibility \
+                bus are reachable, with a fix hint for each failure. Linux has no permission \
+                prompts.".into(),
             input_schema: json!({"type":"object","properties":{"prompt":{"type":"boolean","description":"Ignored: Linux has no permission prompts."}},"additionalProperties":false}),
             read_only: true,
             destructive: false,
@@ -13775,19 +13780,18 @@ impl Tool for SetConfigTool {
     fn def(&self) -> &ToolDef {
         SCFG_DEF.get_or_init(|| ToolDef {
             name: "set_config".into(),
-            description: "Update cua-driver-rs configuration. capture_mode / \
-                max_image_dimension take effect immediately.\n\n\
-                Pass each setting as its own field: `{\"capture_mode\": \"som\", \"max_image_dimension\": 0}`.\n\n\
-                The experimental_pip keys persist to ~/.cua-driver/config.json and apply on next \
-                daemon restart (the PiP backend is initialised once at startup; \
-                Linux ships only the trait stub today — see issue #1729).\n\n\
+            description: "Update the driver configuration. max_image_dimension takes effect \
+                immediately; capture_mode is only stored, because get_window_state ignores it.\n\n\
+                Pass each setting as its own field: `{\"max_image_dimension\": 0}`.\n\n\
+                The experimental_pip keys persist to ~/.cua-driver/config.json and apply on the \
+                next daemon restart; the Linux PiP backend is a stub, so they show nothing here.\n\n\
                 `cursor.motion.style`, `cursor.motion.timing` and `cursor.motion.effects.<name>` \
                 (`on`, `off`, or `default`) save the default cursor motion for sessions started afterwards. \
                 `cursor.motion: \"default\"` clears every saved cursor motion default.\n\n\
                 `cursor.badges` (`minimal` default, `verbose`, or `off`) sets the agent cursor badge \
                 for every cursor at once.".into(),
             input_schema: with_cursor_motion_config_properties(json!({"type":"object","properties":{
-                "capture_mode":{"type":"string","enum":["ax","vision"],"description":"Default capture mode for get_window_state. (\"som\"/\"screenshot\" still decode as deprecated aliases.)"},
+                "capture_mode":{"type":"string","enum":["ax","vision"],"description":"Stored only: get_window_state ignores it and returns the tree and a screenshot by default."},
                 "max_image_dimension":{"type":"integer","description":"Max dimension for screenshot resizing (0 = no limit)."},
                 "experimental_pip":{"type":"boolean","description":"Enable the experimental PiP preview window (applies next restart; Linux backend stubbed)."},
                 "experimental_pip_geometry":{"type":"string","description":"PiP window size + optional position in `WxH` or `WxH+X+Y` form."}
@@ -13972,8 +13976,9 @@ impl Tool for ZoomTool {
             description: "Capture a cropped JPEG of a window region (x1,y1)–(x2,y2) in \
                 screenshot pixels, with 20% padding. Output is at most 500 px wide. \
                 Corners, not a size: x1,y1 is the top-left and x2,y2 the bottom-right (x,y,width,height is also accepted and converted).\n\n\
-                After a zoom, pass from_zoom=true to click/type_text to auto-translate \
-                coordinates back to full-window space. Coordinate actions return \
+                After a zoom, pass from_zoom=true to click, double_click, right_click, drag or \
+                a mouse_button / mouse_drag call to auto-translate coordinates back to \
+                full-window space. Coordinate actions return \
                 `screenshot_context_missing` when no current snapshot contains a \
                 screenshot owned by this session. `from_zoom` actions return \
                 `zoom_context_missing` when the zoom was never created or was replaced; call \

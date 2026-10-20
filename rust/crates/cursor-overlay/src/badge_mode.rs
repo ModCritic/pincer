@@ -189,7 +189,7 @@ pub fn config_schema_properties() -> Map<String, Value> {
         json!({
             "type": "string",
             "enum": values,
-            "description": "Agent cursor badge. minimal (default): no badge at rest; a brief chip for a foreground moment or a key combo, and the session name on hover or when two or more agent cursors are on screen. verbose: the earlier badge with the session name and delivery/target chips on every action. off: no badge. Applies immediately to every cursor."
+            "description": "Agent cursor badge. minimal (default): no badge at rest; a brief chip for a foreground moment or a key combo, and the session name on hover or when two or more agent cursors are on screen. verbose: the session name and delivery/target chips on every action. off: no badge. Applies immediately to every cursor."
         }),
     );
     properties

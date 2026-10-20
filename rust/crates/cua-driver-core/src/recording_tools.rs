@@ -69,7 +69,7 @@ impl Tool for StartRecordingTool {
                   resolution is explicitly not applicable instead.\n\n\
                 The per-turn accessibility walk is bounded like `get_window_state`: \
                 `state_timeout_ms` (default 1000) caps each before/after walk, a walk \
-                that runs out of budget records the PARTIAL tree, and `evidence.json` \
+                that runs out of budget records the partial tree, and `evidence.json` \
                 carries `truncated`, `truncation_reason`, `nodes_visited`, \
                 `nodes_pending` and `timeout_ms` for that phase. A provider that stops \
                 answering is abandoned after the budget plus a short grace and the \
@@ -128,7 +128,7 @@ impl Tool for StartRecordingTool {
                         "minimum": crate::tool_schema::TIMEOUT_MS_MIN,
                         "maximum": crate::tool_schema::TIMEOUT_MS_MAX,
                         "default": crate::recording::TURN_STATE_TIMEOUT_MS_DEFAULT,
-                        "description": "Wall-clock budget in milliseconds for EACH per-turn \
+                        "description": "Wall-clock budget in milliseconds for each per-turn \
                             before/after accessibility walk (same default and bounds as \
                             get_window_state's timeout_ms). A walk that runs out records \
                             the partial tree and marks it truncated in evidence.json."
@@ -361,9 +361,9 @@ impl Tool for ReplayTrajectoryTool {
                   sessions. Pixel clicks (`click({pid, x, y})`) and all keyboard tools \
                   replay cleanly. Failures are reported but don't stop replay unless \
                   `stop_on_error` is true.\n\
-                - `get_window_state` and other read-only tools are NOT currently recorded, \
+                - `get_window_state` and other read-only tools are not recorded, \
                   so replays do not re-populate the per-(pid, window_id) element cache.\n\
-                - If recording is ENABLED while replay runs, the replay itself is recorded \
+                - If recording is enabled while replay runs, the replay itself is recorded \
                   into the currently configured output directory.  That's deliberate: \
                   recording a replay against a new build and diffing the two trajectories \
                   is the regression-test workflow.".into(),
@@ -600,7 +600,7 @@ impl Tool for InstallFfmpegTool {
             name: "install_ffmpeg".into(),
             description: "Install the ffmpeg binary used by start_recording's video \
                 capture (Linux/Windows; macOS records natively and needs no ffmpeg). \
-                Two-step and confirmed: called without `confirm` it only REPORTS the \
+                Two-step and confirmed: called without `confirm` it only reports the \
                 exact install command for this platform's package manager; pass \
                 `confirm: true` to actually run it. No-op if ffmpeg is already on PATH. \
                 ffmpeg is run as a separate process, never linked into the driver."

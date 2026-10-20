@@ -66,7 +66,8 @@ pub fn modifier_schema() -> Value {
     json!({
         "type": "array",
         "items": { "type": "string" },
-        "description": "Modifier keys held during the action: cmd, shift, option/alt, ctrl."
+        "description": "Modifier keys held during the action: ctrl, shift, alt/option, cmd \
+            (Super on Linux, the Windows key on Windows)."
     })
 }
 
@@ -122,7 +123,7 @@ pub fn timeout_ms_schema() -> Value {
         "description": format!(
             "Wall-clock budget in milliseconds for the accessibility-tree walk \
              (default {TIMEOUT_MS_DEFAULT}, min {TIMEOUT_MS_MIN}, max {TIMEOUT_MS_MAX}). \
-             Bounds the WHOLE walk. When the budget runs out the tool returns the PARTIAL tree \
+             Bounds the whole walk. When the budget runs out the tool returns the partial tree \
              it has, flagged with `truncated: true`, `truncation_reason`, `nodes_visited`, \
              `nodes_pending` and `elements_complete: false`; retry with a larger value \
              (e.g. 5000) or narrow with `query` / `max_depth`."

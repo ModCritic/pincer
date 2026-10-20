@@ -618,7 +618,6 @@ impl BrowserPrepareTool {
                 browser_consent_required or browser_requires_setup; then call \
                 get_browser_state again and act with browser_click, browser_type or \
                 browser_pointer. It attaches, or refuses with nothing changed and says why. \
-                Explicitly prepare an owned DevTools endpoint for a browser. \
                 pid is required for an existing process or existing-profile attachment, \
                 and optional only for allow_launch=true with an isolated profile. Existing \
                 endpoints are detected without side effects. Acting setup \
