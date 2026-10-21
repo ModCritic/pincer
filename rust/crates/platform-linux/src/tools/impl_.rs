@@ -5814,12 +5814,42 @@ async fn track_overlay_drag_with(
 /// How often the agent cursor is redrawn while it follows a pointer path.
 const OVERLAY_FOLLOW_FRAME: std::time::Duration = std::time::Duration::from_millis(8);
 
+/// Share of the screen width above which the agent cursor eases across a
+/// jump between path samples instead of sliding at an even speed.
+const EASED_JUMP_SCREEN_FRACTION: f64 = 0.08;
+
+/// The eased-jump threshold when the screen width is unknown (Wayland).
+const EASED_JUMP_FALLBACK_PX: f64 = 200.0;
+
+/// Jumps longer than this are eased: 8% of `screen_width`, else 200 px.
+fn eased_jump_px(screen_width: Option<u32>) -> f64 {
+    screen_width.map_or(EASED_JUMP_FALLBACK_PX, |width| {
+        f64::from(width) * EASED_JUMP_SCREEN_FRACTION
+    })
+}
+
+/// Quadratic ease-in-out: speeds up over the first half, slows down over
+/// the second.
+fn ease_in_out_quad(t: f64) -> f64 {
+    if t < 0.5 {
+        2.0 * t * t
+    } else {
+        1.0 - (2.0 - 2.0 * t).powi(2) / 2.0
+    }
+}
+
 /// Where the agent cursor is drawn `elapsed_ms` into a pointer path whose
 /// samples `points` are due at `offsets_ms`. Between two samples it is on the
 /// line from the one the real pointer is at toward the next, so it reaches
 /// each sample when the pointer jumps there and slides across wide gaps
-/// instead of jumping with the pointer.
-fn path_overlay_point(points: &[(f64, f64)], offsets_ms: &[f64], elapsed_ms: f64) -> (f64, f64) {
+/// instead of jumping with the pointer. Gaps longer than `ease_over_px` are
+/// crossed with a quadratic ease, shorter ones at an even speed.
+fn path_overlay_point(
+    points: &[(f64, f64)],
+    offsets_ms: &[f64],
+    elapsed_ms: f64,
+    ease_over_px: f64,
+) -> (f64, f64) {
     let next = offsets_ms.partition_point(|&offset| offset <= elapsed_ms);
     let Some(&to) = points.get(next) else {
         return points.last().copied().unwrap_or((0.0, 0.0));
@@ -5828,11 +5858,14 @@ fn path_overlay_point(points: &[(f64, f64)], offsets_ms: &[f64], elapsed_ms: f64
         return to;
     };
     let (t0, t1) = (offsets_ms[next - 1], offsets_ms[next]);
-    let fraction = if t1 > t0 {
+    let mut fraction = if t1 > t0 {
         ((elapsed_ms - t0) / (t1 - t0)).clamp(0.0, 1.0)
     } else {
         1.0
     };
+    if (to.0 - from.0).hypot(to.1 - from.1) > ease_over_px {
+        fraction = ease_in_out_quad(fraction);
+    }
     (
         from.0 + (to.0 - from.0) * fraction,
         from.1 + (to.1 - from.1) * fraction,
@@ -5842,12 +5875,14 @@ fn path_overlay_point(points: &[(f64, f64)], offsets_ms: &[f64], elapsed_ms: f64
 /// Draw the agent cursor along a pointer path on the path's own schedule.
 /// It waits for the path driver to report its first sample, then sends one
 /// position per overlay frame until the last sample is due, shown pressed
-/// while `pressed`. Returns early if the driver stops before it starts.
+/// while `pressed`, easing across gaps longer than `ease_over_px`. Returns
+/// early if the driver stops before it starts.
 async fn follow_overlay_path_with(
     send: impl Fn(cursor_overlay::OverlayCommand),
     points: &[(f64, f64)],
     offsets_ms: &[f64],
     pressed: bool,
+    ease_over_px: f64,
     mut started: tokio::sync::mpsc::UnboundedReceiver<()>,
 ) {
     if points.is_empty() || started.recv().await.is_none() {
@@ -5858,7 +5893,7 @@ async fn follow_overlay_path_with(
     let end_ms = offsets_ms.last().copied().unwrap_or(0.0);
     loop {
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-        let (x, y) = path_overlay_point(points, offsets_ms, elapsed_ms);
+        let (x, y) = path_overlay_point(points, offsets_ms, elapsed_ms, ease_over_px);
         send(cursor_overlay::track_pointer_command(x, y));
         if elapsed_ms >= end_ms {
             break;
@@ -5915,21 +5950,82 @@ async fn completed_overlay_drag_balances_visual_press_once() {
 }
 
 #[cfg(test)]
+fn path_overlay_point_linear(
+    points: &[(f64, f64)],
+    offsets: &[f64],
+    elapsed_ms: f64,
+) -> (f64, f64) {
+    path_overlay_point(points, offsets, elapsed_ms, f64::INFINITY)
+}
+
+#[cfg(test)]
+#[test]
+fn long_jumps_are_eased_and_short_ones_are_not() {
+    assert_eq!(eased_jump_px(Some(2560)), 204.8);
+    assert_eq!(eased_jump_px(None), 200.0);
+    let long = [(0.0, 0.0), (300.0, 0.0)];
+    let short = [(0.0, 0.0), (100.0, 0.0)];
+    let offsets = [0.0, 100.0];
+    // Slow start, full speed in the middle, slow arrival.
+    assert_eq!(
+        path_overlay_point(&long, &offsets, 25.0, 200.0),
+        (37.5, 0.0)
+    );
+    assert_eq!(
+        path_overlay_point(&long, &offsets, 50.0, 200.0),
+        (150.0, 0.0)
+    );
+    assert_eq!(
+        path_overlay_point(&long, &offsets, 75.0, 200.0),
+        (262.5, 0.0)
+    );
+    assert_eq!(
+        path_overlay_point(&long, &offsets, 100.0, 200.0),
+        (300.0, 0.0)
+    );
+    assert_eq!(
+        path_overlay_point(&short, &offsets, 25.0, 200.0),
+        (25.0, 0.0)
+    );
+}
+
+#[cfg(test)]
 #[test]
 fn path_overlay_point_leads_the_pointer_to_each_sample() {
     let points = [(0.0, 0.0), (100.0, 0.0), (100.0, 50.0)];
     let offsets = [0.0, 100.0, 200.0];
-    assert_eq!(path_overlay_point(&points, &offsets, -5.0), (0.0, 0.0));
-    assert_eq!(path_overlay_point(&points, &offsets, 0.0), (0.0, 0.0));
+    assert_eq!(
+        path_overlay_point_linear(&points, &offsets, -5.0),
+        (0.0, 0.0)
+    );
+    assert_eq!(
+        path_overlay_point_linear(&points, &offsets, 0.0),
+        (0.0, 0.0)
+    );
     // Halfway between samples, halfway along the jump the pointer makes next.
-    assert_eq!(path_overlay_point(&points, &offsets, 50.0), (50.0, 0.0));
-    assert_eq!(path_overlay_point(&points, &offsets, 100.0), (100.0, 0.0));
-    assert_eq!(path_overlay_point(&points, &offsets, 150.0), (100.0, 25.0));
-    assert_eq!(path_overlay_point(&points, &offsets, 200.0), (100.0, 50.0));
-    assert_eq!(path_overlay_point(&points, &offsets, 900.0), (100.0, 50.0));
+    assert_eq!(
+        path_overlay_point_linear(&points, &offsets, 50.0),
+        (50.0, 0.0)
+    );
+    assert_eq!(
+        path_overlay_point_linear(&points, &offsets, 100.0),
+        (100.0, 0.0)
+    );
+    assert_eq!(
+        path_overlay_point_linear(&points, &offsets, 150.0),
+        (100.0, 25.0)
+    );
+    assert_eq!(
+        path_overlay_point_linear(&points, &offsets, 200.0),
+        (100.0, 50.0)
+    );
+    assert_eq!(
+        path_overlay_point_linear(&points, &offsets, 900.0),
+        (100.0, 50.0)
+    );
     // Samples due at the same time do not divide by zero.
     assert_eq!(
-        path_overlay_point(&[(0.0, 0.0), (10.0, 10.0)], &[0.0, 0.0], 0.0),
+        path_overlay_point_linear(&[(0.0, 0.0), (10.0, 10.0)], &[0.0, 0.0], 0.0),
         (10.0, 10.0)
     );
 }
@@ -5946,6 +6042,7 @@ async fn overlay_path_follow_waits_for_the_start_and_ends_on_the_last_sample() {
         &[(0.0, 0.0), (80.0, 0.0)],
         &[0.0, 40.0],
         true,
+        f64::INFINITY,
         started_rx,
     )
     .await;
@@ -5991,6 +6088,7 @@ async fn overlay_path_follow_sends_nothing_when_the_path_never_starts() {
         &[(0.0, 0.0), (80.0, 0.0)],
         &[0.0, 40.0],
         true,
+        f64::INFINITY,
         started_rx,
     )
     .await;
@@ -13494,6 +13592,7 @@ impl Tool for MoveAlongPathTool {
             .collect();
         // On Wayland the backend checks the samples against its own pointer
         // area, before it sends any input.
+        let mut screen_width = None;
         if !wayland {
             let (width, height) = match tokio::task::spawn_blocking(x11_screen_size).await {
                 Ok(Ok(size)) => size,
@@ -13503,6 +13602,7 @@ impl Tool for MoveAlongPathTool {
             if let Err(error) = path::check_on_screen(&screen, width, height) {
                 return move_along_path_refusal(error.to_string());
             }
+            screen_width = Some(width);
         }
 
         let points: Vec<(i32, i32)> = screen
@@ -13582,6 +13682,7 @@ impl Tool for MoveAlongPathTool {
             &overlay_points,
             &sampled.offsets_ms,
             request.button.is_some(),
+            eased_jump_px(screen_width),
             started_rx,
         );
         let result = if crate::overlay::renderer_configured() {
