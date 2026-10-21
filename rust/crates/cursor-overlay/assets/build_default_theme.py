@@ -8,7 +8,8 @@ archive without a LottieFiles account or a browser editor.
 
 The runtime applies two bounded effects after decoding the compiled theme:
 
-* the approved blue tint key is replaced with the stable session color;
+* the cursor's main color is the tint key, replaced with the session's
+  color (the first session keeps it; later ones are redder or yellower);
 * the shared four-second float transform is applied to the composed theme.
 
 Those effects are runtime concerns because they must stay synchronized across
@@ -19,15 +20,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 CANVAS = 128
 FPS = 30
-BLUE = [94 / 255, 192 / 255, 232 / 255, 1]
-WHITE = [1, 1, 1, 1]
+# Pincer palette. MAIN is the tint key and must match DEFAULT_CURSOR_FILL in
+# src/theme.rs; ACCENT colors the action cues and is never tinted.
+MAIN = [201 / 255, 94 / 255, 72 / 255, 1]  # #C95E48
+ACCENT = [226 / 255, 129 / 255, 80 / 255, 1]  # #E28150
+BLACK = [0, 0, 0, 1]
 TRANSPARENT = [0, 0, 0, 0]
+# Drop shadow: offset down and right in canvas units, softened by wider,
+# fainter copies of the outline.
+SHADOW_OFFSET = (5.0, 7.0)
 
 Point = tuple[float, float]
 PathPoint = tuple[Point, Point, Point]
@@ -121,14 +129,21 @@ def rectangle(
     }
 
 
-def stroke(color: list[float], width: float, opacity: float = 100) -> dict[str, Any]:
+def stroke(
+    color: list[float],
+    width: float,
+    opacity: float = 100,
+    *,
+    sharp: bool = False,
+) -> dict[str, Any]:
     return {
         "ty": "st",
         "c": static(color),
         "o": static(opacity),
         "w": static(width),
         "lc": 2,
-        "lj": 2,
+        # Miter joins keep the cursor's corners pointed; cues stay round.
+        "lj": 1 if sharp else 2,
         "ml": 4,
     }
 
@@ -198,20 +213,80 @@ def shape_layer(
     }
 
 
-CURSOR_PATH = path_shape(
-    [
-        ((55, 30), (0, 0), (-7, -2)),
-        ((43, 41), (-1, -8), (0, 0)),
-        ((64, 98), (0, 0), (3, 8)),
-        ((77, 99), (-4, 7), (0, 0)),
-        ((86, 79), (0, 0), (2, -4)),
-        ((95, 70), (-4, 2), (0, 0)),
-        ((108, 63), (0, 0), (7, -4)),
-        ((107, 50), (7, 3), (0, 0)),
-    ],
-    closed=True,
-    name="Cursor",
-)
+# A dart with pointed corners. The outline's miter tip lands on the hotspot:
+# with a 5-unit stroke and a 49 degree tip the miter reaches 6 units past the
+# path's tip vertex, along the 45 degree axis.
+HOTSPOT = (42, 28)
+OUTLINE_WIDTH = 5
+
+
+def _cursor_outline() -> list[Point]:
+    half_angle = math.radians(24.5)
+    reach = OUTLINE_WIDTH / 2 / math.sin(half_angle)
+    axis = math.radians(45)
+    tip = (
+        HOTSPOT[0] + reach * math.cos(axis),
+        HOTSPOT[1] + reach * math.sin(axis),
+    )
+    side, notch = 74, 55
+
+    def along(angle: float, length: float) -> Point:
+        return (
+            round(tip[0] + length * math.cos(angle), 2),
+            round(tip[1] + length * math.sin(angle), 2),
+        )
+
+    return [
+        (round(tip[0], 2), round(tip[1], 2)),
+        along(axis + half_angle, side),
+        along(axis, notch),
+        along(axis - half_angle, side),
+    ]
+
+
+CURSOR_PATH = points(_cursor_outline(), closed=True, name="Cursor")
+
+
+def offset_position(position: dict[str, Any] | None) -> dict[str, Any]:
+    """`position` (the layer default when None) moved by SHADOW_OFFSET."""
+    dx, dy = SHADOW_OFFSET
+    if position is None:
+        return static([64 + dx, 64 + dy])
+    if not position["a"]:
+        x, y = position["k"]
+        return static([x + dx, y + dy])
+    frames = []
+    for item in position["k"]:
+        moved = dict(item)
+        for key in ("s", "e"):
+            if key in moved:
+                moved[key] = [moved[key][0] + dx, moved[key][1] + dy]
+        frames.append(moved)
+    return {"a": 1, "k": frames}
+
+
+def faster_fade(opacity: dict[str, Any] | None) -> dict[str, Any] | None:
+    """`opacity` squared (as a fraction), for a cue's outline and shadow.
+
+    Every layer fades on its own, so a half-faded cue would show its black
+    outline through its color; fading the outline faster keeps it orange.
+    """
+    if opacity is None:
+        return None
+
+    def squared(values: list[float]) -> list[float]:
+        return [round(value * value / 100, 2) for value in values]
+
+    if not opacity["a"]:
+        return static(squared(_value(opacity["k"]))[0])
+    frames = []
+    for item in opacity["k"]:
+        faded = dict(item)
+        for key in ("s", "e"):
+            if key in faded:
+                faded[key] = squared(faded[key])
+        frames.append(faded)
+    return {"a": 1, "k": frames}
 
 
 def cursor_layers(
@@ -220,39 +295,31 @@ def cursor_layers(
     position: dict[str, Any] | None = None,
     scale: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    layers: list[dict[str, Any]] = []
-    index = 1
-    for width, opacity in [
-        (44, 2.0),
-        (36, 2.4),
-        (29, 3.0),
-        (23, 3.8),
-        (18, 4.8),
-        (14, 6.0),
-        (10, 7.5),
-        (7, 9.5),
-    ]:
-        layers.append(
-            shape_layer(
-                index,
-                f"Cursor glow {width}",
-                [CURSOR_PATH, stroke(BLUE, width, opacity)],
-                frames,
-                position=position,
-                scale=scale,
-            )
-        )
-        index += 1
-    layers.append(
+    shadow = offset_position(position)
+    layers: list[dict[str, Any]] = [
         shape_layer(
-            index,
+            1,
+            "Cursor shadow",
+            [
+                CURSOR_PATH,
+                fill(BLACK, 12),
+                # Round joins: a mitered soft edge would poke past the tip.
+                stroke(BLACK, 14, 4),
+                stroke(BLACK, 7, 6),
+            ],
+            frames,
+            position=shadow,
+            scale=scale,
+        ),
+        shape_layer(
+            2,
             "Cursor body",
-            [CURSOR_PATH, fill(BLUE), stroke(WHITE, 5)],
+            [CURSOR_PATH, fill(MAIN), stroke(BLACK, OUTLINE_WIDTH, sharp=True)],
             frames,
             position=position,
             scale=scale,
-        )
-    )
+        ),
+    ]
     return layers
 
 
@@ -268,48 +335,43 @@ def cue_layers(
     rotation: dict[str, Any] | None = None,
     opacity: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    layers: list[dict[str, Any]] = []
-    index = start_index
-    for expansion, glow_opacity in [(13, 2.4), (9, 3.1), (6, 4.0), (3, 5.2)]:
-        layers.append(
-            shape_layer(
-                index,
-                f"{name} glow {expansion}",
-                [*geometry, stroke(BLUE, width + expansion, glow_opacity)],
-                frames,
-                position=position,
-                scale=scale,
-                rotation=rotation,
-                opacity=opacity,
-            )
-        )
-        index += 1
-    layers.append(
+    shadow = offset_position(position)
+    return [
         shape_layer(
-            index,
+            start_index,
+            f"{name} shadow",
+            [
+                *geometry,
+                stroke(BLACK, width + 7, 4),
+                stroke(BLACK, width + 3, 9),
+            ],
+            frames,
+            position=shadow,
+            scale=scale,
+            rotation=rotation,
+            opacity=faster_fade(opacity),
+        ),
+        shape_layer(
+            start_index + 1,
             f"{name} outline",
-            [*geometry, stroke(WHITE, width + 1.5)],
+            [*geometry, stroke(BLACK, width + 3)],
             frames,
             position=position,
             scale=scale,
             rotation=rotation,
-            opacity=opacity,
-        )
-    )
-    index += 1
-    layers.append(
+            opacity=faster_fade(opacity),
+        ),
         shape_layer(
-            index,
+            start_index + 2,
             f"{name} color",
-            [*geometry, stroke(BLUE, max(width - 1, 1.5))],
+            [*geometry, stroke(ACCENT, max(width - 0.5, 1.5))],
             frames,
             position=position,
             scale=scale,
             rotation=rotation,
             opacity=opacity,
-        )
-    )
-    return layers
+        ),
+    ]
 
 
 def lottie(name: str, frames: int, layers: Sequence[dict[str, Any]]) -> dict[str, Any]:
@@ -539,13 +601,22 @@ def action_record() -> dict[str, Any]:
     dot = [
         shape_layer(
             30,
+            "Record dot shadow",
+            [*dot_geometry, fill(BLACK, 12), stroke(BLACK, 6, 6)],
+            frames,
+            position=offset_position(static([52, 64])),
+            scale=dot_scale,
+            opacity=faster_fade(dot_opacity),
+        ),
+        shape_layer(
+            31,
             "Record dot outline",
-            [*dot_geometry, fill(BLUE), stroke(WHITE, 3)],
+            [*dot_geometry, fill(ACCENT), stroke(BLACK, 3)],
             frames,
             position=static([52, 64]),
             scale=dot_scale,
             opacity=dot_opacity,
-        )
+        ),
     ]
     return lottie("action_record", frames, [*cursor_layers(frames), *ring, *dot])
 
@@ -623,13 +694,13 @@ def semantic_manifest() -> dict[str, Any]:
     return {
         "schema": "cua.cursor-theme/2",
         "id": "cua.default",
-        "name": "Cua Default",
-        "version": "2.0.0",
-        "author": "Cua",
+        "name": "Pincer Default",
+        "version": "3.0.0",
+        "author": "Cua, restyled for Pincer",
         "license": "MIT",
         "compatibility": {"profile": "cua-driver-actions-v2", "semantics": 2},
         "canvas": {"width": CANVAS, "height": CANVAS, "fps": FPS},
-        "hotspot": {"x": 55, "y": 30},
+        "hotspot": {"x": HOTSPOT[0], "y": HOTSPOT[1]},
         "actions": actions,
     }
 

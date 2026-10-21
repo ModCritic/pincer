@@ -1,13 +1,10 @@
 # Agent cursor themes
 
-Cua Driver ships one built-in cursor theme: `cua.default`. It is the default on
-macOS, Windows, and Linux and cannot be removed. The theme uses a colored
-pointer with a white outline over a larger, cursor-shaped glow in the same
-session color. The glow softly fades to transparent around the full pointer
-silhouette, while the white outline preserves a crisp boundary on light, dark,
-and similarly colored backgrounds. Its semantic action marks use
-the same session-colored center and white-outline treatment as the pointer,
-plus a tighter, softer glow so they remain legible without competing with it.
+Pincer ships one built-in cursor theme: `cua.default`. It is the default on
+macOS, Windows, and Linux and cannot be removed. The pointer is a dart with
+pointed corners in Pincer's main color, #C95E48, with a black outline and a
+light drop shadow below and to the right of it. Its semantic action marks are
+drawn in #E28150 with the same black outline and shadow.
 Every semantic state inherits the same gentle levitation and rotation as the
 idle pointer, with its action-specific motion layered on top. The pointer and
 semantic mark therefore move as one visual unit.
@@ -15,10 +12,14 @@ The macOS, Windows, X11, and Wayland overlays keep rendering frames while a
 visible cursor rests, so the levitation continues until the idle fade hides it.
 A cursor set never to hide (`idle_hide_ms` 0) rests still instead, so the
 overlay stops rendering once activity settles. Reduced-motion mode removes this
-shared movement and lets the overlay stop rendering while the cursor is still. The anonymous/default cursor
-uses Cua blue. Named sessions receive a stable fill
-from the built-in session palette, so concurrent agents remain visually
-distinct.
+shared movement and lets the overlay stop rendering while the cursor is still.
+
+The first agent cursor on the desktop keeps #C95E48. Each later one, from the
+same Pincer process or another, takes the lowest free color slot and gets a
+redder or yellower main color, further from the original with each slot; the
+action marks stay #E28150. A slot frees when its session ends or its process
+exits. Slots are lock files under `$XDG_RUNTIME_DIR/pincer/cursor-slots`, or
+under the temporary directory when `XDG_RUNTIME_DIR` is unset.
 
 The badge below the pointer follows the `cursor.badges` setting, which applies
 to every cursor at once:

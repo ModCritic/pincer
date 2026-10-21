@@ -292,6 +292,8 @@ impl<S: RenderEntry, P> RenderMap<S, P> {
         if self.last_active.as_deref() == Some(key.as_str()) {
             self.last_active = None;
         }
+        // The session is over; let the next new cursor take its color slot.
+        crate::theme::release_session_slot(&key);
         self.ended.insert(key.clone());
         MsgOutcome::Removed { key, existed }
     }

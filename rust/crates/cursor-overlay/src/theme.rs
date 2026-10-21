@@ -13,37 +13,46 @@ pub use cua_driver_contract::{
 };
 
 pub const DEFAULT_THEME_ID: &str = "cua.default";
-pub const DEFAULT_THEME_VERSION: &str = "2.0.0";
+pub const DEFAULT_THEME_VERSION: &str = "3.0.0";
 pub const THEME_PROFILE: &str = "cua-driver-actions-v2";
 pub const CANVAS_SIZE: f32 = 128.0;
 pub const DISPLAY_SIZE: f32 = 42.0;
 const FLOAT_DURATION_SECS: f32 = 4.0;
 
-pub const DEFAULT_CURSOR_FILL: [u8; 4] = [94, 192, 232, 255];
+/// Pincer's main cursor color (#C95E48). It is also the tint key: the
+/// default theme paints the cursor body in it, and the runtime replaces it
+/// with the session's own color.
+pub const DEFAULT_CURSOR_FILL: [u8; 4] = [201, 94, 72, 255];
 
+/// Main colors for the second and later cursors on this desktop: the default
+/// turned redder or yellower in turn, further each time. The yellower ones
+/// keep its lightness; past pure red the redder ones get deeper instead of
+/// pinker.
 const SESSION_CURSOR_FILLS: &[[u8; 4]] = &[
-    [178, 132, 255, 255],
-    [247, 132, 170, 255],
-    [96, 218, 174, 255],
-    [244, 178, 66, 255],
-    [76, 204, 224, 255],
-    [221, 113, 236, 255],
-    [232, 82, 98, 255],
-    [184, 220, 54, 255],
-    [80, 126, 236, 255],
+    [201, 73, 72, 255],  // #C94948
+    [201, 118, 72, 255], // #C97648
+    [186, 53, 44, 255],  // #BA352C
+    [201, 137, 72, 255], // #C98948
+    [161, 38, 42, 255],  // #A1262A
+    [201, 154, 72, 255], // #C99A48
+    [133, 39, 35, 255],  // #852723
+    [201, 169, 72, 255], // #C9A948
 ];
 
-/// Return the stable fill color for one session-owned cursor.
-///
-/// The anonymous/default cursor keeps the original Cua blue. Named sessions
-/// hash into the former multi-cursor palette so concurrent runs are visually
-/// distinct without accepting an agent-controlled styling argument.
-pub fn session_fill_rgba(session_id: &str) -> [u8; 4] {
-    if session_id.is_empty() || session_id == "default" {
-        return DEFAULT_CURSOR_FILL;
+/// Main color for the cursor holding `slot` (see [`session_slot`]): slot 0
+/// keeps the default, and later slots cycle through the variants.
+pub fn slot_fill_rgba(slot: usize) -> [u8; 4] {
+    match slot.checked_sub(1) {
+        None => DEFAULT_CURSOR_FILL,
+        Some(index) => SESSION_CURSOR_FILLS[index % SESSION_CURSOR_FILLS.len()],
     }
+}
 
-    SESSION_CURSOR_FILLS[stable_session_index(session_id, SESSION_CURSOR_FILLS.len())]
+/// Return the main color of one session's cursor. The first cursor drawn on
+/// this desktop keeps the default color and later ones get variants, in
+/// the order they claimed a slot.
+pub fn session_fill_rgba(session_id: &str) -> [u8; 4] {
+    slot_fill_rgba(session_slot(session_id))
 }
 
 pub fn session_fill_hex(session_id: &str) -> String {
@@ -51,30 +60,88 @@ pub fn session_fill_hex(session_id: &str) -> String {
     format!("#{r:02X}{g:02X}{b:02X}")
 }
 
-fn stable_session_index(id: &str, count: usize) -> usize {
-    let suffix = id
-        .rfind(['-', '_', '.'])
-        .map(|index| &id[index + 1..])
-        .unwrap_or(id);
-    if let Ok(number) = suffix.parse::<usize>() {
-        if number > 0 {
-            return (number - 1) % count;
-        }
+/// One cursor's place in the order of cursors on this desktop. `_lock` holds
+/// an exclusive lock on the slot's file for as long as the cursor exists.
+struct SessionSlot {
+    index: usize,
+    _lock: Option<std::fs::File>,
+}
+
+static SESSION_SLOTS: std::sync::Mutex<Option<std::collections::HashMap<String, SessionSlot>>> =
+    std::sync::Mutex::new(None);
+
+/// Slots looked for before giving up on the lock files.
+const MAX_SESSION_SLOTS: usize = 64;
+
+/// The slot of `session_id`'s cursor, claimed on first use. Claims are shared
+/// by every Pincer process of this user: each holds a lock on the lowest free
+/// numbered file in [`session_slot_dir`], so separate agents get separate
+/// colors. Without that directory the order is kept within this process.
+pub fn session_slot(session_id: &str) -> usize {
+    let mut guard = SESSION_SLOTS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let slots = guard.get_or_insert_with(Default::default);
+    if let Some(slot) = slots.get(session_id) {
+        return slot.index;
     }
-    if suffix.len() == 1 {
-        if let Some(character) = suffix.chars().next() {
-            if character.is_ascii_alphabetic() {
-                return (character.to_ascii_lowercase() as usize - b'a' as usize) % count;
+    let held: Vec<usize> = slots.values().map(|slot| slot.index).collect();
+    let slot = claim_session_slot(session_slot_dir().as_deref(), &held);
+    let index = slot.index;
+    slots.insert(session_id.to_owned(), slot);
+    index
+}
+
+/// Give up `session_id`'s slot, so the next new cursor can take it.
+pub fn release_session_slot(session_id: &str) {
+    let mut guard = SESSION_SLOTS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if let Some(slots) = guard.as_mut() {
+        slots.remove(session_id);
+    }
+}
+
+/// Where the slot lock files live: under `$XDG_RUNTIME_DIR` when it is set,
+/// else the user's temporary directory. Unit tests keep slots in memory.
+fn session_slot_dir() -> Option<std::path::PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
+    match std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from) {
+        Some(runtime) if runtime.is_absolute() => Some(runtime.join("pincer").join("cursor-slots")),
+        _ => Some(std::env::temp_dir().join("pincer-cursor-slots")),
+    }
+}
+
+fn claim_session_slot(dir: Option<&std::path::Path>, held: &[usize]) -> SessionSlot {
+    if let Some(dir) = dir.filter(|dir| std::fs::create_dir_all(dir).is_ok()) {
+        for index in 0..MAX_SESSION_SLOTS {
+            if held.contains(&index) {
+                continue;
+            }
+            let Ok(file) = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(dir.join(format!("{index}.lock")))
+            else {
+                break;
+            };
+            match file.try_lock() {
+                Ok(()) => {
+                    return SessionSlot {
+                        index,
+                        _lock: Some(file),
+                    }
+                }
+                Err(std::fs::TryLockError::WouldBlock) => continue,
+                Err(std::fs::TryLockError::Error(_)) => break,
             }
         }
     }
-
-    let mut hash: u32 = 2_166_136_261;
-    for character in id.chars() {
-        hash ^= character as u32;
-        hash = hash.wrapping_mul(16_777_619);
-    }
-    hash as usize % count
+    let index = (0..).find(|index| !held.contains(index)).unwrap_or(0);
+    SessionSlot { index, _lock: None }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -254,20 +321,56 @@ mod tests {
     }
 
     #[test]
-    fn default_cursor_keeps_original_blue_fill() {
-        assert_eq!(session_fill_rgba("default"), DEFAULT_CURSOR_FILL);
-        assert_eq!(session_fill_hex("default"), "#5EC0E8");
+    fn first_slot_keeps_the_pincer_color_and_later_ones_alternate() {
+        assert_eq!(slot_fill_rgba(0), DEFAULT_CURSOR_FILL);
+        assert_eq!(DEFAULT_CURSOR_FILL, [0xC9, 0x5E, 0x48, 255]);
+        let [_, base_green, _, _] = DEFAULT_CURSOR_FILL;
+        // Odd slots are redder (less green), even slots yellower (more green).
+        for slot in 1..=SESSION_CURSOR_FILLS.len() {
+            let [red, green, _, _] = slot_fill_rgba(slot);
+            if slot % 2 == 1 {
+                assert!(green < base_green, "slot {slot} should be redder");
+            } else {
+                assert!(
+                    green > base_green && red == 201,
+                    "slot {slot} should be yellower"
+                );
+            }
+        }
+        assert_eq!(
+            slot_fill_rgba(SESSION_CURSOR_FILLS.len() + 1),
+            slot_fill_rgba(1)
+        );
     }
 
     #[test]
     fn named_session_colors_are_stable_and_distinct() {
         assert_eq!(session_fill_rgba("agent-1"), session_fill_rgba("agent-1"));
         assert_ne!(session_fill_rgba("agent-1"), session_fill_rgba("agent-2"));
-        assert_ne!(session_fill_rgba("agent-2"), DEFAULT_CURSOR_FILL);
+        release_session_slot("agent-1");
+        release_session_slot("agent-2");
     }
 
     #[test]
-    fn default_cursor_uses_parameterized_fill_white_ink_and_matching_glow() {
+    fn slot_files_order_cursors_across_owners_and_free_on_release() {
+        let dir = std::env::temp_dir().join(format!("pincer-slot-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Separate claims stand in for separate processes: each holds its own
+        // lock on its file, so the next claim skips it.
+        let first = claim_session_slot(Some(&dir), &[]);
+        let second = claim_session_slot(Some(&dir), &[]);
+        assert_eq!((first.index, second.index), (0, 1));
+        drop(first);
+        let third = claim_session_slot(Some(&dir), &[]);
+        assert_eq!(third.index, 0, "a released slot is taken again");
+        // Without a directory, slots are numbered within the process.
+        assert_eq!(claim_session_slot(None, &[0, 1]).index, 2);
+        drop((second, third));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn default_cursor_uses_parameterized_fill_black_ink_and_a_shadow() {
         let mut pixmap = tiny_skia::Pixmap::new(256, 256).unwrap();
         paint_default_theme_with_fill(
             &mut pixmap,
@@ -282,16 +385,15 @@ mod tests {
 
         let pixels = pixmap.data().chunks_exact(4).collect::<Vec<_>>();
         assert!(pixels.iter().any(|pixel| *pixel == [12, 34, 56, 255]));
-        assert!(pixels.iter().any(|pixel| *pixel == [255, 255, 255, 255]));
-        assert!(pixels.iter().any(|pixel| pixel[2] > pixel[1]
-            && pixel[1] > pixel[0]
-            && pixel[0] > 0
-            && pixel[3] > 16
-            && pixel[3] < 200));
+        assert!(pixels.iter().any(|pixel| *pixel == [0, 0, 0, 255]));
+        // A light shadow: translucent black, never as dark as the outline.
+        assert!(pixels
+            .iter()
+            .any(|pixel| pixel[..3] == [0, 0, 0] && pixel[3] > 8 && pixel[3] < 96));
     }
 
     #[test]
-    fn matching_glow_surrounds_the_full_pointer_silhouette() {
+    fn shadow_falls_below_and_right_of_the_pointer() {
         let mut pixmap = tiny_skia::Pixmap::new(256, 256).unwrap();
         let visual = CursorVisualState {
             reduced_motion: ReducedMotion::On,
@@ -322,30 +424,21 @@ mod tests {
             }
             result
         };
-        let body = bounds(&|pixel| pixel == [12, 34, 56, 255]);
-        let glow = bounds(&|pixel| {
-            pixel[2] > pixel[1]
-                && pixel[1] > pixel[0]
-                && pixel[0] > 0
-                && pixel[3] > 8
-                && pixel[3] < 220
-        });
+        let ink = bounds(&|pixel| pixel == [0, 0, 0, 255]);
+        let shadow = bounds(&|pixel| pixel[..3] == [0, 0, 0] && pixel[3] > 4 && pixel[3] < 96);
 
         assert!(
-            glow.0 + 4 <= body.0,
-            "glow should cover the pointer's left edge: body={body:?}, glow={glow:?}"
+            shadow.2 >= ink.2 + 3 && shadow.3 >= ink.3 + 3,
+            "shadow should reach past the pointer's right and bottom: ink={ink:?}, shadow={shadow:?}"
         );
         assert!(
-            glow.1 + 4 <= body.1,
-            "glow should cover the pointer's top edge: body={body:?}, glow={glow:?}"
+            shadow.0 + 3 >= ink.0 && shadow.1 + 3 >= ink.1,
+            "shadow should not spread up or left: ink={ink:?}, shadow={shadow:?}"
         );
+        // The outline's tip is the hotspot, drawn at (128, 128).
         assert!(
-            glow.2 >= body.2 + 4,
-            "glow should cover the pointer's right edge: body={body:?}, glow={glow:?}"
-        );
-        assert!(
-            glow.3 >= body.3 + 4,
-            "glow should cover the pointer's bottom edge: body={body:?}, glow={glow:?}"
+            ink.0.abs_diff(128) <= 1 && ink.1.abs_diff(128) <= 1,
+            "tip at {ink:?}"
         );
     }
 
