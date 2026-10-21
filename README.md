@@ -79,12 +79,13 @@ Register the binary with Claude Code for your user account, using its
 absolute path.
 
 ```bash
-claude mcp add --scope user pincer -- /path/to/cua-driver mcp --no-overlay
+claude mcp add --scope user pincer -- /path/to/cua-driver mcp
 ```
 
-`--no-overlay` turns off the agent cursor overlay; leave it out to keep the
-overlay. On Linux and Windows, `cua-driver mcp` owns its runtime directly and
-shuts it down when stdin closes.
+The agent cursor overlay is on by default: an arrow that shows where the
+driver points, clicks and types, and follows every pointer move it makes.
+Add `--no-overlay` to turn it off. On Linux and Windows, `cua-driver mcp` owns
+its runtime directly and shuts it down when stdin closes.
 
 On Linux, you can also deny the driver network access by starting it with
 `unshare -cn`, which runs it in a new user and network namespace whose only
@@ -92,7 +93,7 @@ interface is a loopback device that is down.
 
 ```bash
 claude mcp add --scope user pincer -- \
-  unshare -cn /path/to/cua-driver mcp --no-overlay
+  unshare -cn /path/to/cua-driver mcp
 ```
 
 This needs unprivileged user namespaces. Inside the namespace the driver

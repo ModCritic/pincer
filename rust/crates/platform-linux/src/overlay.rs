@@ -568,6 +568,12 @@ pub fn is_enabled() -> bool {
     is_enabled_for("default")
 }
 
+/// Whether this process started an agent cursor renderer (`--no-overlay`
+/// starts none), so a caller can skip streaming positions nothing draws.
+pub fn renderer_configured() -> bool {
+    RENDER.lock().is_ok_and(|guard| guard.is_some())
+}
+
 pub fn is_enabled_for(key: &str) -> bool {
     RENDER
         .lock()

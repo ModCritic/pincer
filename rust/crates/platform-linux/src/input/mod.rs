@@ -1561,11 +1561,7 @@ pub fn send_parallel_virtual_pointer_drags(drags: &[(String, VirtualPointerDrag)
                         // the gesture is visible, not just its endpoints.
                         crate::overlay::send_command_for(
                             item.cursor_id.clone(),
-                            cursor_overlay::OverlayCommand::SnapTo {
-                                x: ix as f64,
-                                y: iy as f64,
-                                heading_radians: Some((dy as f64).atan2(dx as f64)),
-                            },
+                            cursor_overlay::track_pointer_command(ix as f64, iy as f64),
                         );
                     }
                     item.last_x = ix;
@@ -2712,11 +2708,7 @@ pub fn send_virtual_pointer_drag(
                     emit_relative_motion(&mut device, dx, dy)?;
                     crate::overlay::send_command_for(
                         cursor_id.to_owned(),
-                        cursor_overlay::OverlayCommand::SnapTo {
-                            x: ix as f64,
-                            y: iy as f64,
-                            heading_radians: Some((dy as f64).atan2(dx as f64)),
-                        },
+                        cursor_overlay::track_pointer_command(ix as f64, iy as f64),
                     );
                 }
                 last_x = ix;
@@ -4008,6 +4000,9 @@ pub struct PointerPathGesture {
     pub button: Option<u8>,
     /// X button and count clicked at the last sample after the glide.
     pub click_at_end: Option<(u8, usize)>,
+    /// Told once the first sample is delivered and the schedule's clock
+    /// starts, so the agent cursor overlay can follow the same schedule.
+    pub started: Option<tokio::sync::mpsc::UnboundedSender<()>>,
 }
 
 /// The route a pointer path's input takes: XTest on X11, the wlroots virtual
@@ -4057,6 +4052,9 @@ pub fn run_pointer_path(
             pointer.flush()?;
         }
         let start = std::time::Instant::now();
+        if let Some(started) = &gesture.started {
+            let _ = started.send(());
+        }
         for (&point, &offset) in points.iter().zip(&gesture.offsets_ms).skip(1) {
             let due = start + Duration::from_secs_f64(offset.max(0.0) / 1000.0);
             let now = std::time::Instant::now();
@@ -5342,6 +5340,7 @@ mod pointer_path_driver_tests {
             offsets_ms: offsets_ms.to_vec(),
             button: None,
             click_at_end: None,
+            started: None,
         }
     }
 

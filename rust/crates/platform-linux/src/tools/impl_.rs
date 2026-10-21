@@ -5481,13 +5481,18 @@ where
     Ok(())
 }
 
+/// Put the agent cursor's tip on the pointer point `(sx, sy)` at once.
+/// `SnapTo` places the cursor's anchor, so the point is converted for the
+/// heading (the resting 45° pose when `None`).
 fn overlay_snap_to_for(cursor_id: &str, sx: f64, sy: f64, heading: Option<f64>) {
+    let heading = heading.unwrap_or(std::f64::consts::FRAC_PI_4);
+    let (x, y) = cursor_overlay::anchor_for_pointer(sx, sy, heading);
     crate::overlay::send_command_for(
         cursor_id.to_owned(),
         cursor_overlay::OverlayCommand::SnapTo {
-            x: sx,
-            y: sy,
-            heading_radians: heading,
+            x,
+            y,
+            heading_radians: Some(heading),
         },
     );
 }
@@ -5806,6 +5811,62 @@ async fn track_overlay_drag_with(
     }
 }
 
+/// How often the agent cursor is redrawn while it follows a pointer path.
+const OVERLAY_FOLLOW_FRAME: std::time::Duration = std::time::Duration::from_millis(8);
+
+/// Where the agent cursor is drawn `elapsed_ms` into a pointer path whose
+/// samples `points` are due at `offsets_ms`. Between two samples it is on the
+/// line from the one the real pointer is at toward the next, so it reaches
+/// each sample when the pointer jumps there and slides across wide gaps
+/// instead of jumping with the pointer.
+fn path_overlay_point(points: &[(f64, f64)], offsets_ms: &[f64], elapsed_ms: f64) -> (f64, f64) {
+    let next = offsets_ms.partition_point(|&offset| offset <= elapsed_ms);
+    let Some(&to) = points.get(next) else {
+        return points.last().copied().unwrap_or((0.0, 0.0));
+    };
+    let Some(&from) = next.checked_sub(1).and_then(|index| points.get(index)) else {
+        return to;
+    };
+    let (t0, t1) = (offsets_ms[next - 1], offsets_ms[next]);
+    let fraction = if t1 > t0 {
+        ((elapsed_ms - t0) / (t1 - t0)).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    (
+        from.0 + (to.0 - from.0) * fraction,
+        from.1 + (to.1 - from.1) * fraction,
+    )
+}
+
+/// Draw the agent cursor along a pointer path on the path's own schedule.
+/// It waits for the path driver to report its first sample, then sends one
+/// position per overlay frame until the last sample is due, shown pressed
+/// while `pressed`. Returns early if the driver stops before it starts.
+async fn follow_overlay_path_with(
+    send: impl Fn(cursor_overlay::OverlayCommand),
+    points: &[(f64, f64)],
+    offsets_ms: &[f64],
+    pressed: bool,
+    mut started: tokio::sync::mpsc::UnboundedReceiver<()>,
+) {
+    if points.is_empty() || started.recv().await.is_none() {
+        return;
+    }
+    let _pressed = pressed.then(|| cursor_overlay::PressedVisualGuard::new(&send));
+    let start = tokio::time::Instant::now();
+    let end_ms = offsets_ms.last().copied().unwrap_or(0.0);
+    loop {
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let (x, y) = path_overlay_point(points, offsets_ms, elapsed_ms);
+        send(cursor_overlay::track_pointer_command(x, y));
+        if elapsed_ms >= end_ms {
+            break;
+        }
+        tokio::time::sleep(OVERLAY_FOLLOW_FRAME).await;
+    }
+}
+
 #[cfg(test)]
 #[tokio::test]
 async fn cancelled_overlay_drag_releases_visual_press_without_native_commands() {
@@ -5851,6 +5912,89 @@ async fn completed_overlay_drag_balances_visual_press_once() {
     )
     .await;
     assert_eq!(*pressed.borrow(), vec![true, false]);
+}
+
+#[cfg(test)]
+#[test]
+fn path_overlay_point_leads_the_pointer_to_each_sample() {
+    let points = [(0.0, 0.0), (100.0, 0.0), (100.0, 50.0)];
+    let offsets = [0.0, 100.0, 200.0];
+    assert_eq!(path_overlay_point(&points, &offsets, -5.0), (0.0, 0.0));
+    assert_eq!(path_overlay_point(&points, &offsets, 0.0), (0.0, 0.0));
+    // Halfway between samples, halfway along the jump the pointer makes next.
+    assert_eq!(path_overlay_point(&points, &offsets, 50.0), (50.0, 0.0));
+    assert_eq!(path_overlay_point(&points, &offsets, 100.0), (100.0, 0.0));
+    assert_eq!(path_overlay_point(&points, &offsets, 150.0), (100.0, 25.0));
+    assert_eq!(path_overlay_point(&points, &offsets, 200.0), (100.0, 50.0));
+    assert_eq!(path_overlay_point(&points, &offsets, 900.0), (100.0, 50.0));
+    // Samples due at the same time do not divide by zero.
+    assert_eq!(
+        path_overlay_point(&[(0.0, 0.0), (10.0, 10.0)], &[0.0, 0.0], 0.0),
+        (10.0, 10.0)
+    );
+}
+
+#[cfg(test)]
+#[tokio::test(start_paused = true)]
+async fn overlay_path_follow_waits_for_the_start_and_ends_on_the_last_sample() {
+    use std::cell::RefCell;
+    let commands = RefCell::new(Vec::new());
+    let (started, started_rx) = tokio::sync::mpsc::unbounded_channel();
+    started.send(()).unwrap();
+    follow_overlay_path_with(
+        |command| commands.borrow_mut().push(command),
+        &[(0.0, 0.0), (80.0, 0.0)],
+        &[0.0, 40.0],
+        true,
+        started_rx,
+    )
+    .await;
+    let commands = commands.borrow();
+    assert!(matches!(
+        commands.first(),
+        Some(cursor_overlay::OverlayCommand::SetPressed(true))
+    ));
+    assert!(matches!(
+        commands.last(),
+        Some(cursor_overlay::OverlayCommand::SetPressed(false))
+    ));
+    let tips: Vec<(f64, f64)> = commands
+        .iter()
+        .filter_map(|command| match command {
+            cursor_overlay::OverlayCommand::SnapTo {
+                x,
+                y,
+                heading_radians: Some(heading),
+            } => Some(cursor_overlay::pointer_for_anchor(*x, *y, *heading)),
+            _ => None,
+        })
+        .collect();
+    // One frame every 8 ms over 40 ms, sliding toward the second sample.
+    assert!(tips.len() >= 5, "{tips:?}");
+    assert!(tips.windows(2).all(|pair| pair[1].0 >= pair[0].0 - 1e-9));
+    let last = tips.last().unwrap();
+    assert!(
+        (last.0 - 80.0).abs() < 1e-6 && last.1.abs() < 1e-6,
+        "{last:?}"
+    );
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn overlay_path_follow_sends_nothing_when_the_path_never_starts() {
+    use std::cell::RefCell;
+    let commands = RefCell::new(Vec::new());
+    let (started, started_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    drop(started);
+    follow_overlay_path_with(
+        |command| commands.borrow_mut().push(command),
+        &[(0.0, 0.0), (80.0, 0.0)],
+        &[0.0, 40.0],
+        true,
+        started_rx,
+    )
+    .await;
+    assert!(commands.borrow().is_empty());
 }
 
 fn process_name(pid: u32) -> Option<String> {
@@ -10923,6 +11067,16 @@ impl Tool for DragTool {
             };
             let (overlay_from, overlay_to) =
                 (overlay_point(from_x, from_y), overlay_point(to_x, to_y));
+            // Glide to the start before the real pointer jumps there; the
+            // tracking below then follows the drag itself.
+            reveal_pointer_action_for(
+                &self.state,
+                &cursor_id,
+                overlay_from.0,
+                overlay_from.1,
+                false,
+            )
+            .await;
             let result = tokio::task::spawn_blocking(move || {
                 if wayland {
                     crate::wayland::drag_desktop(
@@ -12339,18 +12493,6 @@ impl Tool for ParallelMouseDragTool {
                 session.to_owned(),
                 cursor_overlay::OverlayCommand::PinAbove(xid),
             );
-            crate::overlay::send_command_for(
-                session.to_owned(),
-                cursor_overlay::OverlayCommand::SnapTo {
-                    x: start.0 as f64,
-                    y: start.1 as f64,
-                    heading_radians: None,
-                },
-            );
-            crate::overlay::send_command_for(
-                session.to_owned(),
-                cursor_overlay::OverlayCommand::SetPressed(true),
-            );
 
             drags.push((
                 session.to_owned(),
@@ -12362,6 +12504,20 @@ impl Tool for ParallelMouseDragTool {
                     steps,
                 },
             ));
+        }
+
+        // Glide every cursor to its drag's start together, so none jumps
+        // there, then show them pressed for the drags.
+        futures_util::future::join_all(drags.iter().map(|(session, drag)| {
+            overlay_glide_to_for(session, drag.path[0].0 as f64, drag.path[0].1 as f64)
+        }))
+        .await;
+        for (session, drag) in &drags {
+            overlay_snap_to_for(session, drag.path[0].0 as f64, drag.path[0].1 as f64, None);
+            crate::overlay::send_command_for(
+                session.to_owned(),
+                cursor_overlay::OverlayCommand::SetPressed(true),
+            );
         }
 
         let drags_for_task = drags.clone();
@@ -12378,15 +12534,11 @@ impl Tool for ParallelMouseDragTool {
                     self.state
                         .cursor_registry
                         .update_position(session, end.0 as f64, end.1 as f64);
-                    crate::overlay::send_command_for(
-                        session.to_owned(),
-                        cursor_overlay::OverlayCommand::SnapTo {
-                            x: end.0 as f64,
-                            y: end.1 as f64,
-                            heading_radians: Some(
-                                ((end.1 - prev.1) as f64).atan2((end.0 - prev.0) as f64),
-                            ),
-                        },
+                    overlay_snap_to_for(
+                        session,
+                        end.0 as f64,
+                        end.1 as f64,
+                        Some(((end.1 - prev.1) as f64).atan2((end.0 - prev.0) as f64)),
                     );
                     crate::overlay::send_command_for(
                         session.to_owned(),
@@ -13078,9 +13230,23 @@ impl Tool for MoveCursorTool {
             } else {
                 "xtest_desktop"
             };
+            let space = match desktop_input_space().await {
+                Ok(space) => space,
+                Err(error) => return ToolResult::error(error.to_string()),
+            };
+            // Glide the agent cursor to where the real pointer is about to
+            // jump. The overlay draws in layout coordinates, like the input.
+            let (overlay_x, overlay_y) = space.to_layout(xi, yi);
+            reveal_pointer_action_for(
+                &self.state,
+                &resolve_cursor_key(&args),
+                f64::from(overlay_x),
+                f64::from(overlay_y),
+                false,
+            )
+            .await;
             let result = if wayland {
                 tokio::task::spawn_blocking(move || {
-                    let space = crate::wayland::DesktopInputSpace::current()?;
                     crate::wayland::move_cursor_desktop(&space, xi, yi)
                 })
                 .await
@@ -13339,44 +13505,112 @@ impl Tool for MoveAlongPathTool {
             }
         }
 
+        let points: Vec<(i32, i32)> = screen
+            .iter()
+            .map(|(x, y)| (x.round() as i32, y.round() as i32))
+            .collect();
+        let space = match desktop_input_space().await {
+            Ok(space) => space,
+            Err(error) => return ToolResult::error(error.to_string()),
+        };
+        // The agent cursor follows the real pointer in the overlay's layout
+        // coordinates (the same as screen pixels on X11).
+        let overlay_points: Vec<(f64, f64)> = points
+            .iter()
+            .map(|&(x, y)| {
+                let (lx, ly) = space.to_layout(x, y);
+                (f64::from(lx), f64::from(ly))
+            })
+            .collect();
+        let cursor_id = resolve_cursor_key(&args);
+        if let Some((_, xid)) = target {
+            crate::overlay::send_command_for(
+                cursor_id.clone(),
+                cursor_overlay::OverlayCommand::PinAbove(xid),
+            );
+        }
+        // Glide to the start before the real pointer jumps there.
+        reveal_pointer_action_for(
+            &self.state,
+            &cursor_id,
+            overlay_points[0].0,
+            overlay_points[0].1,
+            false,
+        )
+        .await;
+
+        let (started_tx, started_rx) = tokio::sync::mpsc::unbounded_channel();
         let gesture = crate::input::PointerPathGesture {
-            points: screen
-                .iter()
-                .map(|(x, y)| (x.round() as i32, y.round() as i32))
-                .collect(),
+            points,
             offsets_ms: sampled.offsets_ms.clone(),
             button: request.button,
             click_at_end: request.click_at_end.map(path::EndClick::x_button_and_count),
+            started: Some(started_tx),
         };
         let budget = std::time::Duration::from_millis(request.duration_ms + 15_000);
-        let result = match target {
-            // Like move_cursor and drag on Wayland: libei can wait for portal
-            // consent, which the X11 budget does not allow for.
-            None if wayland => {
-                tokio::task::spawn_blocking(move || {
-                    let space = crate::wayland::DesktopInputSpace::current()?;
-                    crate::wayland::pointer_path_desktop(&space, &gesture)
-                })
-                .await
-            }
-            None => {
-                spawn_blocking_bounded("move_along_path", budget, move || {
-                    crate::input::send_pointer_path_xtest(&gesture)
-                })
-                .await
-            }
-            Some((pid, xid)) => {
-                spawn_blocking_bounded("move_along_path", budget, move || {
-                    crate::input::with_x11_foreground_opts(
-                        xid,
-                        crate::input::ForegroundOptions::pointer().for_pid(pid),
-                        || crate::input::send_pointer_path_xtest(&gesture),
-                    )
-                    .map(|(elapsed, _report)| elapsed)
-                })
-                .await
+        let run = async move {
+            match target {
+                // Like move_cursor and drag on Wayland: libei can wait for
+                // portal consent, which the X11 budget does not allow for.
+                None if wayland => {
+                    tokio::task::spawn_blocking(move || {
+                        crate::wayland::pointer_path_desktop(&space, &gesture)
+                    })
+                    .await
+                }
+                None => {
+                    spawn_blocking_bounded("move_along_path", budget, move || {
+                        crate::input::send_pointer_path_xtest(&gesture)
+                    })
+                    .await
+                }
+                Some((pid, xid)) => {
+                    spawn_blocking_bounded("move_along_path", budget, move || {
+                        crate::input::with_x11_foreground_opts(
+                            xid,
+                            crate::input::ForegroundOptions::pointer().for_pid(pid),
+                            || crate::input::send_pointer_path_xtest(&gesture),
+                        )
+                        .map(|(elapsed, _report)| elapsed)
+                    })
+                    .await
+                }
             }
         };
+        let follow = follow_overlay_path_with(
+            |command| crate::overlay::send_command_for(cursor_id.clone(), command),
+            &overlay_points,
+            &sampled.offsets_ms,
+            request.button.is_some(),
+            started_rx,
+        );
+        let result = if crate::overlay::renderer_configured() {
+            tokio::pin!(run);
+            // A route that fails mid-path ends the follow with it.
+            tokio::select! {
+                result = &mut run => result,
+                () = follow => run.await,
+            }
+        } else {
+            run.await
+        };
+        if matches!(&result, Ok(Ok(_))) {
+            let end = *overlay_points.last().expect("sampled path is non-empty");
+            self.state
+                .cursor_registry
+                .update_position(&cursor_id, end.0, end.1);
+            crate::overlay::send_command_for(
+                cursor_id.clone(),
+                cursor_overlay::track_pointer_command(end.0, end.1),
+            );
+            if request.click_at_end.is_some() {
+                emit_cursor_hook(&cursor_id, end.0, end.1, true);
+                crate::overlay::send_command_for(
+                    cursor_id.clone(),
+                    cursor_overlay::OverlayCommand::ClickPulse { x: end.0, y: end.1 },
+                );
+            }
+        }
         let elapsed = match result {
             Ok(Ok(elapsed)) => elapsed,
             Ok(Err(error)) => {
