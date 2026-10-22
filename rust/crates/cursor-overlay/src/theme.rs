@@ -13,7 +13,7 @@ pub use cua_driver_contract::{
 };
 
 pub const DEFAULT_THEME_ID: &str = "cua.default";
-pub const DEFAULT_THEME_VERSION: &str = "3.0.0";
+pub const DEFAULT_THEME_VERSION: &str = "3.1.0";
 pub const THEME_PROFILE: &str = "cua-driver-actions-v2";
 pub const CANVAS_SIZE: f32 = 128.0;
 pub const DISPLAY_SIZE: f32 = 42.0;
@@ -315,6 +315,9 @@ pub fn paint_default_theme_with_fill(
 mod tests {
     use super::*;
 
+    /// The default theme's outline color, #2B0000, fully opaque.
+    const OUTLINE_INK: [u8; 4] = [43, 0, 0, 255];
+
     #[test]
     fn default_theme_uses_compact_42_point_footprint() {
         assert_eq!(DISPLAY_SIZE, 42.0);
@@ -370,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn default_cursor_uses_parameterized_fill_black_ink_and_a_shadow() {
+    fn default_cursor_uses_parameterized_fill_dark_red_ink_and_a_shadow() {
         let mut pixmap = tiny_skia::Pixmap::new(256, 256).unwrap();
         paint_default_theme_with_fill(
             &mut pixmap,
@@ -385,7 +388,7 @@ mod tests {
 
         let pixels = pixmap.data().chunks_exact(4).collect::<Vec<_>>();
         assert!(pixels.iter().any(|pixel| *pixel == [12, 34, 56, 255]));
-        assert!(pixels.iter().any(|pixel| *pixel == [0, 0, 0, 255]));
+        assert!(pixels.iter().any(|pixel| *pixel == OUTLINE_INK));
         // A light shadow: translucent black, never as dark as the outline.
         assert!(pixels
             .iter()
@@ -424,7 +427,7 @@ mod tests {
             }
             result
         };
-        let ink = bounds(&|pixel| pixel == [0, 0, 0, 255]);
+        let ink = bounds(&|pixel| pixel == OUTLINE_INK);
         let shadow = bounds(&|pixel| pixel[..3] == [0, 0, 0] && pixel[3] > 4 && pixel[3] < 96);
 
         assert!(

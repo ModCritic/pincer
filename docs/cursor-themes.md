@@ -1,10 +1,11 @@
 # Agent cursor themes
 
 Pincer ships one built-in cursor theme: `cua.default`. It is the default on
-macOS, Windows, and Linux and cannot be removed. The pointer is a dart with
-pointed corners in Pincer's main color, #C95E48, with a black outline and a
-light drop shadow below and to the right of it. Its semantic action marks are
-drawn in #E28150 with the same black outline and shadow.
+macOS, Windows, and Linux and cannot be removed. The pointer is a dart in
+Pincer's main color, #C95E48, with a pointed tip, slightly rounded back
+corners, a #2B0000 outline and a soft, faint drop shadow below and to the
+right of it. Its semantic action marks are drawn in #E28150 without an
+outline, over the same kind of shadow.
 Every semantic state inherits the same gentle levitation and rotation as the
 idle pointer, with its action-specific motion layered on top. The pointer and
 semantic mark therefore move as one visual unit.

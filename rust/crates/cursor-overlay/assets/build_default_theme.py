@@ -31,11 +31,12 @@ FPS = 30
 # src/theme.rs; ACCENT colors the action cues and is never tinted.
 MAIN = [201 / 255, 94 / 255, 72 / 255, 1]  # #C95E48
 ACCENT = [226 / 255, 129 / 255, 80 / 255, 1]  # #E28150
+OUTLINE = [43 / 255, 0, 0, 1]  # #2B0000
 BLACK = [0, 0, 0, 1]
 TRANSPARENT = [0, 0, 0, 0]
-# Drop shadow: offset down and right in canvas units, softened by wider,
-# fainter copies of the outline.
-SHADOW_OFFSET = (5.0, 7.0)
+# Drop shadow, offset down and right in canvas units like a desktop pointer's.
+SHADOW_OFFSET = (5.0, 6.0)
+SHADOW_STEPS = 8
 
 Point = tuple[float, float]
 PathPoint = tuple[Point, Point, Point]
@@ -213,11 +214,14 @@ def shape_layer(
     }
 
 
-# A dart with pointed corners. The outline's miter tip lands on the hotspot:
-# with a 5-unit stroke and a 49 degree tip the miter reaches 6 units past the
-# path's tip vertex, along the 45 degree axis.
+# A dart with a pointed tip and notch. The outline's miter tip lands on the
+# hotspot: with a 5-unit stroke and a 49 degree tip the miter reaches 6 units
+# past the path's tip vertex, along the 45 degree axis.
 HOTSPOT = (42, 28)
 OUTLINE_WIDTH = 5
+# The two back corners are rounded so the outline's outer edge turns on a
+# circle 1.5 outline widths across; the stroke adds half its width outside.
+BACK_CORNER_RADIUS = 0.75 * OUTLINE_WIDTH - OUTLINE_WIDTH / 2
 
 
 def _cursor_outline() -> list[Point]:
@@ -244,7 +248,61 @@ def _cursor_outline() -> list[Point]:
     ]
 
 
-CURSOR_PATH = points(_cursor_outline(), closed=True, name="Cursor")
+def _rounded_corner(previous: Point, corner: Point, following: Point, radius: float) -> list[PathPoint]:
+    """Two path points that replace `corner` with a circular arc of `radius`."""
+
+    def unit(start: Point, end: Point) -> Point:
+        length = math.dist(start, end)
+        return ((end[0] - start[0]) / length, (end[1] - start[1]) / length)
+
+    to_previous = unit(corner, previous)
+    to_following = unit(corner, following)
+    interior = math.acos(
+        to_previous[0] * to_following[0] + to_previous[1] * to_following[1]
+    )
+    tangent = radius / math.tan(interior / 2)
+    # Cubic handle length for a circular arc turning through (pi - interior).
+    handle = 4 / 3 * math.tan((math.pi - interior) / 4) * radius
+    start = (corner[0] + to_previous[0] * tangent, corner[1] + to_previous[1] * tangent)
+    end = (corner[0] + to_following[0] * tangent, corner[1] + to_following[1] * tangent)
+
+    def rounded(point: Point) -> Point:
+        return (round(point[0], 3), round(point[1], 3))
+
+    return [
+        (rounded(start), (0, 0), rounded((-to_previous[0] * handle, -to_previous[1] * handle))),
+        (rounded(end), rounded((-to_following[0] * handle, -to_following[1] * handle)), (0, 0)),
+    ]
+
+
+def _cursor_path() -> dict[str, Any]:
+    tip, bottom, notch, right = _cursor_outline()
+    return path_shape(
+        [
+            (tip, (0, 0), (0, 0)),
+            *_rounded_corner(tip, bottom, notch, BACK_CORNER_RADIUS),
+            (notch, (0, 0), (0, 0)),
+            *_rounded_corner(notch, right, tip, BACK_CORNER_RADIUS),
+        ],
+        closed=True,
+        name="Cursor",
+    )
+
+
+CURSOR_PATH = _cursor_path()
+
+
+def soft_shadow(width: float, spread: float, peak: float) -> list[dict[str, Any]]:
+    """Faint strokes that fade a shadow out over `spread` units past its edge.
+
+    `width` is the stroke width of the shape casting it (0 for a filled one),
+    and `peak` the opacity in percent where all the strokes overlap.
+    """
+    each = 100 * (1 - (1 - peak / 100) ** (1 / SHADOW_STEPS))
+    return [
+        stroke(BLACK, width + 2 * spread * step / SHADOW_STEPS, round(each, 2))
+        for step in range(1, SHADOW_STEPS + 1)
+    ]
 
 
 def offset_position(position: dict[str, Any] | None) -> dict[str, Any]:
@@ -266,10 +324,10 @@ def offset_position(position: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def faster_fade(opacity: dict[str, Any] | None) -> dict[str, Any] | None:
-    """`opacity` squared (as a fraction), for a cue's outline and shadow.
+    """`opacity` squared (as a fraction), for a cue's shadow.
 
-    Every layer fades on its own, so a half-faded cue would show its black
-    outline through its color; fading the outline faster keeps it orange.
+    Every layer fades on its own, so a half-faded cue would show its shadow
+    through its color; fading the shadow faster keeps the cue orange.
     """
     if opacity is None:
         return None
@@ -300,13 +358,8 @@ def cursor_layers(
         shape_layer(
             1,
             "Cursor shadow",
-            [
-                CURSOR_PATH,
-                fill(BLACK, 12),
-                # Round joins: a mitered soft edge would poke past the tip.
-                stroke(BLACK, 14, 4),
-                stroke(BLACK, 7, 6),
-            ],
+            # Round joins: a mitered soft edge would poke past the tip.
+            [CURSOR_PATH, fill(BLACK, 8), *soft_shadow(0, 8, 20)],
             frames,
             position=shadow,
             scale=scale,
@@ -314,7 +367,7 @@ def cursor_layers(
         shape_layer(
             2,
             "Cursor body",
-            [CURSOR_PATH, fill(MAIN), stroke(BLACK, OUTLINE_WIDTH, sharp=True)],
+            [CURSOR_PATH, fill(MAIN), stroke(OUTLINE, OUTLINE_WIDTH, sharp=True)],
             frames,
             position=position,
             scale=scale,
@@ -340,11 +393,7 @@ def cue_layers(
         shape_layer(
             start_index,
             f"{name} shadow",
-            [
-                *geometry,
-                stroke(BLACK, width + 7, 4),
-                stroke(BLACK, width + 3, 9),
-            ],
+            [*geometry, *soft_shadow(width, 4, 22)],
             frames,
             position=shadow,
             scale=scale,
@@ -353,18 +402,8 @@ def cue_layers(
         ),
         shape_layer(
             start_index + 1,
-            f"{name} outline",
-            [*geometry, stroke(BLACK, width + 3)],
-            frames,
-            position=position,
-            scale=scale,
-            rotation=rotation,
-            opacity=faster_fade(opacity),
-        ),
-        shape_layer(
-            start_index + 2,
             f"{name} color",
-            [*geometry, stroke(ACCENT, max(width - 0.5, 1.5))],
+            [*geometry, stroke(ACCENT, width)],
             frames,
             position=position,
             scale=scale,
@@ -602,7 +641,7 @@ def action_record() -> dict[str, Any]:
         shape_layer(
             30,
             "Record dot shadow",
-            [*dot_geometry, fill(BLACK, 12), stroke(BLACK, 6, 6)],
+            [*dot_geometry, fill(BLACK, 8), *soft_shadow(0, 4, 22)],
             frames,
             position=offset_position(static([52, 64])),
             scale=dot_scale,
@@ -610,8 +649,8 @@ def action_record() -> dict[str, Any]:
         ),
         shape_layer(
             31,
-            "Record dot outline",
-            [*dot_geometry, fill(ACCENT), stroke(BLACK, 3)],
+            "Record dot",
+            [*dot_geometry, fill(ACCENT)],
             frames,
             position=static([52, 64]),
             scale=dot_scale,
@@ -695,7 +734,7 @@ def semantic_manifest() -> dict[str, Any]:
         "schema": "cua.cursor-theme/2",
         "id": "cua.default",
         "name": "Pincer Default",
-        "version": "3.0.0",
+        "version": "3.1.0",
         "author": "Cua, restyled for Pincer",
         "license": "MIT",
         "compatibility": {"profile": "cua-driver-actions-v2", "semantics": 2},
