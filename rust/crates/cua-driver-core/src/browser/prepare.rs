@@ -475,6 +475,25 @@ fn linux_browser_sandbox(var: impl Fn(&str) -> Option<String>) -> LinuxBrowserSa
     }
 }
 
+/// Whether this process can open a TCP connection to 127.0.0.1, where the
+/// launched browser's DevTools endpoint listens. In a new network namespace
+/// loopback is down: bind succeeds but connect fails with "Network is
+/// unreachable" (checked under `unshare -cn`, 2026-10-25). Checked before
+/// launch so no unreachable browser is left running.
+async fn loopback_tcp_reachable() -> std::io::Result<()> {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
+    let address = listener.local_addr()?;
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::net::TcpStream::connect(address),
+    )
+    .await
+    .map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::TimedOut, "loopback connect timed out")
+    })??;
+    Ok(())
+}
+
 fn isolated_browser_command(executable: &str, profile: &Path) -> Command {
     let mut command = Command::new(executable);
     #[cfg(unix)]
@@ -872,6 +891,17 @@ impl BrowserEngine {
         } else {
             self.platform.isolated_browser_executable()?
         };
+        if let Err(error) = loopback_tcp_reachable().await {
+            return Err(refusal(
+                BrowserRefusalCode::BrowserRouteUnavailable,
+                format!(
+                    "127.0.0.1 is unreachable from this process ({error}), so a launched \
+                     browser's DevTools endpoint could not be reached; a new network namespace \
+                     (`unshare -n`) starts with loopback down, so bring `lo` up before \
+                     starting the driver"
+                ),
+            ));
+        }
         let prepared_profile = prepare_profile(profile_request)?;
         let command = isolated_browser_command(&executable, &prepared_profile.path);
         let mut child = self
@@ -1483,6 +1513,15 @@ impl BrowserEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Under `unshare -cn` this probe fails with "Network is unreachable",
+    // and browser_prepare now refuses before launching (2026-10-25).
+    #[tokio::test]
+    async fn loopback_probe_connects_where_loopback_is_up() {
+        loopback_tcp_reachable()
+            .await
+            .expect("127.0.0.1 is reachable outside a fresh network namespace");
+    }
 
     #[tokio::test]
     async fn spawned_attestation_retries_absence_but_propagates_profile_errors() {

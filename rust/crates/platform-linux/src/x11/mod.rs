@@ -27,6 +27,51 @@ pub struct WindowInfo {
     pub height: u32,
 }
 
+/// True when the X server behind `DISPLAY` is XWayland, which advertises an
+/// extension named `XWAYLAND` (checked with `xdpyinfo` on KDE Plasma 6.8.1,
+/// 2026-10-25). The lock-file pid can't tell: KWin writes its own wrapper's
+/// pid into `/tmp/.X0-lock`. Probed once per process, since `DISPLAY` doesn't
+/// change under a running driver; `false` when no X server answers.
+pub fn server_is_xwayland() -> bool {
+    static XWAYLAND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *XWAYLAND.get_or_init(|| {
+        let Ok((conn, _)) = RustConnection::connect(None) else {
+            return false;
+        };
+        conn.query_extension(b"XWAYLAND")
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .is_some_and(|reply| reply.present)
+    })
+}
+
+/// Why whole-screen capture fails on rootless XWayland, for tool replies.
+pub const ROOTLESS_XWAYLAND_CAPTURE: &str = "whole-screen capture is unavailable in XWayland \
+     mode: this XWayland server runs rootless, so its root window has no pixels (GetImage \
+     answers BadMatch). Capture one window with get_window_state, or run the driver with \
+     CUA_DRIVER_RS_ENABLE_WAYLAND=1 to capture the desktop through the portal";
+
+/// True when `DISPLAY` is a rootless XWayland: [`server_is_xwayland`], and a
+/// one-pixel `GetImage` of the root fails. KWin's XWayland answers BadMatch
+/// even for one pixel (checked on KDE Plasma 6.8.1, 2026-10-25), and x11grab
+/// on it records black frames. A rootful XWayland passes the probe and keeps
+/// whole-screen capture. Probed once per process.
+pub fn rootless_xwayland() -> bool {
+    static ROOTLESS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ROOTLESS.get_or_init(|| server_is_xwayland() && !root_window_readable())
+}
+
+fn root_window_readable() -> bool {
+    let Ok((conn, screen_num)) = RustConnection::connect(None) else {
+        return false;
+    };
+    let root = conn.setup().roots[screen_num].root;
+    conn.get_image(ImageFormat::Z_PIXMAP, root, 0, 0, 1, 1, !0)
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .is_some()
+}
+
 /// The window the window manager reports as active (`_NET_ACTIVE_WINDOW`
 /// on the root), if any.
 pub fn active_window() -> Option<u64> {

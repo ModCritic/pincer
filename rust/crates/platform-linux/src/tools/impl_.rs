@@ -3135,7 +3135,21 @@ fn background_keyboard_refusal(atspi_ok: bool) -> ToolResult {
     refusal
         .content
         .extend((!atspi_ok).then(|| cua_driver_core::protocol::Content::text(hint)));
-    if !crate::wayland::is_wayland() && !crate::input::uinput_accessible() {
+    if crate::wayland::is_wayland() {
+        return refusal;
+    }
+    // Granting /dev/uinput doesn't help where the route is off for the whole
+    // session (XWayland, KDE on Xorg); say that instead.
+    if let Some(reason) = crate::input::mpx_route_disabled_reason() {
+        let hint = format!("The focus-free keyboard route is {reason}.");
+        refusal
+            .content
+            .push(cua_driver_core::protocol::Content::text(hint.clone()));
+        if let Some(structured) = refusal.structured_content.as_mut() {
+            structured["hint"] = json!(hint);
+        }
+        refusal
+    } else if !crate::input::uinput_accessible() {
         with_uinput_hint(refusal)
     } else {
         refusal
@@ -13769,6 +13783,22 @@ impl Tool for MoveAlongPathTool {
 
 // ── set_agent_cursor_enabled ──────────────────────────────────────────────────
 
+/// The `renderer` value and a text suffix for an agent-cursor reply. Without a
+/// renderer (XWayland mode) the setters still store the value, but nothing on
+/// screen changes, and the reply has to say so.
+fn cursor_renderer_report() -> (Value, String) {
+    match crate::overlay::active_renderer() {
+        Some(renderer) => (json!(renderer), String::new()),
+        None => (
+            Value::Null,
+            format!(
+                " Nothing changes on screen: {}.",
+                crate::overlay::missing_renderer_reason()
+            ),
+        ),
+    }
+}
+
 pub struct SetAgentCursorEnabledV2Tool {
     state: Arc<ToolState>,
 }
@@ -13792,11 +13822,12 @@ impl Tool for SetAgentCursorEnabledV2Tool {
             session.clone(),
             cursor_overlay::OverlayCommand::SetEnabled(enabled),
         );
+        let (renderer, note) = cursor_renderer_report();
         ToolResult::text(format!(
-            "Agent cursor for session '{session}' {}.",
+            "Agent cursor for session '{session}' {}.{note}",
             if enabled { "enabled" } else { "disabled" }
         ))
-        .with_structured(json!({"session":session,"enabled":enabled}))
+        .with_structured(json!({"session":session,"enabled":enabled,"renderer":renderer}))
     }
 }
 
@@ -13841,10 +13872,13 @@ impl Tool for SetAgentCursorMotionV2Tool {
             session.clone(),
             cursor_overlay::OverlayCommand::SetMotion(motion.clone()),
         );
+        let (renderer, note) = cursor_renderer_report();
         ToolResult::text(format!(
-            "Agent cursor motion updated for session '{session}'."
+            "Agent cursor motion updated for session '{session}'.{note}"
         ))
-        .with_structured(json!({"session":session,"motion":motion.output_json()}))
+        .with_structured(
+            json!({"session":session,"motion":motion.output_json(),"renderer":renderer}),
+        )
     }
 }
 
@@ -13903,8 +13937,9 @@ impl Tool for SetAgentCursorThemeTool {
                 reduced_motion,
             },
         );
+        let (renderer, note) = cursor_renderer_report();
         ToolResult::text(format!(
-            "Agent cursor theme for session '{session}' set to '{theme_id}'."
+            "Agent cursor theme for session '{session}' set to '{theme_id}'.{note}"
         ))
         .with_structured(json!({"session":session,"theme":{
             "id":theme_id,
@@ -13912,7 +13947,7 @@ impl Tool for SetAgentCursorThemeTool {
             "profile":profile,
             "reduced_motion":reduced_motion,
             "fallback":null
-        }}))
+        },"renderer":renderer}))
     }
 }
 
@@ -13957,9 +13992,13 @@ impl Tool for GetAgentCursorStateV2Tool {
             .get(&session)
             .and_then(|cursor| cursor.x.zip(cursor.y))
             .map(|(x, y)| json!({"x": x, "y": y}));
-        ToolResult::text(format!("Agent cursor state for session '{session}'.")).with_structured(
-            json!({
+        // Without a renderer nothing applies the setters' commands, so the
+        // motion and theme below are the defaults, not what was last set.
+        let (renderer, note) = cursor_renderer_report();
+        ToolResult::text(format!("Agent cursor state for session '{session}'.{note}"))
+            .with_structured(json!({
                 "session":session,
+                "renderer":renderer,
                 "enabled":enabled,
                 "position":position,
                 "theme":{
@@ -13978,8 +14017,7 @@ impl Tool for GetAgentCursorStateV2Tool {
                     "preempted_count":visual.preempted_count
                 },
                 "motion":motion.output_json()
-            }),
-        )
+            }))
     }
 }
 
@@ -14245,7 +14283,7 @@ impl Tool for GetAccessibilityTreeTool {
     async fn invoke(&self, _args: Value) -> ToolResult {
         let (procs, windows) = tokio::task::spawn_blocking(|| {
             (
-                crate::proc_fs::list_processes(),
+                without_kernel_threads(crate::proc_fs::list_processes()),
                 crate::x11::list_windows(None),
             )
         })
@@ -14298,6 +14336,36 @@ impl Tool for GetAccessibilityTreeTool {
             })).collect::<Vec<_>>()
         });
         ToolResult::text(lines.join("\n")).with_structured(structured)
+    }
+}
+
+/// Kernel threads have an empty `/proc/<pid>/cmdline` and never own a
+/// window; listing them put 400+ rows ahead of three windows (2026-10-25).
+fn without_kernel_threads(
+    mut procs: Vec<crate::proc_fs::ProcessInfo>,
+) -> Vec<crate::proc_fs::ProcessInfo> {
+    procs.retain(|process| !process.cmdline.is_empty());
+    procs
+}
+
+#[cfg(test)]
+mod accessibility_tree_tests {
+    use super::without_kernel_threads;
+    use crate::proc_fs::ProcessInfo;
+
+    #[test]
+    fn kernel_threads_are_left_out() {
+        let process = |pid: u32, name: &str, cmdline: &str| ProcessInfo {
+            pid,
+            name: name.to_owned(),
+            cmdline: cmdline.to_owned(),
+        };
+        let kept = without_kernel_threads(vec![
+            process(2, "kthreadd", ""),
+            process(15, "ksoftirqd/0", ""),
+            process(1040, "dolphin", "/usr/bin/dolphin"),
+        ]);
+        assert_eq!(kept.iter().map(|p| p.pid).collect::<Vec<_>>(), [1040]);
     }
 }
 

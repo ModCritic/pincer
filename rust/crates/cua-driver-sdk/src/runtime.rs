@@ -686,7 +686,7 @@ fn configure_linux_runtime(prepare_desktop_environment: bool) {
         ));
     } else {
         cua_driver_core::video::set_video_backend_factory(Box::new(
-            cua_driver_core::video_ffmpeg::FfmpegVideoBackendFactory,
+            platform_linux::recording_hooks::X11VideoBackendFactory,
         ));
     }
 }

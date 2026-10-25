@@ -974,6 +974,9 @@ fn screenshot_display_bytes_with_dispatch(
 /// fallback without re-entering [`screenshot_display_bytes`] (which would
 /// loop forever once we're on Wayland).
 pub(crate) fn screenshot_display_bytes_x11() -> Result<Vec<u8>> {
+    if crate::x11::rootless_xwayland() {
+        anyhow::bail!(crate::x11::ROOTLESS_XWAYLAND_CAPTURE);
+    }
     // Try `import -window root png:-` (ImageMagick).
     let out = Command::new("import")
         .args(["-window", "root", "png:-"])

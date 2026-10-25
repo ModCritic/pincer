@@ -524,20 +524,33 @@ impl<S: SnapshotPayload> SnapshotStore<S> {
                 .map(|context| (pid, context));
         }
         let inner = self.inner.lock().unwrap();
-        let mut matches = inner.iter().filter_map(|(pid, lane)| {
-            let snapshot = lane
-                .iter()
-                .find(|snapshot| snapshot.window_id == window_id)?;
-            Some((*pid, snapshot.screenshot(session)?))
-        });
-        match (matches.next(), matches.next()) {
-            (Some(found), None) => Ok(found),
-            _ => Err(screenshot_context_refusal(
-                None,
-                Some(window_id),
-                MissingFrame::WindowNeverRead,
-            )),
-        }
+        let read: Vec<(i32, &Snapshot<S>)> = inner
+            .iter()
+            .filter_map(|(pid, lane)| {
+                let snapshot = lane
+                    .iter()
+                    .find(|snapshot| snapshot.window_id == window_id)?;
+                Some((*pid, snapshot))
+            })
+            .collect();
+        let mut matches = read
+            .iter()
+            .filter_map(|(pid, snapshot)| Some((*pid, snapshot.screenshot(session)?)));
+        let why = match (matches.next(), matches.next()) {
+            (Some(found), None) => return Ok(found),
+            (Some(_), Some(_)) => MissingFrame::WindowNeverRead,
+            // A read of the window without a frame for this session, such as
+            // a tree-only read after a resize, is not "never read" (zoom said
+            // so right after a screenshot read, 2026-10-25).
+            (None, _) => match read.as_slice() {
+                [] => MissingFrame::WindowNeverRead,
+                [(_, snapshot)] if snapshot.screenshot_scale.is_some() => {
+                    MissingFrame::OtherSession
+                }
+                _ => MissingFrame::NoScreenshot,
+            },
+        };
+        Err(screenshot_context_refusal(None, Some(window_id), why))
     }
 
     pub fn set_zoom(
@@ -1193,6 +1206,33 @@ mod tests {
 
         cache.publish_for_session(10, 20, Payload(vec![1]), Some("b"), Some(1.0));
         assert_eq!(reason(&cache, 20).0, "other_session");
+    }
+
+    #[test]
+    fn zoom_without_pid_says_why_a_read_window_has_no_frame() {
+        let cache = SnapshotStore::new();
+        let reason = |cache: &SnapshotStore<Payload>| {
+            let refused = cache
+                .screenshot_context_for_zoom(None, 20, Some("a"))
+                .unwrap_err();
+            refused.structured_content.clone().unwrap()["reason"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(reason(&cache), "window_never_read");
+        cache.publish_for_session(10, 20, Payload(vec![1]), Some("a"), None);
+        assert_eq!(reason(&cache), "no_screenshot");
+        cache.publish_for_session(10, 20, Payload(vec![1]), Some("b"), Some(1.0));
+        assert_eq!(reason(&cache), "other_session");
+        cache.publish_for_session(10, 20, Payload(vec![1]), Some("a"), Some(1.0));
+        assert_eq!(
+            cache
+                .screenshot_context_for_zoom(None, 20, Some("a"))
+                .unwrap()
+                .0,
+            10
+        );
     }
 
     #[test]

@@ -290,3 +290,20 @@ mod tests {
         }
     }
 }
+
+/// The X11 video backend: ffmpeg's x11grab, refused up front on a rootless
+/// XWayland. There x11grab reads a root window with no pixels; it wrote a
+/// black video and reported no error (KDE Plasma 6.8.1, 2026-10-25).
+pub struct X11VideoBackendFactory;
+
+impl cua_driver_core::video::VideoBackendFactory for X11VideoBackendFactory {
+    fn start(
+        &self,
+        output_path: &std::path::Path,
+    ) -> anyhow::Result<Box<dyn cua_driver_core::video::VideoBackend>> {
+        if crate::x11::rootless_xwayland() {
+            anyhow::bail!(crate::x11::ROOTLESS_XWAYLAND_CAPTURE);
+        }
+        cua_driver_core::video_ffmpeg::FfmpegVideoBackendFactory.start(output_path)
+    }
+}

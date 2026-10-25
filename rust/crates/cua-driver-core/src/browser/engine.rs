@@ -268,6 +268,50 @@ pub(crate) struct ValidatedTab {
     pub cdp_session: String,
 }
 
+/// How long attaching waits for `Page.enable`. It normally replies at once;
+/// with a dialog already open the tab answers no Page command, and the
+/// session stays registered so the dialog's later events still count.
+const DIALOG_EVENTS_ENABLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Make `cdp_session` the tab's dialog-event session and enable the Page
+/// domain on it, once per connection and tab. This has to happen before
+/// anything can open a dialog: once one is open the tab answers no Page or
+/// DOM command (`Page.enable` itself timed out, 2026-10-25), and
+/// browser_click needs `Page.javascriptDialogOpening` to return.
+pub(crate) async fn enable_dialog_events(
+    conn: &CdpConnection,
+    cdp_session: &str,
+    cdp_target_id: &str,
+) -> anyhow::Result<()> {
+    if conn.dialog_state(cdp_target_id).is_some() || conn.has_dialog_session(cdp_target_id) {
+        return Ok(());
+    }
+    // Register before Page.enable so an opening event delivered before the
+    // command reply is still attributed to the exact target.
+    conn.register_dialog_session(cdp_session, cdp_target_id);
+    let enabled = tokio::time::timeout(
+        DIALOG_EVENTS_ENABLE_TIMEOUT,
+        conn.call_until_dialog(Some(cdp_session), "Page.enable", json!({}), cdp_target_id),
+    )
+    .await;
+    match enabled {
+        Ok(Ok(_)) => {
+            tokio::task::yield_now().await;
+            Ok(())
+        }
+        Ok(Err(error)) => {
+            if conn.dialog_state(cdp_target_id).is_none() {
+                conn.unregister_dialog_session(cdp_session, cdp_target_id);
+                return Err(error);
+            }
+            Ok(())
+        }
+        Err(_) => Err(anyhow::anyhow!(
+            "Page.enable did not reply within {DIALOG_EVENTS_ENABLE_TIMEOUT:?}"
+        )),
+    }
+}
+
 fn viewport_point_to_screen(
     native: Rect,
     metrics: &Value,
@@ -1264,7 +1308,26 @@ impl BrowserEngine {
     }
 
     /// Attach (flattened) to a tab's target and return the CDP session id.
+    /// The first attach per connection and tab also turns on the tab's
+    /// dialog events (see [`enable_dialog_events`]).
     async fn attach(
+        &self,
+        conn: &CdpConnection,
+        cdp_target_id: &str,
+    ) -> Result<String, BrowserRefusal> {
+        let session_id = self.attach_session(conn, cdp_target_id).await?;
+        // Best effort: browser_dialog reports a failure itself, and a tab that
+        // can't enable the Page domain still takes every other command.
+        if let Err(error) = enable_dialog_events(conn, &session_id, cdp_target_id).await {
+            tracing::debug!(
+                cdp_target = cdp_target_id,
+                "dialog events unavailable: {error}"
+            );
+        }
+        Ok(session_id)
+    }
+
+    async fn attach_session(
         &self,
         conn: &CdpConnection,
         cdp_target_id: &str,

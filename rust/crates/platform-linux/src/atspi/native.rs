@@ -2128,11 +2128,11 @@ fn render(visited: &[Visited<'_>], only_frame: Option<usize>) -> (String, Vec<At
             }
             let act_str = v.actions.join(",");
             let val_part = match &v.value {
-                Some(val) if !val.is_empty() => format!(" value=\"{val}\""),
+                Some(val) if !val.is_empty() => format!(" value=\"{}\"", one_line(val)),
                 _ => String::new(),
             };
             let description_shown = (!v.description.is_empty() && v.description != name)
-                .then(|| format!(" (description \"{}\")", v.description));
+                .then(|| format!(" (description \"{}\")", one_line(&v.description)));
             let collapsed_note = v
                 .collapsed_children
                 .map(|n| format!(" (closed menu, {n} items; click it to open)"))
@@ -2145,6 +2145,7 @@ fn render(visited: &[Visited<'_>], only_frame: Option<usize>) -> (String, Vec<At
                 "{indent}- [{idx}] {role} \"{name}\"{desc}{val_part} [actions=[{act_str}]]{collapsed_note}{unlabelled_shown}
 ",
                 role = v.role,
+                name = one_line(&name),
                 desc = description_shown.as_deref().unwrap_or(""),
             ));
             let mut description_parts: Vec<String> = Vec::new();
@@ -2189,7 +2190,7 @@ fn render(visited: &[Visited<'_>], only_frame: Option<usize>) -> (String, Vec<At
                 "{indent}- {role} = \"{name}\"{marker}
 ",
                 role = v.role,
-                name = v.name,
+                name = one_line(&v.name),
                 marker = passive_marker(&v.role, !v.actions.is_empty(), v.has_component, v.enabled),
             ));
         }
@@ -3171,6 +3172,13 @@ const ACTIVATION_VERBS: &[&str] = &[
 /// namespaced action ending in `check`, so the role gate is mandatory.
 const CHECKBOX_ACTIVATION_VERBS: &[&str] = &["check", "uncheck"];
 
+/// Menu-only verbs. Qt gives a menu-bar item, and a menu entry that opens a
+/// submenu, exactly one AT-SPI action: `Show Menu` (seen on Kate, KDE Plasma
+/// 6.8.1, 2026-10-25). Role-gated like the checkbox verbs: a tool button or
+/// combo box can advertise the same verb, and opening its drop-down is not
+/// what a click on it does.
+const MENU_ACTIVATION_VERBS: &[&str] = &["showmenu"];
+
 fn normalized_action_verb(name: &str) -> String {
     name.rsplit('.')
         .next()
@@ -3199,14 +3207,22 @@ fn is_checkbox_role(role: &str) -> bool {
     )
 }
 
+fn is_menu_or_menu_item_role(role: &str) -> bool {
+    matches!(
+        role.trim().to_ascii_lowercase().as_str(),
+        "menu" | "menu item"
+    )
+}
+
 /// Index of the action to actuate, or `None` when the element advertises no
 /// activation. `None` must not fall back to index 0: firing an arbitrary
 /// action is worse than reporting that there is nothing to fire.
 fn activation_index(role: &str, actions: &[String]) -> Option<usize> {
     actions.iter().position(|action| {
+        let role_gated = |verbs: &[&str]| verbs.contains(&normalized_action_verb(action).as_str());
         is_activation_action(action)
-            || (is_checkbox_role(role)
-                && CHECKBOX_ACTIVATION_VERBS.contains(&normalized_action_verb(action).as_str()))
+            || (is_checkbox_role(role) && role_gated(CHECKBOX_ACTIVATION_VERBS))
+            || (is_menu_or_menu_item_role(role) && role_gated(MENU_ACTIVATION_VERBS))
     })
 }
 
@@ -3322,8 +3338,29 @@ impl AtPointHit {
     }
 }
 
+/// Text as it goes into one markdown row. `query` filters the tree line by
+/// line, so a newline inside a name, description or value turned the text
+/// after it into a stray row (Kate's document text, 2026-10-25). The
+/// structured nodes keep the raw text.
+fn one_line(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.contains(['\n', '\r']) {
+        text.replace('\r', "\\r").replace('\n', "\\n").into()
+    } else {
+        text.into()
+    }
+}
+
 fn is_menu_role(role: &str) -> bool {
     role.trim().to_ascii_lowercase().contains("menu")
+}
+
+/// Whether a menu-path ancestor contributes its label to the lineage.
+/// Qt hangs each menu-bar item's entries under a `popup menu` container,
+/// which it names after the window title once open ("Kate"; checked with
+/// AT-SPI on Kate, KDE Plasma 6.8.1, 2026-10-25). That name is no menu label,
+/// so the container is transparent like an unlabelled one.
+fn counts_in_menu_lineage(role: &str, name: &str) -> bool {
+    is_menu_role(role) && !role.trim().eq_ignore_ascii_case("popup menu") && !name.trim().is_empty()
 }
 
 /// Find one exact visible menu lineage in a flattened pre-order AT-SPI walk.
@@ -3361,7 +3398,7 @@ fn exact_menu_path_matches(visited: &[Visited<'_>], path: &[String]) -> Vec<usiz
             let mut cursor = Some(index);
             while let Some(current) = cursor {
                 let ancestor = &visited[current];
-                if is_menu_role(&ancestor.role) && !ancestor.name.trim().is_empty() {
+                if counts_in_menu_lineage(&ancestor.role, &ancestor.name) {
                     lineage.push(ancestor.name.trim());
                 }
                 cursor = parents[current];
@@ -6772,12 +6809,12 @@ mod coord_tests {
     use super::OP_DEADLINE;
     use super::{
         activation_index, before_snapshot_deadline, bounded_blocking,
-        combine_wayland_content_offsets, counts_as_showing, hyprland_document_top_inset,
-        is_activation_action, is_enabled_state, is_indexable_capabilities, is_passive_role,
-        is_showing_state, is_web_process_bus, listing_state, passive_marker,
-        prefer_authoritative_wayland_origin, project_screen_extents, rebase_renderer_window_offset,
-        scoped_component_nodes, screen_extent_rebase, select_click_target, select_web_document,
-        ApplicationSelection,
+        combine_wayland_content_offsets, counts_as_showing, counts_in_menu_lineage,
+        hyprland_document_top_inset, is_activation_action, is_enabled_state,
+        is_indexable_capabilities, is_passive_role, is_showing_state, is_web_process_bus,
+        listing_state, one_line, passive_marker, prefer_authoritative_wayland_origin,
+        project_screen_extents, rebase_renderer_window_offset, scoped_component_nodes,
+        screen_extent_rebase, select_click_target, select_web_document, ApplicationSelection,
     };
     use atspi::{State, StateSet};
     use std::time::Duration;
@@ -7459,6 +7496,60 @@ mod coord_tests {
         assert_eq!(activation_index("entry", &uncheck), None);
         assert!(!is_activation_action("check"));
         assert!(!is_activation_action("uncheck"));
+    }
+
+    // Regression for 2026-10-25: with `query`, the tail of Kate's multi-line
+    // document text showed up as its own row (`li" [actions=[]]`).
+    #[test]
+    fn multi_line_text_stays_on_one_markdown_row() {
+        assert_eq!(one_line("first\nsecond\r\nli"), "first\\nsecond\\r\\nli");
+        assert!(matches!(
+            one_line("plain"),
+            std::borrow::Cow::Borrowed("plain")
+        ));
+
+        let markdown = format!(
+            "- [0] frame \"Kate\" [actions=[]]\n  - [1] text \"\" value=\"{}\" [actions=[]]\n",
+            one_line("hello\nsecond line\nli")
+        );
+        let filtered = super::super::filter_tree(&markdown, "li");
+        assert!(
+            filtered
+                .lines()
+                .all(|line| line.trim_start().starts_with("- [")),
+            "{filtered}"
+        );
+        assert_eq!(filtered.lines().count(), 2, "{filtered}");
+    }
+
+    // Regression for 2026-10-25: Kate's open Selection menu read as
+    // `Selection > Kate > Select All`, so no Qt menu path could match.
+    #[test]
+    fn qt_popup_menu_containers_are_transparent_in_menu_paths() {
+        assert!(counts_in_menu_lineage("menu item", "Selection"));
+        assert!(counts_in_menu_lineage("menu", "File"));
+        assert!(!counts_in_menu_lineage("popup menu", "Kate"));
+        assert!(!counts_in_menu_lineage("menu", "  "));
+        assert!(!counts_in_menu_lineage("push button", "Selection"));
+    }
+
+    // Regression for 2026-10-25: invoke_menu(["Edit", "Select All"]) on Kate
+    // failed because Qt's menu-bar items expose only `Show Menu`.
+    #[test]
+    fn qt_show_menu_is_role_gated_to_menus() {
+        let qt_menu_bar_item = vec!["Show Menu".to_owned()];
+        assert_eq!(activation_index("menu item", &qt_menu_bar_item), Some(0));
+        assert_eq!(activation_index("menu", &qt_menu_bar_item), Some(0));
+        assert_eq!(
+            activation_index("Menu Item", &vec!["showMenu".to_owned()]),
+            Some(0)
+        );
+        assert_eq!(activation_index("push button", &qt_menu_bar_item), None);
+        assert_eq!(activation_index("combo box", &qt_menu_bar_item), None);
+        assert!(!is_activation_action("Show Menu"));
+        // A context menu is never a menu activation, whatever the role.
+        let context = vec!["showContextMenu".to_owned()];
+        assert_eq!(activation_index("menu item", &context), None);
     }
 
     #[test]

@@ -143,16 +143,53 @@ fn isolated_browser_candidates() -> Vec<PathBuf> {
     .collect()
 }
 
+/// Whether a file owner seen from this user namespace can be real root.
+/// Besides uid 0, that is the kernel's overflow uid, which stands for any
+/// owner this namespace doesn't map, when the overflow uid isn't itself mapped
+/// here. Under `unshare -c` (Pincer's no-network wrapper) `uid_map` is
+/// `1000 1000 1` and root-owned `/usr/lib/chromium/chromium` shows owner
+/// 65534 (checked 2026-10-25). Every other unmapped account shows as 65534
+/// too, so a path component owned by another unprivileged user would pass;
+/// this process's own uid never does. The rule reads only inside ids, since
+/// the outside column is relative to the parent namespace: in a nested
+/// namespace `1000 0 1` maps the parent's root, which is the real user.
+fn owner_can_be_real_root(owner: u32, uid_map: &str, overflow_uid: u32, euid: u32) -> bool {
+    owner == 0 || (owner == overflow_uid && owner != euid && !maps_inside_uid(uid_map, owner))
+}
+
+/// Whether any `uid_map` line ("inside outside count") covers inside `uid`.
+fn maps_inside_uid(uid_map: &str, uid: u32) -> bool {
+    let uid = u64::from(uid);
+    uid_map.lines().any(|line| {
+        let fields: Vec<u64> = line
+            .split_whitespace()
+            .filter_map(|field| field.parse().ok())
+            .collect();
+        matches!(fields.as_slice(), [inside, _, count] if (*inside..inside + count).contains(&uid))
+    })
+}
+
 fn trusted_root_owned_installation(executable: &std::path::Path) -> bool {
     if !executable.is_absolute() {
         return false;
     }
+    // Unreadable files fail closed: read as the initial namespace, or with no
+    // overflow uid, they leave uid 0 as the only accepted owner.
+    let uid_map = std::fs::read_to_string("/proc/self/uid_map")
+        .unwrap_or_else(|_| "0 0 4294967295".to_owned());
+    let overflow_uid = std::fs::read_to_string("/proc/sys/kernel/overflowuid")
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+        .unwrap_or(0);
+    let euid = unsafe { libc::geteuid() };
     let mut current = Some(executable);
     while let Some(path) = current {
         let Ok(metadata) = std::fs::symlink_metadata(path) else {
             return false;
         };
-        if metadata.file_type().is_symlink() || metadata.uid() != 0 || metadata.mode() & 0o022 != 0
+        if metadata.file_type().is_symlink()
+            || !owner_can_be_real_root(metadata.uid(), &uid_map, overflow_uid, euid)
+            || metadata.mode() & 0o022 != 0
         {
             return false;
         }
@@ -1441,6 +1478,47 @@ mod tests {
         let executable = root.path().join("google-chrome");
         std::fs::write(&executable, b"not a browser").expect("untrusted executable fixture");
         assert!(!trusted_root_owned_installation(&executable));
+    }
+
+    // Regression for 2026-10-25: under `unshare -cn` real root isn't mapped,
+    // root-owned files show owner 65534, and browser_prepare refused.
+    #[test]
+    fn overflow_owner_counts_as_root_only_when_it_is_unmapped() {
+        let initial = "         0          0 4294967295\n";
+        let map_current_user = "      1000       1000          1\n";
+        // `unshare -rn` then `unshare --map-user=1000`: the outside 0 is the
+        // parent namespace's root, which is the real user.
+        let nested = "      1000          0          1\n";
+        let map_auto_root = "         0       1000          1\n         1     100000      65536\n";
+
+        assert!(owner_can_be_real_root(0, initial, 65534, 1000));
+        assert!(
+            !owner_can_be_real_root(65534, initial, 65534, 1000),
+            "real nobody"
+        );
+        assert!(!owner_can_be_real_root(1000, initial, 65534, 1000));
+
+        assert!(owner_can_be_real_root(65534, map_current_user, 65534, 1000));
+        assert!(!owner_can_be_real_root(1000, map_current_user, 65534, 1000));
+        assert!(owner_can_be_real_root(65534, nested, 65534, 1000));
+        assert!(!owner_can_be_real_root(1000, nested, 65534, 1000));
+        // A process running as the overflow uid would own those files itself.
+        assert!(!owner_can_be_real_root(
+            65534,
+            map_current_user,
+            65534,
+            65534
+        ));
+        // Unreadable overflowuid falls back to 0, so nothing new is accepted.
+        assert!(!owner_can_be_real_root(65534, map_current_user, 0, 1000));
+        // 65534 is a mapped subordinate id here, so it isn't the overflow.
+        assert!(!owner_can_be_real_root(65534, map_auto_root, 65534, 0));
+
+        assert!(maps_inside_uid(initial, 65534));
+        assert!(!maps_inside_uid(map_current_user, 65534));
+        assert!(maps_inside_uid(map_current_user, 1000));
+        assert!(!maps_inside_uid(map_current_user, 1001));
+        assert!(!maps_inside_uid("", 0));
     }
 
     #[test]

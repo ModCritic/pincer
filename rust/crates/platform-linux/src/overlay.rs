@@ -25,8 +25,11 @@
 //!   as it was at the last paint until the cursor moves or fades. The cutoff
 //!   path had the same limitation over the smaller alpha≥128 silhouette.
 //! - Z-ordering: `XRaiseWindow` every 80ms to stay above normal windows.
-//! - Wayland: when WAYLAND_DISPLAY is set but DISPLAY is also available (XWayland),
-//!   the X11 path is used.  Pure Wayland support is a TODO.
+//! - Wayland: this X11 overlay never starts when WAYLAND_DISPLAY is set, even
+//!   with DISPLAY pointing at XWayland (see `run_on_thread` for why). With
+//!   `CUA_DRIVER_RS_ENABLE_WAYLAND=1` the native backends in `wayland::overlay`
+//!   and the GNOME Shell helper draw the cursor instead; in the default
+//!   XWayland mode nothing draws it, and [`active_renderer`] reports `None`.
 //!
 //! ## Cross-platform note (2026-05 dedup audit)
 //!
@@ -132,6 +135,57 @@ fn try_send_x11_message(
 
 fn should_start_x11_overlay(wayland_display_present: bool) -> bool {
     !wayland_display_present
+}
+
+/// The renderer that draws this process's agent cursors, or `None` when no
+/// cursor reaches the screen. Ask after sending a command: the native Wayland
+/// backend is picked on first use.
+pub(crate) fn active_renderer() -> Option<&'static str> {
+    #[cfg(target_os = "linux")]
+    let (native_wayland, wayland_backend) = (
+        crate::wayland::is_wayland(),
+        WAYLAND_OVERLAY_BACKEND.get().copied(),
+    );
+    #[cfg(not(target_os = "linux"))]
+    let (native_wayland, wayland_backend) = (false, None);
+    renderer_for(
+        native_wayland,
+        wayland_backend,
+        std::env::var_os("WAYLAND_DISPLAY").is_some(),
+        x11_overlay_live(),
+    )
+}
+
+fn renderer_for(
+    native_wayland: bool,
+    wayland_backend: Option<WaylandOverlayBackend>,
+    wayland_display_present: bool,
+    x11_overlay_live: bool,
+) -> Option<&'static str> {
+    if native_wayland {
+        return match wayland_backend? {
+            WaylandOverlayBackend::LayerShell => Some("wayland_layer_shell"),
+            WaylandOverlayBackend::SemanticShellHelper
+            | WaylandOverlayBackend::LegacyShellHelper => Some("gnome_shell_helper"),
+            WaylandOverlayBackend::None => None,
+        };
+    }
+    (should_start_x11_overlay(wayland_display_present) && x11_overlay_live).then_some("x11_overlay")
+}
+
+/// Why [`active_renderer`] is `None`, worded for a tool reply.
+pub(crate) fn missing_renderer_reason() -> &'static str {
+    #[cfg(target_os = "linux")]
+    let native_wayland = crate::wayland::is_wayland();
+    #[cfg(not(target_os = "linux"))]
+    let native_wayland = false;
+    if !native_wayland && std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        "no agent cursor is drawn in XWayland mode: the X11 overlay stays off while \
+         WAYLAND_DISPLAY is set, and the native Wayland overlay needs \
+         CUA_DRIVER_RS_ENABLE_WAYLAND=1"
+    } else {
+        "no agent cursor overlay is running (it is disabled, or it failed to start)"
+    }
 }
 
 /// Set while the X11 owner thread is running its render loop; only then can a
@@ -3089,6 +3143,38 @@ mod tests {
     fn wayland_display_does_not_start_legacy_x11_overlay() {
         assert!(!should_start_x11_overlay(true));
         assert!(should_start_x11_overlay(false));
+    }
+
+    // Regression for 2026-10-25: in XWayland mode the cursor setters reported
+    // success although no overlay existed. They now read this.
+    #[test]
+    fn xwayland_mode_has_no_cursor_renderer() {
+        // XWayland mode: WAYLAND_DISPLAY set, native backend off.
+        assert_eq!(renderer_for(false, None, true, false), None);
+        // A live X11 overlay never counts under WAYLAND_DISPLAY.
+        assert_eq!(renderer_for(false, None, true, true), None);
+        // Plain X11.
+        assert_eq!(renderer_for(false, None, false, true), Some("x11_overlay"));
+        assert_eq!(renderer_for(false, None, false, false), None);
+        // Native Wayland, per backend.
+        assert_eq!(
+            renderer_for(true, Some(WaylandOverlayBackend::LayerShell), true, false),
+            Some("wayland_layer_shell")
+        );
+        assert_eq!(
+            renderer_for(
+                true,
+                Some(WaylandOverlayBackend::LegacyShellHelper),
+                true,
+                false
+            ),
+            Some("gnome_shell_helper")
+        );
+        assert_eq!(
+            renderer_for(true, Some(WaylandOverlayBackend::None), true, false),
+            None
+        );
+        assert_eq!(renderer_for(true, None, true, false), None);
     }
 
     #[test]

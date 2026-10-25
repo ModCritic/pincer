@@ -28,8 +28,8 @@ use super::platform::{
 use super::pointer::BrowserPointerTool;
 use super::refusal::BrowserRefusal;
 use super::tools::{
-    browser_protected_resource_scope, BrowserClickTool, BrowserNavigateTool, BrowserPrepareTool,
-    BrowserTypeTool, GetBrowserStateTool,
+    browser_protected_resource_scope, BrowserClickTool, BrowserDialogTool, BrowserNavigateTool,
+    BrowserPrepareTool, BrowserTypeTool, GetBrowserStateTool,
 };
 use super::types::{
     BrowserClassification, BrowserEngineFamily, BrowserProcessRole, BrowserProduct,
@@ -74,6 +74,11 @@ pub(super) struct FixtureState {
     omit_primary_target: bool,
     /// Make `Browser.getWindowForTarget` for T1 answer this CDP error.
     primary_window_error: Option<(i64, String)>,
+    /// Answer `Page.enable`, and make a click open a `confirm()` dialog:
+    /// the dialog event arrives on the Page-enabled session and the click
+    /// command never replies, as in Chromium while the dialog is open.
+    dialog_on_click: bool,
+    page_enabled_session: Option<String>,
     /// Every incoming CDP call: (sessionId, method, params).
     calls: Vec<(Option<String>, String, Value)>,
 }
@@ -90,6 +95,8 @@ impl Default for FixtureState {
             windowless_targets: Vec::new(),
             omit_primary_target: false,
             primary_window_error: None,
+            dialog_on_click: false,
+            page_enabled_session: None,
             main_loader: "L_MAIN_1".into(),
             iframe_loader: "L_IFRAME_1".into(),
             oopif_loader: "L_OOPIF_1".into(),
@@ -439,7 +446,26 @@ fn fixture_handler(state: SharedState) -> MockHandler {
         let is_tab = sess.starts_with("tab-sess-");
         let is_oopif = sess.starts_with("oopif-sess-");
 
+        let opens_dialog = st.dialog_on_click
+            && match call.method.as_str() {
+                "Input.dispatchMouseEvent" => call.params["type"] == "mouseReleased",
+                "Runtime.callFunctionOn" => true,
+                _ => false,
+            };
+        if opens_dialog {
+            return MockReply::ok(json!({}))
+                .with_events(vec![MockEvent {
+                    method: "Page.javascriptDialogOpening".into(),
+                    session_id: st.page_enabled_session.clone(),
+                    params: json!({ "type": "confirm", "message": "Sure?" }),
+                }])
+                .withheld();
+        }
         match call.method.as_str() {
+            "Page.enable" if is_tab && st.dialog_on_click => {
+                st.page_enabled_session = Some(sess.clone());
+                MockReply::ok(json!({}))
+            }
             "Target.getTargets" => {
                 let mut infos: Vec<Value> = Vec::new();
                 if !st.omit_primary_target {
@@ -2175,6 +2201,76 @@ async fn navigation_targets_an_inactive_tab_without_activating_it() {
     );
     assert!(recorded_calls(&f, "Page.bringToFront").is_empty());
     assert!(recorded_calls(&f, "Target.activateTarget").is_empty());
+}
+
+// Regression for 2026-10-25: a click whose handler opened confirm() waited
+// 20 s, reported failure, and the tab stayed stuck unless browser_dialog had
+// run before the click.
+#[tokio::test]
+async fn a_click_that_opens_a_dialog_returns_at_once_with_the_dialog() {
+    for route in ["trusted", "dom_event"] {
+        let f = fixture_with(|state| state.dialog_on_click = true).await;
+        let (target, tab) = bind(&f).await;
+        let snap = snapshot(&f, &target, &tab).await;
+        let button = ref_of(&snap, "main", "main-btn");
+        assert!(
+            f.state.lock().unwrap().page_enabled_session.is_some(),
+            "binding and snapshotting must enable dialog events before any click"
+        );
+
+        let started = std::time::Instant::now();
+        let clicked = BrowserClickTool::new(f.engine.clone())
+            .invoke(json!({
+                "target_id": target, "tab_id": tab, "ref": button,
+                "input_route": route, "session": SESSION
+            }))
+            .await;
+        let s = structured(&clicked);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "{route}"
+        );
+        assert_eq!(s["status"], "ok", "{route}: {s}");
+        assert_eq!(s["effect"], "confirmed", "{route}: {s}");
+        assert_eq!(s["dialog"]["kind"], "confirm", "{route}: {s}");
+        let dialog_id = s["dialog"]["dialog_id"].as_str().unwrap().to_owned();
+        // MCP callers see the action record: "confirmed" survives only with
+        // published evidence, which also carries the dialog id.
+        let args = json!({ "input_route": route, "session": SESSION });
+        let public = ActionExecutionRecord::from_legacy("browser_click", &args, s)
+            .expect("browser click action record")
+            .public_result()
+            .expect("public browser click result");
+        let public = serde_json::to_value(public).expect("serialize public result");
+        assert_eq!(public["effect"], "confirmed", "{route}: {public}");
+        assert!(public.to_string().contains(&dialog_id), "{route}: {public}");
+
+        // The tab is blocked: another click refuses instead of hanging.
+        let again = BrowserClickTool::new(f.engine.clone())
+            .invoke(json!({
+                "target_id": target, "tab_id": tab, "ref": button,
+                "input_route": route, "session": SESSION
+            }))
+            .await;
+        let again = structured(&again);
+        assert_eq!(
+            again["refusal"]["code"], "browser_action_unavailable",
+            "{again}"
+        );
+        assert_eq!(
+            again["refusal"]["detail"]["next_call"], "browser_dialog",
+            "{again}"
+        );
+
+        let inspected = BrowserDialogTool::new(f.engine.clone())
+            .invoke(json!({
+                "target_id": target, "tab_id": tab, "action": "inspect", "session": SESSION
+            }))
+            .await;
+        let inspected = structured(&inspected);
+        assert_eq!(inspected["present"], true, "{inspected}");
+        assert_eq!(inspected["dialog_id"], dialog_id.as_str());
+    }
 }
 
 #[tokio::test]

@@ -516,13 +516,38 @@ fn desktop_value_is_kde(value: Option<&str>) -> bool {
     })
 }
 
-/// KDE Plasma 6 / Qt 6.11 applications on X11 can crash session-wide when an
-/// ephemeral uinput pointer is hotplugged into Xorg. Foreground input does not
-/// need that device: the click, drag, scroll, and keyboard tools already use
-/// XTEST after activating the target window. Disable only the MPX/uinput
-/// capability here so callers retain their existing foreground escalation and
-/// XSendEvent fallback behavior.
-fn kde_x11_uinput_hotplug_is_unsafe(
+/// Why the MPX/uinput real-input route (XI2 master pointer plus a uinput
+/// slave) must stay off in this session. Foreground input does not need that
+/// device: the click, drag, scroll, and keyboard tools already use XTEST after
+/// activating the target window. Disable only the MPX/uinput capability so
+/// callers keep their foreground escalation and XSendEvent fallback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MpxHotplugBlock {
+    /// KDE Plasma 6 / Qt 6.11 applications on Xorg can crash session-wide when
+    /// an ephemeral uinput pointer is hotplugged into the server.
+    KdeX11,
+    /// The X server is XWayland. The compositor owns every input device, so a
+    /// uinput slave never reaches XWayland and the route can't work; and the
+    /// XI2 master it adds first crashed every Qt XWayland client on KDE Plasma
+    /// 6.8.1 Wayland (segfaults in `QXcbConnection::xi2SetupDevices`,
+    /// 2026-10-25). This applies on any compositor, KDE or not.
+    Xwayland,
+}
+
+impl MpxHotplugBlock {
+    fn refusal(self) -> &'static str {
+        match self {
+            Self::KdeX11 => "disabled on KDE Plasma X11; retry with delivery_mode='foreground'",
+            Self::Xwayland => {
+                "disabled on XWayland: uinput devices never reach XWayland and adding an XI2 \
+                 master crashes Qt XWayland clients; retry with delivery_mode='foreground'"
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn mpx_hotplug_block(
     session_type: Option<&str>,
     current_desktop: Option<&str>,
     session_desktop: Option<&str>,
@@ -530,11 +555,15 @@ fn kde_x11_uinput_hotplug_is_unsafe(
     kde_full_session: Option<&str>,
     display: Option<&str>,
     wayland_display: Option<&str>,
-) -> bool {
+    xwayland_server: bool,
+) -> Option<MpxHotplugBlock> {
     let explicit_x11 = session_type.is_some_and(|value| value.eq_ignore_ascii_case("x11"));
     let explicit_wayland = session_type.is_some_and(|value| value.eq_ignore_ascii_case("wayland"));
-    if explicit_wayland || (!explicit_x11 && nonempty(wayland_display)) {
-        return false;
+    // On a Wayland session the X server is XWayland even when the server
+    // probe can't run. The probe also catches XWayland under an environment
+    // that claims X11 (a headless compositor started with XDG_SESSION_TYPE=x11).
+    if xwayland_server || explicit_wayland || (!explicit_x11 && nonempty(wayland_display)) {
+        return Some(MpxHotplugBlock::Xwayland);
     }
 
     let x11 = explicit_x11 || nonempty(display);
@@ -548,10 +577,10 @@ fn kde_x11_uinput_hotplug_is_unsafe(
             )
         });
 
-    x11 && kde
+    (x11 && kde).then_some(MpxHotplugBlock::KdeX11)
 }
 
-fn kde_x11_uinput_hotplug_is_unsafe_from_env() -> bool {
+fn mpx_hotplug_block_for_session() -> Option<MpxHotplugBlock> {
     let session_type = std::env::var("XDG_SESSION_TYPE").ok();
     let current_desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
     let session_desktop = std::env::var("XDG_SESSION_DESKTOP").ok();
@@ -560,7 +589,7 @@ fn kde_x11_uinput_hotplug_is_unsafe_from_env() -> bool {
     let display = std::env::var("DISPLAY").ok();
     let wayland_display = std::env::var("WAYLAND_DISPLAY").ok();
 
-    kde_x11_uinput_hotplug_is_unsafe(
+    mpx_hotplug_block(
         session_type.as_deref(),
         current_desktop.as_deref(),
         session_desktop.as_deref(),
@@ -568,7 +597,14 @@ fn kde_x11_uinput_hotplug_is_unsafe_from_env() -> bool {
         kde_full_session.as_deref(),
         display.as_deref(),
         wayland_display.as_deref(),
+        crate::x11::server_is_xwayland(),
     )
+}
+
+/// Why the MPX/uinput route is off for this whole session, when it is: the
+/// refusal [`ensure_master_pointer`] gives, for hints on other refusals.
+pub(crate) fn mpx_route_disabled_reason() -> Option<&'static str> {
+    mpx_hotplug_block_for_session().map(MpxHotplugBlock::refusal)
 }
 
 pub(crate) fn uinput_accessible() -> bool {
@@ -580,10 +616,10 @@ pub(crate) fn uinput_accessible() -> bool {
 }
 
 pub fn real_pointer_input_available() -> bool {
-    // Do not even probe /dev/uinput on an affected KDE/X11 session. Creating
-    // the device is itself the dangerous operation; a later fallback is too
-    // late once Xorg has announced the hotplug to Qt clients.
-    if kde_x11_uinput_hotplug_is_unsafe_from_env() {
+    // Do not even probe /dev/uinput on an affected KDE/X11 or XWayland
+    // session. Creating the devices is itself the dangerous operation; a later
+    // fallback is too late once the X server has announced them to Qt clients.
+    if mpx_hotplug_block_for_session().is_some() {
         return false;
     }
 
@@ -609,17 +645,15 @@ pub fn real_pointer_input_available() -> bool {
 }
 
 fn ensure_master_pointer(cursor_id: &str) -> Result<MasterPointerIds> {
-    ensure_master_pointer_for_session(cursor_id, kde_x11_uinput_hotplug_is_unsafe_from_env())
+    ensure_master_pointer_for_session(cursor_id, mpx_hotplug_block_for_session())
 }
 
 fn ensure_master_pointer_for_session(
     cursor_id: &str,
-    unsafe_hotplug_session: bool,
+    hotplug_block: Option<MpxHotplugBlock>,
 ) -> Result<MasterPointerIds> {
-    if unsafe_hotplug_session {
-        return Err(uinput_unavailable(
-            "disabled on KDE Plasma X11; retry with delivery_mode='foreground'",
-        ));
+    if let Some(block) = hotplug_block {
+        return Err(uinput_unavailable(block.refusal()));
     }
 
     if let Some(ids) = mpx_pointers().lock().unwrap().get(cursor_id).copied() {
@@ -1796,6 +1830,19 @@ fn bounds_contain(bounds: (i32, i32, u32, u32), x: i32, y: i32) -> bool {
 }
 
 /// Describe a mapped override-redirect root child as a [`PopupWindow`].
+/// Whether a root child's attributes allow it to be a menu, popover or combo
+/// list: mapped, override-redirect, bigger than a pixel, and able to draw.
+/// `InputOnly` windows have no pixels; KWin keeps a screen-sized one on
+/// XWayland (no pid, no title), which used to show up as an open popup
+/// covering every XWayland window.
+fn could_be_popup(attrs: &x11::xlib::XWindowAttributes) -> bool {
+    attrs.override_redirect != 0
+        && attrs.map_state == x11::xlib::IsViewable
+        && attrs.class != x11::xlib::InputOnly
+        && attrs.width > 1
+        && attrs.height > 1
+}
+
 fn popup_info(display: *mut x11::xlib::Display, child: x11::xlib::Window) -> Option<PopupWindow> {
     let mut attrs: x11::xlib::XWindowAttributes = unsafe { std::mem::zeroed() };
     let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
@@ -1804,10 +1851,7 @@ fn popup_info(display: *mut x11::xlib::Display, child: x11::xlib::Window) -> Opt
         x11::xlib::XSync(display, 0);
         x11::xlib::XSetErrorHandler(previous_handler);
     }
-    if rc == 0 || attrs.override_redirect == 0 || attrs.map_state != x11::xlib::IsViewable {
-        return None;
-    }
-    if attrs.width <= 1 || attrs.height <= 1 {
+    if rc == 0 || !could_be_popup(&attrs) {
         return None;
     }
     let pid = crate::x11::window_pid(child).or_else(|| {
@@ -4907,11 +4951,12 @@ exit 0"#,
 #[cfg(test)]
 mod path_tests {
     use super::{
-        click_event_target, create_uinput_pointer, ensure_master_pointer_for_session,
-        guarded_uinput_creation, is_uinput_unavailable, kde_x11_uinput_hotplug_is_unsafe,
-        master_pointer_name, modifiers_to_state, mpx_op_guard, normalize_uinput_device_name,
-        path_cumulative, point_on_path, real_pointer_capabilities_available, sample_function,
-        slave_pointer_name, EVDEV_UINPUT_NAME_MAX_BYTES, UINPUT_POINTER_SUFFIX,
+        click_event_target, could_be_popup, create_uinput_pointer,
+        ensure_master_pointer_for_session, guarded_uinput_creation, is_uinput_unavailable,
+        master_pointer_name, modifiers_to_state, mpx_hotplug_block, mpx_op_guard,
+        normalize_uinput_device_name, path_cumulative, point_on_path,
+        real_pointer_capabilities_available, sample_function, slave_pointer_name, MpxHotplugBlock,
+        EVDEV_UINPUT_NAME_MAX_BYTES, UINPUT_POINTER_SUFFIX,
     };
     use x11rb::protocol::xproto::{EventMask, KeyButMask};
 
@@ -5136,56 +5181,166 @@ mod path_tests {
 
     #[test]
     fn kde_x11_sessions_disable_uinput_pointer_hotplug() {
-        assert!(kde_x11_uinput_hotplug_is_unsafe(
-            Some("x11"),
-            Some("KDE"),
-            None,
-            None,
-            None,
-            Some(":0"),
-            None,
-        ));
-        assert!(kde_x11_uinput_hotplug_is_unsafe(
-            Some("x11"),
-            Some("KDE"),
-            None,
-            None,
-            None,
-            Some(":0"),
-            Some("wayland-0"),
-        ));
-        assert!(kde_x11_uinput_hotplug_is_unsafe(
-            None,
-            None,
-            Some("plasma"),
-            None,
-            Some("true"),
-            Some(":1"),
-            None,
-        ));
+        let kde_x11 = Some(MpxHotplugBlock::KdeX11);
+        assert_eq!(
+            mpx_hotplug_block(
+                Some("x11"),
+                Some("KDE"),
+                None,
+                None,
+                None,
+                Some(":0"),
+                None,
+                false
+            ),
+            kde_x11
+        );
+        assert_eq!(
+            mpx_hotplug_block(
+                Some("x11"),
+                Some("KDE"),
+                None,
+                None,
+                None,
+                Some(":0"),
+                Some("wayland-0"),
+                false,
+            ),
+            kde_x11
+        );
+        assert_eq!(
+            mpx_hotplug_block(
+                None,
+                None,
+                Some("plasma"),
+                None,
+                Some("true"),
+                Some(":1"),
+                None,
+                false
+            ),
+            kde_x11
+        );
+        assert_eq!(
+            mpx_hotplug_block(
+                Some("x11"),
+                Some("GNOME"),
+                None,
+                None,
+                None,
+                Some(":0"),
+                None,
+                false
+            ),
+            None
+        );
 
-        assert!(!kde_x11_uinput_hotplug_is_unsafe(
-            Some("wayland"),
-            Some("KDE"),
-            None,
-            None,
-            Some("true"),
-            Some(":0"),
-            Some("wayland-0"),
-        ));
-        assert!(!kde_x11_uinput_hotplug_is_unsafe(
-            Some("x11"),
-            Some("GNOME"),
-            None,
-            None,
-            None,
-            Some(":0"),
-            None,
-        ));
-
-        let error = ensure_master_pointer_for_session("regression-test", true)
+        let error = ensure_master_pointer_for_session("regression-test", kde_x11)
             .expect_err("the creation choke point must refuse before opening X11 or uinput");
         assert!(is_uinput_unavailable(&error));
+        assert!(error.to_string().contains("delivery_mode='foreground'"));
+    }
+
+    // Regression for 2026-10-25: KWin's screen-sized InputOnly window on
+    // XWayland (0x200001, depth 0) was reported as an open popup.
+    #[test]
+    fn input_only_windows_are_never_popups() {
+        let mut attrs: x11::xlib::XWindowAttributes = unsafe { std::mem::zeroed() };
+        attrs.override_redirect = 1;
+        attrs.map_state = x11::xlib::IsViewable;
+        attrs.class = x11::xlib::InputOutput;
+        attrs.width = 2560;
+        attrs.height = 1440;
+        attrs.depth = 24;
+        assert!(could_be_popup(&attrs));
+
+        attrs.class = x11::xlib::InputOnly;
+        attrs.depth = 0;
+        assert!(!could_be_popup(&attrs));
+
+        attrs.class = x11::xlib::InputOutput;
+        attrs.override_redirect = 0;
+        assert!(!could_be_popup(&attrs), "managed windows aren't popups");
+        attrs.override_redirect = 1;
+        attrs.map_state = x11::xlib::IsUnmapped;
+        assert!(!could_be_popup(&attrs), "unmapped windows aren't popups");
+        attrs.map_state = x11::xlib::IsViewable;
+        attrs.width = 1;
+        assert!(!could_be_popup(&attrs), "1-pixel windows aren't popups");
+    }
+
+    // Regression for 2026-10-25: on KDE Plasma 6.8.1 Wayland the old guard
+    // returned "safe" for every Wayland session, and the first background
+    // click crashed every Qt XWayland client.
+    #[test]
+    fn xwayland_sessions_disable_uinput_pointer_hotplug() {
+        let xwayland = Some(MpxHotplugBlock::Xwayland);
+        // The session that crashed: KDE Wayland, driver in XWayland mode.
+        assert_eq!(
+            mpx_hotplug_block(
+                Some("wayland"),
+                Some("KDE"),
+                None,
+                None,
+                Some("true"),
+                Some(":0"),
+                Some("wayland-1"),
+                false,
+            ),
+            xwayland
+        );
+        // XWayland is the X server on any compositor, not only KWin.
+        assert_eq!(
+            mpx_hotplug_block(
+                Some("wayland"),
+                Some("GNOME"),
+                None,
+                None,
+                None,
+                Some(":0"),
+                Some("wayland-0"),
+                false,
+            ),
+            xwayland
+        );
+        // No session type, but a Wayland socket.
+        assert_eq!(
+            mpx_hotplug_block(
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(":0"),
+                Some("wayland-0"),
+                false
+            ),
+            xwayland
+        );
+        // The server probe wins over an environment that claims X11, as in a
+        // headless `kwin_wayland --xwayland` started with XDG_SESSION_TYPE=x11.
+        assert_eq!(
+            mpx_hotplug_block(
+                Some("x11"),
+                Some("KDE"),
+                None,
+                None,
+                None,
+                Some(":1"),
+                None,
+                true
+            ),
+            xwayland
+        );
+        assert_eq!(
+            mpx_hotplug_block(Some("x11"), None, None, None, None, Some(":1"), None, true),
+            xwayland
+        );
+
+        let error = ensure_master_pointer_for_session("regression-test", xwayland)
+            .expect_err("the creation choke point must refuse before opening X11 or uinput");
+        assert!(is_uinput_unavailable(&error));
+        assert!(error.to_string().contains("XWayland"));
         assert!(error.to_string().contains("delivery_mode='foreground'"));
     }
 

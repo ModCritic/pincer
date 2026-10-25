@@ -21,7 +21,7 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, watch, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -120,6 +120,14 @@ pub struct CdpDialogState {
     pub session_id: String,
 }
 
+/// What [`CdpConnection::call_until_dialog`] ended with.
+#[derive(Debug)]
+pub enum CallOrDialog {
+    Reply(Value),
+    /// The target opened a JavaScript dialog before the command replied.
+    Dialog(CdpDialogState),
+}
+
 /// What the reader routed back for one in-flight call.
 enum CallOutcome {
     Result(Value),
@@ -133,6 +141,8 @@ struct Demux {
     session_targets: StdMutex<HashMap<String, String>>,
     dialogs: StdMutex<HashMap<String, CdpDialogState>>,
     next_dialog_generation: AtomicU64,
+    /// The generation of the latest dialog the reader journaled.
+    dialog_opened: watch::Sender<u64>,
     closed: AtomicBool,
 }
 
@@ -217,6 +227,7 @@ async fn read_loop(mut read: SplitStream<WsStream>, demux: Arc<Demux>) {
                                     session_id: session_id.to_owned(),
                                 },
                             );
+                            demux.dialog_opened.send_replace(generation);
                         }
                     }
                     "Page.javascriptDialogClosed" => {
@@ -267,6 +278,7 @@ impl CdpConnection {
             session_targets: StdMutex::new(HashMap::new()),
             dialogs: StdMutex::new(HashMap::new()),
             next_dialog_generation: AtomicU64::new(1),
+            dialog_opened: watch::channel(0).0,
             closed: AtomicBool::new(false),
         });
         let reader = tokio::spawn(read_loop(read, demux.clone()));
@@ -343,6 +355,43 @@ impl CdpConnection {
         let mut dialogs = self.demux.dialogs.lock().unwrap();
         if dialogs.get(target_id).map(|state| state.generation) == Some(generation) {
             dialogs.remove(target_id);
+        }
+    }
+
+    /// [`Self::call`] that also returns once `target_id` opens a JavaScript
+    /// dialog. A command that runs page script (a mouse release on a button
+    /// whose handler calls `confirm()`) gets no reply until the dialog
+    /// closes; waiting for it took the full 20 s timeout and reported a
+    /// failed click although the click worked. Dialog events only arrive on
+    /// a registered dialog session (see [`Self::register_dialog_session`]).
+    /// The abandoned call's reply, when it comes, finds no waiter and is
+    /// dropped by the reader.
+    pub async fn call_until_dialog(
+        &self,
+        session_id: Option<&str>,
+        method: &str,
+        params: Value,
+        target_id: &str,
+    ) -> anyhow::Result<CallOrDialog> {
+        let mut opened = self.demux.dialog_opened.subscribe();
+        let before = self.dialog_state(target_id).map(|dialog| dialog.generation);
+        let call = self.call(session_id, method, params);
+        tokio::pin!(call);
+        loop {
+            tokio::select! {
+                biased;
+                reply = &mut call => return reply.map(CallOrDialog::Reply),
+                changed = opened.changed() => {
+                    if changed.is_err() {
+                        return call.await.map(CallOrDialog::Reply);
+                    }
+                    if let Some(dialog) = self.dialog_state(target_id) {
+                        if Some(dialog.generation) != before {
+                            return Ok(CallOrDialog::Dialog(dialog));
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1345,6 +1394,51 @@ mod tests {
             .await
             .unwrap();
         assert!(conn.dialog_state("page-target").is_none());
+    }
+
+    // Regression for 2026-10-25: a click whose handler called confirm()
+    // waited the full call timeout, then reported failure.
+    #[tokio::test]
+    async fn a_call_returns_when_its_target_opens_a_dialog() {
+        let server = MockCdpServer::start(StdArc::new(|call| match call.method.as_str() {
+            "Input.dispatchMouseEvent" => MockReply::ok(json!({}))
+                .with_events(vec![MockEvent {
+                    method: "Page.javascriptDialogOpening".into(),
+                    session_id: Some("dialog-session".into()),
+                    params: json!({ "type": "confirm", "message": "Sure?" }),
+                }])
+                .withheld(),
+            _ => MockReply::ok(json!({ "echo": call.method })),
+        }))
+        .await;
+        let conn = CdpConnection::connect(&server.ws_url()).await.unwrap();
+        conn.register_dialog_session("dialog-session", "page-target");
+
+        let started = Instant::now();
+        let outcome = conn
+            .call_until_dialog(
+                Some("click-session"),
+                "Input.dispatchMouseEvent",
+                json!({ "type": "mouseReleased" }),
+                "page-target",
+            )
+            .await
+            .unwrap();
+        let CallOrDialog::Dialog(dialog) = outcome else {
+            panic!("expected the dialog to end the call, got {outcome:?}");
+        };
+        assert_eq!(dialog.kind, "confirm");
+        assert_eq!(dialog.session_id, "dialog-session");
+        assert!(started.elapsed() < Duration::from_secs(5));
+
+        // A dialog that was already open doesn't end the next call early.
+        let reply = conn
+            .call_until_dialog(None, "Page.getLayoutMetrics", json!({}), "page-target")
+            .await
+            .unwrap();
+        assert!(
+            matches!(reply, CallOrDialog::Reply(value) if value["echo"] == "Page.getLayoutMetrics")
+        );
     }
 
     #[tokio::test]

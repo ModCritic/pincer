@@ -34,6 +34,9 @@ pub(crate) struct MockEvent {
 pub(crate) struct MockReply {
     pub events: Vec<MockEvent>,
     pub result: Result<Value, (i64, String)>,
+    /// Emit the events but never reply, like Chromium while page script
+    /// sits in `confirm()`.
+    pub withhold_reply: bool,
 }
 
 impl MockReply {
@@ -41,6 +44,7 @@ impl MockReply {
         Self {
             events: Vec::new(),
             result: Ok(result),
+            withhold_reply: false,
         }
     }
 
@@ -48,6 +52,7 @@ impl MockReply {
         Self {
             events: Vec::new(),
             result: Err((code, message.to_owned())),
+            withhold_reply: false,
         }
     }
 
@@ -58,6 +63,11 @@ impl MockReply {
 
     pub fn with_events(mut self, events: Vec<MockEvent>) -> Self {
         self.events = events;
+        self
+    }
+
+    pub fn withheld(mut self) -> Self {
+        self.withhold_reply = true;
         self
     }
 }
@@ -123,6 +133,9 @@ impl MockCdpServer {
                             if ws.send(Message::Text(frame.to_string())).await.is_err() {
                                 return;
                             }
+                        }
+                        if reply.withhold_reply {
+                            continue;
                         }
                         let mut response = match reply.result {
                             Ok(result) => json!({ "id": id, "result": result }),

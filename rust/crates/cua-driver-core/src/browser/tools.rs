@@ -14,9 +14,9 @@ use crate::protocol::{Content, ToolResult};
 use crate::tool::{ProtectedResourceOwnership, Tool, ToolDef, ToolRegistry};
 use crate::tool_args::ArgsExt;
 
-use super::cdp_ws::CdpConnection;
+use super::cdp_ws::{CallOrDialog, CdpConnection, CdpDialogState};
 use super::download::BrowserDownloadTool;
-use super::engine::{BrowserEngine, BrowserTabScreenshot};
+use super::engine::{enable_dialog_events, BrowserEngine, BrowserTabScreenshot};
 use super::platform::{
     BrowserVisualActionKind, PrepareAction, PrepareProfile, PrepareProfileMode, PrepareRequest,
     PrepareStrategy,
@@ -1120,6 +1120,9 @@ impl Tool for BrowserClickTool {
             Ok(v) => v,
             Err(refusal) => return refusal.to_tool_result(),
         };
+        if let Some(dialog) = validated.conn.dialog_state(&validated.tab.cdp_target_id) {
+            return open_dialog_refusal(&tab_id, &dialog);
+        }
         if route == "trusted" && !foreground && validated.record.cdp_window_id.is_some() {
             if let Some(limitation) = self
                 .engine
@@ -1253,18 +1256,35 @@ impl Tool for BrowserClickTool {
                         .await;
                 }
             }
-            return match conn
-                .call(
+            let dispatched = conn
+                .call_until_dialog(
                     Some(cdp),
                     "Runtime.callFunctionOn",
                     json!({
                         "objectId": object_id,
                         "functionDeclaration": DOM_EVENT_CLICK_SEQUENCE,
                     }),
+                    &validated.tab.cdp_target_id,
                 )
-                .await
-            {
-                Ok(_) => ToolResult::text(format!(
+                .await;
+            return match dispatched {
+                Ok(CallOrDialog::Dialog(dialog)) => ToolResult::text(format!(
+                    "dispatched synthetic DOM click on {} in {tab_id}; {}",
+                    ext_ref.as_deref().unwrap_or("?"),
+                    dialog_opened_note(&dialog)
+                ))
+                .with_structured(json!({
+                    "status": "ok",
+                    "effect": "confirmed",
+                    "route": "dom_event",
+                    "target_id": target_id,
+                    "tab_id": tab_id,
+                    "ref": ext_ref,
+                    "frame": frame_kind,
+                    "dialog": dialog_json(&dialog),
+                    "evidence": dialog_evidence(&dialog),
+                })),
+                Ok(CallOrDialog::Reply(_)) => ToolResult::text(format!(
                     "dispatched synthetic DOM click on {} in {tab_id}; application effect not \
                      verified (trust-gated controls may ignore untrusted events). Refresh page \
                      state and verify the expected postcondition",
@@ -1360,9 +1380,10 @@ impl Tool for BrowserClickTool {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
 
         let mut delivery_error = None;
+        let mut opened_dialog = None;
         for (event_type, click_count) in [("mousePressed", 1), ("mouseReleased", 1)] {
-            if let Err(error) = conn
-                .call(
+            match conn
+                .call_until_dialog(
                     Some(cdp),
                     "Input.dispatchMouseEvent",
                     json!({
@@ -1372,12 +1393,54 @@ impl Tool for BrowserClickTool {
                         "button": "left",
                         "clickCount": click_count,
                     }),
+                    &validated.tab.cdp_target_id,
                 )
                 .await
             {
-                delivery_error = Some(error);
-                break;
+                Ok(CallOrDialog::Reply(_)) => {}
+                Ok(CallOrDialog::Dialog(dialog)) => {
+                    opened_dialog = Some(dialog);
+                    break;
+                }
+                Err(error) => {
+                    delivery_error = Some(error);
+                    break;
+                }
             }
+        }
+        if let Some(dialog) = opened_dialog {
+            // The page answers nothing while the dialog is open, so restoring
+            // focus emulation can't be awaited here. CDP keeps per-target
+            // order: it runs once the dialog closes, before later commands.
+            let restore_conn = validated.conn.clone();
+            let restore_session = cdp.to_owned();
+            tokio::spawn(async move {
+                let _ = restore_conn
+                    .call(
+                        Some(&restore_session),
+                        "Emulation.setFocusEmulationEnabled",
+                        json!({ "enabled": false }),
+                    )
+                    .await;
+            });
+            return ToolResult::text(format!(
+                "clicked ({x:.0}, {y:.0}) in {tab_id}; {}",
+                dialog_opened_note(&dialog)
+            ))
+            .with_structured(json!({
+                "status": "ok",
+                "effect": "confirmed",
+                "route": "trusted",
+                "delivery_mode": if foreground { "foreground" } else { "background" },
+                "target_id": target_id,
+                "tab_id": tab_id,
+                "ref": ext_ref,
+                "frame": frame_kind,
+                "x": x,
+                "y": y,
+                "dialog": dialog_json(&dialog),
+                "evidence": dialog_evidence(&dialog),
+            }));
         }
         let cleanup_error = conn
             .call(
@@ -1421,6 +1484,45 @@ impl Tool for BrowserClickTool {
             "y": y,
         }))
     }
+}
+
+/// The tab already shows a JavaScript dialog; until it closes the page
+/// answers no DOM or Input command, so a click would hang.
+fn open_dialog_refusal(tab_id: &str, dialog: &CdpDialogState) -> ToolResult {
+    BrowserRefusal::new(
+        BrowserRefusalCode::BrowserActionUnavailable,
+        format!(
+            "a {} dialog (dialog-{}) is open in {tab_id}; accept or dismiss it with browser_dialog first",
+            dialog.kind, dialog.generation
+        ),
+    )
+    .with_detail(json!({ "dialog": dialog_json(dialog), "next_call": "browser_dialog" }))
+    .to_tool_result()
+}
+
+fn dialog_json(dialog: &CdpDialogState) -> Value {
+    json!({ "dialog_id": format!("dialog-{}", dialog.generation), "kind": dialog.kind })
+}
+
+/// Why a click that opened a dialog reports `effect: "confirmed"`: the
+/// browser's `Page.javascriptDialogOpening` proves the page's handler ran.
+/// The action record keeps "confirmed" only with published evidence.
+fn dialog_evidence(dialog: &CdpDialogState) -> Value {
+    json!([{
+        "kind": "browser_readback",
+        "detail": format!(
+            "the page opened a {} JavaScript dialog (dialog-{})",
+            dialog.kind, dialog.generation
+        ),
+    }])
+}
+
+fn dialog_opened_note(dialog: &CdpDialogState) -> String {
+    format!(
+        "the click opened a {} dialog (dialog-{}); the page is blocked until browser_dialog \
+         accepts or dismisses it",
+        dialog.kind, dialog.generation
+    )
 }
 
 /// Center of the content quad from a `DOM.getBoxModel` result.
@@ -2350,21 +2452,14 @@ impl Tool for BrowserDialogTool {
         let conn = &validated.conn;
         let cdp_session = validated.cdp_session.as_str();
         let cdp_target_id = validated.tab.cdp_target_id.as_str();
-        if conn.dialog_state(cdp_target_id).is_none() && !conn.has_dialog_session(cdp_target_id) {
-            // Register before Page.enable so an opening event delivered before
-            // the command reply is still attributed to the exact target.
-            conn.register_dialog_session(cdp_session, cdp_target_id);
-            if let Err(error) = conn.call(Some(cdp_session), "Page.enable", json!({})).await {
-                if conn.dialog_state(cdp_target_id).is_none() {
-                    conn.unregister_dialog_session(cdp_session, cdp_target_id);
-                    return BrowserRefusal::new(
-                        BrowserRefusalCode::BrowserActionUnavailable,
-                        format!("the exact tab does not expose JavaScript dialog events: {error}"),
-                    )
-                    .to_tool_result();
-                }
-            }
-            tokio::task::yield_now().await;
+        // Revalidation's attach normally did this already; repeat it so a
+        // failure is reported here instead of only logged.
+        if let Err(error) = enable_dialog_events(conn, cdp_session, cdp_target_id).await {
+            return BrowserRefusal::new(
+                BrowserRefusalCode::BrowserActionUnavailable,
+                format!("the exact tab does not expose JavaScript dialog events: {error}"),
+            )
+            .to_tool_result();
         }
 
         let Some(dialog) = conn.dialog_state(cdp_target_id) else {
