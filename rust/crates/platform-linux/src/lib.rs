@@ -129,6 +129,7 @@ pub(crate) mod test_env {
     pub(crate) struct DisplayOverride {
         display: Option<OsString>,
         wayland_display: Option<OsString>,
+        enable_wayland: Option<OsString>,
         _lock: MutexGuard<'static, ()>,
     }
 
@@ -142,10 +143,21 @@ pub(crate) mod test_env {
         let guard = DisplayOverride {
             display: std::env::var_os("DISPLAY"),
             wayland_display: std::env::var_os("WAYLAND_DISPLAY"),
+            enable_wayland: std::env::var_os(crate::wayland::ENABLE_WAYLAND_ENV),
             _lock: lock,
         };
         std::env::set_var("DISPLAY", ":9999999");
         std::env::remove_var("WAYLAND_DISPLAY");
+        guard
+    }
+
+    /// [`unreachable_x11_display`] inside a Wayland session with the native
+    /// backend off: the default XWayland mode on KDE and GNOME, where
+    /// `WAYLAND_DISPLAY` is set but window ids are X11 ones.
+    pub(crate) fn xwayland_mode_display() -> DisplayOverride {
+        let guard = unreachable_x11_display();
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-cua-test-missing");
+        std::env::remove_var(crate::wayland::ENABLE_WAYLAND_ENV);
         guard
     }
 
@@ -154,6 +166,10 @@ pub(crate) mod test_env {
             for (name, value) in [
                 ("DISPLAY", self.display.take()),
                 ("WAYLAND_DISPLAY", self.wayland_display.take()),
+                (
+                    crate::wayland::ENABLE_WAYLAND_ENV,
+                    self.enable_wayland.take(),
+                ),
             ] {
                 match value {
                     Some(value) => std::env::set_var(name, value),

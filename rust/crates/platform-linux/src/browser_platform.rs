@@ -650,7 +650,13 @@ impl BrowserPlatform for LinuxBrowserPlatform {
                 format!("pid {pid} is outside the Linux process-id range"),
             )
         })?;
-        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        // Window ids come from the backend list_windows uses. KDE and GNOME
+        // set WAYLAND_DISPLAY in the default XWayland mode too, and there the
+        // ids are X11 ones; checking WAYLAND_DISPLAY alone sent them to the
+        // Wayland lookups, which gave inexact geometry and no window count, so
+        // no browser window could bind. is_only_exact_native_window follows
+        // the same rule.
+        if crate::wayland::is_wayland() {
             if crate::wayland::hyprland::is_session() {
                 let window = tokio::task::spawn_blocking(move || {
                     crate::wayland::hyprland::window_for_address(window_id)
@@ -823,7 +829,7 @@ impl BrowserPlatform for LinuxBrowserPlatform {
                 format!("pid {pid} is outside the Linux process-id range"),
             )
         })?;
-        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        if crate::wayland::is_wayland() {
             if crate::wayland::hyprland::is_session() {
                 let windows = tokio::task::spawn_blocking(crate::wayland::hyprland::list_windows)
                     .await
@@ -1360,6 +1366,26 @@ impl BrowserPlatform for LinuxBrowserPlatform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn xwayland_mode_looks_up_browser_windows_through_x11() {
+        let display = crate::test_env::xwayland_mode_display();
+        let platform = LinuxBrowserPlatform::default();
+        let pid = i64::from(std::process::id());
+        // The X11 lookup's own refusal, not "the active Wayland compositor
+        // cannot prove this window's pid and geometry".
+        let native = platform.native_window(pid, 0x1234).await;
+        // Some(false) from an X11 count, not None from the Wayland branch.
+        let only = platform.is_only_exact_native_window(pid, 0x1234).await;
+        drop(display);
+        let error = native.expect_err("DISPLAY points at no server");
+        assert_eq!(
+            error.code,
+            BrowserRefusalCode::BrowserBindingStale,
+            "{error:?}"
+        );
+        assert_eq!(only.expect("an X11 count"), Some(false));
+    }
 
     #[test]
     fn hyprland_browser_identity_requires_exact_pid_and_full_native_address() {

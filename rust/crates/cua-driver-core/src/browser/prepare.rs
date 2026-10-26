@@ -428,12 +428,12 @@ fn cleanup_created_profile_as_browser(
 #[cfg(target_os = "linux")]
 fn configure_linux_isolated_browser_command(
     command: &mut Command,
-    native_wayland: bool,
+    ozone_platform: Option<&str>,
     sandbox: LinuxBrowserSandbox,
 ) {
     command.arg("--password-store=basic");
-    if native_wayland {
-        command.arg("--ozone-platform=wayland");
+    if let Some(platform) = ozone_platform {
+        command.arg(format!("--ozone-platform={platform}"));
     }
     match sandbox {
         LinuxBrowserSandbox::Full => {}
@@ -460,6 +460,32 @@ enum LinuxBrowserSandbox {
     /// No unprivileged user namespaces (a container under docker's default
     /// seccomp profile): the container boundary is the sandbox.
     None,
+}
+
+/// Which display backend the isolated browser uses. Chromium picks Wayland by
+/// itself whenever WAYLAND_DISPLAY is set, and KDE and GNOME set it next to
+/// XWayland's DISPLAY. Unless the native Wayland backend is on, the driver
+/// finds windows through X11, so there the browser is pinned to X11; left to
+/// choose, it opened a Wayland window that list_windows never saw (KDE Plasma
+/// 6.8, Chromium 153, 2026-10-25). The native-backend check repeats
+/// platform_linux::wayland::is_wayland, which this crate can't depend on.
+#[cfg(target_os = "linux")]
+fn linux_ozone_platform(var: impl Fn(&str) -> Option<String>) -> Option<&'static str> {
+    let present = |name: &str| var(name).is_some_and(|value| !value.is_empty());
+    let wayland_session = var("XDG_SESSION_TYPE")
+        .is_some_and(|session| session.eq_ignore_ascii_case("wayland"))
+        && present("WAYLAND_DISPLAY");
+    let native_backend = var("CUA_DRIVER_RS_ENABLE_WAYLAND").is_some_and(|value| {
+        let value = value.trim();
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    }) && present("WAYLAND_DISPLAY");
+    if wayland_session && !present("DISPLAY") {
+        Some("wayland")
+    } else if present("DISPLAY") && !native_backend {
+        Some("x11")
+    } else {
+        None
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -516,12 +542,9 @@ fn isolated_browser_command(executable: &str, profile: &Path) -> Command {
         .arg("--window-size=900,640");
     #[cfg(target_os = "linux")]
     {
-        let native_wayland = std::env::var("XDG_SESSION_TYPE")
-            .is_ok_and(|session| session.eq_ignore_ascii_case("wayland"))
-            && std::env::var_os("WAYLAND_DISPLAY").is_some()
-            && std::env::var_os("DISPLAY").is_none();
+        let ozone_platform = linux_ozone_platform(|name| std::env::var(name).ok());
         let sandbox = linux_browser_sandbox(|name| std::env::var(name).ok());
-        configure_linux_isolated_browser_command(&mut command, native_wayland, sandbox);
+        configure_linux_isolated_browser_command(&mut command, ozone_platform, sandbox);
     }
     let stderr = if std::env::var_os("CUA_E2E_BROWSER_STDERR").is_some() {
         Stdio::inherit()
@@ -2131,7 +2154,11 @@ mod tests {
     #[test]
     fn isolated_launch_can_select_native_wayland_and_test_vm_sandbox_mode() {
         let mut command = Command::new("chromium-under-test");
-        configure_linux_isolated_browser_command(&mut command, true, LinuxBrowserSandbox::None);
+        configure_linux_isolated_browser_command(
+            &mut command,
+            Some("wayland"),
+            LinuxBrowserSandbox::None,
+        );
         let args = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -2139,6 +2166,62 @@ mod tests {
         assert!(args.iter().any(|arg| arg == "--password-store=basic"));
         assert!(args.iter().any(|arg| arg == "--ozone-platform=wayland"));
         assert!(args.iter().any(|arg| arg == "--no-sandbox"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn isolated_launch_uses_x11_unless_the_driver_reads_wayland_windows() {
+        let platform = |vars: &[(&str, &str)]| {
+            let vars = vars
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<std::collections::HashMap<_, _>>();
+            linux_ozone_platform(|name| vars.get(name).cloned())
+        };
+        let plasma_wayland = [
+            ("XDG_SESSION_TYPE", "wayland"),
+            ("WAYLAND_DISPLAY", "wayland-1"),
+            ("DISPLAY", ":0"),
+        ];
+        // XWayland mode: the driver only sees X11 windows.
+        assert_eq!(platform(&plasma_wayland), Some("x11"));
+        assert_eq!(
+            platform(&[("XDG_SESSION_TYPE", "x11"), ("DISPLAY", ":0")]),
+            Some("x11")
+        );
+        // Native Wayland backend on: the browser keeps its own choice.
+        let native = [
+            plasma_wayland.as_slice(),
+            &[("CUA_DRIVER_RS_ENABLE_WAYLAND", "1")],
+        ]
+        .concat();
+        assert_eq!(platform(&native), None);
+        let opted_out = [
+            plasma_wayland.as_slice(),
+            &[("CUA_DRIVER_RS_ENABLE_WAYLAND", "0")],
+        ]
+        .concat();
+        assert_eq!(platform(&opted_out), Some("x11"));
+        // No XWayland at all: Wayland is the only option.
+        assert_eq!(
+            platform(&[
+                ("XDG_SESSION_TYPE", "wayland"),
+                ("WAYLAND_DISPLAY", "wayland-1"),
+                ("DISPLAY", ""),
+            ]),
+            Some("wayland")
+        );
+        assert_eq!(platform(&[]), None);
+
+        let mut command = Command::new("chromium-under-test");
+        configure_linux_isolated_browser_command(
+            &mut command,
+            platform(&plasma_wayland),
+            LinuxBrowserSandbox::Full,
+        );
+        assert!(command
+            .get_args()
+            .any(|arg| arg.to_string_lossy() == "--ozone-platform=x11"));
     }
 
     #[cfg(target_os = "linux")]
@@ -2151,7 +2234,7 @@ mod tests {
                 .collect::<std::collections::HashMap<_, _>>();
             let sandbox = linux_browser_sandbox(|name| vars.get(name).cloned());
             let mut command = Command::new("chromium-under-test");
-            configure_linux_isolated_browser_command(&mut command, false, sandbox);
+            configure_linux_isolated_browser_command(&mut command, None, sandbox);
             command
                 .get_args()
                 .map(|arg| arg.to_string_lossy().into_owned())

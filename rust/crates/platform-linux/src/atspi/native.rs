@@ -7541,7 +7541,7 @@ mod coord_tests {
         assert_eq!(activation_index("menu item", &qt_menu_bar_item), Some(0));
         assert_eq!(activation_index("menu", &qt_menu_bar_item), Some(0));
         assert_eq!(
-            activation_index("Menu Item", &vec!["showMenu".to_owned()]),
+            activation_index("Menu Item", &["showMenu".to_owned()]),
             Some(0)
         );
         assert_eq!(activation_index("push button", &qt_menu_bar_item), None);

@@ -299,8 +299,8 @@ There were two blockers; the second isn't in the report above.
   namespaces inside a `chroot`. Under `unshare -c`, Chromium and its parent directories showed
   owner 65534 and `browser_prepare` launched an isolated Chromium in 1.0 s. Under `unshare -cn`
   it refused at once and no Chromium process started.
-- Needs your decision: a wrapper that keeps the network cut but loopback up. This works on this
-  desktop (only `lo` exists inside, Pincer runs as uid 1000, root-owned files show 65534):
+- Wrapper, applied to the MCP registration that evening with your OK: it keeps the network cut
+  but loopback up (only `lo` exists inside, Pincer runs as uid 1000, root-owned files show 65534):
 
   ```bash
   unshare -rn sh -c 'ip link set lo up && exec unshare --map-user=1000 --map-group=1000 ~/.local/bin/pincer mcp'
@@ -309,7 +309,29 @@ There were two blockers; the second isn't in the report above.
   `unshare -cn` alone can't bring `lo` up: the mapped user loses its capabilities at exec
   ("RTNETLINK answers: Operation not permitted"). The outer `-r` provides `CAP_NET_ADMIN` for
   `ip link`, and the inner `unshare` maps back to uid 1000 so Pincer and Chromium don't run as
-  namespace root. It changes the Claude Code MCP registration, so I didn't apply it.
+  namespace root.
+- A live run through the wrapper on this desktop found two more problems after
+  `browser_prepare`, which itself worked (0.97 s, endpoint reached over loopback):
+  - Chromium chose native Wayland, because `WAYLAND_DISPLAY` is set and the isolated launch only
+    passed `--ozone-platform` with no XWayland at all. `list_windows` never saw its window.
+    `linux_ozone_platform` now passes `--ozone-platform=x11` whenever `DISPLAY` is set and the
+    native Wayland backend is off. Test: `isolated_launch_uses_x11_unless_the_driver_reads_wayland_windows`.
+  - `get_browser_state` then refused with "no CDP target correlates with native window". The
+    browser platform's `native_window` and `is_only_exact_native_window` checked
+    `WAYLAND_DISPLAY` alone, so XWayland-mode X11 ids went to the Wayland lookups: inexact
+    geometry, no window count, and no title match against "Untitled - Chromium". Both now use
+    `crate::wayland::is_wayland()`, the rule `list_windows` uses. Test:
+    `xwayland_mode_looks_up_browser_windows_through_x11`, which fails on the old check with
+    `BrowserRouteUnavailable`.
+  - After both: `browser_prepare` 0.58 s, `list_windows` finds the window at once,
+    `get_browser_state` binds exactly with 1 tab, and `end_session` closes Chromium and deletes
+    its profile. Page navigation wasn't checked live: `browser_navigate` refuses `data:` URLs,
+    and nothing else is reachable inside the namespace.
+  - Not changed: the window's class is `Com.anthropic.Claude`. The Claude desktop app sets
+    `CHROME_DESKTOP=com.anthropic.Claude.desktop`, and the launched Chromium inherits it; that is
+    the likely cause, not tested.
+  - Tests after these: `cua-driver-core` 950 passed; `platform-linux` 691 passed with the same one
+    failure as below.
 
 ### 8. A click that opens a JavaScript dialog
 
