@@ -20,6 +20,10 @@ Changes from upstream:
 - Linux gains a `capture_series` tool, which takes screenshots on a schedule
   and can stop early once the image stops changing, and an optional `region`
   crop for `get_desktop_state`.
+- Linux gains a `move_along_path` tool, which glides the real pointer along
+  lines, curves, or a formula; see [Pointer paths](#pointer-paths).
+- On KDE Plasma's Wayland session, the agent cursor overlay draws through
+  XWayland. Upstream keeps it off on every Wayland compositor.
 - PostHog telemetry is removed at compile time.
 - The optional perception extension is removed, together with the
   `parse_visual_regions` tool, the extension installer, the
@@ -35,7 +39,7 @@ Changes from upstream:
   `--from main` is refused.
 
 The driver makes no network calls of its own; the browser tools only talk to
-a browser on this machine through its loopback debugging port.
+a browser on your machine through its loopback debugging port.
 `install_ffmpeg` with `confirm: true` runs the system package manager, which
 downloads ffmpeg from that package manager's sources.
 
@@ -84,8 +88,10 @@ claude mcp add --scope user pincer -- /path/to/cua-driver mcp
 
 The agent cursor overlay is on by default: an arrow that shows where the
 driver points, clicks and types, and follows every pointer move it makes.
-Add `--no-overlay` to turn it off. On Linux and Windows, `cua-driver mcp` owns
-its runtime directly and shuts it down when stdin closes.
+Add `--no-overlay` to turn it off. On a Wayland session in the default
+XWayland mode, the overlay only draws on KDE Plasma (KWin); on other
+compositors it stays off. On Linux and Windows, `cua-driver mcp` owns its
+runtime directly and shuts it down when stdin closes.
 
 On Linux, you can also deny the driver network access by starting it with
 `unshare -cn`, which runs it in a new user and network namespace whose only
@@ -120,6 +126,55 @@ Use MCP for this Claude Code vision/computer-use-style path. CLI screenshots
 still work as driver calls, but they do not expose the
 `mcp__cua-computer-use__screenshot` tool name that Claude Code appears to use
 as the image-grounding cue.
+
+## Pointer paths
+
+`move_along_path` (Linux only) moves your real mouse pointer along a path, so
+it visibly travels instead of jumping. Use it to draw in a paint program,
+drag along a curve, or trace a hover route. The agent cursor follows it.
+Because it takes over your pointer for the length of the glide, the bundled
+skill tells agents to use it only when you ask for real-pointer control.
+
+Describe the path in one of three ways:
+
+- `segments`: a `start` point, then up to 256 pieces. Each piece is a `line`,
+  a `quad` or `cubic` Bezier curve, or an `arc` around a center (a positive
+  `sweep_deg` turns clockwise on screen).
+- `points`: up to 2000 `[x, y]` points joined by straight lines, or by one
+  smooth curve through all of them with `smooth: true`.
+- `parametric`: `x` and `y` as formulas of `t`, run from `t_from` to `t_to`,
+  for circles, loops and spirals. Formulas take `+ - * / ^`, `sin`, `cos`,
+  `tan`, `sqrt`, `abs`, `exp`, `ln`, `pi` and `e`.
+
+Options:
+
+- `button` (`left`, `right`, `middle`) presses at the first point, holds the
+  whole way, and releases at the last. Without it, the pointer only hovers.
+- `click_at_end` (`left`, `right`, `middle`, `double`) clicks at the last
+  point. It can't be combined with `button`.
+- `duration_ms` (default 600, at most 30000) and `easing` (`linear`,
+  `ease_in`, `ease_out`, or the default `ease_in_out`) set the timing.
+- `spacing_px` (default 4) is the largest gap between pointer positions along
+  the path. One call sends at most 4000 positions; a longer path is refused,
+  and the error names the smallest spacing that fits.
+
+By default, `scope` is `"window"`: points are pixels in that window's
+`get_window_state` screenshot, `pid` and `window_id` are required, and the
+window is brought to the front first. `scope: "desktop"` takes
+`get_desktop_state` pixels instead. A path that leaves the screen is refused
+before any input is sent. In the native Wayland mode
+(`CUA_DRIVER_RS_ENABLE_WAYLAND=1`), only `scope: "desktop"` without `pid` and
+`window_id` works. On KDE Plasma's Wayland session, KWin asks whether to let
+the driver control input, and the pointer only moves once you allow it.
+
+This traces a circle with a 200-pixel radius around (800, 500) in 1.5 seconds:
+
+```bash
+cua-driver call move_along_path '{"scope":"desktop","parametric":{"x":"800+200*cos(t)","y":"500+200*sin(t)","t_from":0,"t_to":6.2832},"duration_ms":1500}'
+```
+
+The reply ends with one JSON line giving the number of segments and samples,
+the path length in pixels, the duration, and the start and end points.
 
 ## Agent skill pack
 
