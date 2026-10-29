@@ -78,11 +78,11 @@ unavailable, exit the graphical session, remove the optional plugin, update the
 desktop, and verify a fresh session. Disabling input does not remove a package
 dependency. Retain a matching rollback set.
 
-Cua owns source tooling and native input qualification. The distribution names
+Pincer owns source tooling and native input qualification. The distribution names
 its package-maintenance and signing owner before rollout. Relevant dependency
 changes trigger a candidate build and requalification, not an automatic
 compatibility claim. Before publication, resolve the exact component tag
-`cua-driver-rs-v<driver_version>` and verify that it identifies the profile's full
+`pincer-v<driver_version>` and verify that it identifies the profile's full
 source revision. A mismatched candidate needs the proper component release and
 a profile bound to that exact source. Reuse qualification only for unchanged
 source and package bytes; changed bytes require the affected qualification anew.

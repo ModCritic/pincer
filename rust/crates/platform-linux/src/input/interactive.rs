@@ -1,6 +1,6 @@
 //! Low-latency, stateful input delivery to one X11 target (window or display
 //! region): the Linux native session behind
-//! [`cua_driver_core::interactive_input`].
+//! [`pincer_core::interactive_input`].
 //!
 //! The session keeps one X connection and keyboard map for its lifetime, so a
 //! streaming client's pointer samples do not pay a connect per event.
@@ -23,7 +23,7 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use cua_driver_core::interactive_input::{
+use pincer_core::interactive_input::{
     denormalize, extract_integral, validate_batch, InteractiveDeliveryMode, InteractiveInputBatch,
     InteractiveInputError, InteractiveInputEvent, InteractiveInputReceipt, KeyState, Modifier,
     PointerButton, PointerPhase, TargetedInputError,

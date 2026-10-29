@@ -140,7 +140,7 @@ class GeometryFault:
         assert re.fullmatch(r'0x[0-9a-fA-F]+', window.get('address', ''))
         assert int(window['address'], 16) == self.spec['target']['window_id'], 'target address changed'
         assert window.get('xwayland') is False and window.get('floating') is True, 'need prepared floating native target'
-        assert f'cua-smoke-{self.spec["app"]}' in window.get('title', ''), 'wrong synthetic document'
+        assert f'pincer-smoke-{self.spec["app"]}' in window.get('title', ''), 'wrong synthetic document'
         return {'observed_ns': time.monotonic_ns(), 'bounds': window_bounds(window), 'window': window}
 
     def dispatch(self, to):
@@ -316,7 +316,7 @@ def run(args):
         plan = json.loads(args.plan.read_text())
         save('plan.json', plan)
         validate_plan(plan)
-        assert args.trace_socket.name in ('cua-input-v3.sock', 'cua-input-v3-2.sock')
+        assert args.trace_socket.name in ('pincer-input-v3.sock', 'pincer-input-v3-2.sock')
         fault = GeometryFault(plan)
         origin = provenance(args, plan)
         for name in ('production_geometry_fault_proof.py', 'production_geometry_fault_proof_test.py', 'proof_fixtures.py',

@@ -5,9 +5,9 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib
 
-GLib.set_prgname('cua-index-lab')
-GLib.set_application_name('Cua Index Lab')
-window = Gtk.Window(title='Cua Index Lab')
+GLib.set_prgname('pincer-index-lab')
+GLib.set_application_name('Pincer Index Lab')
+window = Gtk.Window(title='Pincer Index Lab')
 window.set_default_size(440, 320)
 window.set_border_width(20)
 box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)

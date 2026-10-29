@@ -1,4 +1,4 @@
-//! macOS platform backend for cua-driver-rs.
+//! macOS platform backend for pincer.
 //!
 //! Provides background automation on macOS via:
 //! - Accessibility (AX) API for UI tree walking and element interaction
@@ -7,7 +7,7 @@
 //! - CGWindow / ScreenCaptureKit for window enumeration and screenshots
 
 // Tool helpers return `Result<_, ToolResult>`: the error arm is the finished
-// tool reply (see the note in cua-driver-core), not a propagated error, so
+// tool reply (see the note in pincer-core), not a propagated error, so
 // clippy's result_large_err does not apply.
 #![allow(clippy::result_large_err)]
 
@@ -62,10 +62,10 @@ pub mod window_change_detector;
 #[cfg(target_os = "macos")]
 pub mod windows;
 
-use cua_driver_core::tool::ToolRegistry;
+use pincer_core::tool::ToolRegistry;
 
 /// Install the macOS presence pointer-shape backend (AX hit-test, NSCursor
-/// readout, pointer warp) into `cua_driver_core::pointer_shape`. Returns
+/// readout, pointer warp) into `pincer_core::pointer_shape`. Returns
 /// false off macOS or when a backend was already installed.
 pub fn install_pointer_shape_backend() -> bool {
     #[cfg(target_os = "macos")]
@@ -132,7 +132,7 @@ pub fn register_tools_with_cursor(
 /// This is used by the canonical SDK runtime. The original public constructor
 /// remains unchanged for callers that do not host protected consent.
 pub fn register_tools_with_cursor_and_provider(
-    provider: Option<std::sync::Arc<dyn cua_driver_core::consent::ProtectedConsentProvider>>,
+    provider: Option<std::sync::Arc<dyn pincer_core::consent::ProtectedConsentProvider>>,
     cfg: cursor_overlay::CursorConfig,
     compat: bool,
     host_owns_permission_ux: bool,
@@ -146,7 +146,7 @@ pub fn register_tools_with_cursor_and_provider(
             cursor::overlay::init(cfg);
         }
         // System cursor shape reporting is independent of the agent-cursor
-        // overlay: a remote viewer wants the I-beam even when Cua draws no
+        // overlay: a remote viewer wants the I-beam even when Pincer draws no
         // cursor of its own. It needs only a Window Server session, so it is
         // gated on graphic access rather than on `cfg.enabled`.
         if session::has_graphic_access() {
@@ -158,7 +158,7 @@ pub fn register_tools_with_cursor_and_provider(
         // learns it must publish the limitation instead of waiting for events
         // that will never arrive. Unconditional: emission depends on the
         // registry write path, not on the overlay or on graphic access.
-        cua_driver_core::cursor_hook::declare_cursor_hook_emitter();
+        pincer_core::cursor_hook::declare_cursor_hook_emitter();
         let mut r = ToolRegistry::new_with_protected_consent_provider(provider);
         tools::register_all(
             &mut r,

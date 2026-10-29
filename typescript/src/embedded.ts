@@ -4,7 +4,7 @@
  * process, socket, authorization, or restart logic.
  */
 export {
-  EmbeddedCuaDriverHost,
+  EmbeddedPincerHost,
   EmbeddedDriverConnection,
   EmbeddedDriverError,
   EmbeddedDriverExit,
@@ -13,4 +13,4 @@ export {
   EmbeddedEnvironmentVariable,
   EmbeddedMcpConfiguration,
   EmbeddedPermissionMode,
-} from "./native/cua_driver_sdk.js"
+} from "./native/pincer_sdk.js"

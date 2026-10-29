@@ -1,6 +1,6 @@
 # test-apps
 
-Local staging directory for cua-driver test fixture applications.
+Local staging directory for pincer test fixture applications.
 
 Build scripts under `../tests/fixtures/build/` write `harness-<name>/`
 directories here. The staged outputs are intentionally git-ignored; rebuild

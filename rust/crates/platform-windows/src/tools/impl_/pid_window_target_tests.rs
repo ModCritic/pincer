@@ -1,5 +1,5 @@
 use super::*;
-use cua_driver_core::window_target::{resolve_pid_window_target, PidWindowTargetResolution};
+use pincer_core::window_target::{resolve_pid_window_target, PidWindowTargetResolution};
 
 fn window(hwnd: u64, pid: u32) -> crate::win32::WindowInfo {
     crate::win32::WindowInfo {

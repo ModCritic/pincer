@@ -1,8 +1,8 @@
-# Cua Driver action and icon catalog
+# Pincer action and icon catalog
 
 **Status:** Semantic source catalog for cursor theme profile v2
 
-**Source:** Cua Driver public contract and platform tool registries
+**Source:** Pincer public contract and platform tool registries
 
 **Scope:** Public MCP/CLI-callable tools and their meaningful runtime action
 variants. Internal implementation helpers are excluded.

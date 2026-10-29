@@ -10,7 +10,7 @@
 //! window's origin there is nothing to add the local point to, so a missing or
 //! stale window is a refusal.
 
-use cua_driver_core::protocol::ToolResult;
+use pincer_core::protocol::ToolResult;
 
 use crate::windows::WindowBounds;
 

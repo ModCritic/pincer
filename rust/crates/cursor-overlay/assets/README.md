@@ -1,10 +1,10 @@
 # Embedded default cursor theme
 
-`cua.default.lottie` is the canonical source archive for Cua Driver's built-in
-cursor. `cua.default.cua-theme` is the bounded runtime artifact compiled from
+`pincer.default.lottie` is the canonical source archive for Pincer's built-in
+cursor. `pincer.default.pincer-theme` is the bounded runtime artifact compiled from
 that archive.
 
-The privileged overlay embeds and decodes only the `.cua-theme` artifact. It
+The privileged overlay embeds and decodes only the `.pincer-theme` artifact. It
 never parses dotLottie ZIP files or Lottie JSON at runtime. The artifact
 contains bounded vector geometry, paints, transforms, and sampled animation
 frames rather than a fixed-resolution pixel atlas. Skia rasterizes those
@@ -15,10 +15,10 @@ Regenerate both files from the Rust workspace:
 ```bash
 python3 crates/cursor-overlay/assets/build_default_theme.py
 cargo run -p cursor-theme-cli -- build \
-  crates/cursor-overlay/assets/cua.default.lottie \
-  --output crates/cursor-overlay/assets/cua.default.cua-theme
+  crates/cursor-overlay/assets/pincer.default.lottie \
+  --output crates/cursor-overlay/assets/pincer.default.pincer-theme
 cargo run -p cursor-theme-cli -- inspect \
-  crates/cursor-overlay/assets/cua.default.cua-theme
+  crates/cursor-overlay/assets/pincer.default.pincer-theme
 ```
 
 The Python generator uses only the standard library and writes deterministic

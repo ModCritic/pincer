@@ -12,7 +12,7 @@
 //! mode that spawns labwc internally.
 //!
 //! Architecture mirrors the existing `wayland/persistent_vptr.rs`: one
-//! owner thread (`cua-overlay-wl`) holds the wayland Connection +
+//! owner thread (`pincer-overlay-wl`) holds the wayland Connection +
 //! EventQueue + layer surface; commands flow in over a `crossbeam-channel`.
 //! The render core wakes at frame cadence only while pixels can change;
 //! stable or hidden state performs only a cheap, one-second topology check.
@@ -123,16 +123,16 @@ pub fn ensure_started() -> bool {
     TX.get_or_init(|| {
         let (tx, rx) = bounded::<WlOverlayCmd>(64);
         thread::Builder::new()
-            .name("cua-overlay-wl".into())
+            .name("pincer-overlay-wl".into())
             .spawn(move || {
                 if let Err(e) = owner_thread(rx) {
-                    tracing::warn!("cua-overlay-wl thread exited with error: {e}");
+                    tracing::warn!("pincer-overlay-wl thread exited with error: {e}");
                 }
                 // No frame will ever be painted again: unblock every pointer
                 // action still waiting for its glide to arrive.
                 crate::overlay::release_arrivals();
             })
-            .expect("spawn cua-overlay-wl thread");
+            .expect("spawn pincer-overlay-wl thread");
         tx
     });
     true
@@ -414,8 +414,8 @@ fn output_frame(state: &OverlayState) -> Option<ScreenFrame> {
 }
 
 fn dbg(msg: &str) {
-    if std::env::var_os("CUA_OVERLAY_DEBUG").is_some() {
-        eprintln!("[cua-overlay-wl] {msg}");
+    if std::env::var_os("PINCER_OVERLAY_DEBUG").is_some() {
+        eprintln!("[pincer-overlay-wl] {msg}");
     }
 }
 
@@ -562,7 +562,7 @@ fn ensure_layer_surface(state: &mut OverlayState, id: u32, qh: &QueueHandle<Over
         &surface,
         Some(&output.output),
         Layer::Overlay,
-        "cua-agent-cursor".to_string(),
+        "pincer-agent-cursor".to_string(),
         qh,
         LayerData { id },
     );
@@ -1008,12 +1008,12 @@ fn redraw_output(
         }
     }
 
-    // CUA_OVERLAY_DEBUG=1 paints a 60x60 magenta square at the cursor's
+    // PINCER_OVERLAY_DEBUG=1 paints a 60x60 magenta square at the cursor's
     // current pos on top of the gradient arrow. Useful when validating
     // layer-shell visibility on a new compositor — the gradient arrow is
     // small at native scale and easy to miss in a screenshot, while the
     // magenta block is impossible to miss.
-    if std::env::var_os("CUA_OVERLAY_DEBUG").is_some() {
+    if std::env::var_os("PINCER_OVERLAY_DEBUG").is_some() {
         for &(cursor_x, cursor_y) in &painted_positions {
             let cx = (cursor_x - f64::from(layout.origin_x)) as i32;
             let cy = (cursor_y - f64::from(layout.origin_y)) as i32;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cua_hyprland/session.hpp"
+#include "pincer_hyprland/session.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -10,7 +10,7 @@
 #include <sys/types.h>
 #include <thread>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 
 struct ServerSnapshot {
     bool running = false;
@@ -69,4 +69,4 @@ class InjectionServer {
     std::thread m_thread;
 };
 
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

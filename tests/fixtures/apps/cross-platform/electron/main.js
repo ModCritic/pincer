@@ -1,5 +1,5 @@
-// CuaTestHarness.Electron — minimal Electron host loading the shared
-// index.html that CuaTestHarness.WebView also loads. Tests that need
+// PincerTestHarness.Electron — minimal Electron host loading the shared
+// index.html that PincerTestHarness.WebView also loads. Tests that need
 // Chromium DevTools Protocol access use --remote-debugging-port, so we
 // expose one here on a configurable port.
 
@@ -7,39 +7,39 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
-const sentinelMode = process.env.CUA_E2E_SENTINEL === '1';
+const sentinelMode = process.env.PINCER_E2E_SENTINEL === '1';
 const nativeWayland = process.platform === 'linux' && Boolean(process.env.WAYLAND_DISPLAY);
-const customCuaCompositor = process.env.CUA_E2E_WAYLAND_SESSION === 'cua-compositor';
-const fixtureJournalUrl = process.env.CUA_E2E_FIXTURE_JOURNAL_URL || '';
-const sentinelJournalPath = process.env.CUA_E2E_SENTINEL_JOURNAL || '';
-const sentinelControlPath = process.env.CUA_E2E_SENTINEL_CONTROL || '';
-if (process.env.CUA_E2E_USER_DATA_DIR) {
-  app.setPath('userData', process.env.CUA_E2E_USER_DATA_DIR);
+const customPincerCompositor = process.env.PINCER_E2E_WAYLAND_SESSION === 'pincer-compositor';
+const fixtureJournalUrl = process.env.PINCER_E2E_FIXTURE_JOURNAL_URL || '';
+const sentinelJournalPath = process.env.PINCER_E2E_SENTINEL_JOURNAL || '';
+const sentinelControlPath = process.env.PINCER_E2E_SENTINEL_CONTROL || '';
+if (process.env.PINCER_E2E_USER_DATA_DIR) {
+  app.setPath('userData', process.env.PINCER_E2E_USER_DATA_DIR);
 }
 if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
   app.commandLine.appendSwitch('ozone-platform', 'wayland');
   app.commandLine.appendSwitch('enable-features', 'UseOzonePlatform');
 }
 
-// Validate CUA_ELECTRON_CDP_PORT before forwarding to Chromium —
+// Validate PINCER_ELECTRON_CDP_PORT before forwarding to Chromium —
 // remote-debugging-port=0 means "pick an ephemeral port" which would
 // break our fixed-port expectation in the harness tests, and a
 // non-numeric value silently disables CDP.
-const rawCdpPort = process.env.CUA_ELECTRON_CDP_PORT ?? '9223';
+const rawCdpPort = process.env.PINCER_ELECTRON_CDP_PORT ?? '9223';
 const cdpPortNum = Number(rawCdpPort);
 if (!Number.isInteger(cdpPortNum) || cdpPortNum < 1 || cdpPortNum > 65535) {
   throw new Error(
-    `Invalid CUA_ELECTRON_CDP_PORT: "${rawCdpPort}". Expected an integer in 1-65535.`
+    `Invalid PINCER_ELECTRON_CDP_PORT: "${rawCdpPort}". Expected an integer in 1-65535.`
   );
 }
 const CDP_PORT = String(cdpPortNum);
 app.commandLine.appendSwitch('remote-debugging-port', CDP_PORT);
 
-ipcMain.on('cua-e2e-config', event => {
+ipcMain.on('pincer-e2e-config', event => {
   event.returnValue = { journalUrl: fixtureJournalUrl, sentinelMode };
 });
 
-ipcMain.on('cua-e2e-fixture-state', (_event, state) => {
+ipcMain.on('pincer-e2e-fixture-state', (_event, state) => {
   if (!fixtureJournalUrl) return;
   const body = JSON.stringify(state);
   const request = http.request(fixtureJournalUrl, {
@@ -53,7 +53,7 @@ ipcMain.on('cua-e2e-fixture-state', (_event, state) => {
   request.end(body);
 });
 
-ipcMain.on('cua-e2e-sentinel-event', (_event, entry) => {
+ipcMain.on('pincer-e2e-sentinel-event', (_event, entry) => {
   if (!sentinelMode || !sentinelJournalPath) return;
   fs.appendFileSync(sentinelJournalPath, `${JSON.stringify(entry)}\n`, 'utf8');
 });
@@ -64,8 +64,8 @@ let sentinelSetupToken;
 
 function createWindow() {
   const fixedTitle = sentinelMode
-    ? `CuaTestHarness Sentinel [cdp=${CDP_PORT}]`
-    : `CuaTestHarness Electron [cdp=${CDP_PORT}]`;
+    ? `PincerTestHarness Sentinel [cdp=${CDP_PORT}]`
+    : `PincerTestHarness Electron [cdp=${CDP_PORT}]`;
   // GitHub's interactive Windows desktop can be 1024x768. Keep the normal
   // fixture wholly inside its work area so a maximized sentinel can prove
   // geometric full occlusion instead of accepting an off-screen target.
@@ -81,11 +81,11 @@ function createWindow() {
     // Map the normal harness immediately. Xvfb/Openbox can enumerate a
     // deferred BrowserWindow while never painting it into the root desktop.
     // The sentinel normally stays hidden until it has maximized and claimed
-    // focus. cua-compositor has no window-policy transition to perform, so map
+    // focus. pincer-compositor has no window-policy transition to perform, so map
     // it at construction time; a synchronous show() after DOMContentLoaded can
     // otherwise stall Chromium before the renderer paints or schedules timers.
-    show: !sentinelMode || customCuaCompositor,
-    // A floating-level macOS window is omitted by cua-driver's deliberate
+    show: !sentinelMode || customPincerCompositor,
+    // A floating-level macOS window is omitted by pincer's deliberate
     // layer-0 top-level window contract. Foreground + maximized is sufficient
     // for occlusion there and lets an unexpected target raise remain visible.
     alwaysOnTop: sentinelMode && process.platform !== 'darwin' && !nativeWayland,
@@ -102,9 +102,9 @@ function createWindow() {
   });
 
   // Override the page's <title> with our deterministic harness title so
-  // cua-driver tests can find the window by substring match. Without this,
+  // pincer tests can find the window by substring match. Without this,
   // Electron syncs window.title to document.title which would be
-  // 'cua-driver Web Harness' (the page's title).
+  // 'pincer Web Harness' (the page's title).
   mainWindow.on('page-title-updated', e => e.preventDefault());
   mainWindow.setTitle(fixedTitle);
   mainWindow.webContents.setWindowOpenHandler(() => ({
@@ -114,7 +114,7 @@ function createWindow() {
       height: 220,
       show: false,
       autoHideMenuBar: true,
-      title: 'CuaTestHarness Child Window',
+      title: 'PincerTestHarness Child Window',
     },
   }));
   mainWindow.webContents.on('did-create-window', child => {
@@ -124,7 +124,7 @@ function createWindow() {
       // appear to steal focus. The scenario's behavioral oracle is child
       // creation, so keep the child hidden on native Wayland and preserve the
       // visible non-activating window contract on the other backends.
-      if (!nativeWayland || customCuaCompositor) {
+      if (!nativeWayland || customPincerCompositor) {
         child.showInactive();
       }
     });
@@ -154,10 +154,10 @@ function createWindow() {
                   } catch {}
                   if (typeof request?.token === 'string' && request.token !== sentinelSetupToken) {
                     sentinelSetupToken = request.token;
-                    mainWindow.webContents.send('cua-e2e-sentinel-arm-setup-click', request.token);
+                    mainWindow.webContents.send('pincer-e2e-sentinel-arm-setup-click', request.token);
                   }
                 }
-                mainWindow.webContents.send('cua-e2e-sentinel-heartbeat-probe');
+                mainWindow.webContents.send('pincer-e2e-sentinel-heartbeat-probe');
               }
             }, 100);
             sentinelHeartbeatTimer.unref();
@@ -165,19 +165,19 @@ function createWindow() {
           if (process.platform !== 'darwin' && !nativeWayland) {
             mainWindow.setAlwaysOnTop(true);
           }
-          if (nativeWayland && !customCuaCompositor) {
+          if (nativeWayland && !customPincerCompositor) {
             mainWindow.setFullScreen(true);
-          } else if (!customCuaCompositor) {
+          } else if (!customPincerCompositor) {
             mainWindow.maximize();
           }
-          // The minimal nested cua-compositor intentionally has no fullscreen
+          // The minimal nested pincer-compositor intentionally has no fullscreen
           // policy implementation. Requesting fullscreen leaves Chromium
           // waiting on a configure transition and stops the heartbeat oracle.
           // Its 1280x900 sentinel already covers the smaller fixture at origin.
-          // cua-compositor mapped and focused this toplevel at construction
+          // pincer-compositor mapped and focused this toplevel at construction
           // time. Avoid a second synchronous show/configure/focus transition
           // after the renderer has emitted its ready event.
-          if (!customCuaCompositor) {
+          if (!customPincerCompositor) {
             mainWindow.show();
             mainWindow.focus();
           }

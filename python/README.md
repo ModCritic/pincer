@@ -1,4 +1,4 @@
-# cua-driver Python SDK
+# Pincer Python SDK
 
 Rust-backed Python SDK and bundled executable for
 [Pincer](https://github.com/ModCritic/pincer), a fork of
@@ -6,44 +6,44 @@ Rust-backed Python SDK and bundled executable for
 
 ## Product boundary
 
-This package is for client applications importing Cua Driver as an SDK:
+This package is for client applications importing Pincer as an SDK:
 
 ```python
-from cua_driver import CuaDriver
+from pincer_driver import Pincer
 ```
 
 It does not contain a Python MCP protocol implementation. The optional
-`cua_driver.fleet` module forwards service bytes to the shared Rust typed-MCP
+`pincer_driver.fleet` module forwards service bytes to the shared Rust typed-MCP
 client. See [the candidate Fleet connection guide](../docs/shared-fleet-mcp-client.md)
 for prerequisites, ownership, and release limits. Agents already have runtime-neutral
 MCP clients and should configure the bundled server directly:
 
 ```text
-cua-driver mcp
+pincer mcp
 ```
 
-The removed pre-release MCP facade used `CuaDriver.stdio()`,
-`AsyncCuaDriver`, `*Args`, and transport classes. Application code imports the
-typed Rust-backed SDK shown below; agent code supplies `cua-driver mcp` to its
+The removed pre-release MCP facade used `Pincer.stdio()`,
+`AsyncPincer`, `*Args`, and transport classes. Application code imports the
+typed Rust-backed SDK shown below; agent code supplies `pincer mcp` to its
 agent SDK.
 
 ## Installation
 
-This fork publishes no wheels. The `cua-driver` name in `pyproject.toml` is
-upstream's, so a `cua-driver` package installed from PyPI is not this fork.
+This fork publishes no wheels. The package is `pincer-driver` (import
+`pincer_driver`), because `pincer` on PyPI is an unrelated project.
 
 To build a wheel yourself, first build the driver and the SDK library from
 source as described in the [top-level README](../README.md#build-from-source),
-adding the `cua-driver-sdk` package. From `rust/`:
+adding the `pincer-sdk` package. From `rust/`:
 
 ```bash
-cargo build --release -p cua-driver -p cua-driver-sdk
+cargo build --release -p pincer -p pincer-sdk
 ```
 
-On Windows, add `-p cua-driver-uia` to also bundle the UIAccess worker. Then
+On Windows, add `-p pincer-uia` to also bundle the UIAccess worker. Then
 run `python build_wheel.py` from this directory. It copies the binary and the
 library from `../rust/target/release` (or `$CARGO_TARGET_DIR/release`) into
-`src/cua_driver/` and builds the wheel with `python -m build`, so the `build`
+`src/pincer_driver/` and builds the wheel with `python -m build`, so the `build`
 package must be installed. Use `--target-dir`, `--binary`, or
 `--native-library` to take them from somewhere else. The script never
 downloads anything.
@@ -59,7 +59,7 @@ set the tag yourself, for example after building against an older glibc, pass
 `--plat-name manylinux_2_31_x86_64`.
 
 The wheel contains generated UniFFI bindings, a platform-specific Rust SDK
-library, and the `cua-driver` executable. `CuaDriver.create()` loads the runtime
+library, and the `pincer` executable. `Pincer.create()` loads the runtime
 in the importing process and does not require the executable or daemon.
 
 ## SDK example
@@ -67,8 +67,8 @@ in the importing process and does not require the executable or daemon.
 ```python
 import asyncio
 
-from cua_driver import (
-    CuaDriver,
+from pincer_driver import (
+    Pincer,
     CursorReducedMotion,
     EndSessionInput,
     GetDesktopStateInput,
@@ -77,7 +77,7 @@ from cua_driver import (
 )
 
 async def main() -> None:
-    driver = CuaDriver.create()
+    driver = Pincer.create()
     await driver.start_session(
         StartSessionInput(session="demo", cursor_theme=None, cursor_motion=None)
     )
@@ -85,7 +85,7 @@ async def main() -> None:
         await driver.set_agent_cursor_theme(
             SetAgentCursorThemeInput(
                 session="demo",
-                theme_id="cua.default",
+                theme_id="pincer.default",
                 reduced_motion=CursorReducedMotion.AUTO,
             )
         )
@@ -146,11 +146,11 @@ for discovery, token selection, verification, and shutdown.
 `standard` is promptless for normal automation. An application that needs to
 authorize attachment to an existing logged-in Chromium profile can construct a
 configured runtime with
-`CuaDriver.create_configured_with_authorization_host(options, host)`.
+`Pincer.create_configured_with_authorization_host(options, host)`.
 Implement `DriverAuthorizationHost.authorize()` in trusted application code
 and return the request's exact digest with `ALLOW`, `DENY`, or `CANCEL`.
 
-`CuaDriver.create_configured_with_activity_observer(options, observer)` emits
+`Pincer.create_configured_with_activity_observer(options, observer)` emits
 content-free action, refusal, grant, and session events. The observer cannot
 change authorization or tool results. Use
 `create_configured_with_host_integrations` when the application needs both.
@@ -158,7 +158,7 @@ change authorization or tool results. Use
 See upstream's [SDK reference](https://cua.ai/docs/cua-driver/guides/use-the-sdk#constructors)
 for complete examples and the callback trust rules.
 
-`CuaDriver.connect(socket_path)` remains available while existing applications
+`Pincer.connect(socket_path)` remains available while existing applications
 migrate. It exposes the same methods over the installed daemon, but it does not
 provide a second SDK contract.
 
@@ -176,16 +176,16 @@ lifetime for short-lived or external clients:
 ```python
 import asyncio
 
-from cua_driver import CuaDriver, EmbeddedCuaDriverHost, get_binary_path
+from pincer_driver import Pincer, EmbeddedPincerHost, get_binary_path
 
 
 async def main() -> None:
-    host = EmbeddedCuaDriverHost(
+    host = EmbeddedPincerHost(
         binary_path=str(get_binary_path()),
         host_bundle_id="com.example.your-app",
     )
     connection = await host.start()
-    driver = CuaDriver.connect(connection.socket_path)
+    driver = Pincer.connect(connection.socket_path)
     try:
         # Application calls use driver. An agent runtime can launch
         # connection.mcp.command with connection.mcp.args and environment.
@@ -210,10 +210,10 @@ child as a fallback, but orderly applications should still await `stop()`.
 The package also exposes the bundled executable:
 
 ```python
-from cua_driver import get_binary_path, run_cua_driver
+from pincer_driver import get_binary_path, run_pincer
 
 print(get_binary_path())
-exit_code = run_cua_driver(["mcp"])
+exit_code = run_pincer(["mcp"])
 ```
 
 ## Platform support

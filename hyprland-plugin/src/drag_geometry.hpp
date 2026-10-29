@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 // A drag is bound to the geometry accepted at dispatch. Other requests may
 // refresh the client's cached revision, but cannot rebase an in-flight drag.
 class DragGeometry {
@@ -13,4 +13,4 @@ class DragGeometry {
   private:
     const std::uint64_t accepted_;
 };
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

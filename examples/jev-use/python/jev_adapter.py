@@ -68,7 +68,7 @@ def visual_decision_state(visual: VisualObservation | None) -> dict[str, Any] | 
     if visual is None:
         return None
     return {
-        "schema": "cua.visual_regions_v1",
+        "schema": "pincer.visual_regions_v1",
         "capture_id": visual.capture_id,
         "screenshot_reference": visual.screenshot_reference,
         "source": {
@@ -138,7 +138,7 @@ def decision_state(
     )
 
 
-DRIVER_ACTION_INSTRUCTIONS = "Which complete executable action should Cua Driver run next?"
+DRIVER_ACTION_INSTRUCTIONS = "Which complete executable action should Pincer run next?"
 
 
 def choose_for_task(

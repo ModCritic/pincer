@@ -3,8 +3,8 @@
 //! Lineage:
 //! - The arc knobs (`start_handle`, `end_handle`, `arc_size`, `arc_flow`,
 //!   `spring`), their defaults and clamp ranges, and the glide speed constants
-//!   originate in Cua Driver's Swift `CursorMotionPath.swift` (April 2026,
-//!   #1359). The Dubins glide they feed is from Cua Driver's Swift
+//!   originate in Pincer's Swift `CursorMotionPath.swift` (April 2026,
+//!   #1359). The Dubins glide they feed is from Pincer's Swift
 //!   `AgentCursorRenderer.swift` (#1360).
 //! - The `press_duration_ms` knob, the 80 ms `dwell_after_click_ms` default
 //!   and the `with_overrides` method shape follow trope-cua's C#
@@ -14,9 +14,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-// The styles, timing modes and effect switches live in `cua-cursor-motion`, the
-// single source of truth for cursor motion shared with `@trycua/cursor-motion`.
-pub use cua_cursor_motion::{
+// The styles, timing modes and effect switches live in `pincer-cursor-motion`, the
+// single source of truth for cursor motion shared with `pincer-cursor-motion`.
+pub use pincer_cursor_motion::{
     MotionEffects, MotionStyle, MotionTiming, ResolvedEffects, DEFAULT_FIXED_MS,
 };
 
@@ -70,7 +70,7 @@ impl Default for MotionConfig {
             glide_duration_ms: 0.0, // 0 = speed-based mode
             dwell_after_click_ms: 80.0,
             // The shared agent idle timeout (presence drops an idle agent then too).
-            idle_hide_ms: cua_driver_core::agent_cursor::default_idle_hide_ms(),
+            idle_hide_ms: pincer_core::agent_cursor::default_idle_hide_ms(),
             press_duration_ms: 120.0,
             peak_speed: 900.0,
             min_start_speed: 300.0,
@@ -213,9 +213,9 @@ impl MotionConfig {
         self.effects.resolve(self.style.default_effects())
     }
 
-    /// The fields that shape motion, for `cua_cursor_motion::plan_move`.
-    pub fn params(&self) -> cua_cursor_motion::MotionParams {
-        cua_cursor_motion::MotionParams {
+    /// The fields that shape motion, for `pincer_cursor_motion::plan_move`.
+    pub fn params(&self) -> pincer_cursor_motion::MotionParams {
+        pincer_cursor_motion::MotionParams {
             style: self.style,
             timing: self.timing,
             effects: self.effects,

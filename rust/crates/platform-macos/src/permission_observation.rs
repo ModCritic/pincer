@@ -117,7 +117,7 @@ fn write_json_atomic(path: &Path, value: &PersistedVerification) -> Result<(), S
 mod tests {
     use super::*;
 
-    const RELEASE_BUNDLE_ID: &str = "com.trycua.driver";
+    const RELEASE_BUNDLE_ID: &str = "io.github.modcritic.pincer";
     const VERIFIED_AT: i64 = 1_754_352_000;
 
     fn store(path: PathBuf) -> DirectCaptureEvidenceStore {
@@ -165,7 +165,7 @@ mod tests {
                 ..valid.clone()
             },
             PersistedVerification {
-                bundle_id: "com.trycua.driver.local".to_owned(),
+                bundle_id: "io.github.modcritic.pincer.local".to_owned(),
                 ..valid
             },
         ];

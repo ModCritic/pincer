@@ -35,10 +35,10 @@ function run(command, args, cwd) {
 function nativeLibraryPath() {
   const file =
     process.platform === "darwin"
-      ? "libcua_driver_sdk.dylib"
+      ? "libpincer_sdk.dylib"
       : process.platform === "win32"
-        ? "cua_driver_sdk.dll"
-        : "libcua_driver_sdk.so"
+        ? "pincer_sdk.dll"
+        : "libpincer_sdk.so"
   // Cargo honors CARGO_TARGET_DIR (relative to the workspace) for the build above.
   const targetRoot = process.env.CARGO_TARGET_DIR
     ? resolve(rustRoot, process.env.CARGO_TARGET_DIR)
@@ -196,16 +196,16 @@ function normalizeTypeScript(name, source) {
     }
     output = output.replace(needle, 'import lib from "./node-runtime.js";')
   }
-  if (name === "cua_driver_contract.ts") output = normalizeTypeScriptCursorEffects(output)
-  if (name === "cua_driver_contract-ffi.ts") {
-    const needle = 'crateName: "cua_driver_contract"'
+  if (name === "pincer_contract.ts") output = normalizeTypeScriptCursorEffects(output)
+  if (name === "pincer_contract-ffi.ts") {
+    const needle = 'crateName: "pincer_contract"'
     const matches = output.split(needle).length - 1
     if (matches !== 1) {
       throw new Error(`expected one contract Node library selector, found ${matches}`)
     }
     // The contract namespace is linked into the SDK cdylib. UBRN 0.31.0-3
     // cannot configure a shared cdylib name for an external component.
-    output = output.replace(needle, 'crateName: "cua_driver_sdk"')
+    output = output.replace(needle, 'crateName: "pincer_sdk"')
   }
   return output
 }
@@ -275,9 +275,9 @@ function applyGroup(root, inventoryName, files) {
   }
 }
 
-const temporaryRoot = mkdtempSync(join(tmpdir(), "cua-driver-uniffi-"))
+const temporaryRoot = mkdtempSync(join(tmpdir(), "pincer-uniffi-"))
 try {
-  run("cargo", ["build", "--locked", "--release", "-p", "cua-driver-sdk"], rustRoot)
+  run("cargo", ["build", "--locked", "--release", "-p", "pincer-sdk"], rustRoot)
   const library = nativeLibraryPath()
   if (!existsSync(library)) throw new Error(`missing built SDK library ${library}`)
 
@@ -288,9 +288,9 @@ try {
       "run",
       "--locked",
       "-p",
-      "cua-driver-bindgen",
+      "pincer-bindgen",
       "--bin",
-      "cua-driver-bindgen",
+      "pincer-bindgen",
       "--",
       "generate",
       "--library",
@@ -325,19 +325,19 @@ try {
       "--ts-dir",
       typescriptOutput,
       "--lib-package-base",
-      "@trycua/cua-driver",
+      "pincer-driver",
       "--lib-node-triple",
       "--no-format",
     ],
     rustRoot,
   )
 
-  applyGroup(pythonRoot, ".cua-driver-uniffi-generated-files", {
-    "src/cua_driver/_native.py": normalizePython(
-      readFileSync(join(pythonOutput, "cua_driver_sdk.py"), "utf8"),
+  applyGroup(pythonRoot, ".pincer-uniffi-generated-files", {
+    "src/pincer_driver/_native.py": normalizePython(
+      readFileSync(join(pythonOutput, "pincer_sdk.py"), "utf8"),
     ),
-    "src/cua_driver/_native_contract.py": normalizePythonCursorEffects(normalizePython(
-      readFileSync(join(pythonOutput, "cua_driver_contract.py"), "utf8"),
+    "src/pincer_driver/_native_contract.py": normalizePythonCursorEffects(normalizePython(
+      readFileSync(join(pythonOutput, "pincer_contract.py"), "utf8"),
     )),
   })
 
@@ -348,7 +348,7 @@ try {
       readFileSync(join(typescriptOutput, name), "utf8"),
     )
   }
-  applyGroup(typescriptRoot, ".cua-driver-uniffi-generated-files", typescriptFiles)
+  applyGroup(typescriptRoot, ".pincer-uniffi-generated-files", typescriptFiles)
   console.log(check ? "UniFFI bindings are up to date." : "Generated UniFFI bindings.")
 } finally {
   if (process.argv.includes("--keep-temp")) {

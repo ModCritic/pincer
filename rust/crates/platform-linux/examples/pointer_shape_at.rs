@@ -11,7 +11,7 @@ fn main() {
             eprintln!("no pointer-shape backend (no display?)");
             std::process::exit(1);
         }
-        let backend = cua_driver_core::pointer_shape::pointer_shape_backend().unwrap();
+        let backend = pincer_core::pointer_shape::pointer_shape_backend().unwrap();
         println!(
             "names: {:?} limitation: {:?}",
             backend.names(),

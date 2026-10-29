@@ -88,9 +88,9 @@ fn tx() -> &'static Sender<Cmd> {
     TX.get_or_init(|| {
         let (tx, rx) = bounded::<Cmd>(32);
         thread::Builder::new()
-            .name("cua-persistent-vptr".into())
+            .name("pincer-persistent-vptr".into())
             .spawn(move || owner_thread(rx))
-            .expect("spawn cua-persistent-vptr thread");
+            .expect("spawn pincer-persistent-vptr thread");
         tx
     })
 }
@@ -296,7 +296,7 @@ pub fn press(cursor_id: &str, window_id: u64, x: i32, y: i32, button: u8) -> any
         button,
         reply: tx_r,
     })
-    .map_err(|e| anyhow::anyhow!("cua-persistent-vptr thread is dead: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("pincer-persistent-vptr thread is dead: {e}"))?;
     rx_r.recv()
         .map_err(|e| anyhow::anyhow!("reply channel closed: {e}"))?
 }
@@ -311,7 +311,7 @@ pub fn move_to(cursor_id: &str, x: i32, y: i32) -> anyhow::Result<()> {
         y,
         reply: tx_r,
     })
-    .map_err(|e| anyhow::anyhow!("cua-persistent-vptr thread is dead: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("pincer-persistent-vptr thread is dead: {e}"))?;
     rx_r.recv()
         .map_err(|e| anyhow::anyhow!("reply channel closed: {e}"))?
 }
@@ -325,7 +325,7 @@ pub fn release(cursor_id: &str, button: u8) -> anyhow::Result<()> {
         button,
         reply: tx_r,
     })
-    .map_err(|e| anyhow::anyhow!("cua-persistent-vptr thread is dead: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("pincer-persistent-vptr thread is dead: {e}"))?;
     rx_r.recv()
         .map_err(|e| anyhow::anyhow!("reply channel closed: {e}"))?
 }
@@ -340,7 +340,7 @@ pub fn forget(cursor_id: &str) -> anyhow::Result<()> {
         cursor_id: cursor_id.to_string(),
         reply: tx_r,
     })
-    .map_err(|e| anyhow::anyhow!("cua-persistent-vptr thread is dead: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("pincer-persistent-vptr thread is dead: {e}"))?;
     rx_r.recv()
         .map_err(|e| anyhow::anyhow!("reply channel closed: {e}"))?
 }

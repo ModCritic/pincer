@@ -58,8 +58,8 @@ class KitTest(unittest.TestCase):
             self.assertEqual(command[0], "makepkg")
             self.assertNotIn("--syncdeps", command)
             self.assertNotIn("--install", command)
-            self.assertEqual(kwargs["env"]["CUA_RELEASE_CXX"], str(compiler))
-            (kwargs["cwd"] / "cua-hyprland-plugin-1.2.3-1-x86_64.pkg.tar.zst").write_bytes(b"synthetic package")
+            self.assertEqual(kwargs["env"]["PINCER_RELEASE_CXX"], str(compiler))
+            (kwargs["cwd"] / "pincer-hyprland-plugin-1.2.3-1-x86_64.pkg.tar.zst").write_bytes(b"synthetic package")
             return subprocess.CompletedProcess(command, 0, "synthetic build", "")
 
         arguments = ["lifecycle.py", "--kit", str(kit), "--revision", self.revision,
@@ -81,7 +81,7 @@ class KitTest(unittest.TestCase):
 
 class LifecycleTest(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="cua-lifecycle-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="pincer-lifecycle-test-")
         self.addCleanup(self.temporary.cleanup)
         self.work = Path(self.temporary.name)
         self.manifest = {"driver_version": "1.2.3", "source_revision": "a" * 40,
@@ -115,7 +115,7 @@ class LifecycleTest(unittest.TestCase):
         if operation == ["-U", str(self.package)]:
             if root.name == "mismatched":
                 code = 1
-                out = ":: unable to satisfy dependency 'hyprland=0.56.2-1' required by cua-hyprland-plugin"
+                out = ":: unable to satisfy dependency 'hyprland=0.56.2-1' required by pincer-hyprland-plugin"
                 err = "error: failed to prepare transaction (could not satisfy dependencies)"
             else:
                 for name, data in self.data.items():
@@ -194,7 +194,7 @@ class LifecycleTest(unittest.TestCase):
 
     def test_package_provenance_and_unexpected_config_or_hook_payload(self):
         names = list(self.payload) + [".PKGINFO", ".BUILDINFO", ".MTREE"]
-        info = ("pkgname = cua-hyprland-plugin\npkgver = 1.2.3-1\narch = x86_64\n"
+        info = ("pkgname = pincer-hyprland-plugin\npkgver = 1.2.3-1\narch = x86_64\n"
                 "depend = hyprland=0.56.2-1\ndepend = gcc-libs\n")
 
         def fake_run(command, **kwargs):

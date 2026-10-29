@@ -253,7 +253,7 @@ class AppKitTaskTest(unittest.TestCase):
         self.assertNotIn("secret note", wire)
         self.assertNotIn("element_token", wire)
         self.assertNotIn("s00000086:", wire)
-        self.assertEqual(request["schema"], "cua.jev_choice_request_v2")
+        self.assertEqual(request["schema"], "pincer.jev_choice_request_v2")
         self.assertEqual({c.get("source") for c in request["candidates"][:-2]}, {"ax"})
 
     def test_type_text_method(self) -> None:
@@ -301,7 +301,7 @@ class AppKitTaskTest(unittest.TestCase):
     def test_oracle_and_classification(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
-            state = {"schema": "cua.appkit_task_state_v1", "pid": 42, "counter": 3,
+            state = {"schema": "pincer.appkit_task_state_v1", "pid": 42, "counter": 3,
                      "agreed": True, "size": "large", "note_saved": "n"}
             path.write_text(json.dumps(state))
             counter = appkit_task("appkit-counter", path, pid=42)
@@ -315,7 +315,7 @@ class AppKitTaskTest(unittest.TestCase):
             with self.assertRaises(OracleError):
                 appkit_task("appkit-counter", path, pid=43).read_oracle()
             with self.assertRaises(OracleError):
-                AppStateOracle(Path(directory) / "missing.json", "cua.appkit_task_state_v1").read()
+                AppStateOracle(Path(directory) / "missing.json", "pincer.appkit_task_state_v1").read()
         self.assertEqual(set(APPKIT_TASK_IDS), {"appkit-counter", "appkit-save-note", "appkit-choose-size"})
 
     def test_history_is_compact_and_redacted(self) -> None:

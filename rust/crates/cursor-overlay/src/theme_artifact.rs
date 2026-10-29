@@ -1,6 +1,6 @@
 //! Bounded compiled cursor-theme artifacts and the local installed-theme store.
 //!
-//! `.cua-theme` files contain zstd-compressed postcard data behind a fixed
+//! `.pincer-theme` files contain zstd-compressed postcard data behind a fixed
 //! header. The privileged overlay never parses Lottie, ZIP, JSON, fonts,
 //! expressions, URLs, or arbitrary source paths.
 
@@ -31,7 +31,7 @@ const MAX_PATH_POINTS: usize = 512;
 const MAX_TEXT_BYTES: usize = 200;
 const CANVAS: u32 = 128;
 const FPS: u16 = 30;
-const DEFAULT_THEME_BYTES: &[u8] = include_bytes!("../assets/cua.default.cua-theme");
+const DEFAULT_THEME_BYTES: &[u8] = include_bytes!("../assets/pincer.default.pincer-theme");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum CompiledGeometry {
@@ -315,11 +315,11 @@ pub fn encode_theme(theme: &CompiledTheme) -> Result<Vec<u8>> {
 pub fn decode_theme(bytes: &[u8]) -> Result<CompiledTheme> {
     if bytes.len() >= LEGACY_MAGIC.len() && &bytes[..LEGACY_MAGIC.len()] == LEGACY_MAGIC {
         bail!(
-            "cursor-theme artifact targets the retired v1 contract; rebuild the source as cua.cursor-theme/2"
+            "cursor-theme artifact targets the retired v1 contract; rebuild the source as pincer.cursor-theme/2"
         );
     }
     if bytes.len() < HEADER_LEN || &bytes[..8] != MAGIC {
-        bail!("not a Cua cursor-theme artifact");
+        bail!("not a Pincer cursor-theme artifact");
     }
     if bytes.len() - HEADER_LEN > MAX_COMPRESSED_BYTES {
         bail!("cursor-theme artifact exceeds the compressed size limit");
@@ -352,10 +352,10 @@ pub fn decode_theme(bytes: &[u8]) -> Result<CompiledTheme> {
 }
 
 pub fn theme_store_root() -> Result<PathBuf> {
-    if let Some(override_path) = std::env::var_os("CUA_DRIVER_CURSOR_THEME_DIR") {
+    if let Some(override_path) = std::env::var_os("PINCER_CURSOR_THEME_DIR") {
         let path = PathBuf::from(override_path);
         if !path.is_absolute() {
-            bail!("CUA_DRIVER_CURSOR_THEME_DIR must be absolute");
+            bail!("PINCER_CURSOR_THEME_DIR must be absolute");
         }
         return Ok(path);
     }
@@ -364,7 +364,7 @@ pub fn theme_store_root() -> Result<PathBuf> {
         let root = std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .ok_or_else(|| anyhow!("LOCALAPPDATA is unavailable"))?;
-        return Ok(root.join("Cua Driver").join("cursor-themes"));
+        return Ok(root.join("Pincer").join("cursor-themes"));
     }
     #[cfg(target_os = "macos")]
     {
@@ -374,13 +374,13 @@ pub fn theme_store_root() -> Result<PathBuf> {
         Ok(home
             .join("Library")
             .join("Application Support")
-            .join("Cua Driver")
+            .join("Pincer")
             .join("cursor-themes"))
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         if let Some(root) = std::env::var_os("XDG_DATA_HOME") {
-            return Ok(PathBuf::from(root).join("cua-driver").join("cursor-themes"));
+            return Ok(PathBuf::from(root).join("pincer").join("cursor-themes"));
         }
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -388,7 +388,7 @@ pub fn theme_store_root() -> Result<PathBuf> {
         Ok(home
             .join(".local")
             .join("share")
-            .join("cua-driver")
+            .join("pincer")
             .join("cursor-themes"))
     }
 }
@@ -397,7 +397,7 @@ fn installed_path(id: &str) -> Result<PathBuf> {
     if !valid_theme_id(id) {
         bail!("invalid cursor theme id");
     }
-    Ok(theme_store_root()?.join(format!("{id}.cua-theme")))
+    Ok(theme_store_root()?.join(format!("{id}.pincer-theme")))
 }
 
 #[cfg(feature = "theme-authoring")]
@@ -440,7 +440,7 @@ pub fn list_installed_themes() -> Result<Vec<String>> {
         }
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if let Some(id) = name.strip_suffix(".cua-theme") {
+        if let Some(id) = name.strip_suffix(".pincer-theme") {
             if valid_theme_id(id) {
                 ids.push(id.to_owned());
             }
@@ -503,7 +503,7 @@ pub fn embedded_default_theme() -> Arc<CompiledTheme> {
     static DEFAULT: OnceLock<Arc<CompiledTheme>> = OnceLock::new();
     Arc::clone(DEFAULT.get_or_init(|| {
         let theme =
-            decode_theme(DEFAULT_THEME_BYTES).expect("embedded cua.default theme must be valid");
+            decode_theme(DEFAULT_THEME_BYTES).expect("embedded pincer.default theme must be valid");
         assert_eq!(
             theme.id,
             crate::DEFAULT_THEME_ID,
@@ -767,7 +767,7 @@ pub fn paint_compiled_theme(
 /// pivot around it so the tip stays put while the artwork turns.
 ///
 /// Custom themes pass `None` and retain their authored colors. Only the
-/// checked-in `cua.default` path passes a tint.
+/// checked-in `pincer.default` path passes a tint.
 #[allow(clippy::too_many_arguments)]
 pub fn paint_compiled_theme_with_tint(
     target: &mut tiny_skia::Pixmap,
@@ -850,7 +850,7 @@ mod tests {
             version: "1.0.0".into(),
             author: "Example Author".into(),
             license: "MIT".into(),
-            profile: "cua-driver-development-v2".into(),
+            profile: "pincer-development-v2".into(),
             source_hash: [7; 32],
             hotspot: [55, 30],
             actions: BTreeMap::from([
@@ -874,7 +874,7 @@ mod tests {
         bytes[..LEGACY_MAGIC.len()].copy_from_slice(LEGACY_MAGIC);
         let message = decode_theme(&bytes).unwrap_err().to_string();
         assert!(message.contains("retired v1 contract"));
-        assert!(message.contains("cua.cursor-theme/2"));
+        assert!(message.contains("pincer.cursor-theme/2"));
     }
 
     #[test]
@@ -923,7 +923,7 @@ mod tests {
 
     #[test]
     fn embedded_default_was_compiled_from_the_checked_in_lottie() {
-        let source = include_bytes!("../assets/cua.default.lottie");
+        let source = include_bytes!("../assets/pincer.default.lottie");
         let expected: [u8; 32] = Sha256::digest(source).into();
         assert_eq!(embedded_default_theme().source_hash, expected);
     }

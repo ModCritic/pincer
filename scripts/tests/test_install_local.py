@@ -13,17 +13,17 @@ LOCAL_SIGNING = INSTALL_LOCAL.with_name("_local-signing.sh")
 DISPATCHER = INSTALL_LOCAL.with_name("install-local.sh")
 WINDOWS_INSTALL_LOCAL = INSTALL_LOCAL.with_name("install-local.ps1")
 POST_INSTALL_HINTS = INSTALL_LOCAL.with_name("post-install-hints.txt")
-MIGRATION_WARNING = "Existing MCP clients configured for 'cua-driver' will not use this local build."
-SKILL_PACK = INSTALL_LOCAL.parents[1] / "rust/Skills/cua-driver"
+MIGRATION_WARNING = "Existing MCP clients configured for 'pincer' will not use this local build."
+SKILL_PACK = INSTALL_LOCAL.parents[1] / "rust/Skills/pincer"
 
 
 def test_local_installers_stage_the_canonical_skill_pack() -> None:
     windows = WINDOWS_INSTALL_LOCAL.read_text(encoding="utf-8")
 
-    assert 'Join-Path $RepoRoot "Skills\\cua-driver"' in windows
-    assert 'Join-Path $VersionedDir "Skills\\cua-driver"' in windows
-    assert "Skills\\cua-driver-rs" not in windows
-    assert "Skills/cua-driver-rs" not in INSTALL_LOCAL.read_text(encoding="utf-8")
+    assert 'Join-Path $RepoRoot "Skills\\pincer"' in windows
+    assert 'Join-Path $VersionedDir "Skills\\pincer"' in windows
+    assert "Skills\\cua-driver" not in windows
+    assert "Skills/cua-driver" not in INSTALL_LOCAL.read_text(encoding="utf-8")
     assert {path.name for path in SKILL_PACK.iterdir()} >= {
         "SKILL.md",
         "BROWSER.md",
@@ -69,8 +69,8 @@ def test_explicit_local_signing_identity_is_selected_exactly(tmp_path: Path) -> 
     env.update(
         {
             "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN": str(keychain),
-            "CUA_DRIVER_LOCAL_SIGNING_IDENTITY": wanted.lower(),
+            "PINCER_LOCAL_SIGNING_KEYCHAIN": str(keychain),
+            "PINCER_LOCAL_SIGNING_IDENTITY": wanted.lower(),
         }
     )
     result = subprocess.run(
@@ -102,8 +102,8 @@ def test_explicit_local_signing_identity_never_falls_back(tmp_path: Path) -> Non
     env.update(
         {
             "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN": str(keychain),
-            "CUA_DRIVER_LOCAL_SIGNING_IDENTITY": "B" * 40,
+            "PINCER_LOCAL_SIGNING_KEYCHAIN": str(keychain),
+            "PINCER_LOCAL_SIGNING_IDENTITY": "B" * 40,
         }
     )
     result = subprocess.run(
@@ -127,7 +127,7 @@ def test_explicit_local_signing_identity_never_falls_back(tmp_path: Path) -> Non
 def test_installer_stages_binary_from_custom_cargo_target(
     tmp_path: Path, relative_target: bool, installed_helper_version: int
 ) -> None:
-    fixture_root = tmp_path / "cua-driver"
+    fixture_root = tmp_path / "pincer"
     scripts_dir = fixture_root / "scripts"
     rust_dir = fixture_root / "rust"
     scripts_dir.mkdir(parents=True)
@@ -136,12 +136,12 @@ def test_installer_stages_binary_from_custom_cargo_target(
     shutil.copy2(LOCAL_SIGNING, scripts_dir / LOCAL_SIGNING.name)
     shutil.copy2(POST_INSTALL_HINTS, scripts_dir / POST_INSTALL_HINTS.name)
 
-    wayland_helper = fixture_root / "wayland-helper/winrects@cua"
+    wayland_helper = fixture_root / "wayland-helper/winrects@pincer"
     wayland_helper.mkdir(parents=True)
     (wayland_helper / "metadata.json").write_text('{"version":5}\n', encoding="utf-8")
     (wayland_helper / "extension.js").write_text("// semantic cursor v5\n", encoding="utf-8")
 
-    stale_binary = rust_dir / "target/release/cua-driver"
+    stale_binary = rust_dir / "target/release/pincer"
     _write_executable(stale_binary, "printf 'stale workspace target\\n'")
 
     custom_target = (
@@ -157,10 +157,10 @@ def test_installer_stages_binary_from_custom_cargo_target(
 test "${1:-}" = build
 test "$CARGO_TARGET_DIR" = "$EXPECTED_CARGO_TARGET_DIR"
 mkdir -p "$CARGO_TARGET_DIR/release"
-printf 'fresh custom target\n' > "$CARGO_TARGET_DIR/release/cua-driver"
-printf 'fresh cursor theme compiler\n' > "$CARGO_TARGET_DIR/release/cua-cursor-theme"
-chmod +x "$CARGO_TARGET_DIR/release/cua-driver"
-chmod +x "$CARGO_TARGET_DIR/release/cua-cursor-theme"
+printf 'fresh custom target\n' > "$CARGO_TARGET_DIR/release/pincer"
+printf 'fresh cursor theme compiler\n' > "$CARGO_TARGET_DIR/release/pincer-cursor-theme"
+chmod +x "$CARGO_TARGET_DIR/release/pincer"
+chmod +x "$CARGO_TARGET_DIR/release/pincer-cursor-theme"
 """,
     )
     _write_executable(
@@ -177,7 +177,7 @@ esac
 
     local_home = tmp_path / "local-home"
     user_home = tmp_path / "home"
-    installed_helper = user_home / ".local/share/gnome-shell/extensions/winrects@cua"
+    installed_helper = user_home / ".local/share/gnome-shell/extensions/winrects@pincer"
     installed_helper.mkdir(parents=True)
     (installed_helper / "metadata.json").write_text(
         f'{{"version":{installed_helper_version}}}\n', encoding="utf-8"
@@ -192,9 +192,9 @@ esac
             "PATH": f"{fake_bin}:/usr/bin:/bin",
             "CARGO_TARGET_DIR": cargo_target_dir,
             "EXPECTED_CARGO_TARGET_DIR": str(custom_target),
-            "CUA_DRIVER_SOURCE_SHA": "a" * 40,
-            "CUA_DRIVER_LOCAL_HOME": str(local_home),
-            "CUA_DRIVER_LOCAL_INSTALL_DIR": str(install_bin),
+            "PINCER_SOURCE_SHA": "a" * 40,
+            "PINCER_LOCAL_HOME": str(local_home),
+            "PINCER_LOCAL_INSTALL_DIR": str(install_bin),
         }
     )
 
@@ -210,16 +210,16 @@ esac
 
     output = result.stdout
     assert result.returncode == 0, output
-    assert (custom_target / "release/cua-driver").read_text() == "fresh custom target\n"
+    assert (custom_target / "release/pincer").read_text() == "fresh custom target\n"
     assert (
-        custom_target / "release/cua-cursor-theme"
+        custom_target / "release/pincer-cursor-theme"
     ).read_text() == "fresh cursor theme compiler\n"
-    assert (install_bin / "cua-driver-local").read_text() == "fresh custom target\n"
+    assert (install_bin / "pincer-local").read_text() == "fresh custom target\n"
     assert (
-        local_home / "packages/current/cua-cursor-theme"
+        local_home / "packages/current/pincer-cursor-theme"
     ).read_text() == "fresh cursor theme compiler\n"
     assert (
-        local_home / "packages/current/wayland-helper/winrects@cua/metadata.json"
+        local_home / "packages/current/wayland-helper/winrects@pincer/metadata.json"
     ).read_text() == '{"version":5}\n'
     if installed_helper_version < 5:
         assert (installed_helper / "metadata.json").read_text() == '{"version":5}\n'
@@ -235,21 +235,21 @@ esac
 
     # No published CLI exists here, so the installer explains the migration
     # after the shared hints instead of aliasing the local build to it.
-    release_bin = install_bin / "cua-driver"
+    release_bin = install_bin / "pincer"
     assert not release_bin.exists() and not release_bin.is_symlink()
-    hints = output.index(f"{install_bin}/cua-driver-local list-tools")
-    note = output.index(f"the published cua-driver CLI is not installed at {release_bin}")
+    hints = output.index(f"{install_bin}/pincer-local list-tools")
+    note = output.index(f"the published pincer CLI is not installed at {release_bin}")
     assert hints < note
     migration = output[note:]
     assert MIGRATION_WARNING in migration
-    assert f"{install_bin}/cua-driver-local mcp-config --client codex" in migration
+    assert f"{install_bin}/pincer-local mcp-config --client codex" in migration
     assert "https://github.com/ModCritic/pincer#connect-an-agent" in migration
     assert "cua.ai" not in output
 
 
 def _linux_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     """Stage a minimal Linux install-local fixture: (scripts_dir, fake_bin, env)."""
-    fixture_root = tmp_path / "cua-driver"
+    fixture_root = tmp_path / "pincer"
     scripts_dir = fixture_root / "scripts"
     rust_dir = fixture_root / "rust"
     scripts_dir.mkdir(parents=True)
@@ -262,10 +262,10 @@ def _linux_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
         fake_bin / "cargo",
         """set -eu
 mkdir -p "$CARGO_TARGET_DIR/debug"
-printf 'fresh driver\n' > "$CARGO_TARGET_DIR/debug/cua-driver"
-printf 'fresh cursor theme compiler\n' > "$CARGO_TARGET_DIR/debug/cua-cursor-theme"
-chmod +x "$CARGO_TARGET_DIR/debug/cua-driver"
-chmod +x "$CARGO_TARGET_DIR/debug/cua-cursor-theme"
+printf 'fresh driver\n' > "$CARGO_TARGET_DIR/debug/pincer"
+printf 'fresh cursor theme compiler\n' > "$CARGO_TARGET_DIR/debug/pincer-cursor-theme"
+chmod +x "$CARGO_TARGET_DIR/debug/pincer"
+chmod +x "$CARGO_TARGET_DIR/debug/pincer-cursor-theme"
 """,
     )
     _write_executable(
@@ -283,13 +283,13 @@ esac
     env = os.environ.copy()
     env.pop("SUDO_USER", None)
     env.pop("CARGO_TARGET_DIR", None)
-    env.pop("CUA_DRIVER_LOCAL_INSTALL_DIR", None)
+    env.pop("PINCER_LOCAL_INSTALL_DIR", None)
     env.update(
         {
             "HOME": str(tmp_path / "home"),
             "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "CUA_DRIVER_SOURCE_SHA": "a" * 40,
-            "CUA_DRIVER_LOCAL_HOME": str(tmp_path / "local-home"),
+            "PINCER_SOURCE_SHA": "a" * 40,
+            "PINCER_LOCAL_HOME": str(tmp_path / "local-home"),
         }
     )
     return scripts_dir, fake_bin, env
@@ -305,7 +305,7 @@ def test_dispatcher_forwards_bin_dir_override(tmp_path: Path, flag_form: list[st
     helper must accept both spellings and honor them over the env default."""
     scripts_dir, _, env = _linux_fixture(tmp_path)
     flag_bin = tmp_path / "flag-bin"
-    env["CUA_DRIVER_LOCAL_INSTALL_DIR"] = str(tmp_path / "env-bin")
+    env["PINCER_LOCAL_INSTALL_DIR"] = str(tmp_path / "env-bin")
     args = [arg.format(bin=flag_bin) for arg in flag_form]
 
     result = subprocess.run(
@@ -318,7 +318,7 @@ def test_dispatcher_forwards_bin_dir_override(tmp_path: Path, flag_form: list[st
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (flag_bin / "cua-driver-local").read_text() == "fresh driver\n"
+    assert (flag_bin / "pincer-local").read_text() == "fresh driver\n"
     assert not (tmp_path / "env-bin").exists()
 
 
@@ -347,7 +347,7 @@ def test_reinstall_over_a_running_driver(tmp_path: Path) -> None:
     """Staging must replace the versioned binary by rename, not write through it.
 
     The version tag is stable per build config, so every rebuild targets the
-    same path. If a previous cua-driver-local is still executing out of it, a
+    same path. If a previous pincer-local is still executing out of it, a
     write-in-place `cp` fails with ETXTBSY ("Text file busy") and the install
     dies mid-stage. Reproduce that with a real running executable.
     """
@@ -356,7 +356,7 @@ def test_reinstall_over_a_running_driver(tmp_path: Path) -> None:
         tmp_path / "local-home/packages/releases/0.0.0-local-debug-x86_64-unknown-linux-gnu"
     )
     versioned.mkdir(parents=True)
-    busy = versioned / "cua-driver-local"
+    busy = versioned / "pincer-local"
     shutil.copy2("/bin/sleep", busy)
 
     running = subprocess.Popen([str(busy), "60"])

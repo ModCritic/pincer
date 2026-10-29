@@ -8,8 +8,8 @@ candidate set from the native accessibility source, plus visual regions only
 under the fallback rule, and composes them in the fixed order page, ax, visual.
 
 The built-in tasks drive the repository's harness applications in task mode:
-AppKit (``CUA_APPKIT_TASK_STATE``), WPF (``CUA_WPF_TASK_STATE``), WinUI3
-(``CUA_WINUI3_TASK_STATE``), and GTK3 (``CUA_GTK3_TASK_STATE``), under
+AppKit (``PINCER_APPKIT_TASK_STATE``), WPF (``PINCER_WPF_TASK_STATE``), WinUI3
+(``PINCER_WINUI3_TASK_STATE``), and GTK3 (``PINCER_GTK3_TASK_STATE``), under
 ``tests/fixtures/apps``.
 Their oracle is the harness's own JSON state file, which the app rewrites on
 every change; it never depends on Driver output.
@@ -666,7 +666,7 @@ def native_choice_request(
     step: NativeStep,
     history: list[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Build the ``cua.jev_choice_request_v2`` the provider receives.
+    """Build the ``pincer.jev_choice_request_v2`` the provider receives.
 
     It carries candidate IDs, descriptions and sources, compact value-free
     elements, compact history, and, for a task that declares steps, the
@@ -727,23 +727,23 @@ class HarnessSpec:
 
 HARNESSES: Mapping[str, HarnessSpec] = {
     "appkit": HarnessSpec(
-        "appkit", "macos", "CuaTestHarness AppKit", "cua.appkit_task_state_v1",
-        "CUA_APPKIT_TASK_STATE", bundle_id="com.trycua.harness.appkit",
+        "appkit", "macos", "PincerTestHarness AppKit", "pincer.appkit_task_state_v1",
+        "PINCER_APPKIT_TASK_STATE", bundle_id="io.github.modcritic.pincer.harness.appkit",
     ),
     # WPF, WinUI3, and GTK3 show a dedicated task window in task mode: their
     # ordinary main windows scroll, so most controls would be off screen (and
     # excluded).
     "wpf": HarnessSpec(
-        "wpf", "windows", "CuaTestHarness WPF Tasks", "cua.wpf_task_state_v1",
-        "CUA_WPF_TASK_STATE", process_name="CuaTestHarness.Wpf",
+        "wpf", "windows", "PincerTestHarness WPF Tasks", "pincer.wpf_task_state_v1",
+        "PINCER_WPF_TASK_STATE", process_name="PincerTestHarness.Wpf",
     ),
     "winui3": HarnessSpec(
-        "winui3", "windows", "CuaTestHarness WinUI3 Tasks", "cua.winui3_task_state_v1",
-        "CUA_WINUI3_TASK_STATE", process_name="CuaTestHarness.WinUI3",
+        "winui3", "windows", "PincerTestHarness WinUI3 Tasks", "pincer.winui3_task_state_v1",
+        "PINCER_WINUI3_TASK_STATE", process_name="PincerTestHarness.WinUI3",
     ),
     "gtk3": HarnessSpec(
-        "gtk3", "linux", "CuaTestHarness GTK3 Tasks", "cua.gtk3_task_state_v1",
-        "CUA_GTK3_TASK_STATE", process_name="python3",
+        "gtk3", "linux", "PincerTestHarness GTK3 Tasks", "pincer.gtk3_task_state_v1",
+        "PINCER_GTK3_TASK_STATE", process_name="python3",
     ),
 }
 
@@ -800,8 +800,8 @@ def harness_task_ids(harness: str) -> tuple[str, ...]:
 # The cross-platform visual-only canvas has no accessibility tree, so it is not
 # a form harness: it has one task, reached only through the visual fallback.
 CANVAS = HarnessSpec(
-    "canvas", "any", "Cua Visual-Only Canvas Fixture", "cua.visual_canvas_task_state_v1",
-    "CUA_CANVAS_TASK_STATE",
+    "canvas", "any", "Pincer Visual-Only Canvas Fixture", "pincer.visual_canvas_task_state_v1",
+    "PINCER_CANVAS_TASK_STATE",
 )
 CANVAS_TASK_ID = "canvas-cancel"
 # Cancel, not Save: OmniParser reads the 32 px "Save" label inconsistently on a

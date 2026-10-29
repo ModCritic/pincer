@@ -6,8 +6,8 @@ import sys
 import unittest
 from pathlib import Path
 
-from cua_driver import (
-    CuaDriver,
+from pincer_driver import (
+    Pincer,
     DriverError,
     DriverExecutionMode,
     ForeignDriverChannelCapabilities,
@@ -120,14 +120,14 @@ class RemoteChannelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.unraisable_errors, [], "native callback raised an unhandled exception")
 
     async def test_generated_foreign_future_drop_uses_threadsafe_scheduler(self):
-        from cua_driver import _native
+        from pincer_driver import _native
 
         source = Path(_native.__file__).read_text()
         self.assertIn("eventloop.call_soon_threadsafe(_uniffi_cancel_task, task)", source)
         self.assertNotIn("eventloop.call_soon(_uniffi_cancel_task, task)", source)
 
     async def test_canonical_driver_projection_and_bound_lifecycle(self):
-        self.assertIsInstance(self.driver, CuaDriver)
+        self.assertIsInstance(self.driver, Pincer)
         self.assertEqual(self.driver.execution_mode(), DriverExecutionMode.REMOTE)
         result = await self.driver.call_tool("health_report", '{"sample":null}')
         self.assertEqual(result.text, "carrier response")
@@ -247,7 +247,7 @@ class RemoteChannelTests(unittest.IsolatedAsyncioTestCase):
 
 class NativeWindowTests(unittest.IsolatedAsyncioTestCase):
     async def test_typed_discovery_snapshot_and_token_click_cross_ffi(self):
-        import cua_driver as sdk
+        import pincer_driver as sdk
 
         carrier = Carrier()
         driver = connect_remote_channel(carrier)

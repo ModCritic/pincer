@@ -1,9 +1,9 @@
 {
  "_fixture": {
-  "source": "CuaTestHarness.AppKit with CUA_APPKIT_TASK_STATE and CUA_APPKIT_TASK_DENSITY=12 set (initial), observed by cua-driver 0.30.4 get_window_state (macOS 26.5.2 Lume guest)",
+  "source": "PincerTestHarness.AppKit with PINCER_APPKIT_TASK_STATE and PINCER_APPKIT_TASK_DENSITY=12 set (initial), observed by pincer 0.30.4 get_window_state (macOS 26.5.2 Lume guest)",
   "sanitized": "Recorded by verify_native.py --capture-dir. Screenshot bytes, tree_markdown, local file paths, and Driver guidance notes removed. The system Apple menu's machine-specific items (the Recent Items entries and the account name) were removed."
  },
- "app_name": "CuaTestHarness.AppKit",
+ "app_name": "PincerTestHarness.AppKit",
  "background_input": {
   "exact_window": {
    "pid": 7800,
@@ -45,7 +45,7 @@
     "x": 310.0,
     "y": 50.0
    },
-   "label": "CuaTestHarness AppKit",
+   "label": "PincerTestHarness AppKit",
    "role": "AXWindow",
    "screenshot_frame": {
     "h": 892,
@@ -1178,7 +1178,7 @@
    "element_index": 77,
    "element_token": "s00000012:77",
    "enabled": true,
-   "label": "Force Quit CuaTestHarness.AppKit",
+   "label": "Force Quit PincerTestHarness.AppKit",
    "parent_index": 45,
    "role": "AXMenuItem",
    "selected": false
@@ -1289,7 +1289,7 @@
     "x": 44.0,
     "y": 0.0
    },
-   "label": "CuaTestHarness.AppKit",
+   "label": "PincerTestHarness.AppKit",
    "parent_index": 43,
    "role": "AXMenuBarItem",
    "screenshot_frame": {
@@ -1730,7 +1730,7 @@
    "element_index": 115,
    "element_token": "s00000012:115",
    "enabled": true,
-   "label": "CuaTestHarness AppKit",
+   "label": "PincerTestHarness AppKit",
    "parent_index": 91,
    "role": "AXMenuItem",
    "selected": false
@@ -1758,5 +1758,5 @@
   "y": 50.0
  },
  "window_id": 131,
- "window_title": "CuaTestHarness AppKit"
+ "window_title": "PincerTestHarness AppKit"
 }

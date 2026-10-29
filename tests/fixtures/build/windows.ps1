@@ -1,4 +1,4 @@
-# windows.ps1 - publish the cua-driver test fixture binaries.
+# windows.ps1 - publish the pincer test fixture binaries.
 #
 # Outputs land in rust/test-apps/harness-{wpf,winui3,webview,electron,tauri}/
 # so the existing sandbox runner picks them up via its mapped folder.
@@ -23,8 +23,8 @@ $ErrorActionPreference = "Stop"
 $buildDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $harnessDir = Split-Path -Parent $buildDir
 $testsDir = Split-Path -Parent $harnessDir
-$cuaDriverDir = Split-Path -Parent $testsDir
-$testAppsDir = Join-Path $cuaDriverDir "rust\test-apps"
+$pincerDir = Split-Path -Parent $testsDir
+$testAppsDir = Join-Path $pincerDir "rust\test-apps"
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     Write-Host "[ERROR] dotnet CLI not found on PATH. Install .NET 8 SDK first." -ForegroundColor Red
@@ -62,10 +62,10 @@ function Publish-Project {
 }
 
 if (Should-Build "wpf") {
-    Publish-Project (Join-Path $harnessDir "apps\windows\wpf\CuaTestHarness.Wpf.csproj") "harness-wpf"
+    Publish-Project (Join-Path $harnessDir "apps\windows\wpf\PincerTestHarness.Wpf.csproj") "harness-wpf"
 }
 if (Should-Build "winui3") {
-    $winuiProj = Join-Path $harnessDir "apps\windows\winui3\CuaTestHarness.WinUI3.csproj"
+    $winuiProj = Join-Path $harnessDir "apps\windows\winui3\PincerTestHarness.WinUI3.csproj"
     if (Test-Path $winuiProj) {
         Publish-Project $winuiProj "harness-winui3"
     } else {
@@ -73,7 +73,7 @@ if (Should-Build "winui3") {
     }
 }
 if (Should-Build "webview") {
-    $webProj = Join-Path $harnessDir "apps\windows\webview2\CuaTestHarness.WebView.csproj"
+    $webProj = Join-Path $harnessDir "apps\windows\webview2\PincerTestHarness.WebView.csproj"
     if (Test-Path $webProj) {
         Publish-Project $webProj "harness-webview"
     } else {

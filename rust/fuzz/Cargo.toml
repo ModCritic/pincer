@@ -1,5 +1,5 @@
 [package]
-name = "cua-driver-fuzz"
+name = "pincer-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-cua-driver-testkit = { path = "../crates/cua-driver-testkit" }
+pincer-testkit = { path = "../crates/pincer-testkit" }
 
 # Detached from the main workspace on purpose: libfuzzer-sys must never enter
 # the shipped or `cargo test` dependency graph.

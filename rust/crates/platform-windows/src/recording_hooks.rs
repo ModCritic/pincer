@@ -1,4 +1,4 @@
-//! Recording callbacks exposed to `cua_driver_core::recording`.
+//! Recording callbacks exposed to `pincer_core::recording`.
 //!
 //! Two hooks:
 //!  - `app_state_json_for` — produces `app_state.json` bytes for a turn folder.
@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 #[cfg(target_os = "windows")]
-use cua_driver_core::snapshot_store::{current_runtime_store, register_runtime_store};
+use pincer_core::snapshot_store::{current_runtime_store, register_runtime_store};
 
 #[cfg(target_os = "windows")]
 use crate::uia::snapshot::{SnapshotKind, UiaSnapshot};
@@ -18,7 +18,7 @@ use crate::uia::snapshot::{SnapshotKind, UiaSnapshot};
 #[cfg(target_os = "windows")]
 use crate::uia::Snapshots;
 
-use cua_driver_core::recording::ScreenshotCapture;
+use pincer_core::recording::ScreenshotCapture;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
@@ -90,7 +90,7 @@ pub fn screenshot_for_recording(window_id: Option<u64>, pid: Option<i64>) -> Scr
 /// Keep capture inside the lazy callback so private/unrecorded turns do no work.
 #[cfg(target_os = "windows")]
 pub(crate) fn capture_dispatch_click_target(window_id: u64, pid: u32, x: i32, y: i32) {
-    cua_driver_core::recording::capture_dispatch_click_target(window_id, i64::from(pid), || {
+    pincer_core::recording::capture_dispatch_click_target(window_id, i64::from(pid), || {
         crate::capture::screenshot_window_click_target(window_id, x, y)
     });
 }
@@ -103,11 +103,11 @@ pub(crate) fn capture_dispatch_click_target(window_id: u64, pid: u32, x: i32, y:
 pub fn app_state_json_for(
     window_id: Option<u64>,
     pid: Option<i64>,
-    budget: cua_driver_core::recording::StateCaptureBudget,
+    budget: pincer_core::recording::StateCaptureBudget,
 ) -> Option<Vec<u8>> {
     let pid = u32::try_from(pid?).ok()?;
     let hwnd = resolve_window_for_recording(window_id, Some(pid.into()))?;
-    let mut walk = cua_driver_core::walk_budget::WalkBudget::new(
+    let mut walk = pincer_core::walk_budget::WalkBudget::new(
         budget.timeout_ms,
         crate::uia::DEFAULT_MAX_TOTAL_ELEMENTS,
     );
@@ -143,7 +143,7 @@ pub fn element_window_local_xy(
     let cache = current_runtime_store::<UiaSnapshot>()?;
     let pid_u32 = u32::try_from(pid).ok()?;
     let resolved = cache.resolve(pid_u32 as i32, args).ok()?;
-    let cua_driver_core::element_token::ResolvedElement::Element {
+    let pincer_core::element_token::ResolvedElement::Element {
         window_id, element, ..
     } = resolved
     else {
@@ -169,7 +169,7 @@ pub fn element_window_local_xy(
 pub fn app_state_json_for(
     _window_id: Option<u64>,
     _pid: Option<i64>,
-    _budget: cua_driver_core::recording::StateCaptureBudget,
+    _budget: pincer_core::recording::StateCaptureBudget,
 ) -> Option<Vec<u8>> {
     None
 }

@@ -1,7 +1,7 @@
 use crate::ax::bindings::{element_screen_center, AXUIElementRef};
 use crate::ax::snapshot::{AxSnapshot, Snapshots};
-use cua_driver_core::element_token::ResolvedElement;
-use cua_driver_core::snapshot_store::{current_runtime_store, register_runtime_store};
+use pincer_core::element_token::ResolvedElement;
+use pincer_core::snapshot_store::{current_runtime_store, register_runtime_store};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -16,7 +16,7 @@ pub fn set_snapshots(cache: Arc<Snapshots>) {
 pub fn app_state_json_for(
     window_id: Option<u64>,
     pid: Option<i64>,
-    budget: cua_driver_core::recording::StateCaptureBudget,
+    budget: pincer_core::recording::StateCaptureBudget,
 ) -> Option<Vec<u8>> {
     let pid = i32::try_from(pid?).ok()?;
     let resolved_wid = match window_id {
@@ -28,7 +28,7 @@ pub fn app_state_json_for(
         Some(resolved_wid),
         None,
         crate::ax::tree::DEFAULT_MAX_DEPTH,
-        cua_driver_core::walk_budget::WalkBudget::new(
+        pincer_core::walk_budget::WalkBudget::new(
             budget.timeout_ms,
             crate::ax::tree::DEFAULT_MAX_ELEMENTS,
         ),

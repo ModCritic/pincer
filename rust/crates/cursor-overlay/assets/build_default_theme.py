@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build the deterministic dotLottie source archive for ``cua.default``.
+"""Build the deterministic dotLottie source archive for ``pincer.default``.
 
-The checked-in ``cua.default.lottie`` is the canonical authoring artifact used
-to produce the embedded ``cua.default.cua-theme``.  This script deliberately
+The checked-in ``pincer.default.lottie`` is the canonical authoring artifact used
+to produce the embedded ``pincer.default.pincer-theme``.  This script deliberately
 uses only Python's standard library so contributors can reproduce the source
 archive without a LottieFiles account or a browser editor.
 
@@ -731,13 +731,13 @@ def semantic_manifest() -> dict[str, Any]:
     }
     actions["click"]["still_frame"] = 8
     return {
-        "schema": "cua.cursor-theme/2",
-        "id": "cua.default",
+        "schema": "pincer.cursor-theme/2",
+        "id": "pincer.default",
         "name": "Pincer Default",
         "version": "3.1.0",
         "author": "Cua, restyled for Pincer",
         "license": "MIT",
-        "compatibility": {"profile": "cua-driver-actions-v2", "semantics": 2},
+        "compatibility": {"profile": "pincer-actions-v2", "semantics": 2},
         "canvas": {"width": CANVAS, "height": CANVAS, "fps": FPS},
         "hotspot": {"x": HOTSPOT[0], "y": HOTSPOT[1]},
         "actions": actions,
@@ -759,7 +759,7 @@ def build(output: Path) -> None:
     animations = all_animations()
     standard_manifest = {
         "version": "2",
-        "generator": "Cua Driver default cursor generator",
+        "generator": "Pincer default cursor generator",
         "animations": [
             {"id": animation_id, "name": animation_id}
             for animation_id in animations
@@ -768,7 +768,7 @@ def build(output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(output, "w") as archive:
         write_entry(archive, "manifest.json", encoded_json(standard_manifest))
-        write_entry(archive, "cua/theme.json", encoded_json(semantic_manifest()))
+        write_entry(archive, "pincer/theme.json", encoded_json(semantic_manifest()))
         for animation_id, animation in animations.items():
             write_entry(archive, f"a/{animation_id}.json", encoded_json(animation))
 
@@ -778,7 +778,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(__file__).with_name("cua.default.lottie"),
+        default=Path(__file__).with_name("pincer.default.lottie"),
     )
     args = parser.parse_args()
     build(args.output.resolve())

@@ -1,5 +1,5 @@
-#include "cua_hyprland/protocol.hpp"
-#include "cua_hyprland/session.hpp"
+#include "pincer_hyprland/protocol.hpp"
+#include "pincer_hyprland/session.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -26,7 +26,7 @@ const T& expect(const auto& value, const char* message) {
 } // namespace
 
 int main() {
-    using namespace cua::hyprland;
+    using namespace pincer::hyprland;
 
     const auto hello = make_frame(
         MessageType::hello, 42,
@@ -207,6 +207,6 @@ int main() {
         ProtocolError{ErrorCode::server_busy, std::string(kMaxPayloadSize * 2, 'x')});
     check(long_error.size() == kMaxPayloadSize, "error detail is bounded");
 
-    std::cout << "cua-inject-v2 protocol tests passed\n";
+    std::cout << "pincer-inject-v2 protocol tests passed\n";
     return 0;
 }

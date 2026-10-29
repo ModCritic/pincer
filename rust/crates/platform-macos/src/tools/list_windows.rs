@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
@@ -24,7 +24,7 @@ fn def() -> &'static ToolDef {
                 },
                 "app": {
                     "type": "string",
-                    "description": cua_driver_core::tool_args::LIST_WINDOWS_APP_FILTER_DESCRIPTION
+                    "description": pincer_core::tool_args::LIST_WINDOWS_APP_FILTER_DESCRIPTION
                 },
                 "on_screen_only": {
                     "type": "boolean",
@@ -47,7 +47,7 @@ impl Tool for ListWindowsTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let pid_filter: Option<i32> = args.opt_i64("pid").map(|v| v as i32);
         let on_screen_only = args.bool_or("on_screen_only", false);
 
@@ -68,7 +68,7 @@ impl Tool for ListWindowsTool {
                 let bundle_id = bundle_ids
                     .entry(w.pid)
                     .or_insert_with(|| crate::apps::bundle_id_for_pid(w.pid));
-                cua_driver_core::tool_args::app_filter_matches(
+                pincer_core::tool_args::app_filter_matches(
                     &filter,
                     &w.app_name,
                     bundle_id.as_deref(),

@@ -167,9 +167,9 @@ pub fn init(cfg: CursorConfig) {
             },
         ));
     });
-    cua_driver_core::cursor_events::install_cursor_event_sink(std::sync::Arc::new(
-        |event: cua_driver_core::cursor_events::CursorEvent| {
-            use cua_driver_core::cursor_events::{CursorEvent, CursorEventPhase};
+    pincer_core::cursor_events::install_cursor_event_sink(std::sync::Arc::new(
+        |event: pincer_core::cursor_events::CursorEvent| {
+            use pincer_core::cursor_events::{CursorEvent, CursorEventPhase};
             let (session, cmd) = match event {
                 CursorEvent::SetSessionLabel { session, label } => {
                     (session, OverlayCommand::SetSessionLabel(label))
@@ -213,9 +213,9 @@ pub fn init(cfg: CursorConfig) {
 /// Whether commands for `key` reach the renderer: not the empty no-cursor
 /// key (direct platform calls that bypass lifecycle dispatch), and not a
 /// human-origin session, whose client draws the human's own cursor (see
-/// `cua_driver_core::agent_cursor`).
+/// `pincer_core::agent_cursor`).
 pub(crate) fn draws_cursor(key: &str) -> bool {
-    !key.is_empty() && !cua_driver_core::agent_cursor::overlay_suppressed(key)
+    !key.is_empty() && !pincer_core::agent_cursor::overlay_suppressed(key)
 }
 
 /// Send a keyed command from any thread (MCP tool, etc.). Non-blocking; drops
@@ -468,7 +468,7 @@ pub fn run_on_thread() {
     }
 
     std::thread::Builder::new()
-        .name("cua-overlay-win".into())
+        .name("pincer-overlay-win".into())
         .spawn(move || {
             // Windows message loops must run on the same thread that created the window.
             run_overlay_thread(cfg, rx);
@@ -570,9 +570,9 @@ fn run_overlay_thread(cfg: CursorConfig, rx: std::sync::mpsc::Receiver<OverlayMs
         }
     }
 
-    // Register window class. Class + title use the `Cua.` namespace.
-    let class_name_w: Vec<u16> = "Cua.AgentCursorOverlay\0".encode_utf16().collect();
-    let title_w: Vec<u16> = format!("Cua.AgentCursorOverlay.{}\0", cfg.cursor_id)
+    // Register window class. Class + title use the `Pincer.` namespace.
+    let class_name_w: Vec<u16> = "Pincer.AgentCursorOverlay\0".encode_utf16().collect();
+    let title_w: Vec<u16> = format!("Pincer.AgentCursorOverlay.{}\0", cfg.cursor_id)
         .encode_utf16()
         .collect();
 
@@ -1146,7 +1146,7 @@ unsafe extern "system" fn wnd_proc(
                 .as_millis() as u64;
 
             // ── Optional overlay-FPS probe ───────────────────────────────────
-            // Set CUA_DRIVER_RS_OVERLAY_FPS_FILE=<path> to append a measured
+            // Set PINCER_OVERLAY_FPS_FILE=<path> to append a measured
             // render-FPS line ~once/sec. Diagnostic only; when the env var is
             // unset this is a single OnceLock read + branch (no behaviour change).
             {
@@ -1155,7 +1155,7 @@ unsafe extern "system" fn wnd_proc(
                 static FPS_FRAMES: AtomicU64 = AtomicU64::new(0);
                 static FPS_LAST: AtomicU64 = AtomicU64::new(0);
                 if let Some(path) =
-                    FPS_PATH.get_or_init(|| std::env::var("CUA_DRIVER_RS_OVERLAY_FPS_FILE").ok())
+                    FPS_PATH.get_or_init(|| std::env::var("PINCER_OVERLAY_FPS_FILE").ok())
                 {
                     let n = FPS_FRAMES.fetch_add(1, Relaxed) + 1;
                     let last = FPS_LAST.load(Relaxed);
@@ -1631,10 +1631,10 @@ mod tests {
 
     /// A human-origin session (a Cua Spaces viewer's relayed input) never
     /// reaches the renderer; an agent's session does. The rule itself lives
-    /// in `cua_driver_core::agent_cursor`.
+    /// in `pincer_core::agent_cursor`.
     #[test]
     fn human_origin_sessions_draw_no_agent_cursor() {
-        use cua_driver_core::agent_cursor::{set_input_origin, InputOrigin};
+        use pincer_core::agent_cursor::{set_input_origin, InputOrigin};
         let human = "overlay-test-human-origin-session";
         assert!(draws_cursor(human));
         set_input_origin(human, InputOrigin::Human);

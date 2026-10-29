@@ -9,14 +9,14 @@ const fake = (name, upAfter = 0) => {
 const base = { platform: "darwin", sleep() {} }
 
 test("a running daemon is used on macOS", () => {
-  delete process.env.CUA_DRIVER_EMBEDDED
+  delete process.env.PINCER_EMBEDDED
   const daemon = fake("daemon")
   const embedded = fake("embedded")
   assert.equal(createDriver(() => daemon, () => embedded, false, false, base), daemon)
 })
 
 test("an installed app is launched and awaited", () => {
-  delete process.env.CUA_DRIVER_EMBEDDED
+  delete process.env.PINCER_EMBEDDED
   const daemon = fake("daemon", 2)
   let launched = 0
   const result = createDriver(() => daemon, () => fake("e"), false, false, {
@@ -29,7 +29,7 @@ test("an installed app is launched and awaited", () => {
 })
 
 test("fallback to embedded warns once", () => {
-  delete process.env.CUA_DRIVER_EMBEDDED
+  delete process.env.PINCER_EMBEDDED
   resetDaemonWarning()
   const warnings = []
   const embedded = fake("embedded")
@@ -46,7 +46,7 @@ test("fallback to embedded warns once", () => {
 })
 
 test("embedded is forced by option, env, compat flag or non-macOS", () => {
-  delete process.env.CUA_DRIVER_EMBEDDED
+  delete process.env.PINCER_EMBEDDED
   const daemon = fake("daemon")
   const embedded = fake("embedded")
   const connect = () => daemon
@@ -55,8 +55,8 @@ test("embedded is forced by option, env, compat flag or non-macOS", () => {
   assert.equal(createDriver(connect, create, false, true, base), embedded)
   assert.equal(createDriver(connect, create, false, false, { platform: "linux" }), embedded)
   assert.equal(createDriver(connect, create, false, false, { platform: "win32" }), embedded)
-  process.env.CUA_DRIVER_EMBEDDED = "1"
+  process.env.PINCER_EMBEDDED = "1"
   assert.equal(createDriver(connect, create, false, false, base), embedded)
-  delete process.env.CUA_DRIVER_EMBEDDED
+  delete process.env.PINCER_EMBEDDED
   assert.equal(daemon.calls(), 0)
 })

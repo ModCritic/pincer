@@ -7,7 +7,7 @@ repository.workspace = true
 publish = false
 
 [[bin]]
-name = "cua-cursor-theme"
+name = "pincer-cursor-theme"
 path = "src/main.rs"
 
 [dependencies]

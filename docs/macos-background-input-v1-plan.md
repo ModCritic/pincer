@@ -97,7 +97,7 @@ tree. Mutation needs to carry the same invariant farther than it does today.
 
 ### Explicit `window_id` does not make PID keyboard delivery window-scoped
 
-[`window_target.rs`](../rust/crates/cua-driver-core/src/window_target.rs)
+[`window_target.rs`](../rust/crates/pincer-core/src/window_target.rs)
 correctly promotes a unique PID-only target and refuses a PID with multiple
 eligible top-level windows. Explicit `window_id` and element-token requests,
 however, pass through that cardinality guard unchanged.
@@ -158,11 +158,11 @@ using title order, the first AX window, or stale process-global focus.
 
 ### Exact browser mutation is already unique-or-refuse
 
-[`browser/binding.rs`](../rust/crates/cua-driver-core/src/browser/binding.rs)
-contains the pure native-window-to-CDP correlation. [`browser/engine.rs`](../rust/crates/cua-driver-core/src/browser/engine.rs)
+[`browser/binding.rs`](../rust/crates/pincer-core/src/browser/binding.rs)
+contains the pure native-window-to-CDP correlation. [`browser/engine.rs`](../rust/crates/pincer-core/src/browser/engine.rs)
 checks native ownership, process fingerprint, endpoint ownership, CDP window
 geometry/cardinality, tab identity, and generation again before every
-mutation. [`browser/tools.rs`](../rust/crates/cua-driver-core/src/browser/tools.rs)
+mutation. [`browser/tools.rs`](../rust/crates/pincer-core/src/browser/tools.rs)
 uses those exact capabilities for typed browser actions.
 
 V1 should reuse this rung rather than creating a macOS-specific browser
@@ -187,9 +187,9 @@ gate instead of inventing a complete Spaces model.
 
 ### The result contract is intentionally closed
 
-[`outputs.rs`](../rust/crates/cua-driver-contract/src/outputs.rs) defines the
+[`outputs.rs`](../rust/crates/pincer-contract/src/outputs.rs) defines the
 closed `ActionResult`: effect, route, delivery, evidence, and escalation.
-[`action_record.rs`](../rust/crates/cua-driver-core/src/action_record.rs) is the
+[`action_record.rs`](../rust/crates/pincer-core/src/action_record.rs) is the
 functional core that conservatively projects native attempts to that public
 shape. [`action-result-contract.md`](action-result-contract.md) explicitly
 excludes echoed selectors, coordinates, and request targets.

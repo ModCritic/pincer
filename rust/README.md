@@ -1,4 +1,4 @@
-# cua-driver Rust workspace
+# Pincer Rust workspace
 
 This directory is the standalone Cargo workspace for the driver daemon, platform
 implementations, testkit, and helper crates.
@@ -7,14 +7,14 @@ implementations, testkit, and helper crates.
 
 | Crate | Purpose |
 | --- | --- |
-| `cua-driver` | Main CLI/MCP daemon and hermetic integration tests |
-| `cua-driver-e2e` | Desktop E2E suites that the canonical OS runners select; never shipped |
-| `cua-driver-core` | Shared protocol, tool models, config, and CDP helpers |
+| `pincer` | Main CLI/MCP daemon and hermetic integration tests |
+| `pincer-e2e` | Desktop E2E suites that the canonical OS runners select; never shipped |
+| `pincer-core` | Shared protocol, tool models, config, and CDP helpers |
 | `platform-macos` | macOS AX, capture, input, browser, and daemon support |
 | `platform-windows` | Windows UIA, capture, input, overlay, and diagnostics |
 | `platform-linux` | Linux AT-SPI, X11/Wayland, capture, and input support |
-| `cua-driver-testkit` | Test-only helpers for spawning the daemon and parsing responses |
-| `cua-driver-uia` | Windows UIAccess worker |
+| `pincer-testkit` | Test-only helpers for spawning the daemon and parsing responses |
+| `pincer-uia` | Windows UIAccess worker |
 | `cursor-overlay` | Cross-platform semantic cursor renderer and bounded compiled-theme loader |
 | `cursor-theme-cli` | Short-lived dotLottie validation, compilation, preview, and installation sidecar |
 | `pip-preview` | Packaging preview helper |
@@ -25,13 +25,13 @@ Keep platform-specific behavior inside the matching `platform-<os>` crate.
 ## Build
 
 ```bash
-cargo build -p cua-driver
-cargo build -p cua-driver --release
+cargo build -p pincer
+cargo build -p pincer --release
 ```
 
 The Python wrapper and install scripts expect the built binary at
-`target/<profile>/cua-driver` (or `cua-driver.exe` on Windows), unless
-`CUA_DRIVER_BINARY` is set.
+`target/<profile>/pincer` (or `pincer.exe` on Windows), unless
+`PINCER_BINARY` is set.
 
 ## Formatting
 
@@ -54,26 +54,26 @@ cargo fmt --all
 Default tests should be headless and safe for CI:
 
 ```bash
-cargo test -p cua-driver-core
-cargo test -p cua-driver --test protocol_schema_test
+cargo test -p pincer-core
+cargo test -p pincer --test protocol_schema_test
 ```
 
-GUI and VM-backed tests live in `cua-driver-e2e`, are marked `#[ignore]`, and
+GUI and VM-backed tests live in `pincer-e2e`, are marked `#[ignore]`, and
 require a built driver, harness apps from `../tests/fixtures/build/`, and a
 real interactive desktop session:
 
 ```bash
-cargo build -p cua-driver
-cargo test -p cua-driver-e2e --test harness_appkit_test -- --ignored --nocapture
-cargo test -p cua-driver-e2e --test harness_wpf_test -- --ignored --nocapture
+cargo build -p pincer
+cargo test -p pincer-e2e --test harness_appkit_test -- --ignored --nocapture
+cargo test -p pincer-e2e --test harness_wpf_test -- --ignored --nocapture
 ```
 
-See `crates/cua-driver-e2e/tests/README.md` for the desktop E2E suites and
-`crates/cua-driver/tests/README.md` for the hermetic driver tests.
+See `crates/pincer-e2e/tests/README.md` for the desktop E2E suites and
+`crates/pincer/tests/README.md` for the hermetic driver tests.
 
-Testkit-owned daemons use a temporary `CUA_DRIVER_RS_HOME` on every platform.
+Testkit-owned daemons use a temporary `PINCER_HOME` on every platform.
 A nonempty override also places Computer History data and its `admission.json`
-under `<CUA_DRIVER_RS_HOME>/computer-history`. Without an override (or with an
+under `<PINCER_HOME>/computer-history`. Without an override (or with an
 empty value), History keeps its platform-specific default location. Existing
 data is not migrated, and installed-product admission checks still apply.
 On Windows this isolates driver state without redirecting `LOCALAPPDATA`,
@@ -90,7 +90,7 @@ files, not the operating system's credential store.
 
 ## Permission Policies
 
-Set `CUA_DRIVER_POLICY_FILE` on the daemon to enforce a deny-by-default policy
+Set `PINCER_POLICY_FILE` on the daemon to enforce a deny-by-default policy
 on all tool calls from MCP and CLI clients. If the variable is unset, or points to a path that does
 not exist, the driver keeps its backward-compatible behavior with no policy
 enforcement. Supported paths are:
@@ -121,6 +121,6 @@ deny:
   tools: [shell_execute, file_delete]
 ```
 
-Rego policies must expose a boolean rule at `data.cua.policy.allow`. The input
-shape is `{ "server": "cua-driver", "tool": <name>, "arguments": <object> }`.
+Rego policies must expose a boolean rule at `data.pincer.policy.allow`. The input
+shape is `{ "server": "pincer", "tool": <name>, "arguments": <object> }`.
 Regorus evaluates policies inside the daemon; no OPA service is required.

@@ -9,7 +9,7 @@
 //! (avoids per-property cross-process calls that make Chrome's 5000-node tree
 //!  take >4s when reading each property individually).
 
-use cua_driver_core::walk_budget::WalkBudget;
+use pincer_core::walk_budget::WalkBudget;
 use windows::core::{Interface, BSTR};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,

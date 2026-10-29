@@ -1,4 +1,4 @@
-"""Hatch build hook for platform-tagged cua-driver wheels."""
+"""Hatch build hook for platform-tagged pincer wheels."""
 
 import os
 
@@ -9,7 +9,7 @@ class CustomBuildHook(BuildHookInterface):
     """Apply the wheel tag selected by build_wheel.py."""
 
     def initialize(self, version: str, build_data: dict) -> None:
-        wheel_tag = os.environ.get("CUA_DRIVER_WHEEL_TAG")
+        wheel_tag = os.environ.get("PINCER_WHEEL_TAG")
         if not wheel_tag:
             return
 

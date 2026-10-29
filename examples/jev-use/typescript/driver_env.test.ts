@@ -22,9 +22,9 @@ test('omits desktop session variables when unset', () => {
   }
 });
 
-test('forwards Cua Driver variables', () => {
-  const env = driverEnvironment({ CUA_DRIVER_PERMISSION_MODE: 'unrestricted' });
-  assert.equal(env.CUA_DRIVER_PERMISSION_MODE, 'unrestricted');
+test('forwards Pincer variables', () => {
+  const env = driverEnvironment({ PINCER_PERMISSION_MODE: 'unrestricted' });
+  assert.equal(env.PINCER_PERMISSION_MODE, 'unrestricted');
 });
 
 test('does not forward provider credentials', () => {

@@ -314,7 +314,7 @@ def verify_status(status, enabled):
 
 
 def production_status(instance, enabled):
-    return verify_status(json.loads(_hypr(instance, '-j', 'cua:status')), enabled)
+    return verify_status(json.loads(_hypr(instance, '-j', 'pincer:status')), enabled)
 
 
 def verify_trace_peer(trace, config):
@@ -418,7 +418,7 @@ class ConfigFault:
         # Known inodes let either process reject an unrelated replacement.
         try:
             for name, data in (('disabled', changed.encode()), ('restored', original.encode())):
-                fd, staged = tempfile.mkstemp(prefix='.cua-config-proof-', suffix='.stage', dir=path.parent)
+                fd, staged = tempfile.mkstemp(prefix='.pincer-config-proof-', suffix='.stage', dir=path.parent)
                 with os.fdopen(fd, 'wb') as stream:
                     os.fchmod(stream.fileno(), plan['config']['mode'])
                     stream.write(data)
@@ -662,7 +662,7 @@ def run(args):
         save('plan.json', plan)
         validate_plan(plan)
         report['scope'] = 'native-' + plan['fault']['kind'].replace('_', '-')
-        assert args.trace_socket.name in ('cua-input-v3.sock', 'cua-input-v3-2.sock')
+        assert args.trace_socket.name in ('pincer-input-v3.sock', 'pincer-input-v3-2.sock')
         origin = provenance(args, plan)
         for name in ('production_desktop_fault_proof.py', 'production_desktop_fault_proof_test.py', 'proof_fixtures.py',
                      'production_geometry_fault_proof.py', 'production_cancel_proof.py',

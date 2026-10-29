@@ -3,7 +3,7 @@
 /** Assemble the public TypeScript package and its optional native packages.
  *
  * The generated UniFFI loader resolves the SDK cdylib from an OS/architecture
- * package. Keeping native payloads separate lets `@trycua/cua-driver` remain
+ * package. Keeping native payloads separate lets `pincer-driver` remain
  * one stable public package while npm installs only the matching binary.
  */
 
@@ -40,14 +40,14 @@ if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(version)) {
 }
 
 const platforms = [
-  { triple: "darwin-arm64", os: "darwin", cpu: "arm64", file: "libcua_driver_sdk.dylib" },
-  { triple: "darwin-x64", os: "darwin", cpu: "x64", file: "libcua_driver_sdk.dylib" },
-  { triple: "linux-arm64-gnu", os: "linux", cpu: "arm64", libc: "glibc", file: "libcua_driver_sdk.so" },
-  { triple: "linux-x64-gnu", os: "linux", cpu: "x64", libc: "glibc", file: "libcua_driver_sdk.so" },
-  { triple: "win32-arm64-msvc", os: "win32", cpu: "arm64", file: "cua_driver_sdk.dll" },
-  { triple: "win32-x64-msvc", os: "win32", cpu: "x64", file: "cua_driver_sdk.dll" },
+  { triple: "darwin-arm64", os: "darwin", cpu: "arm64", file: "libpincer_sdk.dylib" },
+  { triple: "darwin-x64", os: "darwin", cpu: "x64", file: "libpincer_sdk.dylib" },
+  { triple: "linux-arm64-gnu", os: "linux", cpu: "arm64", libc: "glibc", file: "libpincer_sdk.so" },
+  { triple: "linux-x64-gnu", os: "linux", cpu: "x64", libc: "glibc", file: "libpincer_sdk.so" },
+  { triple: "win32-arm64-msvc", os: "win32", cpu: "arm64", file: "pincer_sdk.dll" },
+  { triple: "win32-x64-msvc", os: "win32", cpu: "x64", file: "pincer_sdk.dll" },
 ]
-const runtimeFile = "cua_driver_node_runtime.node"
+const runtimeFile = "pincer_node_runtime.node"
 const runtimeNotice = "node-runtime-NOTICE.md"
 
 function writeJson(path, value) {
@@ -66,12 +66,12 @@ function pack(directory) {
 }
 
 mkdirSync(outputRoot, { recursive: true })
-const stagingRoot = mkdtempSync(join(outputRoot, ".cua-driver-npm-staging-"))
+const stagingRoot = mkdtempSync(join(outputRoot, ".pincer-npm-staging-"))
 
 const optionalDependencies = {}
 let nativeCount = 0
 for (const platform of platforms) {
-  const name = `@trycua/cua-driver-${platform.triple}`
+  const name = `pincer-driver-${platform.triple}`
   optionalDependencies[name] = version
   const source = join(nativeRoot, platform.triple, platform.file)
   if (!existsSync(source)) {
@@ -91,7 +91,7 @@ for (const platform of platforms) {
   const manifest = {
     name,
     version,
-    description: `Native Cua Driver SDK library for ${platform.triple}`,
+    description: `Native Pincer SDK library for ${platform.triple}`,
     license: "MIT AND MPL-2.0",
     repository: { type: "git", url: "git+https://github.com/ModCritic/pincer.git" },
     os: [platform.os],
@@ -115,9 +115,9 @@ const rootStage = join(stagingRoot, "root")
 mkdirSync(rootStage, { recursive: true })
 cpSync(join(typescriptRoot, "dist"), join(rootStage, "dist"), { recursive: true })
 for (const nativeFile of [
-  "libcua_driver_sdk.dylib",
-  "libcua_driver_sdk.so",
-  "cua_driver_sdk.dll",
+  "libpincer_sdk.dylib",
+  "libpincer_sdk.so",
+  "pincer_sdk.dll",
 ]) {
   const staleColocatedLibrary = join(rootStage, "dist", "native", nativeFile)
   if (existsSync(staleColocatedLibrary)) unlinkSync(staleColocatedLibrary)
@@ -132,4 +132,4 @@ writeJson(join(rootStage, "package.json"), {
 pack(rootStage)
 
 rmSync(stagingRoot, { recursive: true })
-console.log(`Packed @trycua/cua-driver ${version} with ${nativeCount} native package(s).`)
+console.log(`Packed pincer-driver ${version} with ${nativeCount} native package(s).`)

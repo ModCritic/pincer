@@ -49,7 +49,7 @@ pub fn server_is_xwayland() -> bool {
 pub const ROOTLESS_XWAYLAND_CAPTURE: &str = "whole-screen capture is unavailable in XWayland \
      mode: this XWayland server runs rootless, so its root window has no pixels (GetImage \
      answers BadMatch). Capture one window with get_window_state, or run the driver with \
-     CUA_DRIVER_RS_ENABLE_WAYLAND=1 to capture the desktop through the portal";
+     PINCER_ENABLE_WAYLAND=1 to capture the desktop through the portal";
 
 /// True when `DISPLAY` is a rootless XWayland: [`server_is_xwayland`], and a
 /// one-pixel `GetImage` of the root fails. KWin's XWayland answers BadMatch

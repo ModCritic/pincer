@@ -1,4 +1,4 @@
-"""Task progress in cua.jev_choice_request_v2 (#4313).
+"""Task progress in pincer.jev_choice_request_v2 (#4313).
 
 A native task declares the steps it requires. The request reports how often
 this run has performed each step, counted only from the runner's own

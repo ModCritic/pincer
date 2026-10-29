@@ -73,11 +73,11 @@ class HarnessRegistryTest(unittest.TestCase):
     def test_platforms_and_windows(self) -> None:
         self.assertEqual({h.name: h.platform for h in HARNESSES.values()},
                          {"appkit": "macos", "wpf": "windows", "winui3": "windows", "gtk3": "linux"})
-        self.assertEqual(HARNESSES["wpf"].window_title, "CuaTestHarness WPF Tasks")
-        self.assertEqual(HARNESSES["winui3"].window_title, "CuaTestHarness WinUI3 Tasks")
-        self.assertEqual(HARNESSES["winui3"].state_env, "CUA_WINUI3_TASK_STATE")
-        self.assertEqual(HARNESSES["winui3"].process_name, "CuaTestHarness.WinUI3")
-        self.assertEqual(HARNESSES["gtk3"].window_title, "CuaTestHarness GTK3 Tasks")
+        self.assertEqual(HARNESSES["wpf"].window_title, "PincerTestHarness WPF Tasks")
+        self.assertEqual(HARNESSES["winui3"].window_title, "PincerTestHarness WinUI3 Tasks")
+        self.assertEqual(HARNESSES["winui3"].state_env, "PINCER_WINUI3_TASK_STATE")
+        self.assertEqual(HARNESSES["winui3"].process_name, "PincerTestHarness.WinUI3")
+        self.assertEqual(HARNESSES["gtk3"].window_title, "PincerTestHarness GTK3 Tasks")
 
     def test_unknown_tasks_are_rejected(self) -> None:
         for task_id in ("wpf-reset", "winui3-exit", "uwp-counter", "counter", ""):
@@ -149,7 +149,7 @@ class RecordedHarnessFixtureTest(unittest.TestCase):
                 self.assertEqual(field.label, "Note")
                 ids = [c.id for c in note.candidates(after)]
                 if harness == "gtk3":
-                    # Known limitation of Cua Driver 0.30.2 (#4291): a named
+                    # Known limitation of Pincer 0.30.2 (#4291): a named
                     # AT-SPI text field reports no value, so the written note
                     # is not observable and the write stays offered.
                     self.assertIn("limitation", window_state(harness, "after-save-note")["_fixture"])

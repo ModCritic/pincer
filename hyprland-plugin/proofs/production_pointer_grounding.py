@@ -51,7 +51,7 @@ def checked_snapshot(snapshot, image, app):
     bounds = snapshot['window_bounds']
     assert (image.width, image.height) == (snapshot['screenshot_width'], snapshot['screenshot_height'])
     assert (image.width, image.height) == (bounds['width'], bounds['height']), 'only native 1:1 pixels qualified'
-    assert f'cua-smoke-{app}' in snapshot['window_title'], 'wrong synthetic document'
+    assert f'pincer-smoke-{app}' in snapshot['window_title'], 'wrong synthetic document'
     return elements
 
 

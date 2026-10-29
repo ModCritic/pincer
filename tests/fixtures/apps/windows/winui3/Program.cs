@@ -4,7 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.Windows.ApplicationModel.DynamicDependency;
 using WinRT;
 
-namespace CuaTestHarness.WinUI3;
+namespace PincerTestHarness.WinUI3;
 
 public static class Program
 {

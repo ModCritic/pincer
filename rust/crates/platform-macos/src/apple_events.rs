@@ -160,7 +160,7 @@ fn script_error_refusal(stderr: &str) -> ScriptRefusal {
     if stderr.contains("(-1743)") {
         ScriptRefusal {
             code: "automation_denied",
-            reason: "macOS does not allow Cua Driver to control this app (System Settings > \
+            reason: "macOS does not allow Pincer to control this app (System Settings > \
                      Privacy & Security > Automation)"
                 .into(),
         }
@@ -184,7 +184,7 @@ fn ensure_permitted(bundle_id: &str, app_name: &str) -> Result<(), ScriptRefusal
         AutomationPermission::Denied => Err(ScriptRefusal {
             code: "automation_denied",
             reason: format!(
-                "macOS does not allow Cua Driver to control {app_name}. The user can allow it in \
+                "macOS does not allow Pincer to control {app_name}. The user can allow it in \
                  System Settings > Privacy & Security > Automation"
             ),
         }),
@@ -506,7 +506,7 @@ mod tests {
 
     #[test]
     fn a_rename_onto_an_existing_name_is_refused_before_any_event() {
-        let dir = std::env::temp_dir().join(format!("cua-ae-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pincer-ae-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "a").unwrap();
         std::fs::write(dir.join("b.txt"), "b").unwrap();

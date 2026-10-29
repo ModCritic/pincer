@@ -15,7 +15,7 @@ fn main() {
     let mut pipe = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
-        .open(r"\\.\pipe\cua-driver")
+        .open(r"\\.\pipe\pincer")
         .expect("open pipe");
 
     fn req(p: &mut std::fs::File, json: &str) -> String {

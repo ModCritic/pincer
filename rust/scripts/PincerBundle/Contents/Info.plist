@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    Minimal .app bundle for pincer.
+
+    It installs at /Applications/Pincer.app with bundle id
+    `io.github.modcritic.pincer`. Upstream Cua Driver used `com.trycua.driver`,
+    so macOS treats Pincer as a separate app: its Accessibility and Screen
+    Recording grants start fresh, and an upstream install can sit beside it.
+
+    The bundle exists for TCC attribution: `open -n -g -a Pincer --args serve`
+    relaunches into a process attributed to `io.github.modcritic.pincer` (a
+    stable bundle identifier TCC keys grants against), instead of
+    inheriting the calling shell/IDE-terminal's TCC responsibility. TCC also
+    pairs the bundle id with the binary's cdhash, so a rebuilt binary can
+    prompt for the grants once more.
+
+    LSUIElement=true keeps the bundle headless (no Dock icon, no menu
+    bar) so the daemon-spawn path doesn't flash any UI.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>io.github.modcritic.pincer</string>
+    <key>CFBundleName</key>
+    <string>Pincer</string>
+    <key>CFBundleDisplayName</key>
+    <string>Pincer</string>
+    <key>CFBundleExecutable</key>
+    <string>pincer</string>
+    <!-- Bundle icon shown in Finder / Launchpad / Get Info. Resolves to
+         Contents/Resources/AppIcon.icns. LSUIElement (below) suppresses
+         the Dock icon, but Finder and Launchpad still render this — without
+         it the app shows a blank placeholder (see issue #1496). -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <!-- Version values are placeholders. The CD workflow's
+         `plutil -replace CFBundleShortVersionString` /
+         `plutil -replace CFBundleVersion` step rewrites both on
+         every tag push so the published .app reflects the release
+         tag. The in-tree values stay at a sentinel that's obviously
+         not a real release, so dev builds running against a fresh
+         checkout don't accidentally masquerade as a tagged version. -->
+    <key>CFBundleShortVersionString</key>
+    <string>0.0.0-dev</string>
+    <key>CFBundleVersion</key>
+    <string>0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Pincer captures the screen so agents can see and interact with the interface you ask them to control.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Pincer uses Automation only when a requested action needs to communicate with another app.</string>
+    <key>NSSupportsAutomaticTermination</key>
+    <true/>
+</dict>
+</plist>

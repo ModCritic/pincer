@@ -121,7 +121,7 @@ def run(args):
     args.evidence.mkdir(parents=True, exist_ok=False)
 
     def read_status():
-        return json.loads(subprocess.check_output(["hyprctl", "-j", "cua:status"], timeout=5))
+        return json.loads(subprocess.check_output(["hyprctl", "-j", "pincer:status"], timeout=5))
 
     def obtain_grants(stage, requests):
         (args.evidence / f"request-{stage}.json").write_text(json.dumps(requests, indent=2))
@@ -143,7 +143,7 @@ def run(args):
         assert not any(lane["lease_active"] or lane.get("reserved") is not False for lane in initial), "test requires unowned idle lanes"
         with ExitStack() as stack:
             clients, hellos, operators = [], [], []
-            for name in ("cua-input-test.sock", "cua-input-test-2.sock"):
+            for name in ("pincer-input-test.sock", "pincer-input-test-2.sock"):
                 client, hello = connect(args.input_directory / name, claim=True)
                 clients.append(stack.enter_context(client))
                 hellos.append(hello)

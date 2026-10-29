@@ -1,5 +1,5 @@
 use super::{GetWindowStateTool, ToolState};
-use cua_driver_core::tool::Tool;
+use pincer_core::tool::Tool;
 
 #[test]
 fn schema_exposes_zero_as_native_resolution() {

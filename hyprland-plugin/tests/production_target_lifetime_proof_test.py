@@ -21,7 +21,7 @@ DESTROYED = ACTIVE + [(8, 'agent_cancel', 1, 0)]
 
 
 def owned(directory):
-    return {'document': {'path': directory + '/cua-smoke-calc.ods', 'device': 1,
+    return {'document': {'path': directory + '/pincer-smoke-calc.ods', 'device': 1,
             'inode': 2, 'uid': 1000, 'sha256': 'a' * 64}, 'profile': directory + '/calc-profile'}
 
 
@@ -72,11 +72,11 @@ class PlanTests(unittest.TestCase):
     def test_inkscape_only_profile_binds_both_the_target_and_its_replacement(self):
         candidate = inkscape_profile(plan())
         old, fresh = candidate['agents'][0], candidate['recovery']['agent']
-        fresh.update(app='inkscape', document='/synthetic/replacement/cua-smoke-inkscape.svg',
+        fresh.update(app='inkscape', document='/synthetic/replacement/pincer-smoke-inkscape.svg',
                      pointer_stage='click_rectangle')
         candidate['recovery']['identity']['exe'] = '/usr/bin/inkscape'
         for index, spec in enumerate((old, fresh)):
-            spec['app_id_tag'] = f'cua-profile-lane-{index}'
+            spec['app_id_tag'] = f'pincer-profile-lane-{index}'
             spec['owned'].pop('profile')
             spec['owned']['document']['path'] = spec['document']
         proof.validate_plan(candidate)
@@ -91,12 +91,12 @@ class PlanTests(unittest.TestCase):
         ])
 
     def test_inkscape_requires_exact_reviewed_app_id_tag_argv_and_identity(self):
-        spec = {'app': 'inkscape', 'app_id_tag': 'cua-profile-lane-0',
-                'document': '/synthetic/cua-smoke-inkscape.svg'}
+        spec = {'app': 'inkscape', 'app_id_tag': 'pincer-profile-lane-0',
+                'document': '/synthetic/pincer-smoke-inkscape.svg'}
         expected = {**identity(20), 'exe': '/usr/bin/inkscape', 'uid': os.getuid()}
-        argv = ['/usr/bin/inkscape', '--app-id-tag=cua-profile-lane-0', spec['document']]
+        argv = ['/usr/bin/inkscape', '--app-id-tag=pincer-profile-lane-0', spec['document']]
         for words in (argv, [argv[0], '--new-instance', argv[2]],
-                      [argv[0], '--app-id-tag=cua-profile-lane-1', argv[2]], argv + ['/other.svg']):
+                      [argv[0], '--app-id-tag=pincer-profile-lane-1', argv[2]], argv + ['/other.svg']):
             with self.subTest(argv=words), patch.object(proof, '_identity', return_value=expected), \
                  patch.object(proof, 'saved_document'), \
                  patch.object(Path, 'read_bytes', return_value=b'\0'.join(x.encode() for x in words) + b'\0'):
@@ -129,7 +129,7 @@ class PlanTests(unittest.TestCase):
     def test_saved_output_exact_bytes_identity_and_alias_refusal(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            path = root / 'cua-smoke-calc.ods'
+            path = root / 'pincer-smoke-calc.ods'
             path.write_bytes(b'existing saved bytes')
             info = path.stat()
             spec = {'owned': {'document': {'path': str(path), 'device': info.st_dev,
@@ -154,7 +154,7 @@ class PlanTests(unittest.TestCase):
             spec = {'owned': owned(str(root))}
             expected_identity = {**identity(20), 'uid': os.getuid()}
             argv = [expected_identity['exe'], f'-env:UserInstallation={profile.as_uri()}',
-                    '--norestore', '--nologo', '--calc', str(root / 'cua-smoke-calc.ods')]
+                    '--norestore', '--nologo', '--calc', str(root / 'pincer-smoke-calc.ods')]
             for words in (argv, argv + ['/private.ods'], argv[:-1], [*argv[:1], '-env:UserInstallation=file:///real', *argv[2:]]):
                 with patch.object(proof, '_identity', return_value=expected_identity), \
                      patch.object(Path, 'read_bytes', return_value=b'\0'.join(x.encode() for x in words) + b'\0'):

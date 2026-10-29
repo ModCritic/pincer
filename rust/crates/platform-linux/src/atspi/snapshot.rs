@@ -3,7 +3,7 @@
 //! Two views of the same `get_window_state` snapshot live here:
 //!
 //! 1. [`AtspiSnapshot`], the [`SnapshotPayload`] published into the runtime
-//!    snapshot store (`cua_driver_core::snapshot_store`). An `element_token`
+//!    snapshot store (`pincer_core::snapshot_store`). An `element_token`
 //!    resolves through it to a [`CachedElement`]: the
 //!    element's proven AT-SPI identity ([`AtspiIdentity`]) plus what a later
 //!    per-index action needs to act WITHOUT re-walking the application (its
@@ -23,7 +23,7 @@
 
 use super::native::{self, ObjectRef};
 use super::{AtspiIdentity, AtspiNode};
-use cua_driver_core::snapshot_store::{SnapshotPayload, SnapshotStore};
+use pincer_core::snapshot_store::{SnapshotPayload, SnapshotStore};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -182,7 +182,7 @@ pub(crate) fn hit_test(pid: u32, xid: u64, sx: i32, sy: i32) -> Option<(usize, C
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cua_driver_core::element_token::{token_for, ResolvedElement};
+    use pincer_core::element_token::{token_for, ResolvedElement};
 
     fn node(index: usize) -> AtspiNode {
         node_with_role(index, "button")

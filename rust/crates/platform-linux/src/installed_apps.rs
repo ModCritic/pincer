@@ -174,7 +174,7 @@ fn parse_desktop_file(path: &Path, bundle_id: &str) -> Option<InstalledApp> {
         .ok()
         .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .and_then(|d| cua_driver_core::timestamp::unix_secs_to_rfc3339(d.as_secs() as i64));
+        .and_then(|d| pincer_core::timestamp::unix_secs_to_rfc3339(d.as_secs() as i64));
 
     Some(InstalledApp {
         name,
@@ -285,7 +285,7 @@ Name=Hidden Helper
 Exec=/usr/libexec/helper
 NoDisplay=true
 ";
-        let dir = std::env::temp_dir().join(format!("cua-driver-rs-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pincer-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("hidden-helper.desktop");
         std::fs::write(&path, body).unwrap();
@@ -301,7 +301,7 @@ Type=Application
 Name=Demo App
 Exec=/opt/demo/bin/demo %U
 ";
-        let dir = std::env::temp_dir().join(format!("cua-driver-rs-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pincer-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("demo-app.desktop");
         std::fs::write(&path, body).unwrap();

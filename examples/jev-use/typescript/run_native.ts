@@ -2,7 +2,7 @@
  * Run one native jev-use task against a desktop window (RFC #4268, Phase 1).
  * Mirrors python/run_native.py: attach to --pid, find the task window, and
  * loop oracle -> one get_window_state (tree and screenshot) -> closed
- * candidates -> validated cua.jev_choice_request_v2 -> one element-bound
+ * candidates -> validated pincer.jev_choice_request_v2 -> one element-bound
  * action -> oracle.
  */
 import { appendFile, writeFile } from 'node:fs/promises';
@@ -130,7 +130,7 @@ async function observe(
   let payload;
   try {
     // The observation needs structured elements, the markdown tree and the
-    // completeness flags; cua-driver 0.35 returns the lean markdown-only
+    // completeness flags; pincer 0.35 returns the lean markdown-only
     // read unless asked for the full response.
     payload = await driver.call('get_window_state', { ...read, full_output: true });
   } catch (error) {
@@ -257,11 +257,11 @@ export async function runTask(args: Arguments, task: NativeTask): Promise<Outcom
   const history: HistoryEntry[] = [];
   const foregroundIds = new Set<string>();
   const transport = new StdioClientTransport({
-    command: process.env.CUA_DRIVER_BIN ?? 'cua-driver',
+    command: process.env.PINCER_BIN ?? 'pincer',
     args: ['mcp'],
     env: driverEnvironment(),
   });
-  const client = new Client({ name: 'cua-driver-jev-use-native', version: '0.1.0' });
+  const client = new Client({ name: 'pincer-jev-use-native', version: '0.1.0' });
   try {
     await client.connect(transport);
     const advertised = (await client.listTools()).tools;

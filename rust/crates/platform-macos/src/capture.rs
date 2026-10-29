@@ -191,7 +191,7 @@ impl SecureCapturePath {
         use std::os::unix::fs::DirBuilderExt;
 
         let directory = std::env::temp_dir().join(format!(
-            "cua-driver-rs-capture-{}-{}",
+            "pincer-capture-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4()
         ));
@@ -417,7 +417,7 @@ where
         .ok_or_else(|| anyhow::anyhow!("ScreenCaptureKit capture already in flight"))?;
     let (sender, receiver) = mpsc::sync_channel(1);
     std::thread::Builder::new()
-        .name("cua-sck-window-capture".into())
+        .name("pincer-sck-window-capture".into())
         .spawn(move || {
             let result = autoreleasepool(|_| work());
             drop(permit);
@@ -568,7 +568,7 @@ fn cgimage_to_png(
         );
     }
 
-    cua_driver_core::image_utils::encode_rgba_to_png(&rgba, w, h)
+    pincer_core::image_utils::encode_rgba_to_png(&rgba, w, h)
 }
 
 enum CaptureIdentityValidation {
@@ -853,7 +853,7 @@ fn core_cgimage_to_png(
     if !unpremultiply_rgba(&mut rgba) {
         anyhow::bail!("capture of {label} is fully transparent (no window content)");
     }
-    cua_driver_core::image_utils::encode_rgba_to_png(&rgba, w, h)
+    pincer_core::image_utils::encode_rgba_to_png(&rgba, w, h)
 }
 
 /// Convert premultiplied RGBA8 to straight alpha in place. Returns whether
@@ -1060,21 +1060,21 @@ pub fn screenshot_display() -> anyhow::Result<(String, u32, u32)> {
 }
 
 // PNG/JPEG/resize/crosshair helpers — re-exports of the shared
-// `cua_driver_core::image_utils` module. The previous file-local copies were
+// `pincer_core::image_utils` module. The previous file-local copies were
 // near-identical to the Windows and Linux versions; the dedup-audit
 // (2026-05) moved them all to one place. See
-// `CUA_DRIVER_RS_DEDUP_AUDIT.md` for the audit trail.
+// `PINCER_DEDUP_AUDIT.md` for the audit trail.
 
 /// Convert raw PNG bytes to JPEG at the given quality (1-95).
 pub fn png_bytes_to_jpeg(png_bytes: &[u8], quality: u8) -> anyhow::Result<Vec<u8>> {
-    cua_driver_core::image_utils::png_bytes_to_jpeg(png_bytes, quality)
+    pincer_core::image_utils::png_bytes_to_jpeg(png_bytes, quality)
 }
 
 /// Downscale `png_bytes` so neither dimension exceeds `max_dim`.
 /// If `max_dim == 0` or the image already fits, returns the original
 /// bytes unchanged.
 pub fn resize_png_if_needed(png_bytes: &[u8], max_dim: u32) -> anyhow::Result<Vec<u8>> {
-    cua_driver_core::image_utils::resize_png_if_needed(png_bytes, max_dim)
+    pincer_core::image_utils::resize_png_if_needed(png_bytes, max_dim)
 }
 
 /// Draw a red crosshair at pixel (cx, cy) on a PNG image and write to
@@ -1082,19 +1082,19 @@ pub fn resize_png_if_needed(png_bytes: &[u8], max_dim: u32) -> anyhow::Result<Ve
 /// coordinate spaces. The crosshair uses top-left-origin coords
 /// matching the click tool's convention.
 pub fn write_crosshair_png(png_bytes: &[u8], cx: f64, cy: f64, path: &str) -> anyhow::Result<()> {
-    cua_driver_core::image_utils::write_crosshair_png(png_bytes, cx, cy, path)
+    pincer_core::image_utils::write_crosshair_png(png_bytes, cx, cy, path)
 }
 
 /// Draw a red crosshair at pixel (cx, cy) on a PNG image and return the
 /// modified PNG bytes. Used by recording's click-marker callback to
 /// produce click.png.
 pub fn crosshair_png_bytes(png_bytes: &[u8], cx: f64, cy: f64) -> anyhow::Result<Vec<u8>> {
-    cua_driver_core::image_utils::crosshair_png_bytes(png_bytes, cx, cy)
+    pincer_core::image_utils::crosshair_png_bytes(png_bytes, cx, cy)
 }
 
 /// Parse width and height from a PNG file's IHDR chunk.
 pub fn png_dimensions(data: &[u8]) -> anyhow::Result<(u32, u32)> {
-    cua_driver_core::image_utils::png_dimensions(data)
+    pincer_core::image_utils::png_dimensions(data)
 }
 
 #[cfg(test)]
@@ -1255,7 +1255,7 @@ mod tests {
 
     #[test]
     fn native_window_capture_short_circuits_shell_fallback() {
-        let png = cua_driver_core::image_utils::encode_rgba_to_png(&[0, 0, 0, 255], 1, 1)
+        let png = pincer_core::image_utils::encode_rgba_to_png(&[0, 0, 0, 255], 1, 1)
             .expect("encode 1x1 PNG");
         assert!(!png.is_empty(), "PNG bytes must be non-empty");
 

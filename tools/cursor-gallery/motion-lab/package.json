@@ -1,8 +1,8 @@
 {
-  "name": "cua-driver-motion-lab",
+  "name": "pincer-motion-lab",
   "private": true,
   "type": "module",
-  "description": "Candidate agent-cursor motion styles for Cua Driver, previewed in the cursor gallery.",
+  "description": "Candidate agent-cursor motion styles for Pincer, previewed in the cursor gallery.",
   "scripts": {
     "test": "node --test test/",
     "bench": "node test/bench.js",

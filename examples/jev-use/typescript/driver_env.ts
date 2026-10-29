@@ -6,7 +6,7 @@ import { getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js
 // PATH, USER, ...) on POSIX. On Linux that drops the desktop session, so the
 // Driver cannot reach the display or session bus and the isolated browser exits
 // before exposing DevTools. Forward the SDK defaults plus the desktop-session
-// and Cua Driver variables only; provider credentials such as TYPESAFE_API_KEY
+// and Pincer variables only; provider credentials such as TYPESAFE_API_KEY
 // stay in the agent process.
 export const DESKTOP_SESSION_VARS = [
   'DISPLAY',
@@ -18,7 +18,7 @@ export const DESKTOP_SESSION_VARS = [
   'XDG_SESSION_TYPE',
   'XDG_CURRENT_DESKTOP',
 ] as const;
-const DRIVER_VAR_PREFIX = 'CUA_DRIVER_';
+const DRIVER_VAR_PREFIX = 'PINCER_';
 
 export function driverEnvironment(
   source: NodeJS.ProcessEnv = process.env,

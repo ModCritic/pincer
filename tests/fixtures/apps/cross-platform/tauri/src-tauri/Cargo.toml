@@ -1,7 +1,7 @@
 [package]
-name = "cua-test-harness-tauri"
+name = "pincer-test-harness-tauri"
 version = "1.0.0"
-description = "cua-driver Tauri test harness"
+description = "pincer Tauri test harness"
 edition = "2021"
 rust-version = "1.77"
 

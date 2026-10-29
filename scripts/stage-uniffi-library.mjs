@@ -9,17 +9,17 @@ import { fileURLToPath } from "node:url"
 const driverRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const file =
   process.platform === "darwin"
-    ? "libcua_driver_sdk.dylib"
+    ? "libpincer_sdk.dylib"
     : process.platform === "win32"
-      ? "cua_driver_sdk.dll"
-      : "libcua_driver_sdk.so"
+      ? "pincer_sdk.dll"
+      : "libpincer_sdk.so"
 const source = join(driverRoot, "rust", "target", "release", file)
 if (!existsSync(source)) {
-  throw new Error(`missing ${source}; build cua-driver-sdk --release first`)
+  throw new Error(`missing ${source}; build pincer-sdk --release first`)
 }
 
 const destinations = [
-  join(driverRoot, "python", "src", "cua_driver", file),
+  join(driverRoot, "python", "src", "pincer_driver", file),
 ]
 for (const destination of destinations) {
   mkdirSync(dirname(destination), { recursive: true })
@@ -42,12 +42,11 @@ const localPackage = join(
   driverRoot,
   "typescript",
   "node_modules",
-  "@trycua",
-  `cua-driver-${nodeTriple}`,
+  `pincer-driver-${nodeTriple}`,
 )
 mkdirSync(localPackage, { recursive: true })
 copyFileSync(source, join(localPackage, file))
-const runtime = join(localPackage, "cua_driver_node_runtime.node")
+const runtime = join(localPackage, "pincer_node_runtime.node")
 const runtimeBuild = spawnSync(
   process.execPath,
   [join(driverRoot, "scripts", "build-node-runtime.mjs"), "--output", runtime],
@@ -61,7 +60,7 @@ writeFileSync(
   join(localPackage, "package.json"),
   `${JSON.stringify(
     {
-      name: `@trycua/cua-driver-${nodeTriple}`,
+      name: `pincer-driver-${nodeTriple}`,
       version: "0.0.0-local",
       private: true,
     },

@@ -1,4 +1,4 @@
-# CUA Driver Test Matrix
+# Pincer Test Matrix
 
 This is the source map for the Rust test suites in this repository. It uses
 two top-level test classes:
@@ -44,7 +44,7 @@ These run without the repo-local GUI applications:
 | Area | Location | Coverage |
 | --- | --- | --- |
 | Core driver logic | `rust/crates/*/src/**` | Protocol values, sessions, schemas, image helpers, input helpers, configuration, telemetry, CLI behavior |
-| MCP and CLI boundary | `rust/crates/cua-driver/tests/protocol_*` | Handshake, tool registration, tool calls, media, sessions, and errors |
+| MCP and CLI boundary | `rust/crates/pincer/tests/protocol_*` | Handshake, tool registration, tool calls, media, sessions, and errors |
 | Lifecycle sessions and target migration | Core `session`, `session_tools`, and `action_target` tests plus `session_capture_scope_test.rs` | One implicit session per transport, five-minute idle policy, in-flight and exact-once cleanup, owner-scoped inspection and revival, per-call target validation, and refusal of the removed `capture_scope` input |
 | Tool-contract gate | `schema_consistency_test.rs` | Shared tool schema parity and reviewed risk metadata across OS backends |
 | Configuration transport | `transport_config_persistence_test.rs` | CLI configuration persistence across daemon-backed processes |
@@ -70,7 +70,7 @@ Source:
 - `tests/fixtures/shared/web/index.html`
 - `tests/fixtures/apps/cross-platform/electron/`
 - `tests/fixtures/apps/cross-platform/tauri/`
-- `rust/crates/cua-driver-e2e/tests/cross_platform_behavior_test.rs`
+- `rust/crates/pincer-e2e/tests/cross_platform_behavior_test.rs`
 
 The shared harness exposes deterministic external markers for these actions:
 
@@ -197,7 +197,7 @@ allowed, and the desktop-side-effect oracles pass.
 Upstream gates these suites in its CI and through canonical runner scripts in
 its monorepo-level `scripts/ci/`, none of which are part of this repository.
 Run individual suites with `cargo test`; see
-[`rust/crates/cua-driver-e2e/tests/README.md`](../rust/crates/cua-driver-e2e/tests/README.md)
+[`rust/crates/pincer-e2e/tests/README.md`](../rust/crates/pincer-e2e/tests/README.md)
 for the harness builds and environment variables they need.
 
 Rust source owns scenario definitions, fixture oracles, and result records. OS

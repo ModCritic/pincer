@@ -13,7 +13,7 @@
 //! `Connection::session()` has nothing to connect to, the AT-SPI registry walk
 //! comes back empty, and `get_window_state` reports every window as having no
 //! elements. This is the single most common reason AT-SPI "silently does
-//! nothing" on Linux, and it is exactly the failure seen driving cua-driver in
+//! nothing" on Linux, and it is exactly the failure seen driving pincer in
 //! the XFCE-in-a-container test rig (the VNC session runs an ad-hoc bus whose
 //! address only that session's processes know).
 //!
@@ -63,13 +63,13 @@ pub fn ensure_session_bus_discovered() {
             // worker thread reads the environment.
             std::env::set_var("DBUS_SESSION_BUS_ADDRESS", &address);
             tracing::info!(
-                target: "cua-driver",
+                target: "pincer",
                 "DBUS_SESSION_BUS_ADDRESS was unset; adopted the desktop session bus at {address} \
                  so AT-SPI works without a session-attached launch"
             );
         } else {
             tracing::debug!(
-                target: "cua-driver",
+                target: "pincer",
                 "DBUS_SESSION_BUS_ADDRESS unset and no session bus found \
                  (no /run/user/<uid>/bus socket, no desktop-session process exposing it); \
                  AT-SPI trees may stay empty — start the daemon inside the desktop session"
@@ -167,14 +167,14 @@ mod tests {
         assert!(is_session_process("cinnamon-sessio")); // cinnamon-session
                                                         // Non-session processes are ignored.
         assert!(!is_session_process("bash"));
-        assert!(!is_session_process("cua-driver"));
+        assert!(!is_session_process("pincer"));
         assert!(!is_session_process(""));
     }
 
     #[test]
     fn parses_dbus_address_from_environ_blob() {
         // Realistic NUL-separated /proc/<pid>/environ.
-        let environ = b"PATH=/usr/bin\0DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus\0HOME=/home/cua\0";
+        let environ = b"PATH=/usr/bin\0DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus\0HOME=/home/pincer\0";
         assert_eq!(
             dbus_address_from_environ(environ).as_deref(),
             Some("unix:path=/run/user/1000/bus")

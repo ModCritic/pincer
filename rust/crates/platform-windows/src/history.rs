@@ -1,10 +1,10 @@
 //! Windows adapters for encrypted Computer History.
 
-use cua_driver_core::history::{
+use keyring::{Entry, Error as KeyringError};
+use pincer_core::history::{
     ApplicationIdentity, ApplicationIdentityProvider, HistoryError, HistoryHealthCategory,
     HistoryKey, KeyProvider,
 };
-use keyring::{Entry, Error as KeyringError};
 use std::{path::PathBuf, sync::Arc};
 use zeroize::Zeroizing;
 
@@ -20,7 +20,9 @@ impl WindowsCredentialKeyProvider {
 
     fn service(namespace: &str) -> Result<String, HistoryError> {
         validate_namespace(namespace)?;
-        Ok(format!("com.trycua.{namespace}.computer-history.v1"))
+        Ok(format!(
+            "io.github.modcritic.pincer.{namespace}.computer-history.v1"
+        ))
     }
 
     fn entry(service: &str) -> Result<Entry, HistoryError> {
@@ -203,8 +205,8 @@ mod tests {
     #[test]
     fn credential_namespace_is_strict_and_separated() {
         assert_ne!(
-            WindowsCredentialKeyProvider::service("cua-driver").unwrap(),
-            WindowsCredentialKeyProvider::service("cua-driver-local").unwrap()
+            WindowsCredentialKeyProvider::service("pincer").unwrap(),
+            WindowsCredentialKeyProvider::service("pincer-local").unwrap()
         );
         assert!(WindowsCredentialKeyProvider::service("../escape").is_err());
     }
@@ -230,7 +232,7 @@ mod tests {
     #[test]
     #[ignore = "mutates uniquely named Windows Credential Manager items; run in native release qualification"]
     fn credential_manager_key_lifecycle_is_isolated_corruptible_and_destroyable() {
-        let namespace = format!("cua-driver-local-test-{}", uuid::Uuid::new_v4().simple());
+        let namespace = format!("pincer-local-test-{}", uuid::Uuid::new_v4().simple());
         let other_namespace = format!("{namespace}-other");
         let provider = WindowsCredentialKeyProvider;
         assert!(provider.references(&namespace).unwrap().is_empty());

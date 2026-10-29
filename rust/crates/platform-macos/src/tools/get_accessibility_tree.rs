@@ -5,7 +5,7 @@
 //! `include_screenshot:false` to skip the screenshot).
 
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };

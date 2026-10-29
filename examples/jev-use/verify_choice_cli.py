@@ -12,7 +12,7 @@ def main() -> None:
     parser.add_argument("--live", action="store_true")
     parser.add_argument(
         "--request-version", choices=("v1", "v2"), default="v1",
-        help="v2 sends the native cua.jev_choice_request_v2 fixture",
+        help="v2 sends the native pincer.jev_choice_request_v2 fixture",
     )
     args = parser.parse_args()
 
@@ -33,7 +33,7 @@ def main() -> None:
     response = json.loads(result.stdout)
     if set(response) != {"schema", "selected_id", "model", "confidence", "probabilities"}:
         raise RuntimeError("chooser returned fields outside the response contract")
-    if response["schema"] != "cua.jev_choice_v1":
+    if response["schema"] != "pincer.jev_choice_v1":
         raise RuntimeError("chooser returned an unsupported schema")
     candidate_ids = {candidate["id"] for candidate in request["candidates"]}
     if response["selected_id"] not in candidate_ids:

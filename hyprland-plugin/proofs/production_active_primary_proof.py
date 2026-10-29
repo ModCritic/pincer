@@ -338,7 +338,7 @@ class HoverFixture:
         else:
             first, _ = poll_fault_active(trace, initial, pending, motion, timeout=1)
         started = time.monotonic_ns()
-        gate = json.loads(_hypr(self.desktop.instance, '-j', 'cua:status'))
+        gate = json.loads(_hypr(self.desktop.instance, '-j', 'pincer:status'))
         if motion is None:
             page, active = poll_active(trace, first, None, [pending], timeout=.25)
         else:
@@ -352,7 +352,7 @@ class HoverFixture:
         bounds = prepared['snapshot']['window_bounds']
         point = [bounds['x'] + prepared['arguments']['from_x'], bounds['y'] + prepared['arguments']['from_y']]
         self.move(point, prepared['target'], prepared['prepared_ns'], pending=pending)
-        self.record['after'] = json.loads(_hypr(self.desktop.instance, '-j', 'cua:status'))
+        self.record['after'] = json.loads(_hypr(self.desktop.instance, '-j', 'pincer:status'))
         self.record['observed_ns'] = time.monotonic_ns()
         cancelled_status(gate, self.record['after'], lane)
 

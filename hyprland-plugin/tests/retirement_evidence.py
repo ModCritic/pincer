@@ -5,12 +5,12 @@ Passing these helpers on synthetic data is not native compositor evidence.
 import re
 
 
-NAMES = {"Cua-Test-Agent", "Cua-Test-Agent-2"}
+NAMES = {"Pincer-Test-Agent", "Pincer-Test-Agent-2"}
 
 
 def active_experiment(status):
     experiment = status.get("experiment", {})
-    if (status.get("name") != "cua-hyprland-plugin"
+    if (status.get("name") != "pincer-hyprland-plugin"
             or status.get("state") != "input_experiment"
             or status.get("configured") is not True
             or status.get("abi", {}).get("match") is not True
@@ -42,7 +42,7 @@ does not prove this path was reached.
         "input seat lifetime unavailable; restart the desktop before loading a replacement plugin",
         "restart desktop before replacing input seats",
     }
-    if (status.get("name") != "cua-hyprland-plugin"
+    if (status.get("name") != "pincer-hyprland-plugin"
             or status.get("configured") is not True
             or status.get("abi", {}).get("match") is not True
             or status.get("state") != "discovery_only"

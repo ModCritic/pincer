@@ -25,7 +25,7 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Accessibility::{AccessibleObjectFromWindow, IAccessible};
 
 use crate::uia::{UiaNode, UiaTreeResult};
-use cua_driver_core::walk_budget::WalkBudget;
+use pincer_core::walk_budget::WalkBudget;
 
 const OBJID_CLIENT: u32 = 0xFFFFFFFC;
 

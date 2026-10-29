@@ -73,7 +73,7 @@ def _functions(module: ast.Module) -> dict[str, ast.FunctionDef | ast.AsyncFunct
 
 def test_click_position_preserves_released_uniffi_ordinals() -> None:
     generated = (
-        PACKAGE_ROOT / "src" / "cua_driver" / "_native_contract.py"
+        PACKAGE_ROOT / "src" / "pincer_driver" / "_native_contract.py"
     ).read_text(encoding="utf-8")
     converter = re.search(
         r"class _UniffiFfiConverterTypeClickPosition\b.*?def check_lower",
@@ -93,9 +93,9 @@ def test_click_position_preserves_released_uniffi_ordinals() -> None:
 
 def test_released_python_exports_and_signatures_remain_available() -> None:
     expected = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    package_module = _module(PACKAGE_ROOT / "src" / "cua_driver" / "__init__.py")
-    wrapper_module = _module(PACKAGE_ROOT / "src" / "cua_driver" / "wrapper.py")
-    native_module = _module(PACKAGE_ROOT / "src" / "cua_driver" / "_native.py")
+    package_module = _module(PACKAGE_ROOT / "src" / "pincer_driver" / "__init__.py")
+    wrapper_module = _module(PACKAGE_ROOT / "src" / "pincer_driver" / "wrapper.py")
+    native_module = _module(PACKAGE_ROOT / "src" / "pincer_driver" / "_native.py")
 
     all_assignment = next(
         node
@@ -116,14 +116,14 @@ def test_released_python_exports_and_signatures_remain_available() -> None:
     wrapper_functions = _functions(wrapper_module)
     wrapper_signatures = {
         _signature(wrapper_functions["get_binary_path"]),
-        _signature(wrapper_functions["run_cua_driver"]),
+        _signature(wrapper_functions["run_pincer"]),
     }
     assert set(expected["wrapper_signatures"]) == wrapper_signatures
 
     driver_class = next(
         node
         for node in native_module.body
-        if isinstance(node, ast.ClassDef) and node.name == "CuaDriver"
+        if isinstance(node, ast.ClassDef) and node.name == "Pincer"
     )
     actual_methods = {
         _signature(node)
@@ -131,4 +131,4 @@ def test_released_python_exports_and_signatures_remain_available() -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and not node.name.startswith("_")
     }
-    assert set(expected["cua_driver_methods"]) <= actual_methods
+    assert set(expected["pincer_methods"]) <= actual_methods

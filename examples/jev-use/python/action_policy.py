@@ -135,7 +135,7 @@ def authorize_exact_region_text_action(
         or capture_id != current_capture_id
     ):
         raise ActionAuthorizationError("capture identity changed")
-    if parsed.get("schema") != "cua.visual_regions_v1":
+    if parsed.get("schema") != "pincer.visual_regions_v1":
         raise ActionAuthorizationError("unsupported visual observation")
     source = capture.get("source")
     if (
@@ -175,7 +175,7 @@ def authorize_exact_region_text_action(
     except CoordinateMappingError as error:
         raise ActionAuthorizationError(str(error)) from error
     if (
-        decision.get("schema") != "cua.decision_choice_v1"
+        decision.get("schema") != "pincer.decision_choice_v1"
         or decision.get("kind") != "selected"
         or decision.get("selected_id") != action.candidate_id
     ):

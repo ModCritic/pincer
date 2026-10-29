@@ -88,7 +88,7 @@ class DecisionResult:
 
     def to_wire(self) -> dict[str, Any]:
         return {
-            "schema": "cua.decision_choice_v1",
+            "schema": "pincer.decision_choice_v1",
             "kind": self.kind,
             "capture_id": self.capture_id,
             "selected_id": self.selected_id,
@@ -376,7 +376,7 @@ class S1DecisionModel:
             for item in request.candidates
         ]
         kwargs: dict[str, Any] = {
-            "app": "Cua Driver",
+            "app": "Pincer",
             "task_family": "closed-candidate decision",
             "goal": request.goal,
             "modality": self.modality,

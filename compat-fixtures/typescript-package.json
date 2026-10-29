@@ -16,9 +16,9 @@
   "root_declaration_exports": [
     "ClickButton",
     "ClickInput",
-    "CuaDriver",
-    "CuaDriverInterface",
-    "CuaDriverLike",
+    "Pincer",
+    "PincerInterface",
+    "PincerLike",
     "DesktopScope",
     "DragInput",
     "DriverError",
@@ -26,9 +26,9 @@
     "DriverExecutionMode",
     "DriverMetadata",
     "DriverOptions",
-    "EmbeddedCuaDriverHost",
-    "EmbeddedCuaDriverHostInterface",
-    "EmbeddedCuaDriverHostLike",
+    "EmbeddedPincerHost",
+    "EmbeddedPincerHostInterface",
+    "EmbeddedPincerHostLike",
     "EmbeddedDriverConnection",
     "EmbeddedDriverError",
     "EmbeddedDriverError_Tags",
@@ -61,17 +61,17 @@
     "openMacOsScreenRecordingSettings",
     "requestMacOsPermissions"
   ],
-  "cua_driver_declarations": [
-    "static connect(socketPath: string | undefined): CuaDriverLike;",
-    "static connectWithClientKind(socketPath: string | undefined, clientKind: SdkClientKind): CuaDriverLike;",
-    "static create(options: DriverOptions | undefined): CuaDriverLike;",
-    "static createWithClientKind(options: DriverOptions | undefined, clientKind: SdkClientKind): CuaDriverLike;",
+  "pincer_declarations": [
+    "static connect(socketPath: string | undefined): PincerLike;",
+    "static connectWithClientKind(socketPath: string | undefined, clientKind: SdkClientKind): PincerLike;",
+    "static create(options: DriverOptions | undefined): PincerLike;",
+    "static createWithClientKind(options: DriverOptions | undefined, clientKind: SdkClientKind): PincerLike;",
     "callTool(name: string, argumentsJson: string, asyncOpts_?: { signal: AbortSignal; }): Promise<ToolResult>;",
     "shutdown(asyncOpts_?: { signal: AbortSignal; }): Promise<void>;"
   ],
   "native_entrypoint_fragments": [
-    "export * from './cua_driver_contract.js';",
-    "export * from './cua_driver_sdk.js';"
+    "export * from './pincer_contract.js';",
+    "export * from './pincer_sdk.js';"
   ],
   "entrypoint_declarations": {
     "index.d.ts": [
@@ -79,7 +79,7 @@
       "export { default } from \"./native/index.js\";"
     ],
     "embedded.d.ts": [
-      "EmbeddedCuaDriverHost",
+      "EmbeddedPincerHost",
       "EmbeddedDriverConnection",
       "EmbeddedPermissionMode"
     ],

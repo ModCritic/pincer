@@ -376,7 +376,7 @@ async def run(args: argparse.Namespace) -> str:
     task.reset()
 
     params = StdioServerParameters(
-        command=os.getenv("CUA_DRIVER_BIN", "cua-driver"), args=["mcp"], env=driver_environment()
+        command=os.getenv("PINCER_BIN", "pincer"), args=["mcp"], env=driver_environment()
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:

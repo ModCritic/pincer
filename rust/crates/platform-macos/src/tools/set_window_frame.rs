@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use core_foundation::base::{CFRelease, CFTypeRef};
-use cua_driver_contract::SetWindowFrameInput;
-use cua_driver_core::{
+use pincer_contract::SetWindowFrameInput;
+use pincer_core::{
     action_record::{
         effect_from_value_readback, ActionEvidence, ActionExecutionRecord, ActionTransport,
         ActualDelivery, EvidenceKind, RequestedDelivery,
@@ -17,8 +17,8 @@ static DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
 fn def() -> &'static ToolDef {
     DEF.get_or_init(|| {
-        let contract = cua_driver_contract::tool_contract("set_window_frame")
-            .expect("set_window_frame contract");
+        let contract =
+            pincer_contract::tool_contract("set_window_frame").expect("set_window_frame contract");
         ToolDef {
             name: contract.name,
             description: contract.description,
@@ -350,7 +350,7 @@ impl Tool for SetWindowFrameTool {
 
     async fn invoke(&self, args: Value) -> ToolResult {
         let input: SetWindowFrameInput =
-            match cua_driver_core::tool_args::parse_typed_input("set_window_frame", args) {
+            match pincer_core::tool_args::parse_typed_input("set_window_frame", args) {
                 Ok(input) => input,
                 Err(result) => return result,
             };
@@ -545,7 +545,7 @@ mod tests {
         let projection = record.stable_projection().expect("valid projection");
         assert_eq!(
             projection.effect,
-            cua_driver_core::action_record::ActionEffect::Unverifiable
+            pincer_core::action_record::ActionEffect::Unverifiable
         );
         assert_eq!(projection.evidence, None);
     }

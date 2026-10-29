@@ -30,10 +30,10 @@ impl<T: Clone + PartialEq> Seats<T> {
             .rev()
             .find(|entry| {
                 !entry.1.as_deref().is_some_and(|name| {
-                    name == "Cua-Test-Agent"
-                        || name.starts_with("Cua-Test-Agent-")
-                        || name == "Cua-Agent"
-                        || name == "Cua-Agent-2"
+                    name == "Pincer-Test-Agent"
+                        || name.starts_with("Pincer-Test-Agent-")
+                        || name == "Pincer-Agent"
+                        || name == "Pincer-Agent-2"
                 })
             })
             .map(|entry| entry.0.clone())
@@ -52,7 +52,7 @@ mod tests {
                 seats.add(seat);
             }
             seats.name(&1, "seat0".into());
-            seats.name(&2, "Cua-Test-Agent".into());
+            seats.name(&2, "Pincer-Test-Agent".into());
             assert_eq!(seats.selected(), Some(1));
         }
     }
@@ -61,10 +61,10 @@ mod tests {
     fn no_primary_seat_refuses_and_legacy_selection_is_preserved() {
         let mut seats = Seats::default();
         seats.add(2);
-        seats.name(&2, "Cua-Test-Agent".into());
+        seats.name(&2, "Pincer-Test-Agent".into());
         assert_eq!(seats.selected(), None);
         seats.add(4);
-        seats.name(&4, "Cua-Test-Agent-2".into());
+        seats.name(&4, "Pincer-Test-Agent-2".into());
         assert_eq!(seats.selected(), None);
         seats.add(1);
         seats.add(3);
@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn production_seats_never_replace_the_primary_seat() {
         let mut seats = Seats::default();
-        for (id, name) in [(1, "seat0"), (2, "Cua-Agent"), (3, "Cua-Agent-2")] {
+        for (id, name) in [(1, "seat0"), (2, "Pincer-Agent"), (3, "Pincer-Agent-2")] {
             seats.add(id);
             seats.name(&id, name.into());
         }

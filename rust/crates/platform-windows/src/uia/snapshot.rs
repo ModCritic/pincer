@@ -1,5 +1,5 @@
 use super::UiaNode;
-use cua_driver_core::snapshot_store::{SnapshotPayload, SnapshotStore};
+use pincer_core::snapshot_store::{SnapshotPayload, SnapshotStore};
 use windows::core::Interface;
 use windows::Win32::UI::Accessibility::{IAccessible, IUIAutomationElement};
 

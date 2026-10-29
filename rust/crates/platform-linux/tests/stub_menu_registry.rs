@@ -3,10 +3,10 @@
 fn assert_menu_definition(compat: bool) {
     let registry = platform_linux::tools::build_registry(compat);
     let definition = registry.get_def("invoke_menu").expect("menu stub exists");
-    let contract = cua_driver_contract::tool_contract("invoke_menu").unwrap();
+    let contract = pincer_contract::tool_contract("invoke_menu").unwrap();
     assert_eq!(
         contract.schema_mode,
-        cua_driver_contract::SchemaMode::PortableSubset
+        pincer_contract::SchemaMode::PortableSubset
     );
     assert_eq!(definition.name, contract.name);
     assert_eq!(definition.description, contract.description);

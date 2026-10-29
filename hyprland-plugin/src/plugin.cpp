@@ -1,10 +1,10 @@
 #include "inject_server.hpp"
-#if defined(CUA_HYPRLAND_TEST_INPUT) || defined(CUA_HYPRLAND_INPUT)
+#if defined(PINCER_HYPRLAND_TEST_INPUT) || defined(PINCER_HYPRLAND_INPUT)
 #include "input_experiment.hpp"
 #endif
 
-#include "cua_hyprland/protocol.hpp"
-#include "cua_hyprland/status.hpp"
+#include "pincer_hyprland/protocol.hpp"
+#include "pincer_hyprland/status.hpp"
 
 #include <src/config/values/types/BoolValue.hpp>
 #include <src/plugins/PluginAPI.hpp>
@@ -26,30 +26,30 @@
 #include <sys/random.h>
 #endif
 
-#ifndef CUA_HYPRLAND_SOCKET1_API
+#ifndef PINCER_HYPRLAND_SOCKET1_API
 #error CMake must select a supported Hyprland command API
 #endif
 
 namespace {
 
-constexpr auto kPluginVersion = CUA_HYPRLAND_PLUGIN_VERSION;
-constexpr auto kSocketName = "cua-inject-v2.sock";
+constexpr auto kPluginVersion = PINCER_HYPRLAND_PLUGIN_VERSION;
+constexpr auto kSocketName = "pincer-inject-v2.sock";
 
 SP<Config::Values::CBoolValue> g_enabled;
-#if CUA_HYPRLAND_SOCKET1_API
+#if PINCER_HYPRLAND_SOCKET1_API
 SP<IPC::Socket1::SCommand> g_status_command;
 #else
 SP<SHyprCtlCommand> g_status_command;
 #endif
 CHyprSignalListener g_config_listener;
-std::unique_ptr<cua::hyprland::InjectionServer> g_server;
+std::unique_ptr<pincer::hyprland::InjectionServer> g_server;
 std::string g_compiled_abi_hash;
 std::string g_runtime_abi_hash;
 std::uint64_t g_epoch = 0;
 std::string g_socket_path;
 std::string g_reconcile_error;
-#if defined(CUA_HYPRLAND_TEST_INPUT) || defined(CUA_HYPRLAND_INPUT)
-std::unique_ptr<cua::hyprland::InputExperiment> g_experiment;
+#if defined(PINCER_HYPRLAND_TEST_INPUT) || defined(PINCER_HYPRLAND_INPUT)
+std::unique_ptr<pincer::hyprland::InputExperiment> g_experiment;
 HANDLE g_experiment_handle = nullptr;
 #endif
 
@@ -86,7 +86,7 @@ std::string compiled_abi_fingerprint() {
 
 bool safe_runtime_path(const std::string& runtime) {
     if (runtime.empty() || runtime.front() != '/' ||
-        !cua::hyprland::is_valid_utf8(runtime))
+        !pincer::hyprland::is_valid_utf8(runtime))
         return false;
     for (const auto character : runtime) {
         const auto value = static_cast<unsigned char>(character);
@@ -146,7 +146,7 @@ std::uint64_t make_epoch() {
 }
 
 std::string stop_server() {
-#if defined(CUA_HYPRLAND_TEST_INPUT) || defined(CUA_HYPRLAND_INPUT)
+#if defined(PINCER_HYPRLAND_TEST_INPUT) || defined(PINCER_HYPRLAND_INPUT)
     if (g_experiment)
         g_experiment->suspend();
 #endif
@@ -173,20 +173,20 @@ void reconcile_server() {
     g_reconcile_error.clear();
     g_socket_path = resolve_socket_path();
     const auto epoch = make_epoch();
-    auto server = std::make_unique<cua::hyprland::InjectionServer>(
+    auto server = std::make_unique<pincer::hyprland::InjectionServer>(
         g_socket_path,
-        cua::hyprland::ServerInfo{
+        pincer::hyprland::ServerInfo{
             .compositor_epoch = epoch,
             .supported_capabilities =
-                cua::hyprland::capability(cua::hyprland::Capability::discovery),
+                pincer::hyprland::capability(pincer::hyprland::Capability::discovery),
             .enabled_capabilities =
-                cua::hyprland::capability(cua::hyprland::Capability::discovery),
+                pincer::hyprland::capability(pincer::hyprland::Capability::discovery),
         });
     if (server->start()) {
         g_epoch = epoch;
-#if defined(CUA_HYPRLAND_TEST_INPUT) || defined(CUA_HYPRLAND_INPUT)
+#if defined(PINCER_HYPRLAND_TEST_INPUT) || defined(PINCER_HYPRLAND_INPUT)
         if (!g_experiment)
-            g_experiment = std::make_unique<cua::hyprland::InputExperiment>(
+            g_experiment = std::make_unique<pincer::hyprland::InputExperiment>(
                 std::filesystem::path{g_socket_path}.parent_path().string(), g_experiment_handle);
         g_experiment->resume();
 #endif
@@ -196,9 +196,9 @@ void reconcile_server() {
 
 std::string status_output(bool json) {
     const auto configured = g_enabled && g_enabled->value();
-    const auto snapshot = g_server ? g_server->snapshot() : cua::hyprland::ServerSnapshot{};
+    const auto snapshot = g_server ? g_server->snapshot() : pincer::hyprland::ServerSnapshot{};
     const auto last_error = snapshot.last_error.empty() ? g_reconcile_error : snapshot.last_error;
-    const cua::hyprland::StatusReport report{
+    const pincer::hyprland::StatusReport report{
         .plugin_version = kPluginVersion,
         .compositor_epoch = snapshot.running ? g_epoch : 0,
         .compiled_hash = g_compiled_abi_hash,
@@ -217,8 +217,8 @@ std::string status_output(bool json) {
     };
 
     if (json) {
-        auto result = cua::hyprland::render_status_json(report);
-#ifdef CUA_HYPRLAND_INPUT
+        auto result = pincer::hyprland::render_status_json(report);
+#ifdef PINCER_HYPRLAND_INPUT
         // Compiled keyboard behavior of this loaded module, reported whether or
         // not input is enabled, so an installer can tell it from an older module
         // still loaded in the running compositor. keyboard_layout_independent:
@@ -230,9 +230,9 @@ std::string status_output(bool json) {
         result.pop_back();
         result += R"(,"keyboard_layout_independent":true,"foreground_numlock_compatible":true})";
 #endif
-#if defined(CUA_HYPRLAND_TEST_INPUT) || defined(CUA_HYPRLAND_INPUT)
+#if defined(PINCER_HYPRLAND_TEST_INPUT) || defined(PINCER_HYPRLAND_INPUT)
         if (g_experiment) {
-#ifdef CUA_HYPRLAND_INPUT
+#ifdef PINCER_HYPRLAND_INPUT
             constexpr auto input_state = "\"state\":\"input_v3_candidate\"";
             constexpr auto input_mutation = "trusted_local_per_action";
             constexpr auto input_field = ",\"input\":";
@@ -256,15 +256,15 @@ std::string status_output(bool json) {
         return result;
     }
 
-    auto result = cua::hyprland::render_status_text(report);
-#ifdef CUA_HYPRLAND_INPUT
+    auto result = pincer::hyprland::render_status_text(report);
+#ifdef PINCER_HYPRLAND_INPUT
     if (g_experiment)
         result += "\nInput v3 candidate: trusted-local per-action admission; " + g_experiment->status_json();
 #endif
     return result;
 }
 
-#if CUA_HYPRLAND_SOCKET1_API
+#if PINCER_HYPRLAND_SOCKET1_API
 IPC::Socket1::SResponse status(const IPC::Socket1::SRequest& request) {
     return IPC::Socket1::SResponse{
         status_output(request.format == IPC::Socket1::FORMAT_JSON)};
@@ -274,7 +274,7 @@ SP<IPC::Socket1::SCommand> register_status_command(HANDLE handle) {
     return HyprlandAPI::registerHyprCtlCommand(
         handle,
         IPC::Socket1::SCommand{
-            .name = "cua:status",
+            .name = "pincer:status",
             .match = IPC::Socket1::COMMAND_MATCH_EXACT,
             .handler = status,
         });
@@ -288,7 +288,7 @@ SP<SHyprCtlCommand> register_status_command(HANDLE handle) {
     return HyprlandAPI::registerHyprCtlCommand(
         handle,
         SHyprCtlCommand{
-            .name = "cua:status",
+            .name = "pincer:status",
             .exact = true,
             .fn = status,
         });
@@ -302,7 +302,7 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 }
 
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
-#if defined(CUA_HYPRLAND_TEST_INPUT) || defined(CUA_HYPRLAND_INPUT)
+#if defined(PINCER_HYPRLAND_TEST_INPUT) || defined(PINCER_HYPRLAND_INPUT)
     g_experiment_handle = handle;
 #endif
     // Hyprland skips PLUGIN_EXIT when initialization throws. Do not start any
@@ -311,26 +311,26 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_compiled_abi_hash = compiled_abi_fingerprint();
     if (!runtime_abi_hash || g_compiled_abi_hash != runtime_abi_hash) {
         throw std::runtime_error(std::format(
-            "cua-hyprland-plugin ABI fingerprint mismatch: built for {}, running {}",
+            "pincer-hyprland-plugin ABI fingerprint mismatch: built for {}, running {}",
             g_compiled_abi_hash,
             runtime_abi_hash ? runtime_abi_hash : "<missing>"));
     }
     g_runtime_abi_hash = runtime_abi_hash;
 
     g_enabled = makeShared<Config::Values::CBoolValue>(
-        "plugin:cua:enabled",
-#if defined(CUA_HYPRLAND_TEST_INPUT) || defined(CUA_HYPRLAND_INPUT)
-        "Enable Cua's same-user local capability transport and the input mode selected at build time.",
+        "plugin:pincer:enabled",
+#if defined(PINCER_HYPRLAND_TEST_INPUT) || defined(PINCER_HYPRLAND_INPUT)
+        "Enable Pincer's same-user local capability transport and the input mode selected at build time.",
 #else
-        "Enable Cua's same-user local capability transport. Background mutation remains disabled in this build.",
+        "Enable Pincer's same-user local capability transport. Background mutation remains disabled in this build.",
 #endif
         false);
     if (!HyprlandAPI::addConfigValueV2(handle, g_enabled))
-        throw std::runtime_error("failed to register plugin:cua:enabled");
+        throw std::runtime_error("failed to register plugin:pincer:enabled");
 
     g_status_command = register_status_command(handle);
     if (!g_status_command)
-        throw std::runtime_error("failed to register cua:status");
+        throw std::runtime_error("failed to register pincer:status");
 
     g_config_listener = Event::bus()->m_events.config.reloaded.listen([] {
         try {
@@ -342,16 +342,16 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     });
 
     return {
-        "cua-hyprland-plugin",
+        "pincer-hyprland-plugin",
         "Discovery foundation for isolated background computer use",
-        "Cua",
+        "Pincer",
         kPluginVersion,
     };
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
     g_config_listener.reset();
-#if defined(CUA_HYPRLAND_TEST_INPUT) || defined(CUA_HYPRLAND_INPUT)
+#if defined(PINCER_HYPRLAND_TEST_INPUT) || defined(PINCER_HYPRLAND_INPUT)
     // Retire input directly so an in-flight action receives plugin_shutdown,
     // not the config-disable reason from stop_server()'s suspend path.
     g_experiment.reset();

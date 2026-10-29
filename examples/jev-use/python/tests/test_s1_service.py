@@ -15,7 +15,7 @@ from run_native import parse_args
 from s1_service import S1ServiceError, choose_s1_service, s1_service_url, validate_decision
 
 REQUEST = {
-    "schema": "cua.jev_choice_request_v2",
+    "schema": "pincer.jev_choice_request_v2",
     "goal": "Set the counter to 3.",
     "capture_id": "cap-1",
     "regions": [],
@@ -30,7 +30,7 @@ REQUEST = {
 
 def decision(**overrides):
     value = {
-        "schema": "cua.decision_choice_v1",
+        "schema": "pincer.decision_choice_v1",
         "kind": "selected",
         "capture_id": "cap-1",
         "selected_id": "ax:button:increment",
@@ -99,7 +99,7 @@ class ValidateDecisionTest(unittest.TestCase):
 
     def test_rejects_malformed_decisions(self):
         bad = [
-            decision(schema="cua.decision_choice_v0"),
+            decision(schema="pincer.decision_choice_v0"),
             decision(kind="act"),
             decision(capture_id="cap-2"),
             decision(kind="error", selected_id=None, reason="model_error"),

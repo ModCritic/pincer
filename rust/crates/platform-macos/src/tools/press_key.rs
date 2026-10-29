@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use core_foundation::base::CFRelease;
-use cua_driver_contract::PressKeyInput;
-use cua_driver_core::{
+use libc;
+use pincer_contract::PressKeyInput;
+use pincer_core::{
     action_record::{
         ActionEffect, ActionEvidence, ActionExecutionRecord, ActionTransport, ActualDelivery,
         EvidenceKind, RequestedDelivery,
@@ -10,7 +11,6 @@ use cua_driver_core::{
     tool::{Tool, ToolDef},
     tool_args::parse_typed_projection,
 };
-use libc;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -199,11 +199,11 @@ fn def() -> &'static ToolDef {
                     "description": "cmd, shift, option/alt, ctrl, fn."
                 },
                 "window_id": { "type": "integer", "description": "Target window; required for foreground. Does not raise by itself." },
-                "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                "element_token": pincer_core::tool_schema::element_token_schema(),
                 "x": { "type": "number", "description": "Screenshot-pixel X: pixel-click to focus, then send the key. With y, no element_token." },
                 "y": { "type": "number", "description": "Screenshot-pixel Y (see x)." },
                 "scope": { "type": "string", "enum": ["window", "desktop"], "default": "window", "description": "\"desktop\" with no pid/window_id sends to the frontmost app." },
-                "delivery_mode": cua_driver_core::tool_schema::delivery_mode_schema_with("Default \"background\": no fronting or focus steal. \"foreground\": briefly front the window, act, restore the prior app; last resort when background did not land.")
+                "delivery_mode": pincer_core::tool_schema::delivery_mode_schema_with("Default \"background\": no fronting or focus steal. \"foreground\": briefly front the window, act, restore the prior app; last resort when background did not land.")
             },
             "additionalProperties": false
         }),
@@ -221,7 +221,7 @@ impl Tool for PressKeyTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         if args.opt_str("scope").as_deref() == Some("desktop")
             && args.get("pid").is_none()
             && args.get("window_id").is_none()
@@ -315,7 +315,7 @@ impl Tool for PressKeyTool {
                     pid,
                     wid,
                     pre_focus_ptr,
-                    cua_driver_core::background_input::BackgroundAction::GenericKey,
+                    pincer_core::background_input::BackgroundAction::GenericKey,
                 )
                 .await
                 {
@@ -511,19 +511,16 @@ mod tests {
         let unverifiable = action_record(false, false).public_result().unwrap();
         assert_eq!(
             unverifiable.effect,
-            cua_driver_contract::ActionEffect::Unverifiable
+            pincer_contract::ActionEffect::Unverifiable
         );
         assert_eq!(
             unverifiable.delivery.unwrap().mode,
-            cua_driver_contract::ActionDeliveryMode::Background
+            pincer_contract::ActionDeliveryMode::Background
         );
         assert!(unverifiable.escalation.is_none());
 
         let confirmed = action_record(true, false).public_result().unwrap();
-        assert_eq!(
-            confirmed.effect,
-            cua_driver_contract::ActionEffect::Confirmed
-        );
+        assert_eq!(confirmed.effect, pincer_contract::ActionEffect::Confirmed);
         assert_eq!(confirmed.evidence.unwrap().len(), 1);
         assert!(confirmed.escalation.is_none());
     }

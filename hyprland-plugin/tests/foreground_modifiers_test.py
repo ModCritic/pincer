@@ -5,7 +5,7 @@ site changes the behavior under test. The compositor, seat and client objects
 are fakes: this is policy coverage, not evidence of Wayland delivery.
 
 Adapted from tests/foreground_modifiers_test.py in omacom/omarchy-pkgs#473
-(pkgbuilds/cua-hyprland-plugin/independent-keymaps.patch), by Spencer Bull.
+(pkgbuilds/pincer-hyprland-plugin/independent-keymaps.patch), by Spencer Bull.
 Copyright (c) David Heinemeier Hansson. Used under the MIT License, whose
 permission notice is the same as this repository's LICENSE.md.
 """
@@ -19,7 +19,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED = bool(os.environ.get('CUA_HYPRLAND_REQUIRE_XKBCOMMON'))
+REQUIRED = bool(os.environ.get('PINCER_HYPRLAND_REQUIRE_XKBCOMMON'))
 
 FIXTURE = r'''
 #include "keymap_equivalence.hpp"
@@ -31,7 +31,7 @@ FIXTURE = r'''
 #include <string>
 #include <utility>
 #include <vector>
-using namespace cua::hyprland;
+using namespace pincer::hyprland;
 using Clock = std::chrono::steady_clock;
 void check(bool ok, const char* why) { if (!ok) { std::cerr << why << '\n'; std::exit(1); } }
 struct Vector2D { double x, y; };
@@ -322,7 +322,7 @@ class ForegroundModifiersTest(unittest.TestCase):
             self.skipTest('xkbcommon development files unavailable')
         compiler = shlex.split(os.environ.get('CXX', '')) or [
             shutil.which('clang++-18') or shutil.which('clang++') or 'c++']
-        with tempfile.TemporaryDirectory(prefix='cua-foreground-modifiers-') as directory:
+        with tempfile.TemporaryDirectory(prefix='pincer-foreground-modifiers-') as directory:
             cpp, binary = Path(directory) / 'fixture.cpp', Path(directory) / 'fixture'
             cpp.write_text(fixture)
             build = subprocess.run([*compiler, '-std=c++20', '-Wall', '-Wextra', '-Wpedantic', '-Werror',

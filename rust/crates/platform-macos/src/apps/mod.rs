@@ -46,7 +46,7 @@ pub struct AppInfo {
 pub fn list_running_apps() -> Vec<AppInfo> {
     // KERNEL TRUTH FIRST. `NSWorkspace.runningApplications` is a CACHE that
     // AppKit refreshes from workspace notifications delivered on a main run
-    // loop. A long-lived daemon (rcdpd, cua-driver serve) has no such loop
+    // loop. A long-lived daemon (rcdpd, pincer serve) has no such loop
     // servicing it, so the array freezes at the snapshot taken when it was
     // first read: measured in a Space after 32 minutes of uptime, `list_apps`
     // reported 2 running apps -- Finder and `Unity Hub (pid 3082)` -- while the
@@ -309,7 +309,7 @@ type RunningAppStates = std::collections::HashMap<String, Vec<(i32, bool, Option
 /// * live `(pid, active)` state for every process that reports a bundle
 ///   identifier, across ALL activation policies. The `Regular`-only filter
 ///   above must not decide whether an *installed* app is running: bundles
-///   shipped with `LSUIElement = true` (Cua Driver itself, many menu-bar
+///   shipped with `LSUIElement = true` (Pincer itself, many menu-bar
 ///   apps) run as `Accessory`, never enter the standalone list, and would
 ///   otherwise surface as `running = false / pid = 0` while windows and the
 ///   accessibility tree see the live process (#3060).
@@ -870,7 +870,7 @@ fn fs_last_used(path: &std::path::Path) -> Option<String> {
     let meta = std::fs::metadata(path).ok()?;
     let modified = meta.modified().ok()?;
     let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
-    cua_driver_core::timestamp::unix_secs_to_rfc3339(duration.as_secs() as i64)
+    pincer_core::timestamp::unix_secs_to_rfc3339(duration.as_secs() as i64)
 }
 
 fn read_app_plist(plist_path: &std::path::Path) -> Option<AppInfo> {
@@ -1083,18 +1083,18 @@ mod tests {
 
     #[test]
     fn installed_app_running_as_accessory_reports_live_state() {
-        // The #3060 shape: CuaDriver.app ships LSUIElement=true, so its live
+        // The #3060 shape: Pincer.app ships LSUIElement=true, so its live
         // process runs as Accessory and never enters the Regular list.
-        let mut entry = app("Cua Driver", 0, Some("com.trycua.driver"), false);
-        entry.launch_path = Some("/Applications/CuaDriver.app".to_owned());
+        let mut entry = app("Pincer", 0, Some("io.github.modcritic.pincer"), false);
+        entry.launch_path = Some("/Applications/Pincer.app".to_owned());
         let merged = merge_app_lists(
             vec![],
             vec![entry],
             &states(&[(
-                "com.trycua.driver",
+                "io.github.modcritic.pincer",
                 31438,
                 false,
-                Some("/Applications/CuaDriver.app"),
+                Some("/Applications/Pincer.app"),
             )]),
         );
         assert_eq!(merged.len(), 1);
@@ -1103,7 +1103,7 @@ mod tests {
         // The upgrade must not clobber the fields the installed scan owns.
         assert_eq!(
             merged[0].launch_path.as_deref(),
-            Some("/Applications/CuaDriver.app")
+            Some("/Applications/Pincer.app")
         );
     }
 
@@ -1160,19 +1160,19 @@ mod tests {
 
     #[test]
     fn duplicate_bundle_ids_upgrade_only_the_live_bundle_path() {
-        let mut release = app("Cua Driver", 0, Some("com.trycua.driver"), false);
-        release.launch_path = Some("/Applications/CuaDriver.app".to_owned());
-        let mut debug = app("Cua Driver", 0, Some("com.trycua.driver"), false);
-        debug.launch_path = Some("/Users/test/CuaDriver.app".to_owned());
+        let mut release = app("Pincer", 0, Some("io.github.modcritic.pincer"), false);
+        release.launch_path = Some("/Applications/Pincer.app".to_owned());
+        let mut debug = app("Pincer", 0, Some("io.github.modcritic.pincer"), false);
+        debug.launch_path = Some("/Users/test/Pincer.app".to_owned());
 
         let merged = merge_app_lists(
             vec![],
             vec![release, debug],
             &states(&[(
-                "com.trycua.driver",
+                "io.github.modcritic.pincer",
                 42,
                 false,
-                Some("/Users/test/CuaDriver.app"),
+                Some("/Users/test/Pincer.app"),
             )]),
         );
 
@@ -1210,7 +1210,7 @@ mod tests {
                 r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>com.trycua.test.{name}</string>
+<key>CFBundleIdentifier</key><string>io.github.modcritic.pincer.test.{name}</string>
 <key>CFBundleName</key><string>{name}</string>
 <key>CFBundleExecutable</key><string>{name}</string>
 {extra_plist}
@@ -1223,7 +1223,7 @@ mod tests {
     }
 
     fn pid_of(apps: &[AppInfo], name: &str) -> Option<i32> {
-        let bundle_id = format!("com.trycua.test.{name}");
+        let bundle_id = format!("io.github.modcritic.pincer.test.{name}");
         apps.iter()
             .find(|app| app.bundle_id.as_deref() == Some(bundle_id.as_str()))
             .map(|app| app.pid)
@@ -1237,13 +1237,13 @@ mod tests {
     fn running_apps_follow_the_process_snapshot() {
         let temp = tempfile::tempdir().expect("temp dir");
         let root = format!("{}/", temp.path().display());
-        let regular = synthetic_bundle(temp.path(), "CuaAppProbe", "");
+        let regular = synthetic_bundle(temp.path(), "PincerAppProbe", "");
         let roots = [root];
         let nothing = HashSet::new();
 
         let launched = [(4242, regular.clone()), (4243, "/usr/bin/ssh".to_owned())];
         let apps = running_apps_from_processes(&launched, None, &nothing, &roots);
-        assert_eq!(pid_of(&apps, "CuaAppProbe"), Some(4242));
+        assert_eq!(pid_of(&apps, "PincerAppProbe"), Some(4242));
         assert_eq!(
             apps.len(),
             1,
@@ -1254,7 +1254,7 @@ mod tests {
         let exited = [(4243, "/usr/bin/ssh".to_owned())];
         let apps = running_apps_from_processes(&exited, None, &nothing, &roots);
         assert_eq!(
-            pid_of(&apps, "CuaAppProbe"),
+            pid_of(&apps, "PincerAppProbe"),
             None,
             "an app missing from the snapshot must not be reported (stale pid)"
         );
@@ -1266,7 +1266,7 @@ mod tests {
     #[test]
     fn windowless_bundle_is_one_entry_preferring_the_front_pid() {
         let temp = tempfile::tempdir().expect("temp dir");
-        let exe = synthetic_bundle(temp.path(), "CuaMulti", "");
+        let exe = synthetic_bundle(temp.path(), "PincerMulti", "");
         let roots = [format!("{}/", temp.path().display())];
         let nothing = HashSet::new();
         let processes = [(900, exe.clone()), (700, exe.clone()), (800, exe)];
@@ -1287,11 +1287,11 @@ mod tests {
     /// Two windowed instances of one bundle are two apps, as NSWorkspace
     /// reports them. A frontmost second instance must not hide the first
     /// (the E2E fixture vs. foreground-sentinel regression: both are
-    /// CuaTestHarness.Electron.app, the sentinel is frontmost).
+    /// PincerTestHarness.Electron.app, the sentinel is frontmost).
     #[test]
     fn every_windowed_instance_of_a_bundle_is_listed() {
         let temp = tempfile::tempdir().expect("temp dir");
-        let exe = synthetic_bundle(temp.path(), "CuaTwin", "");
+        let exe = synthetic_bundle(temp.path(), "PincerTwin", "");
         // Outside the app roots, so only windowed processes qualify.
         let roots = ["/nonexistent-app-root/".to_owned()];
         let windowed: HashSet<i32> = [700, 800].into_iter().collect();
@@ -1307,13 +1307,13 @@ mod tests {
     #[test]
     fn background_and_windowless_system_bundles_are_filtered() {
         let temp = tempfile::tempdir().expect("temp dir");
-        let agent = synthetic_bundle(temp.path(), "CuaAgent", "<key>LSUIElement</key><true/>");
+        let agent = synthetic_bundle(temp.path(), "PincerAgent", "<key>LSUIElement</key><true/>");
         let background = synthetic_bundle(
             temp.path(),
-            "CuaBackground",
+            "PincerBackground",
             "<key>LSBackgroundOnly</key><string>1</string>",
         );
-        let service = synthetic_bundle(temp.path(), "CuaService", "");
+        let service = synthetic_bundle(temp.path(), "PincerService", "");
         let processes = [(10, agent), (11, background), (12, service)];
         let in_roots = [format!("{}/", temp.path().display())];
 
@@ -1331,7 +1331,7 @@ mod tests {
             "windowless system bundle admitted: {apps:?}"
         );
         let apps = running_apps_from_processes(&processes, None, &HashSet::from([12]), &elsewhere);
-        assert_eq!(pid_of(&apps, "CuaService"), Some(12));
+        assert_eq!(pid_of(&apps, "PincerService"), Some(12));
     }
 
     /// The process-table readers see this very process at its own path. This

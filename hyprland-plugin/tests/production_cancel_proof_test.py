@@ -81,7 +81,7 @@ class InkscapeProfileTests(unittest.TestCase):
             ('requires Inkscape targets', lambda p: p['agents'][0].update(app='calc')),
             ('absolute synthetic SVG document', lambda p: p['agents'][0].update(document='/synthetic/private.svg')),
             ('absolute synthetic SVG document', lambda p: p['agents'][0].update(
-                document='synthetic/cua-smoke-inkscape.svg')),
+                document='synthetic/pincer-smoke-inkscape.svg')),
             ('distinct documents required', lambda p: p['agents'][1].update(document=p['agents'][0]['document'])),
             ('distinct native windows required', lambda p: p['agents'][0]['target'].update(
                 window_id=p['foreground']['window_id'])),
@@ -105,7 +105,7 @@ class InkscapeProfileTests(unittest.TestCase):
     def test_native_document_identity_is_checked_before_driver_observation(self):
         import production_cancel_proof as cancellation
         actor = Mock()
-        spec = {'app': 'inkscape', 'document': '/synthetic/cua-smoke-inkscape.svg',
+        spec = {'app': 'inkscape', 'document': '/synthetic/pincer-smoke-inkscape.svg',
                 'target': {'pid': 20, 'window_id': 200}}
         with patch.object(cancellation.subprocess, 'check_output', return_value='[]'), \
              patch.object(cancellation, 'inkscape_client_identity', side_effect=AssertionError('wrong identity')) as identity:
@@ -781,7 +781,7 @@ class RunnerTests(unittest.TestCase):
                 victim = candidate['kill_agent']
                 source_plan.write_text(json.dumps(candidate))
                 args = SimpleNamespace(plan=source_plan, evidence=root / 'evidence', driver=root / 'driver',
-                                       trace_socket=root / 'cua-input-v3.sock', primary_grab=root / 'primary-grab',
+                                       trace_socket=root / 'pincer-input-v3.sock', primary_grab=root / 'primary-grab',
                                        foreground_journal=root / 'journal')
                 agents, observer = [client(100), client(101)], client(102)
                 fresh = client(103)

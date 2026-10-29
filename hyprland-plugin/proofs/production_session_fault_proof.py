@@ -130,7 +130,7 @@ def power(config, expected=None):
 
 
 def production_status(config):
-    return verify_status(json.loads(_hypr(config['instance'], '-j', 'cua:status')), True)
+    return verify_status(json.loads(_hypr(config['instance'], '-j', 'pincer:status')), True)
 
 
 def lanes(status, cleared=False, *, allow_passive=False):
@@ -287,7 +287,7 @@ class SessionFault:
             assert len(selected) == 1 and selected[0].get('xwayland') is False
             assert int(selected[0]['address'], 16) == target['window_id'], 'target window changed'
             if target == spec['target']:
-                assert f'cua-smoke-{spec["app"]}' in selected[0].get('title', ''), 'wrong synthetic document'
+                assert f'pincer-smoke-{spec["app"]}' in selected[0].get('title', ''), 'wrong synthetic document'
                 assert dict(zip(('x', 'y', 'width', 'height'), [*selected[0]['at'], *selected[0]['size']])) == spec['bounds']
 
     def arm(self):
@@ -525,7 +525,7 @@ def refuse(client, spec, prepared, fault, trace, guard, save):
 
 def connect_trace(path, config):
     expected = Path(os.environ['XDG_RUNTIME_DIR']) / 'hypr' / config['instance'] / path.name
-    assert path.name in ('cua-input-v3.sock', 'cua-input-v3-2.sock')
+    assert path.name in ('pincer-input-v3.sock', 'pincer-input-v3-2.sock')
     assert path.is_absolute() and path == expected and path.resolve(strict=True) == path
     info = path.lstat()
     assert stat.S_ISSOCK(info.st_mode) and info.st_uid == config['compositor']['uid']

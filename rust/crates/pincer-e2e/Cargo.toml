@@ -1,0 +1,63 @@
+[package]
+name = "pincer-e2e"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Desktop E2E suites for pincer. The canonical OS harnesses run them against a built driver; never shipped."
+publish = false
+
+# The suites live in tests/. They drive a separately built `pincer`
+# binary that the testkit resolves from PINCER_TEST_DRIVER_BIN or the Cargo
+# target directory, so this crate has no dependency on the driver itself.
+[lib]
+path = "src/lib.rs"
+test = false
+doctest = false
+
+[features]
+default = []
+# Linux runners pass the driver's portal features through unchanged so the
+# in-process platform helpers the suites call match the driver they test.
+portal-input = ["platform-linux/portal-input"]
+portal-capture = ["platform-linux/portal-capture"]
+portal-libei = ["platform-linux/portal-libei"]
+
+[dev-dependencies]
+pincer-testkit = { path = "../pincer-testkit" }
+pincer-core = { path = "../pincer-core" }
+pincer-contract = { path = "../pincer-contract" }
+pincer-sdk = { path = "../pincer-sdk" }
+cursor-overlay = { path = "../cursor-overlay" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+image = { workspace = true }
+base64 = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tempfile = "3"
+futures-util = "0.3"
+tokio-tungstenite = "0.24"
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+platform-linux = { path = "../platform-linux" }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+x11rb = "0.13"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+core-foundation = "0.10"
+
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+platform-windows = { path = "../platform-windows" }
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_Input_Ime",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

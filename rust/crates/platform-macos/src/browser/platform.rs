@@ -7,18 +7,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use cua_driver_core::browser::platform::{
+use pincer_core::browser::platform::{
     select_isolated_browser_executable, BrowserConsentOutcome, BrowserConsentRequest,
     BrowserPlatform, BrowserVisualAction, BrowserVisualActionKind, ExistingProfileSetupOutcome,
     ExistingProfileSetupRequest, PrepareAction, PrepareOutcome, PrepareRequest,
 };
-use cua_driver_core::browser::refusal::{BrowserRefusal, BrowserRefusalCode};
-use cua_driver_core::browser::types::{
+use pincer_core::browser::refusal::{BrowserRefusal, BrowserRefusalCode};
+use pincer_core::browser::types::{
     BrowserClassification, BrowserEngineFamily, BrowserProcessRole, BrowserProduct,
     EndpointOwnershipMethod, EndpointOwnershipProof, EndpointTransport, NativeOwnershipMethod,
     NativeOwnershipProof, NativeWindowInfo, OwnedEndpoint, ProcessFingerprint, Rect,
 };
-use cua_driver_core::browser::{
+use pincer_core::browser::{
     existing_profile_setup_descriptor, is_firefox, loopback_websocket_port,
     parse_devtools_active_port, BrowserCursorTracker,
 };
@@ -689,7 +689,7 @@ async fn process_details(pid: i64) -> Result<(String, String), BrowserRefusal> {
         .output()
         .await
         .map_err(|error| {
-            cua_driver_core::browser::refusal::inspection_spawn_refusal(
+            pincer_core::browser::refusal::inspection_spawn_refusal(
                 format!("could not inspect browser process {pid}"),
                 "ps",
                 Some(pid),
@@ -753,7 +753,7 @@ async fn loopback_ports_for_pid(pid: i64) -> Result<Vec<u16>, BrowserRefusal> {
         .output()
         .await
         .map_err(|error| {
-            cua_driver_core::browser::refusal::inspection_spawn_refusal(
+            pincer_core::browser::refusal::inspection_spawn_refusal(
                 "could not inspect browser listeners",
                 "lsof",
                 Some(pid),
@@ -932,7 +932,7 @@ impl BrowserPlatform for MacOsBrowserPlatform {
     async fn visualize_browser_action(&self, action: BrowserVisualAction) {
         if action.session.is_empty()
             || action.cdp_target_id.is_empty()
-            || cua_driver_core::session::is_session_ended(&action.session)
+            || pincer_core::session::is_session_ended(&action.session)
         {
             return;
         }
@@ -2217,7 +2217,7 @@ mod tests {
 
     #[test]
     fn user_data_dir_parser_preserves_exact_custom_argv_path() {
-        let custom = std::env::temp_dir().join("cua browser profile with spaces");
+        let custom = std::env::temp_dir().join("pincer browser profile with spaces");
         let arg = format!("--user-data-dir={}", custom.display()).into_bytes();
         assert_eq!(
             user_data_dir_from_arguments_with_relative_fallback(
@@ -2258,7 +2258,8 @@ mod tests {
     fn embedded_window_proof_ignores_untitled_window_server_helpers() {
         let mut helper = window(8, 42, "");
         helper.is_on_screen = false;
-        let ids = exact_browser_surface_ids([window(7, 42, "CuaTestHarness Electron"), helper], 42);
+        let ids =
+            exact_browser_surface_ids([window(7, 42, "PincerTestHarness Electron"), helper], 42);
         assert_eq!(ids, vec![7]);
     }
 

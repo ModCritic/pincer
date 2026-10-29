@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage the Tauri test fixture app for cua-driver tests on Linux and macOS.
+# Stage the Tauri test fixture app for pincer tests on Linux and macOS.
 #
 # The app embeds the same shared/web/index.html DOM used by Electron,
 # WebView2, and WKWebView. Build output is copied into
@@ -10,8 +10,8 @@ tauriDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 crossDir="$(dirname "$tauriDir")"
 appsDir="$(dirname "$crossDir")"
 harnessDir="$(dirname "$appsDir")"
-cuaDriverDir="$(cd "$harnessDir/../.." && pwd)"
-outDir="$cuaDriverDir/rust/test-apps/harness-tauri"
+pincerDir="$(cd "$harnessDir/../.." && pwd)"
+outDir="$pincerDir/rust/test-apps/harness-tauri"
 platform="$(uname -s)"
 tauriTargetDir="${CARGO_TARGET_DIR:-$tauriDir/src-tauri/target}"
 
@@ -32,14 +32,14 @@ rm -rf "$outDir"
 mkdir -p "$outDir"
 
 if [ "$platform" = "Darwin" ]; then
-  srcBin="$tauriTargetDir/release/cua-test-harness-tauri"
+  srcBin="$tauriTargetDir/release/pincer-test-harness-tauri"
   [ -x "$srcBin" ] || { echo "[ERROR] Tauri binary missing after build" >&2; exit 1; }
 
-  bundle="$outDir/CuaTestHarness.Tauri.app"
+  bundle="$outDir/PincerTestHarness.Tauri.app"
   appMacOS="$bundle/Contents/MacOS"
   mkdir -p "$appMacOS" "$bundle/Contents/Resources"
-  cp "$srcBin" "$appMacOS/CuaTestHarness.Tauri"
-  chmod +x "$appMacOS/CuaTestHarness.Tauri"
+  cp "$srcBin" "$appMacOS/PincerTestHarness.Tauri"
+  chmod +x "$appMacOS/PincerTestHarness.Tauri"
 
   cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -47,10 +47,10 @@ if [ "$platform" = "Darwin" ]; then
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key><string>CuaTestHarness.Tauri</string>
-    <key>CFBundleIdentifier</key><string>com.trycua.harness.tauri</string>
-    <key>CFBundleName</key><string>CuaTestHarness.Tauri</string>
-    <key>CFBundleDisplayName</key><string>CuaTestHarness.Tauri</string>
+    <key>CFBundleExecutable</key><string>PincerTestHarness.Tauri</string>
+    <key>CFBundleIdentifier</key><string>io.github.modcritic.pincer.harness.tauri</string>
+    <key>CFBundleName</key><string>PincerTestHarness.Tauri</string>
+    <key>CFBundleDisplayName</key><string>PincerTestHarness.Tauri</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0.0</string>
     <key>CFBundleVersion</key><string>1</string>
@@ -69,10 +69,10 @@ PLIST
   codesign --force --deep --sign - "$bundle"
   echo "[OK]    Staged: $bundle"
 else
-  srcBin="$tauriTargetDir/release/cua-test-harness-tauri"
+  srcBin="$tauriTargetDir/release/pincer-test-harness-tauri"
   [ -x "$srcBin" ] || { echo "[ERROR] Tauri binary missing after build" >&2; exit 1; }
 
-  cp "$srcBin" "$outDir/CuaTestHarness.Tauri"
-  chmod +x "$outDir/CuaTestHarness.Tauri"
-  echo "[OK]    Staged: $outDir/CuaTestHarness.Tauri"
+  cp "$srcBin" "$outDir/PincerTestHarness.Tauri"
+  chmod +x "$outDir/PincerTestHarness.Tauri"
+  echo "[OK]    Staged: $outDir/PincerTestHarness.Tauri"
 fi

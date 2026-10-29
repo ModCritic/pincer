@@ -1,4 +1,4 @@
-# Cua Driver MCP tool output format
+# Pincer MCP tool output format
 
 Every call keeps the standard MCP `ToolResult` envelope:
 
@@ -33,5 +33,5 @@ verification](action-result-contract.md).
 Observation tools retain their typed tool-specific structured payloads.
 `get_window_state`, for example, returns the accessibility outline and element
 records in `structuredContent` and can attach a PNG as image content. A
-multimodal harness interprets the image; Cua Driver does not OCR it or assign
+multimodal harness interprets the image; Pincer does not OCR it or assign
 task meaning.

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use std::{collections::HashSet, iter};
 
 use core_foundation::base::{CFRelease, CFTypeRef};
-use cua_driver_core::browser::{
+use pincer_core::browser::{
     BrowserConsentOutcome, BrowserConsentRequest, BrowserRefusal, BrowserRefusalCode,
 };
 
@@ -619,7 +619,7 @@ mod tests {
             base::{CFGetRetainCount, CFRetain, TCFType},
             string::CFString,
         };
-        use cua_driver_core::walk_budget::WalkBudget;
+        use pincer_core::walk_budget::WalkBudget;
         let value = CFArray::from_CFTypes(&[CFString::new("owned")]);
         let ptr = value.as_CFTypeRef();
         let baseline = unsafe { CFGetRetainCount(ptr) };

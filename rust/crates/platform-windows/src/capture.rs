@@ -223,7 +223,7 @@ unsafe fn target_is_obscured(target: HWND) -> bool {
         }
     }
     // Threshold of 2 of 5: a single corner being "covered" can be a layered
-    // overlay (e.g. the cua-driver agent cursor) that's not actually opaque
+    // overlay (e.g. the pincer agent cursor) that's not actually opaque
     // over the content; we don't want to false-positive on that. Two or more
     // sample points missing means real content is being covered.
     covered_samples >= 2
@@ -372,7 +372,7 @@ fn screenshot_window_mapped(hwnd: u64) -> Result<(Vec<u8>, bool, Option<FrameGeo
             // first fallback for this class of capture failure.
             match crate::wgc::screenshot_window_via_wgc(hwnd) {
                 Ok((pixels, width, height)) => Ok((
-                    cua_driver_core::image_utils::encode_bgra_to_png(&pixels, width, height)?,
+                    pincer_core::image_utils::encode_bgra_to_png(&pixels, width, height)?,
                     false,
                     None,
                 )),
@@ -385,7 +385,7 @@ fn screenshot_window_mapped(hwnd: u64) -> Result<(Vec<u8>, bool, Option<FrameGeo
                     let occluded = unsafe { target_is_obscured(target) };
                     match unsafe { screenshot_via_screen_region(target) } {
                         Ok((pixels, width, height, geometry)) => Ok((
-                            cua_driver_core::image_utils::encode_bgra_to_png(
+                            pincer_core::image_utils::encode_bgra_to_png(
                                 &pixels,
                                 width as u32,
                                 height as u32,
@@ -464,14 +464,14 @@ unsafe fn screenshot_window_bytes_with_occlusion_unsafe(
         match crate::wgc::screenshot_window_via_wgc(hwnd_raw) {
             Ok((pixels, w, h)) => {
                 return Ok((
-                    cua_driver_core::image_utils::encode_bgra_to_png(&pixels, w, h)?,
+                    pincer_core::image_utils::encode_bgra_to_png(&pixels, w, h)?,
                     false, // WGC reads target's own pixels — never occluded by definition
                     None,
                 ));
             }
             Err(e) => {
                 tracing::warn!(
-                    target: "cua-driver",
+                    target: "pincer",
                     "screenshot: WGC failed for XAML target hwnd 0x{hwnd_raw:x}: {e}; \
                      falling back to screen-region BitBlt (may be occluded)."
                 );
@@ -481,7 +481,7 @@ unsafe fn screenshot_window_bytes_with_occlusion_unsafe(
         match screenshot_via_screen_region(hwnd) {
             Ok((pixels, w, h, geometry)) => {
                 return Ok((
-                    cua_driver_core::image_utils::encode_bgra_to_png(&pixels, w as u32, h as u32)?,
+                    pincer_core::image_utils::encode_bgra_to_png(&pixels, w as u32, h as u32)?,
                     occluded,
                     Some(geometry),
                 ));
@@ -490,7 +490,7 @@ unsafe fn screenshot_window_bytes_with_occlusion_unsafe(
                 // Screen-region failed — fall through and try PrintWindow as a
                 // last resort so the caller at least gets *something*.
                 tracing::warn!(
-                    target: "cua-driver",
+                    target: "pincer",
                     "screenshot: XAML target screen-region path failed: {e}; \
                      falling back to PrintWindow (likely all-black)."
                 );
@@ -639,14 +639,14 @@ unsafe fn screenshot_window_bytes_with_occlusion_unsafe(
         match crate::wgc::screenshot_window_via_wgc(hwnd_raw) {
             Ok((alt_pixels, w, h)) => {
                 return Ok((
-                    cua_driver_core::image_utils::encode_bgra_to_png(&alt_pixels, w, h)?,
+                    pincer_core::image_utils::encode_bgra_to_png(&alt_pixels, w, h)?,
                     false,
                     None,
                 ));
             }
             Err(e) => {
                 tracing::warn!(
-                    target: "cua-driver",
+                    target: "pincer",
                     "screenshot: PrintWindow returned black AND WGC failed for hwnd 0x{hwnd_raw:x}: {e}; \
                      trying screen-region BitBlt next."
                 );
@@ -656,7 +656,7 @@ unsafe fn screenshot_window_bytes_with_occlusion_unsafe(
         match screenshot_via_screen_region(hwnd) {
             Ok((alt_pixels, alt_w, alt_h, geometry)) => {
                 return Ok((
-                    cua_driver_core::image_utils::encode_bgra_to_png(
+                    pincer_core::image_utils::encode_bgra_to_png(
                         &alt_pixels,
                         alt_w as u32,
                         alt_h as u32,
@@ -671,7 +671,7 @@ unsafe fn screenshot_window_bytes_with_occlusion_unsafe(
                 // Caller still gets an image; the fact that it's black is now
                 // visible in the bytes themselves.
                 tracing::warn!(
-                    target: "cua-driver",
+                    target: "pincer",
                     "screenshot: PrintWindow returned a mostly-black bitmap (UWP / \
                      DirectComposition target?); screen-region fallback failed: {e}"
                 );
@@ -688,7 +688,7 @@ unsafe fn screenshot_window_bytes_with_occlusion_unsafe(
     // we return here is the target's pixels even when occluded — no
     // occluded warning needed on this path.
     Ok((
-        cua_driver_core::image_utils::encode_bgra_to_png(&pixels, w as u32, h as u32)?,
+        pincer_core::image_utils::encode_bgra_to_png(&pixels, w as u32, h as u32)?,
         false,
         (!mostly_black).then_some(cropped_geometry),
     ))
@@ -698,15 +698,15 @@ unsafe fn screenshot_window_bytes_with_occlusion_unsafe(
 // `write_uncompressed_png` + `write_png_chunk` + `zlib_store` +
 // `adler32` + `crc32_ieee` (~110 lines) plus a local
 // `encode_bgra_to_png` that used them. All of that is replaced by
-// `cua_driver_core::image_utils::encode_bgra_to_png` which goes through
+// `pincer_core::image_utils::encode_bgra_to_png` which goes through
 // the `image` crate's PNG encoder — already a workspace dep,
 // produces ~5x smaller files than the uncompressed-store path.
 //
 // Same extraction applies to the four pub helpers below
 // (`png_bytes_to_jpeg`, `resize_png_if_needed`, `crosshair_png_bytes`,
 // `png_dimensions_pub`). They're now thin re-exports of the shared
-// `cua_driver_core::image_utils::*` so all three platform crates call the
-// same code. See `CUA_DRIVER_RS_DEDUP_AUDIT.md` for the full audit.
+// `pincer_core::image_utils::*` so all three platform crates call the
+// same code. See `PINCER_DEDUP_AUDIT.md` for the full audit.
 
 /// Capture the primary display (full screen), returning raw PNG bytes.
 pub fn screenshot_display_bytes() -> Result<Vec<u8>> {
@@ -781,7 +781,7 @@ pub fn screenshot_display_bytes() -> Result<Vec<u8>> {
         if ok == 0 {
             bail!("GetDIBits returned 0");
         }
-        cua_driver_core::image_utils::encode_bgra_to_png(&pixels, w as u32, h as u32)
+        pincer_core::image_utils::encode_bgra_to_png(&pixels, w as u32, h as u32)
     }
 }
 
@@ -800,32 +800,32 @@ pub fn screenshot_display_bytes_excluding_overlay() -> Result<(
 /// Capture primary display, returning (base64_png, width, height).
 pub fn screenshot_display() -> Result<(String, u32, u32)> {
     let png_bytes = screenshot_display_bytes()?;
-    let (w, h) = cua_driver_core::image_utils::png_dimensions(&png_bytes)?;
+    let (w, h) = pincer_core::image_utils::png_dimensions(&png_bytes)?;
     Ok((BASE64.encode(&png_bytes), w, h))
 }
 
 // PNG/JPEG/resize/crosshair helpers — re-exports of the shared
-// `cua_driver_core::image_utils` module. The previous file-local copies were
+// `pincer_core::image_utils` module. The previous file-local copies were
 // near-identical to the macOS and Linux versions; the dedup-audit
 // (2026-05) moved them all to one place.
 
 /// Convert PNG bytes to JPEG at the given quality (1–95).
 pub fn png_bytes_to_jpeg(png_bytes: &[u8], quality: u8) -> Result<Vec<u8>> {
-    cua_driver_core::image_utils::png_bytes_to_jpeg(png_bytes, quality)
+    pincer_core::image_utils::png_bytes_to_jpeg(png_bytes, quality)
 }
 
 /// Downscale `png_bytes` so neither dimension exceeds `max_dim`.
 /// If `max_dim == 0` or the image already fits, returns a copy of the
 /// original bytes unchanged.
 pub fn resize_png_if_needed(png_bytes: &[u8], max_dim: u32) -> Result<Vec<u8>> {
-    cua_driver_core::image_utils::resize_png_if_needed(png_bytes, max_dim)
+    pincer_core::image_utils::resize_png_if_needed(png_bytes, max_dim)
 }
 
 /// Draw a red crosshair at pixel (cx, cy) on a PNG image and return
 /// modified PNG bytes. Used by recording's click-marker callback to
 /// produce click.png.
 pub fn crosshair_png_bytes(png_bytes: &[u8], cx: f64, cy: f64) -> Result<Vec<u8>> {
-    cua_driver_core::image_utils::crosshair_png_bytes(png_bytes, cx, cy)
+    pincer_core::image_utils::crosshair_png_bytes(png_bytes, cx, cy)
 }
 
 /// Parse width and height from a PNG IHDR chunk.
@@ -833,5 +833,5 @@ pub fn crosshair_png_bytes(png_bytes: &[u8], cx: f64, cy: f64) -> Result<Vec<u8>
 /// Suffixed `_pub` because an older private `png_dimensions` predated
 /// the `_pub` export; the public alias is what callers use today.
 pub fn png_dimensions_pub(data: &[u8]) -> Result<(u32, u32)> {
-    cua_driver_core::image_utils::png_dimensions(data)
+    pincer_core::image_utils::png_dimensions(data)
 }

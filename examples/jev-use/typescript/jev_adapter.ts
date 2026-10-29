@@ -80,7 +80,7 @@ function candidateCriteria(candidates: Candidate[]): Record<string, string> {
 export function visualDecisionState(visual?: VisualObservation) {
   if (!visual) return null;
   return {
-    schema: 'cua.visual_regions_v1' as const,
+    schema: 'pincer.visual_regions_v1' as const,
     capture_id: visual.captureId,
     screenshot_reference: visual.screenshotReference,
     source: {
@@ -148,7 +148,7 @@ export function decisionState(
 }
 
 export const DRIVER_ACTION_INSTRUCTIONS =
-  'Which complete executable action should Cua Driver run next?';
+  'Which complete executable action should Pincer run next?';
 
 export async function chooseForTask(
   client: TypeSafeClientLike,

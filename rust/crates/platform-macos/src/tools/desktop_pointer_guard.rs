@@ -16,7 +16,7 @@
 //! page without the user's pointer, instead of recommending foreground.
 //! Points over no window, or over the frontmost app, are unchanged.
 
-use cua_driver_core::{
+use pincer_core::{
     delivery::{background_unavailable_result, DeliveryMode},
     protocol::ToolResult,
 };
@@ -186,7 +186,7 @@ mod tests {
             pid: 4242,
             window_id: 77,
             app_name: "BenchLab".into(),
-            bundle_id: "com.trycua.benchlab".into(),
+            bundle_id: "io.github.modcritic.pincer.benchlab".into(),
         }
     }
 

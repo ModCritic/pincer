@@ -6,25 +6,25 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 
-namespace CuaTestHarness.WinUI3;
+namespace PincerTestHarness.WinUI3;
 
 /// <summary>
 /// Opt-in jev-use task window (RFC #4268), shown instead of the main window
-/// when CUA_WINUI3_TASK_STATE=&lt;path&gt; is set. It carries the same labeled
+/// when PINCER_WINUI3_TASK_STATE=&lt;path&gt; is set. It carries the same labeled
 /// controls as the AppKit, WPF, and GTK3 harness task modes (Increment, Reset,
 /// I agree, Small/Medium/Large, Note, Save note, Exit) in a small window where
 /// every control is on screen, and atomically rewrites an app-owned JSON state
 /// file on every change. The jev-use task oracle reads that file; it never
-/// depends on Cua Driver output. Ordinary launches never create this window.
-/// CUA_WINUI3_TASK_DENSITY=12 or 24 (task mode only) also adds benign
+/// depends on Pincer output. Ordinary launches never create this window.
+/// PINCER_WINUI3_TASK_DENSITY=12 or 24 (task mode only) also adds benign
 /// distractor controls in a panel before the task controls, for measuring
 /// jev-use accuracy at larger candidate sets (#4312).
 /// </summary>
 public sealed class TaskWindow : Window
 {
-    public const string StateEnv = "CUA_WINUI3_TASK_STATE";
-    private const string StateSchema = "cua.winui3_task_state_v1";
-    public const string DensityEnv = "CUA_WINUI3_TASK_DENSITY";
+    public const string StateEnv = "PINCER_WINUI3_TASK_STATE";
+    private const string StateSchema = "pincer.winui3_task_state_v1";
+    public const string DensityEnv = "PINCER_WINUI3_TASK_DENSITY";
 
     // Opt-in distractor controls (#4312). The labels are benign (no
     // risky-action phrase) and match the AppKit, GTK3, and WPF harnesses,
@@ -86,7 +86,7 @@ public sealed class TaskWindow : Window
     {
         _statePath = statePath;
         _density = density;
-        Title = "CuaTestHarness WinUI3 Tasks";
+        Title = "PincerTestHarness WinUI3 Tasks";
 
         var root = new StackPanel { Padding = new Thickness(16), Spacing = 8 };
         root.Children.Add(_counterLabel);

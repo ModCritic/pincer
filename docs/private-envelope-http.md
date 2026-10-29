@@ -1,7 +1,7 @@
 # Private typed envelope HTTP carrier
 
 This carrier connects unary HTTP requests to `DriverEnvelopeReceiver`. It is
-disabled unless the trusted launcher sets `CUA_DRIVER_ENVELOPE_HTTP_PORT` to a
+disabled unless the trusted launcher sets `PINCER_ENVELOPE_HTTP_PORT` to a
 nonzero port. It binds only to `127.0.0.1` and fails startup if binding fails.
 No non-loopback binding option is provided.
 
@@ -25,7 +25,7 @@ are refused. There is no CORS support.
 | `POST /v1/connections/{id}/cancel`   | `{"request_id":"REQUEST_ID"}`     | `{"ok":true}`                                                       |
 | `DELETE /v1/connections/{id}`        | Empty or `{}`                     | `{"ok":true}`                                                       |
 
-Every connection-specific request requires `X-Cua-Driver-Generation` with the
+Every connection-specific request requires `X-Pincer-Generation` with the
 value returned at creation. Missing generations fail with HTTP 400, absent
 connections with 404, and mismatches with 409. A client must not reopen a
 connection automatically after those failures.
@@ -38,7 +38,7 @@ options from the wire. Ordinary typed calls use `session=None`; operations
 requiring a session label use the returned `public_session`.
 
 For an explicitly authorized disposable or trusted environment, the launcher
-can set `CUA_DRIVER_ENVELOPE_PERMISSION_MODE=unrestricted` and launch the daemon
+can set `PINCER_ENVELOPE_PERMISSION_MODE=unrestricted` and launch the daemon
 with `--permission-mode unrestricted --dangerously-bypass-approvals`. Both the
 carrier opt-in and the existing runtime risk acknowledgement are required.
 The carrier reads the setting once at startup; clients cannot change it.
@@ -80,7 +80,7 @@ checks, raw results, close, active-session reaping, cancellation under full
 exchange load, and oversized responses. Run them from `rust/`:
 
 ```sh
-cargo test -p cua-driver --bin cua-driver driver_service_http --locked
+cargo test -p pincer --bin pincer driver_service_http --locked
 ```
 
 These tests do not establish guest network isolation, Fleet authorization,

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
@@ -86,7 +86,7 @@ impl Tool for LaunchAppTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         crate::window_change_detector::end_tail();
         crate::window_change_detector::note_intentional_activation();
         let bundle_id = args.opt_str("bundle_id");
@@ -114,11 +114,9 @@ impl Tool for LaunchAppTool {
         }
         if additional_arguments
             .iter()
-            .any(|argument| cua_driver_core::launch_guard::contains_remote_debugging_flag(argument))
+            .any(|argument| pincer_core::launch_guard::contains_remote_debugging_flag(argument))
         {
-            return ToolResult::error(
-                cua_driver_core::launch_guard::REMOTE_DEBUGGING_LAUNCH_REFUSAL,
-            );
+            return ToolResult::error(pincer_core::launch_guard::REMOTE_DEBUGGING_LAUNCH_REFUSAL);
         }
 
         if bundle_id.is_none() && name.is_none() {
@@ -126,7 +124,7 @@ impl Tool for LaunchAppTool {
                 "Provide either bundle_id or name to identify the app to launch.",
             );
         }
-        if bundle_id.as_deref().is_some_and(is_cua_driver_bundle_id) {
+        if bundle_id.as_deref().is_some_and(is_pincer_bundle_id) {
             return protected_host_launch_refusal();
         }
         if let Some(ref bid) = bundle_id {
@@ -149,7 +147,7 @@ impl Tool for LaunchAppTool {
             response_bundle_id = resolved_bundle_id.clone();
             if resolved_bundle_id
                 .as_deref()
-                .is_some_and(is_cua_driver_bundle_id)
+                .is_some_and(is_pincer_bundle_id)
             {
                 return protected_host_launch_refusal();
             }
@@ -386,12 +384,12 @@ impl Tool for LaunchAppTool {
                     //
                     // Note on process lifecycle: this watchdog only runs
                     // when the tokio runtime stays alive — i.e. in the
-                    // long-running `cua-driver mcp` / `cua-driver serve`
-                    // daemon modes. The one-shot `cua-driver call` mode
+                    // long-running `pincer mcp` / `pincer serve`
+                    // daemon modes. The one-shot `pincer call` mode
                     // exits as soon as the tool returns, taking the
                     // detached task with it. Acceptable because the
                     // contract is "no foreground steal during a session
-                    // the agent is driving" — `cua-driver call` doesn't
+                    // the agent is driving" — `pincer call` doesn't
                     // have a session that outlives the call.
                     //
                     // Tradeoffs:
@@ -500,14 +498,17 @@ impl Tool for LaunchAppTool {
     }
 }
 
-fn is_cua_driver_bundle_id(bundle_id: &str) -> bool {
-    matches!(bundle_id, "com.trycua.driver" | "com.trycua.driver.local")
+fn is_pincer_bundle_id(bundle_id: &str) -> bool {
+    matches!(
+        bundle_id,
+        "io.github.modcritic.pincer" | "io.github.modcritic.pincer.local"
+    )
 }
 
 fn protected_host_launch_refusal() -> ToolResult {
     structured_launch_error(
         "PROTECTED_HOST_ENTRYPOINT",
-        "launch_app cannot launch Cua Driver's protected host; operating-system permission UI must originate outside the agent tool stream".to_owned(),
+        "launch_app cannot launch Pincer's protected host; operating-system permission UI must originate outside the agent tool stream".to_owned(),
         serde_json::json!({}),
     )
 }
@@ -716,10 +717,10 @@ fn hex_value(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_cua_driver_bundle_id, local_file_target, normalize_launch_url, preflight_file_urls,
+        is_pincer_bundle_id, local_file_target, normalize_launch_url, preflight_file_urls,
         rank_launch_windows, response_identity, structured_launch_failure, LaunchAppTool,
     };
-    use cua_driver_core::tool::Tool;
+    use pincer_core::tool::Tool;
     use serde_json::json;
     use std::path::PathBuf;
 
@@ -817,14 +818,14 @@ mod tests {
 
     #[test]
     fn preflight_file_urls_returns_structured_file_not_found() {
-        let missing = "/tmp/cua-driver-definitely-missing-file-for-test.md".to_string();
+        let missing = "/tmp/pincer-definitely-missing-file-for-test.md".to_string();
         let result = preflight_file_urls(&[missing]).expect("missing file should error");
         assert_eq!(result.is_error, Some(true));
         let structured = result.structured_content.expect("structured error");
         assert_eq!(structured["error"], "FILE_NOT_FOUND");
         assert_eq!(
             structured["path"],
-            "/tmp/cua-driver-definitely-missing-file-for-test.md"
+            "/tmp/pincer-definitely-missing-file-for-test.md"
         );
         assert!(structured.get("details").is_none());
     }
@@ -843,9 +844,11 @@ mod tests {
 
     #[test]
     fn recognizes_release_and_local_protected_host_bundle_ids() {
-        assert!(is_cua_driver_bundle_id("com.trycua.driver"));
-        assert!(is_cua_driver_bundle_id("com.trycua.driver.local"));
-        assert!(!is_cua_driver_bundle_id("com.trycua.harness.tauri"));
+        assert!(is_pincer_bundle_id("io.github.modcritic.pincer"));
+        assert!(is_pincer_bundle_id("io.github.modcritic.pincer.local"));
+        assert!(!is_pincer_bundle_id(
+            "io.github.modcritic.pincer.harness.tauri"
+        ));
     }
 
     #[test]
@@ -901,7 +904,7 @@ mod tests {
                 "additional_arguments": [
                     "__permissions-host-request",
                     "--result-file",
-                    "/tmp/cua-driver-permissions-forged.json"
+                    "/tmp/pincer-permissions-forged.json"
                 ]
             }))
             .await;
@@ -912,7 +915,7 @@ mod tests {
         );
 
         let result = LaunchAppTool
-            .invoke(json!({ "bundle_id": "com.trycua.driver" }))
+            .invoke(json!({ "bundle_id": "io.github.modcritic.pincer" }))
             .await;
         assert_eq!(result.is_error, Some(true));
         assert_eq!(

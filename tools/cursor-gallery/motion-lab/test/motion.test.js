@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { byId, candidates, categories } from '../motion/candidates.js';
-import { DT_MS, cuaBezier, dubinsPath, ease } from '../motion/math.js';
+import { DT_MS, pincerBezier, dubinsPath, ease } from '../motion/math.js';
 import { fittsTimingMs, kinematics, metrics, plan } from '../motion/plan.js';
 import { inside, sceneList, scenes } from '../motion/scenes.js';
 
@@ -113,7 +113,7 @@ test('timing modes: fixed ignores distance, Fitts grows with distance and shrink
   assert.ok(Math.max(...durs) - Math.min(...durs) > 100, 'Fitts timing varies per move');
 });
 
-test('primitives: easing endpoints, minimum-jerk symmetry, Cua bezier and Dubins endpoints', () => {
+test('primitives: easing endpoints, minimum-jerk symmetry, Pincer bezier and Dubins endpoints', () => {
   for (const [name, f] of Object.entries(ease)) {
     assert.ok(Math.abs(f(0)) < 1e-9, `${name}(0)`);
     assert.ok(Math.abs(f(1) - 1) < 1e-9, `${name}(1)`);
@@ -121,7 +121,7 @@ test('primitives: easing endpoints, minimum-jerk symmetry, Cua bezier and Dubins
   assert.ok(Math.abs(ease.minJerk(0.5) - 0.5) < 1e-12);
   const a = { x: 10, y: 20 };
   const b = { x: 900, y: 500 };
-  const bz = cuaBezier(a, b, { arcSize: 0.25 });
+  const bz = pincerBezier(a, b, { arcSize: 0.25 });
   assert.deepEqual(bz(0), a);
   assert.ok(Math.hypot(bz(1).x - b.x, bz(1).y - b.y) < 1e-9);
   const d = dubinsPath(a, Math.PI * 1.25, b, Math.PI * 1.25, 80);

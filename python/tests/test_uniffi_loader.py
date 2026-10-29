@@ -14,13 +14,13 @@ from pathlib import Path
 
 def _library_name() -> str:
     if os.name == "nt":
-        return "cua_driver_sdk.dll"
+        return "pincer_sdk.dll"
     if platform.system() == "Darwin":
-        return "libcua_driver_sdk.dylib"
-    return "libcua_driver_sdk.so"
+        return "libpincer_sdk.dylib"
+    return "libpincer_sdk.so"
 
 
-LIBRARY = Path(__file__).parents[1] / "src" / "cua_driver" / _library_name()
+LIBRARY = Path(__file__).parents[1] / "src" / "pincer_driver" / _library_name()
 
 
 @unittest.skipUnless(LIBRARY.exists(), "host-native UniFFI library is not staged")
@@ -28,20 +28,20 @@ class GeneratedOptionsTests(unittest.TestCase):
     def test_public_constructors_keep_released_signatures(self) -> None:
         import inspect
 
-        from cua_driver import CuaDriver
+        from pincer_driver import Pincer
 
         # Released callers pass these by keyword; embedded is an additive keyword-only option.
-        self.assertEqual(str(inspect.signature(CuaDriver.connect)), "(socket_path)")
-        self.assertEqual(str(inspect.signature(CuaDriver.create)), "(options=None, *, embedded=False)")
+        self.assertEqual(str(inspect.signature(Pincer.connect)), "(socket_path)")
+        self.assertEqual(str(inspect.signature(Pincer.create)), "(options=None, *, embedded=False)")
 
     def test_action_target_is_public_and_uses_the_generated_contract(self) -> None:
-        import cua_driver
-        from cua_driver import (
+        import pincer_driver
+        from pincer_driver import (
             ActionTarget, ClickButton, ClickInput, ClickPosition, InputDeliveryMode,
         )
-        from cua_driver._native_contract import ActionTarget as GeneratedActionTarget
+        from pincer_driver._native_contract import ActionTarget as GeneratedActionTarget
 
-        self.assertIn("ActionTarget", cua_driver.__all__)
+        self.assertIn("ActionTarget", pincer_driver.__all__)
         self.assertIs(ActionTarget, GeneratedActionTarget)
         target = ActionTarget.DESKTOP(display_id="primary")
         click = ClickInput(
@@ -67,14 +67,14 @@ class GeneratedOptionsTests(unittest.TestCase):
             "ListWindowsOutput", "SnapshotImage", "WindowBounds", "WindowElement",
             "WindowInfo", "WindowStateOutput",
         ):
-            self.assertIn(name, cua_driver.__all__)
-            self.assertIsNotNone(getattr(cua_driver, name))
+            self.assertIn(name, pincer_driver.__all__)
+            self.assertIsNotNone(getattr(pincer_driver, name))
 
     def test_embedded_overlay_option_defaults_false_and_accepts_true(self) -> None:
-        from cua_driver import EmbeddedDriverHostOptions
+        from pincer_driver import EmbeddedDriverHostOptions
 
         required = {
-            "binary_path": "/example/cua-driver",
+            "binary_path": "/example/pincer",
             "host_bundle_id": "com.example.host",
             "socket_path": None,
             "startup_timeout_ms": None,
@@ -97,10 +97,10 @@ class GeneratedOptionsTests(unittest.TestCase):
 @unittest.skipIf(os.name == "nt", "Unix socket fixture")
 class SdkLoaderTests(unittest.TestCase):
     def test_generated_python_embedded_host_owns_the_rust_lifecycle(self) -> None:
-        from cua_driver import CuaDriver, EmbeddedCuaDriverHost
+        from pincer_driver import Pincer, EmbeddedPincerHost
 
         with tempfile.TemporaryDirectory() as directory:
-            binary_path = Path(directory) / "fake cua-driver"
+            binary_path = Path(directory) / "fake pincer"
             binary_path.write_text(
                 """#!/usr/bin/env python3
 import json
@@ -150,11 +150,11 @@ except FileNotFoundError:
             binary_path.chmod(0o755)
 
             async def scenario() -> str:
-                host = EmbeddedCuaDriverHost(
+                host = EmbeddedPincerHost(
                     str(binary_path), "com.example.python-embedded"
                 )
                 connection = await host.start()
-                driver = CuaDriver.connect(connection.socket_path)
+                driver = Pincer.connect(connection.socket_path)
                 metadata = await driver.metadata()
                 self.assertTrue(metadata.embedded)
                 self.assertEqual(metadata.pid, connection.pid)
@@ -172,8 +172,8 @@ except FileNotFoundError:
             self.assertFalse(Path(socket_path).exists())
 
     def test_generated_python_sdk_calls_the_rust_daemon_interface(self) -> None:
-        import cua_driver
-        from cua_driver import (
+        import pincer_driver
+        from pincer_driver import (
             ActionEffect,
             ActionRoute,
             ActionTarget,
@@ -181,7 +181,7 @@ except FileNotFoundError:
             InputDeliveryMode,
             ClickButton,
             ClickInput,
-            CuaDriver,
+            Pincer,
             StatePredicate,
             StartSessionOutput,
             VerificationStatus,
@@ -190,11 +190,11 @@ except FileNotFoundError:
         )
 
         self.assertIsNotNone(StartSessionOutput)
-        self.assertIs(cua_driver.CuaDriver, CuaDriver)
-        self.assertFalse(hasattr(cua_driver, "AsyncCuaDriver"))
-        self.assertFalse(hasattr(cua_driver, "StdioMcpTransport"))
-        self.assertIsNone(importlib.util.find_spec("cua_driver.sdk"))
-        self.assertIsNone(importlib.util.find_spec("cua_driver.native"))
+        self.assertIs(pincer_driver.Pincer, Pincer)
+        self.assertFalse(hasattr(pincer_driver, "AsyncPincer"))
+        self.assertFalse(hasattr(pincer_driver, "StdioMcpTransport"))
+        self.assertIsNone(importlib.util.find_spec("pincer_driver.sdk"))
+        self.assertIsNone(importlib.util.find_spec("pincer_driver.native"))
 
         with tempfile.TemporaryDirectory() as directory:
             socket_path = str(Path(directory) / "driver.sock")
@@ -252,7 +252,7 @@ except FileNotFoundError:
 
             server = threading.Thread(target=serve)
             server.start()
-            driver = CuaDriver.connect(socket_path)
+            driver = Pincer.connect(socket_path)
             expected_methods = {
                 "start_session",
                 "get_session",
@@ -345,10 +345,10 @@ except FileNotFoundError:
         )
 
     def test_generated_python_sdk_can_own_the_runtime_in_process(self) -> None:
-        from cua_driver import CuaDriver, DriverExecutionMode
+        from pincer_driver import Pincer, DriverExecutionMode
 
         async def scenario() -> None:
-            driver = CuaDriver.create()
+            driver = Pincer.create()
             self.assertEqual(driver.execution_mode(), DriverExecutionMode.EMBEDDED)
             self.assertEqual(driver.socket_path(), "")
             self.assertTrue(driver.is_available())
@@ -361,7 +361,7 @@ except FileNotFoundError:
         asyncio.run(scenario())
 
 
-if os.environ.get("CUA_DRIVER_REQUIRE_UNIFFI") == "1" and not LIBRARY.exists():
+if os.environ.get("PINCER_REQUIRE_UNIFFI") == "1" and not LIBRARY.exists():
     raise RuntimeError(f"required staged UniFFI library is missing: {LIBRARY}")
 
 

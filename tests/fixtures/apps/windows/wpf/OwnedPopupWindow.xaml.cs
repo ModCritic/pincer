@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace CuaTestHarness.Wpf;
+namespace PincerTestHarness.Wpf;
 
 public partial class OwnedPopupWindow : Window
 {

@@ -54,7 +54,7 @@ function cargoEnvironment() {
   // Native npm packages must load on a clean Windows installation. The
   // upstream N-API runtime includes C++ objects, so MSVC's default dynamic
   // CRT linkage otherwise leaves VCRUNTIME140.dll as an undeclared system
-  // prerequisite before any Cua code can run.
+  // prerequisite before any Pincer code can run.
   environment.RUSTFLAGS = [
     environment.RUSTFLAGS?.trim(),
     "-C target-feature=+crt-static",
@@ -144,7 +144,7 @@ function patchCall(source) {
   return `${source.slice(0, bodyStart)}${replacement}${source.slice(bodyEnd + bodyEndNeedle.length)}`
 }
 
-const temporaryRoot = mkdtempSync(join(tmpdir(), "cua-driver-node-runtime-"))
+const temporaryRoot = mkdtempSync(join(tmpdir(), "pincer-node-runtime-"))
 try {
   const runtimeRoot = join(temporaryRoot, "runtime")
   cpSync(join(upstreamRoot, "runtimes", "core"), join(runtimeRoot, "core"), {

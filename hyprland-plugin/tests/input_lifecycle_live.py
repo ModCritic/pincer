@@ -43,7 +43,7 @@ def validate_plan(plan):
 def run(args):
     # Refuse the historical hot-reload test before starting input or unloading
     # a restart-required module. Its replacement is config-toggle recovery.
-    status = json.loads(subprocess.check_output(['hyprctl', '-j', 'cua:status'], timeout=5))
+    status = json.loads(subprocess.check_output(['hyprctl', '-j', 'pincer:status'], timeout=5))
     if args.case == 'reload' and status.get('experiment', {}).get('upgrade') == 'desktop_restart':
         raise ValueError('use the toggle case; plugin replacement requires a desktop restart')
     if args.case == 'toggle' and not args.toggle_file:
@@ -120,7 +120,7 @@ def run(args):
         assert all(grant[key] == pending[key] for key in ('epoch', 'challenge', 'target'))
         assert grant['capabilities'] == 10, 'grant must cover only drag and recovery key probe'
         lane = pending['lane']
-        input_path = args.input_directory / ('cua-input-test.sock' if lane == 0 else 'cua-input-test-2.sock')
+        input_path = args.input_directory / ('pincer-input-test.sock' if lane == 0 else 'pincer-input-test-2.sock')
         operator, _ = connect(input_path)
         assert exchange(operator, grant['packet'])['ok']
         # Native recording is supporting evidence, never the cleanup oracle.

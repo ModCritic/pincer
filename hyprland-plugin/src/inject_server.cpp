@@ -1,6 +1,6 @@
 #include "inject_server.hpp"
 
-#include "cua_hyprland/protocol.hpp"
+#include "pincer_hyprland/protocol.hpp"
 
 #include <array>
 #include <cerrno>
@@ -14,7 +14,7 @@
 #include <unistd.h>
 #include <vector>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 namespace {
 
 constexpr std::size_t kMaxClients = 8;
@@ -446,7 +446,7 @@ void InjectionServer::run() {
                     request_id_from_frame_prefix(std::span<const std::byte>{
                         buffer.data(), static_cast<std::size_t>(received)}),
                     protocol_error_for(error),
-                    "invalid cua-inject-v2 frame");
+                    "invalid pincer-inject-v2 frame");
                 send_frame(client.fd, response);
                 close_client(client);
                 clients.erase(clients.begin() + static_cast<std::ptrdiff_t>(index - 1));
@@ -506,4 +506,4 @@ void InjectionServer::set_error(std::string error) {
     m_last_error = std::move(error);
 }
 
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

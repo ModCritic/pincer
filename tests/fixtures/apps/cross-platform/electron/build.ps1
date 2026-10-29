@@ -1,9 +1,9 @@
-# build.ps1 - stage the Electron test harness for cua-driver tests.
+# build.ps1 - stage the Electron test harness for pincer tests.
 #
 # electron-builder portable mode needs admin (symlink privilege) for the
 # winCodeSign cache extraction. We instead stage a flat folder containing
 # the electron runtime + our app resources, with electron.exe renamed to
-# CuaTestHarness.Electron.exe so tests get a deterministic exe name.
+# PincerTestHarness.Electron.exe so tests get a deterministic exe name.
 #
 # Output: rust/test-apps/harness-electron/
 
@@ -15,8 +15,8 @@ $crossDir = Split-Path -Parent $elecDir
 $appsDir = Split-Path -Parent $crossDir
 $harnessDir = Split-Path -Parent $appsDir
 $testsDir = Split-Path -Parent $harnessDir
-$cuaDriverDir = Split-Path -Parent $testsDir
-$testAppsDir = Join-Path $cuaDriverDir "rust\test-apps"
+$pincerDir = Split-Path -Parent $testsDir
+$testAppsDir = Join-Path $pincerDir "rust\test-apps"
 $outDir = Join-Path $testAppsDir "harness-electron"
 
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
@@ -52,8 +52,8 @@ try {
     Copy-Item (Join-Path $elecDir "package.json") $appDir -Force
     Copy-Item $webDir (Join-Path $appDir "web") -Recurse -Force
 
-    Rename-Item (Join-Path $outDir "electron.exe") "CuaTestHarness.Electron.exe" -Force
-    Write-Host "[OK]    Staged: $outDir\CuaTestHarness.Electron.exe" -ForegroundColor Green
+    Rename-Item (Join-Path $outDir "electron.exe") "PincerTestHarness.Electron.exe" -Force
+    Write-Host "[OK]    Staged: $outDir\PincerTestHarness.Electron.exe" -ForegroundColor Green
 } finally {
     Pop-Location
 }

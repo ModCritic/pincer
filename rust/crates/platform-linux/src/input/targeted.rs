@@ -1,7 +1,7 @@
 //! X11 targeted one-shot input with explicit delivery semantics.
 //!
 //! The Linux adapter for the cross-platform contract in
-//! [`cua_driver_core::interactive_input`]; embedders (cua-spacesd) call it
+//! [`pincer_core::interactive_input`]; embedders (cua-spacesd) call it
 //! instead of injecting input themselves.
 //!
 //! - **Foreground**: activate the target window (when there is one), confirm
@@ -27,7 +27,7 @@
 
 use std::time::{Duration, Instant};
 
-use cua_driver_core::interactive_input::{
+use pincer_core::interactive_input::{
     resolve_delivery, DeliveryReport, DeliveryUsed, KeyOp, PointerOp, TargetedButton,
     TargetedDelivery, TargetedInputError,
 };

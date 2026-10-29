@@ -13,7 +13,7 @@ void check(bool condition, const char* message) {
 }
 bool refused(const std::string& directory) {
     try {
-        cua::hyprland::SeatLifetime second(directory);
+        pincer::hyprland::SeatLifetime second(directory);
         return false;
     } catch (const std::runtime_error&) {
         return true;
@@ -23,19 +23,19 @@ bool refused(const std::string& directory) {
 
 int main() {
     std::array<char, 64> pattern{};
-    const std::string seed = "/tmp/cua-seat-lifetime-XXXXXX";
+    const std::string seed = "/tmp/pincer-seat-lifetime-XXXXXX";
     seed.copy(pattern.data(), seed.size());
     const auto* created = mkdtemp(pattern.data());
     check(created != nullptr, "create isolated instance directory");
     const std::string directory(created);
-    const auto marker = directory + "/cua-input-seat-lifetime";
+    const auto marker = directory + "/pincer-input-seat-lifetime";
     {
-        cua::hyprland::SeatLifetime failed_initialization(directory);
+        pincer::hyprland::SeatLifetime failed_initialization(directory);
         check(refused(directory), "parallel initialization refuses");
     }
     check(access(marker.c_str(), F_OK) != 0, "failed initialization releases reservation");
     {
-        cua::hyprland::SeatLifetime initialized(directory);
+        pincer::hyprland::SeatLifetime initialized(directory);
         initialized.publish();
     }
     check(refused(directory), "replacement after publication requires desktop restart");

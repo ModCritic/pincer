@@ -1,6 +1,6 @@
 """Real two-session browser authority isolation proof for the jev-use CI lane.
 
-The proof uses one Driver MCP process, two named Cua sessions, two independently
+The proof uses one Driver MCP process, two named Pincer sessions, two independently
 owned isolated Chromium profiles, and two independent loopback fixture journals.
 A cross-session target/ref must refuse before it can mutate the other fixture.
 Ending session A must revoke A without making session B unusable.
@@ -215,7 +215,7 @@ async def run(output: Path) -> dict[str, Any]:
         "session_end": {},
     }
     params = StdioServerParameters(
-        command=os.getenv("CUA_DRIVER_BIN", "cua-driver"),
+        command=os.getenv("PINCER_BIN", "pincer"),
         args=["mcp"],
         env=driver_environment(),
     )
@@ -233,7 +233,7 @@ async def run(output: Path) -> dict[str, Any]:
                     b = await _prepare(driver_b, url_b)
 
                     # Pre-mutation capability cross-use: try to type into A
-                    # through B's Cua session and vice versa. Then use the
+                    # through B's Pincer session and vice versa. Then use the
                     # owner's Submit ref as a target-owned journal probe. If
                     # the foreign type landed, the fixture would submit it.
                     code_b_to_a = await _expect_foreign_refusal(

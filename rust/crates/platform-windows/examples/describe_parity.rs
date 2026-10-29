@@ -10,13 +10,13 @@ fn main() {
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/debug/cua-driver.exe");
+        .join("target/debug/pincer.exe");
 
     // 1. Known tool — describe `click`.
     let out = Command::new(&exe)
         .args(["describe", "click"])
         .output()
-        .expect("run cua-driver describe click");
+        .expect("run pincer describe click");
     assert!(out.status.success(), "describe click failed: {:?}", out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -44,7 +44,7 @@ fn main() {
     let out2 = Command::new(&exe)
         .args(["describe", "this_tool_does_not_exist"])
         .output()
-        .expect("run cua-driver describe missing");
+        .expect("run pincer describe missing");
     assert_eq!(
         out2.status.code(),
         Some(64),

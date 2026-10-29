@@ -179,7 +179,7 @@ fn capture_one_frame(pipewire_fd: i32, node_id: u32) -> anyhow::Result<Vec<u8>> 
 
     let stream = pw::stream::Stream::new(
         &core,
-        "cua-driver-capture",
+        "pincer-capture",
         properties! {
             *pw::keys::MEDIA_TYPE => "Video",
             *pw::keys::MEDIA_CATEGORY => "Capture",

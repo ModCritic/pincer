@@ -165,7 +165,7 @@ fn send_key(
 }
 
 fn keymap_file() -> anyhow::Result<File> {
-    let name = CString::new("cua-driver-keymap")?;
+    let name = CString::new("pincer-keymap")?;
     let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_CLOEXEC) };
     if fd < 0 {
         return Err(std::io::Error::last_os_error().into());

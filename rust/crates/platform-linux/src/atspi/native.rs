@@ -163,16 +163,16 @@ pub(crate) const INPUT_QUERY_BUDGET: Duration = Duration::from_millis(1500);
 /// named a specific element and a miss is an error, not a fallback.
 pub(crate) const INDEX_RESOLVE_BUDGET: Duration = Duration::from_secs(6);
 
-/// Emit a one-line diagnostic to stderr when `CUA_ATSPI_DEBUG` is set. The
+/// Emit a one-line diagnostic to stderr when `PINCER_ATSPI_DEBUG` is set. The
 /// driver's stderr is surfaced in the test logs, so this is how we see what the
 /// native walk actually found in CI.
 fn dbg_enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("CUA_ATSPI_DEBUG").is_some())
+    *ON.get_or_init(|| std::env::var_os("PINCER_ATSPI_DEBUG").is_some())
 }
 macro_rules! dlog {
     ($($arg:tt)*) => {
-        if dbg_enabled() { eprintln!("[cua-atspi] {}", format!($($arg)*)); }
+        if dbg_enabled() { eprintln!("[pincer-atspi] {}", format!($($arg)*)); }
     };
 }
 
@@ -327,7 +327,7 @@ fn wait_for_listener_startup(
 ) -> Result<()> {
     let (completed_tx, completed_rx) = std::sync::mpsc::sync_channel(1);
     std::thread::Builder::new()
-        .name("cua-atspi-listener".into())
+        .name("pincer-atspi-listener".into())
         .spawn(move || {
             let _ = completed_tx.send(connect());
         })
@@ -1096,7 +1096,7 @@ mod hyprland_frame_tests {
     fn binds_unique_chromium_profile_title() {
         assert_eq!(
             correlate_hyprland_frame(
-                &[frame("Page - Google Chrome - Cua Test")],
+                &[frame("Page - Google Chrome - Pincer Test")],
                 &[("Page - Google Chrome", 800, 600), ("Other", 800, 600)],
                 0,
             ),
@@ -1108,7 +1108,7 @@ mod hyprland_frame_tests {
     fn rejects_generic_prefixes_unknown_roots_and_wrong_sizes() {
         assert!(!chromium_title_matches("Pageant", "Page"));
         assert!(!chromium_title_matches("Page - ", "Page"));
-        let mut candidate = frame("Page - Google Chrome - Cua Test");
+        let mut candidate = frame("Page - Google Chrome - Pincer Test");
         candidate.browser_root = false;
         assert_eq!(
             correlate_hyprland_frame(&[candidate], &[("Page - Google Chrome", 800, 600)], 0),
@@ -1116,7 +1116,7 @@ mod hyprland_frame_tests {
         );
         assert_eq!(
             correlate_hyprland_frame(
-                &[frame("Page - Google Chrome - Cua Test")],
+                &[frame("Page - Google Chrome - Pincer Test")],
                 &[("Page - Google Chrome", 801, 600)],
                 0,
             ),
@@ -1128,10 +1128,10 @@ mod hyprland_frame_tests {
     fn rejects_ambiguous_native_and_accessibility_candidates() {
         assert_eq!(
             correlate_hyprland_frame(
-                &[frame("Page - Google Chrome - Cua Test")],
+                &[frame("Page - Google Chrome - Pincer Test")],
                 &[
                     ("Page - Google Chrome", 800, 600),
-                    ("Page - Google Chrome - Cua Test", 800, 600),
+                    ("Page - Google Chrome - Pincer Test", 800, 600),
                 ],
                 0,
             ),
@@ -1141,7 +1141,7 @@ mod hyprland_frame_tests {
             correlate_hyprland_frame(
                 &[
                     frame("Page - Google Chrome"),
-                    frame("Page - Google Chrome - Cua Test"),
+                    frame("Page - Google Chrome - Pincer Test"),
                 ],
                 &[("Page - Google Chrome", 800, 600)],
                 0,
@@ -4729,7 +4729,7 @@ pub fn scroll_element(
     idx: usize,
     direction: &str,
     amount: usize,
-    by: cua_driver_contract::ScrollBy,
+    by: pincer_contract::ScrollBy,
 ) -> Result<ScrollProgress> {
     let attempted = std::cell::Cell::new(false);
     let acknowledged = std::cell::Cell::new(0);
@@ -4780,7 +4780,7 @@ pub fn scroll_element(
 
             if let (Some(action), Some(action_index)) = (action_proxy, selected) {
                 let mut observation = None;
-                if by == cua_driver_contract::ScrollBy::Page && amount > 1 {
+                if by == pincer_contract::ScrollBy::Page && amount > 1 {
                     let component = proxies.component().await?;
                     let target_index = visited
                         .iter()
@@ -6015,7 +6015,7 @@ fn window_to_screen_offset(pid: u32, xid: u64, title: Option<&str>) -> Option<(i
         }
         // Native Wayland: clients can't query a window's screen origin, and
         // AT-SPI CoordType::Screen collapses to (0,0) on Mutter. The bundled
-        // `org.cua.WinRects` GNOME Shell extension supplies the window's screen
+        // `org.pincer.WinRects` GNOME Shell extension supplies the window's screen
         // origin (`meta_window.get_frame_rect()`); combined with the per-widget
         // CoordType::Window coords (which GTK4 reports correctly on Wayland too)
         // this reconstructs real screen coords — the GNOME analogue of the X11
@@ -6710,7 +6710,7 @@ mod frame_correlation_tests {
             xid: 4242,
             pid: Some(99),
             app_name: "Google-chrome".to_owned(),
-            title: "Cua - Google Chrome".to_owned(),
+            title: "Pincer - Google Chrome".to_owned(),
             is_on_screen: true,
             z_index: Some(3),
             x,

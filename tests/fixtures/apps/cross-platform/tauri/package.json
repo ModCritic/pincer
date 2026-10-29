@@ -1,8 +1,8 @@
 {
-  "name": "cua-test-harness-tauri",
+  "name": "pincer-test-harness-tauri",
   "version": "1.0.0",
   "private": true,
-  "description": "cua-driver Tauri test harness loading the shared web DOM",
+  "description": "pincer Tauri test harness loading the shared web DOM",
   "scripts": {
     "build": "cargo build --release --manifest-path src-tauri/Cargo.toml",
     "dev": "cargo run --manifest-path src-tauri/Cargo.toml"

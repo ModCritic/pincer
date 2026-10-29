@@ -23,8 +23,8 @@ function sentinelRenderer() {
     window: { addEventListener: (kind, handler) => listeners.set(kind, handler) },
   });
   return {
-    arm: token => ipcListeners.get('cua-e2e-sentinel-arm-setup-click')(null, token),
-    heartbeat: () => ipcListeners.get('cua-e2e-sentinel-heartbeat-probe')(),
+    arm: token => ipcListeners.get('pincer-e2e-sentinel-arm-setup-click')(null, token),
+    heartbeat: () => ipcListeners.get('pincer-e2e-sentinel-heartbeat-probe')(),
     input: kind => listeners.get(kind)({ button: 0, clientX: 10, clientY: 20 }),
     pending,
   };
@@ -41,7 +41,7 @@ test('setup barrier follows the full click on the same journal IPC channel', () 
   assert.deepEqual(renderer.pending.map(({ entry }) => entry.kind), [
     'setup-click-armed', 'heartbeat', 'pointerdown', 'pointerup', 'click', 'setup-click-drained',
   ]);
-  assert.ok(renderer.pending.every(({ channel }) => channel === 'cua-e2e-sentinel-event'));
+  assert.ok(renderer.pending.every(({ channel }) => channel === 'pincer-e2e-sentinel-event'));
   assert.equal(renderer.pending.at(-1).entry.token, 'first');
   // An action's later pointer input remains observable after setup completes.
   renderer.input('pointerdown');

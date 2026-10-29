@@ -1,9 +1,9 @@
 # Profile kit: original source bytes and separately committed packaging tooling.
 # shellcheck shell=bash disable=SC2034,SC2154
-pkgname=cua-hyprland-plugin
+pkgname=pincer-hyprland-plugin
 pkgver=@DRIVER_VERSION@
 pkgrel=@PKGREL@
-pkgdesc='Cua input candidate for reviewed profile @PROFILE_ID@'
+pkgdesc='Pincer input candidate for reviewed profile @PROFILE_ID@'
 arch=('x86_64')
 url='https://github.com/trycua/cua'
 license=('MIT')
@@ -15,7 +15,7 @@ _archive_sha256='@ARCHIVE_SHA256@'
 _kit_sha256='@KIT_SHA256@'
 _profile_sha256='@PROFILE_SHA256@'
 _verifier_sha256='@VERIFIER_SHA256@'
-_cxx="${CUA_RELEASE_CXX:-/usr/bin/g++}"
+_cxx="${PINCER_RELEASE_CXX:-/usr/bin/g++}"
 source=("${_stem}.tar.gz" 'KIT-PROVENANCE.json' 'PROFILE.json' 'profile_verify.py')
 sha256sums=('@ARCHIVE_SHA256@' '@KIT_SHA256@' '@PROFILE_SHA256@' '@VERIFIER_SHA256@')
 
@@ -57,8 +57,8 @@ check() {
 package() {
   check || return 1
   _verify --build "$srcdir/build" --output "$srcdir/BUILD-PROVENANCE.json" || return 1
-  install -Dm755 "$srcdir/build/cua-hyprland-plugin.so" \
-    "$pkgdir/usr/lib/cua/hyprland/cua-hyprland-plugin.so" || return 1
+  install -Dm755 "$srcdir/build/pincer-hyprland-plugin.so" \
+    "$pkgdir/usr/lib/pincer/hyprland/pincer-hyprland-plugin.so" || return 1
   install -Dm644 "$srcdir/$_stem/LICENSE.md" \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSE" || return 1
   install -Dm644 "$srcdir/$_stem/SOURCE-PROVENANCE.json" \

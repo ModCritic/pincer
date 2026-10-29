@@ -18,10 +18,10 @@ explicitly provisions the corresponding environment.
 The host checkout is the only checkout that commits or pushes. Sync it with:
 
 ```bash
-scripts/sync-vm-worktree.sh push user@host '~/cua'
+scripts/sync-vm-worktree.sh push user@host '~/pincer'
 ```
 
-The sync writes `.cua-e2e-source-sha` after transferring the worktree. The
+The sync writes `.pincer-e2e-source-sha` after transferring the worktree. The
 canonical preflight validates that marker when the VM intentionally has no
 `.git` directory, so reports still identify the exact host commit.
 
@@ -39,8 +39,8 @@ scripts/ci/linux/run-rust-e2e-desktop.sh kde
 scripts/ci/linux/run-rust-e2e-desktop.sh xorg
 ```
 
-The default is the complete canonical matrix. `CUA_E2E_INTERNAL_LANE` and
-`CUA_E2E_HARNESS_FILTER` remain diagnostic/maintainer controls; they do not
+The default is the complete canonical matrix. `PINCER_E2E_INTERNAL_LANE` and
+`PINCER_E2E_HARNESS_FILTER` remain diagnostic/maintainer controls; they do not
 define a second catalog.
 
 ## Evidence acceptance

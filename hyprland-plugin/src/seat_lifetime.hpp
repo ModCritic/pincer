@@ -5,7 +5,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 
 // The per-instance runtime directory is validated by the plugin entry point.
 // A successful initialization leaves a marker until the desktop ends. This
@@ -15,7 +15,7 @@ namespace cua::hyprland {
 class SeatLifetime {
   public:
     explicit SeatLifetime(const std::string& instance_directory)
-        : path_(instance_directory + "/cua-input-seat-lifetime") {
+        : path_(instance_directory + "/pincer-input-seat-lifetime") {
         if (mkdir(path_.c_str(), 0700) != 0)
             throw std::runtime_error("input seat lifetime unavailable; restart the desktop before loading a replacement plugin");
     }
@@ -34,4 +34,4 @@ class SeatLifetime {
     bool published_ = false;
 };
 
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

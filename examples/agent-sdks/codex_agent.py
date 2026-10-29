@@ -1,4 +1,4 @@
-"""Run a Codex Python SDK desktop task through Cua Driver's MCP boundary."""
+"""Run a Codex Python SDK desktop task through Pincer's MCP boundary."""
 
 from __future__ import annotations
 
@@ -18,13 +18,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def driver_binary() -> str:
-    configured = os.environ.get("CUA_DRIVER_BIN")
+    configured = os.environ.get("PINCER_BIN")
     if configured:
         return configured
-    discovered = shutil.which("cua-driver")
+    discovered = shutil.which("pincer")
     if discovered:
         return discovered
-    raise RuntimeError("cua-driver is not on PATH; set CUA_DRIVER_BIN")
+    raise RuntimeError("pincer is not on PATH; set PINCER_BIN")
 
 
 async def main() -> None:
@@ -32,9 +32,9 @@ async def main() -> None:
     binary = driver_binary()
     config = CodexConfig(
         config_overrides=(
-            f"mcp_servers.cua_driver.command={json.dumps(binary)}",
-            'mcp_servers.cua_driver.args=["mcp"]',
-            "mcp_servers.cua_driver.required=true",
+            f"mcp_servers.pincer.command={json.dumps(binary)}",
+            'mcp_servers.pincer.args=["mcp"]',
+            "mcp_servers.pincer.required=true",
         )
     )
     async with AsyncCodex(config) as codex:
@@ -43,19 +43,19 @@ async def main() -> None:
             sandbox=Sandbox.read_only,
         )
         result = await thread.run(
-            f"""Complete this trusted desktop task through the cua_driver MCP server:
+            f"""Complete this trusted desktop task through the pincer MCP server:
 
 {args.task}
 
 This MCP transport owns one implicit lifecycle session. Omit the session field
 for ordinary calls so the runtime creates and reuses it. Select an exact window
 or desktop target on every action; session identity never selects capture
-modality or permission authority. Use only cua_driver MCP tools for desktop
+modality or permission authority. Use only pincer MCP tools for desktop
 observation and interaction. Inspect before each action and verify afterward.
 If a mutation times out, observe before any retry; never blindly replay an
 action with an unknown outcome. Return a concise result and name anything
 unverified. When both history_status and history_query are advertised and the
-task asks to continue, resume, or recall prior Cua work, call history_status
+task asks to continue, resume, or recall prior Pincer work, call history_status
 first. If history is healthy and access is admitted, make one bounded initial
 history_query before broad application or window discovery. Use its
 metadata only as a lead and verify current state; omitted content, geometry,

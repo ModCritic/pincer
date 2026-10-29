@@ -1,5 +1,5 @@
 {
-  "schema": "cua.visual_regions_v1",
+  "schema": "pincer.visual_regions_v1",
   "capture": {
     "capture_id": "capture-edge",
     "source": {

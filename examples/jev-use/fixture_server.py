@@ -12,7 +12,7 @@ from urllib.parse import parse_qs
 
 
 PAGE = b"""<!doctype html>
-<html lang="en"><meta charset="utf-8"><title>Cua Driver Jev fixture</title>
+<html lang="en"><meta charset="utf-8"><title>Pincer Jev fixture</title>
 <style>
 body { font: 20px system-ui; display:grid; min-height:90vh; place-items:center; }
 main { width:min(640px,85vw); text-align:center; }
@@ -20,7 +20,7 @@ input,button { box-sizing:border-box; font:inherit; margin:8px; padding:16px; }
 input { width:min(440px,75vw); }
 output { display:block; margin-top:20px; font-family:monospace; }
 </style>
-<main><h1>Cua Driver + TypeSafe Jev fixture</h1>
+<main><h1>Pincer + TypeSafe Jev fixture</h1>
 <p>Enter the verification value and submit it.</p>
 <form method="post" action="/submit">
 <input name="value" required aria-label="verification value">
@@ -90,7 +90,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
         self.server.state.submit(value)
         safe = html.escape(value)
         body = (
-            "<!doctype html><title>Cua Driver Jev verified</title>"
+            "<!doctype html><title>Pincer Jev verified</title>"
             f"<h1>Action received</h1><output>status=submitted:{safe}</output>"
         ).encode()
         self._send(HTTPStatus.OK, "text/html; charset=utf-8", body)

@@ -296,7 +296,7 @@ mod tests {
           "nodes": [{
             "id": 10,
             "name": "Tauri",
-            "app_id": "cua-test-harness",
+            "app_id": "pincer-test-harness",
             "pid": 123,
             "rect": {"x": 0, "y": 0, "width": 940, "height": 780},
             "window_rect": {"x": 0, "y": 0, "width": 940, "height": 733},
@@ -314,7 +314,7 @@ mod tests {
           "nodes": [{
             "id": 10,
             "name": "Tauri",
-            "app_id": "cua-test-harness",
+            "app_id": "pincer-test-harness",
             "pid": 123,
             "rect": {"x": 0, "y": 0, "width": 940, "height": 780},
             "window_rect": {"x": 0, "y": 0, "width": 940, "height": 733},

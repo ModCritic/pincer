@@ -57,11 +57,11 @@ test('every harness has the same three tasks', () => {
     assert.equal(task.oracle.expectedPid, 7);
     assert.deepEqual(task.mockPreferences, nativeTask(`appkit-${kind}`, '/tmp/none.json').mockPreferences);
   }
-  assert.equal(HARNESSES.wpf.windowTitle, 'CuaTestHarness WPF Tasks');
-  assert.equal(HARNESSES.winui3.windowTitle, 'CuaTestHarness WinUI3 Tasks');
-  assert.equal(HARNESSES.winui3.stateEnv, 'CUA_WINUI3_TASK_STATE');
-  assert.equal(HARNESSES.winui3.processName, 'CuaTestHarness.WinUI3');
-  assert.equal(HARNESSES.gtk3.windowTitle, 'CuaTestHarness GTK3 Tasks');
+  assert.equal(HARNESSES.wpf.windowTitle, 'PincerTestHarness WPF Tasks');
+  assert.equal(HARNESSES.winui3.windowTitle, 'PincerTestHarness WinUI3 Tasks');
+  assert.equal(HARNESSES.winui3.stateEnv, 'PINCER_WINUI3_TASK_STATE');
+  assert.equal(HARNESSES.winui3.processName, 'PincerTestHarness.WinUI3');
+  assert.equal(HARNESSES.gtk3.windowTitle, 'PincerTestHarness GTK3 Tasks');
   for (const taskId of ['wpf-reset', 'winui3-exit', 'uwp-counter', 'counter', '']) {
     assert.throws(() => splitTaskId(taskId));
   }
@@ -112,7 +112,7 @@ test('a text entry value is never a label', () => {
     assert.equal(field.label, 'Note');
     const ids = note.candidates(after).map((c) => c.id);
     if (harness === 'gtk3') {
-      // Known limitation of Cua Driver 0.30.2 (#4291): a named AT-SPI text
+      // Known limitation of Pincer 0.30.2 (#4291): a named AT-SPI text
       // field reports no value, so the written note is not observable.
       assert.ok('limitation' in windowState(harness, 'after-save-note')._fixture);
       assert.equal(field.value, undefined);

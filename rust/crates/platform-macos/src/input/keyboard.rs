@@ -18,11 +18,11 @@ const SHIFT_KEY_CODE: u16 = 56;
 const DEFAULT_KEY_GAP: std::time::Duration = std::time::Duration::from_millis(8);
 
 /// Key down→up gap and inter-key pacing: `DEFAULT_KEY_GAP`, or the
-/// host's `CUA_DRIVER_KEY_GAP_MS` clamped by `cua_driver_core::key_pacing`.
+/// host's `PINCER_KEY_GAP_MS` clamped by `pincer_core::key_pacing`.
 /// Read once: pacing is a launch-time knob, not a per-call one.
 fn key_gap() -> std::time::Duration {
     static GAP: std::sync::OnceLock<std::time::Duration> = std::sync::OnceLock::new();
-    *GAP.get_or_init(|| cua_driver_core::key_pacing::key_gap_from_env(DEFAULT_KEY_GAP))
+    *GAP.get_or_init(|| pincer_core::key_pacing::key_gap_from_env(DEFAULT_KEY_GAP))
 }
 
 fn key_gap_sleep() {

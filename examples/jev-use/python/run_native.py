@@ -3,13 +3,13 @@
 The runner attaches to an already running application (``--pid``), finds the
 task's window by title, and loops: read the app-owned oracle, observe the
 window once with ``get_window_state`` (tree and screenshot together), build
-the closed candidate set, send a validated ``cua.jev_choice_request_v2`` to
+the closed candidate set, send a validated ``pincer.jev_choice_request_v2`` to
 the chooser, dispatch the one selected element-bound action, and read the
 oracle again. The chooser only ever selects a supplied ID.
 
 Built-in tasks drive the AppKit, WPF, WinUI3, or GTK3 harness launched in task
-mode (``CUA_APPKIT_TASK_STATE``, ``CUA_WPF_TASK_STATE``,
-``CUA_WINUI3_TASK_STATE``, or ``CUA_GTK3_TASK_STATE`` set to ``<path>``); ``verify_native.py`` launches it, runs this runner, and
+mode (``PINCER_APPKIT_TASK_STATE``, ``PINCER_WPF_TASK_STATE``,
+``PINCER_WINUI3_TASK_STATE``, or ``PINCER_GTK3_TASK_STATE`` set to ``<path>``); ``verify_native.py`` launches it, runs this runner, and
 checks the state file independently.
 """
 
@@ -98,7 +98,7 @@ async def observe(
         "include_accessibility_tree": True,
         "include_screenshot": True,
         # The observation needs structured elements, the markdown tree and the
-        # completeness flags of the walk; cua-driver 0.35 returns the lean
+        # completeness flags of the walk; pincer 0.35 returns the lean
         # markdown-only read unless asked for the full response.
         "full_output": True,
         **task.scope.window_state_arguments(),
@@ -258,7 +258,7 @@ async def run_task(args: argparse.Namespace, task: NativeTask) -> str:
     foreground_ids: set[str] = set()
     label = f"jev-native-python-{uuid.uuid4().hex[:8]}"
     params = StdioServerParameters(
-        command=os.getenv("CUA_DRIVER_BIN", "cua-driver"), args=["mcp"], env=driver_environment()
+        command=os.getenv("PINCER_BIN", "pincer"), args=["mcp"], env=driver_environment()
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -395,7 +395,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--task", choices=NATIVE_TASK_IDS, required=True)
     parser.add_argument(
         "--provider", choices=("mock", "live", "s1"), default="mock",
-        help="s1 reads the loopback decide URL from CUA_S1_DECISION_URL",
+        help="s1 reads the loopback decide URL from PINCER_S1_DECISION_URL",
     )
     parser.add_argument("--pid", type=int, required=True, help="the running harness process")
     parser.add_argument("--state-file", required=True, help="the harness task-state file path")

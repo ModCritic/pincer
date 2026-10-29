@@ -137,7 +137,7 @@ def mapped_plugin(maps, plugin):
 def require_enabled_plugin(option):
     # The pinned Hyprland 0.56.2 getoption reply for a V2 CBoolValue uses
     # "bool": true, not the legacy integer config representation.
-    assert isinstance(option, dict) and option.get('option') == 'plugin:cua:enabled' \
+    assert isinstance(option, dict) and option.get('option') == 'plugin:pincer:enabled' \
         and option.get('bool') is True and 'int' not in option, 'setup has not enabled the plugin'
 
 
@@ -196,8 +196,8 @@ def artifact_identity(args, product, plugin, app_profile):
         assert build['source']['source_revision'] == product['source_sha'], 'build product source mismatch'
         assert build['source']['driver_version'] == kit['source']['driver_version'], 'build Driver version mismatch'
         assert build['kit'] == kit and build['profile'] == profile, 'build kit/profile provenance mismatch'
-        assert kit['cmake_options'] == {'CUA_HYPRLAND_INPUT': 'ON', 'CUA_HYPRLAND_TEST_INPUT': 'OFF',
-                                        'CUA_HYPRLAND_INPUT_TRACE': 'OFF'}, 'not a production kit configuration'
+        assert kit['cmake_options'] == {'PINCER_HYPRLAND_INPUT': 'ON', 'PINCER_HYPRLAND_TEST_INPUT': 'OFF',
+                                        'PINCER_HYPRLAND_INPUT_TRACE': 'OFF'}, 'not a production kit configuration'
         assert build['module_sha256'] == digest(plugin)['sha256'], 'build module digest mismatch'
         return {'role': role, 'kit': digest(kit_path), 'profile': digest(profile_path),
                 'build': digest(build_path), 'profile_id': profile['profile_id'],
@@ -228,8 +228,8 @@ def provenance(args, app_profile=None):
     maps = mapped_plugin(Path(f'/proc/{pid}/maps').read_text(), plugin)
     artifact = artifact_identity(args, product, plugin, app_profile)
     plugins = read(['hyprctl', 'plugin', 'list'])
-    assert 'cua-hyprland-plugin' in plugins, 'plugin is mapped but not registered'
-    enabled = json.loads(read(['hyprctl', '-j', 'getoption', 'plugin:cua:enabled']))
+    assert 'pincer-hyprland-plugin' in plugins, 'plugin is mapped but not registered'
+    enabled = json.loads(read(['hyprctl', '-j', 'getoption', 'plugin:pincer:enabled']))
     save_json(args.evidence, 'plugin-enabled-option.json', enabled)
     require_enabled_plugin(enabled)
     files = {'driver': args.driver, 'plugin': plugin,
@@ -239,7 +239,7 @@ def provenance(args, app_profile=None):
             'source_versions': {
                 'driver': re.search(r'(?m)^version = "([^"]+)"',
                                     (source / 'rust/Cargo.toml').read_text())[1],
-                'plugin': re.search(r'project\(cua_hyprland_plugin VERSION ([\d.]+)',
+                'plugin': re.search(r'project\(pincer_hyprland_plugin VERSION ([\d.]+)',
                                     (source / 'hyprland-plugin/CMakeLists.txt').read_text())[1]},
             'driver_version': read([str(args.driver), '--version']),
             'app_profile': app_profile, 'packages': packages, 'app_files': app_files,
@@ -249,7 +249,7 @@ def provenance(args, app_profile=None):
 
 
 def create_calc_document(directory):
-    ods = directory / 'cua-smoke-calc.ods'
+    ods = directory / 'pincer-smoke-calc.ods'
     content = f'''<?xml version="1.0" encoding="UTF-8"?>
 <office:document-content xmlns:office="{NS['office']}" xmlns:table="{NS['table']}"
  xmlns:text="{NS['text']}" office:version="1.3"><office:body><office:spreadsheet>
@@ -269,7 +269,7 @@ def create_calc_document(directory):
 
 
 def create_inkscape_document(directory):
-    svg = directory / 'cua-smoke-inkscape.svg'
+    svg = directory / 'pincer-smoke-inkscape.svg'
     with svg.open('x') as stream:
         stream.write('''<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
 <rect id="smoke-rectangle" x="40" y="60" width="80" height="50" fill="#336699"/>
@@ -521,7 +521,7 @@ def observe(mcp, target, filename):
     attempts = []
     for attempt in range(1, OBSERVATION_ATTEMPTS + 1):
         # full_output: grounding needs structured elements from a complete
-        # walk, not the lean 250-node markdown read (cua-driver 0.35).
+        # walk, not the lean 250-node markdown read (pincer 0.35).
         result = content(mcp.tool('get_window_state', {**target, 'timeout_ms': OBSERVATION_TIMEOUT_MS,
                                                        'full_output': True}))
         assert filename in result.get('window_title', ''), 'snapshot is not the synthetic document'
@@ -663,7 +663,7 @@ def discover(mcp, app, document, old_pids, arguments=()):
 
 
 def inkscape_app_id_tag(directory):
-    return 'cua-smoke-' + hashlib.sha256(str(Path(directory).resolve()).encode()).hexdigest()[:16]
+    return 'pincer-smoke-' + hashlib.sha256(str(Path(directory).resolve()).encode()).hexdigest()[:16]
 
 
 def launch_arguments(app, document, directory):

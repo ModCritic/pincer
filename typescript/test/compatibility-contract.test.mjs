@@ -23,8 +23,8 @@ test("released package exports and declarations remain available", () => {
   }
 
   const nativeDeclarations = [
-    "cua_driver_contract.d.ts",
-    "cua_driver_sdk.d.ts",
+    "pincer_contract.d.ts",
+    "pincer_sdk.d.ts",
   ].map((name) =>
     fs.readFileSync(path.join(packageRoot, "dist", "native", name), "utf8"),
   ).join("\n")
@@ -41,14 +41,14 @@ test("released package exports and declarations remain available", () => {
 
   const normalizedSdk = normalize(
     fs.readFileSync(
-      path.join(packageRoot, "dist", "native", "cua_driver_sdk.d.ts"),
+      path.join(packageRoot, "dist", "native", "pincer_sdk.d.ts"),
       "utf8",
     ),
   )
-  for (const declaration of fixture.cua_driver_declarations) {
+  for (const declaration of fixture.pincer_declarations) {
     assert.ok(
       normalizedSdk.includes(normalize(declaration)),
-      `missing CuaDriver declaration: ${declaration}`,
+      `missing Pincer declaration: ${declaration}`,
     )
   }
 

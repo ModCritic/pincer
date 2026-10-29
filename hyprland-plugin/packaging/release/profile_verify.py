@@ -15,8 +15,8 @@ import tempfile
 
 SOURCE_REVISION = "4b3396d9fe4bd3cf723b0eb8db83c18a8764b520"
 DRIVER_VERSION = "0.24.0"
-STEM = f"cua-hyprland-plugin-{DRIVER_VERSION}-{SOURCE_REVISION}"
-OPTIONS = {"CUA_HYPRLAND_INPUT": "ON", "CUA_HYPRLAND_TEST_INPUT": "OFF", "CUA_HYPRLAND_INPUT_TRACE": "OFF"}
+STEM = f"pincer-hyprland-plugin-{DRIVER_VERSION}-{SOURCE_REVISION}"
+OPTIONS = {"PINCER_HYPRLAND_INPUT": "ON", "PINCER_HYPRLAND_TEST_INPUT": "OFF", "PINCER_HYPRLAND_INPUT_TRACE": "OFF"}
 TOOLING = ("profile_bundle.py", "profile_verify.py", "PROFILE-PKGBUILD.in", "PROFILE-USAGE.md", "lifecycle.py")
 PKGCONF = Path("/usr/bin/pkgconf")
 PKGCONF_ENV = {"PKG_CONFIG_ALLOW_SYSTEM_CFLAGS": "1", "PKG_CONFIG_ALLOW_SYSTEM_LIBS": "1"}
@@ -110,7 +110,7 @@ def validate_profile(profile):
 
 def source_stem(profile):
     source = validate_profile(profile)["source"]
-    return f"cua-hyprland-plugin-{source['driver_version']}-{source['revision']}"
+    return f"pincer-hyprland-plugin-{source['driver_version']}-{source['revision']}"
 
 
 def source_manifest(data, profile):
@@ -118,7 +118,7 @@ def source_manifest(data, profile):
     require(sha256(data) == profile["source"]["manifest_sha256"], "historical manifest checksum mismatch")
     manifest = read_json(data)
     expected = {"schema": 1, "source_revision": source["revision"], "driver_version": source["driver_version"],
-                "release_tag": "cua-driver-rs-v" + source["driver_version"], "plugin_version": "0.1.0",
+                "release_tag": "pincer-v" + source["driver_version"], "plugin_version": "0.1.0",
                 "architecture": "x86_64", "native_certified": False, "cmake_options": OPTIONS,
                 "hyprland_version": "0.56.2", "hyprland_package": "0.56.2-1",
                 "compiler_version": "16.1.1 20260728", "compiler_comment": "GCC: (GNU) 16.1.1 20260728"}
@@ -165,7 +165,7 @@ def verify_source(source, profile):
     require(actual == set(manifest["files"]) | {"SOURCE-PROVENANCE.json"}, "source file inventory mismatch")
     for name, checksum in manifest["files"].items():
         require(digest(source / name) == checksum, f"source checksum mismatch: {name}")
-    require(f"project(cua_hyprland_plugin VERSION {manifest['plugin_version']} LANGUAGES CXX)" in (source / "CMakeLists.txt").read_text(), "plugin version mismatch")
+    require(f"project(pincer_hyprland_plugin VERSION {manifest['plugin_version']} LANGUAGES CXX)" in (source / "CMakeLists.txt").read_text(), "plugin version mismatch")
     return manifest
 
 
@@ -272,9 +272,9 @@ def verify_native(cxx, profile):
     require(header_inventory_sha256() == profile["hyprland"]["headers_sha256"], "Hyprland header inventory mismatch")
     macros = run(str(cxx), "-dM", "-E", "-x", "c++", "-", input="")
     require(f'#define __VERSION__ "{profile["compiler"]["version"]}"' in macros.splitlines() and not re.search(r"^#define __clang__\b", macros, re.MULTILINE), "GCC version/date mismatch")
-    with tempfile.TemporaryDirectory(prefix="cua-profile-probe-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="pincer-profile-probe-") as temporary:
         probe = Path(temporary) / "probe.o"
-        run(str(cxx), "-x", "c++", "-c", "-o", str(probe), "-", input="int cua_compiler_probe;\n")
+        run(str(cxx), "-x", "c++", "-c", "-o", str(probe), "-", input="int pincer_compiler_probe;\n")
         elf_comment(probe, profile["compiler"]["comment"])
     runtime = Path(run(str(cxx), "--print-file-name=libstdc++.so.6")).resolve(strict=True)
     require(runtime.name == profile["runtime"]["basename"] and digest(runtime) == runtime_sha, "compiler shared runtime mismatch")
@@ -374,7 +374,7 @@ def verify_build(build, source, cxx, profile):
         if match:
             require(match[1] not in cache, "duplicate CMake cache entry")
             cache[match[1]] = match[2]
-    expected = dict(OPTIONS, BUILD_TESTING="ON", CUA_HYPRLAND_BUILD_PLUGIN="ON", CMAKE_BUILD_TYPE="Release",
+    expected = dict(OPTIONS, BUILD_TESTING="ON", PINCER_HYPRLAND_BUILD_PLUGIN="ON", CMAKE_BUILD_TYPE="Release",
                     CMAKE_GENERATOR="Ninja",
                     PKG_CONFIG_EXECUTABLE=str(PKGCONF), PKG_CONFIG_ARGN="", PKG_CONFIG_USE_CMAKE_PREFIX_PATH="OFF",
                     HYPRLAND_VERSION=profile["hyprland"]["header_version"],
@@ -382,8 +382,8 @@ def verify_build(build, source, cxx, profile):
                     HYPRLAND_INCLUDE_DIRS=";".join(pkgconfig["include_dirs"]),
                     HYPRLAND_CFLAGS_OTHER=";".join(pkgconfig["cflags_other"]),
                     HYPRLAND_LDFLAGS=";".join(pkgconfig["ldflags"]),
-                    CUA_HYPRLAND_EXPECTED_VERSION=profile["hyprland"]["header_version"],
-                    CUA_HYPRLAND_TEST_OPERATOR_KEY="", CMAKE_CXX_COMPILER=str(cxx),
+                    PINCER_HYPRLAND_EXPECTED_VERSION=profile["hyprland"]["header_version"],
+                    PINCER_HYPRLAND_TEST_OPERATOR_KEY="", CMAKE_CXX_COMPILER=str(cxx),
                     CMAKE_HOME_DIRECTORY=str(source.resolve()))
     for name, value in expected.items():
         require(cache.get(name) == value, f"build configuration mismatch: {name}")
@@ -394,7 +394,7 @@ def verify_build(build, source, cxx, profile):
             require(not value, f"CMake routing override refused: {name}")
         if name.startswith(("CMAKE_CXX_FLAGS", "CMAKE_EXE_LINKER_FLAGS", "CMAKE_MODULE_LINKER_FLAGS", "CMAKE_SHARED_LINKER_FLAGS")):
             verify_flags(shlex.split(value), name)
-    module = build / "cua-hyprland-plugin.so"
+    module = build / "pincer-hyprland-plugin.so"
     elf_comment(module, profile["compiler"]["comment"])
     linked_runtime(module, profile)
     return digest(module)

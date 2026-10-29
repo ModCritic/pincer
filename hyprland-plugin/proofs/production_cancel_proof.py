@@ -51,7 +51,7 @@ def validate_app_profile(plan, *, require_drag=True):
         specs = plan['agents']
         assert all(spec['app'] == 'inkscape' for spec in specs), 'inkscape-only requires Inkscape targets'
         documents = [Path(spec['document']) for spec in specs]
-        assert all(path.is_absolute() and path.name == 'cua-smoke-inkscape.svg' for path in documents), \
+        assert all(path.is_absolute() and path.name == 'pincer-smoke-inkscape.svg' for path in documents), \
             'Inkscape requires an absolute synthetic SVG document'
         assert len({path.resolve() for path in documents}) == len(documents), 'distinct documents required'
         targets = [plan['foreground'], *(spec['target'] for spec in specs)]
@@ -490,7 +490,7 @@ def run(args):
         plan = json.loads(args.plan.read_text())
         save('plan.json', plan)
         validate_plan(plan)
-        assert args.trace_socket and args.trace_socket.name in ('cua-input-v3.sock', 'cua-input-v3-2.sock'), \
+        assert args.trace_socket and args.trace_socket.name in ('pincer-input-v3.sock', 'pincer-input-v3-2.sock'), \
             'cancellation requires continuous v3 trace'
         origin = provenance(args, plan)
         for name in ('production_cancel_proof.py', 'production_cancel_proof_test.py', 'proof_fixtures.py'):

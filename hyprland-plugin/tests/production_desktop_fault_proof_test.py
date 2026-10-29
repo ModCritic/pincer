@@ -944,7 +944,7 @@ class RunnerTests(unittest.TestCase):
                     candidate['fault']['pointer_cleanup'] = policy
                 path.write_text(json.dumps(candidate))
                 args = SimpleNamespace(plan=path, evidence=directory / 'evidence', driver=Path('/driver'),
-                    primary_grab=Path('/grab'), foreground_journal=Path('/journal'), trace_socket=Path('/cua-input-v3.sock'))
+                    primary_grab=Path('/grab'), foreground_journal=Path('/journal'), trace_socket=Path('/pincer-input-v3.sock'))
                 order = []
                 cancelled = trace(CANCEL)
                 fault_record = keymap_record() if kind == 'keymap' else record()

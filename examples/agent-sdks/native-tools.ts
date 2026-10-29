@@ -1,4 +1,4 @@
-/** Narrow agent-tool adapter over the same-process Cua Driver TypeScript SDK. */
+/** Narrow agent-tool adapter over the same-process Pincer TypeScript SDK. */
 
 import {
   ActionTarget,
@@ -6,13 +6,13 @@ import {
   ClickButton,
   ClickInput,
   ClickPosition,
-  CuaDriver,
+  Pincer,
   GetDesktopStateInput,
   InputDeliveryMode,
   PressKeyInput,
   ToolResult,
   TypeTextInput,
-} from '@trycua/cua-driver';
+} from 'pincer-driver';
 
 type McpContent =
   | { type: 'text'; text: string }
@@ -24,7 +24,7 @@ export type NativeToolResult = {
 };
 
 export class NativeDesktopTools {
-  readonly driver = CuaDriver.create(undefined);
+  readonly driver = Pincer.create(undefined);
   readonly desktopTarget = new ActionTarget.Desktop({ displayId: 'primary' });
 
   constructor(private readonly timeoutMs = 30_000) {}

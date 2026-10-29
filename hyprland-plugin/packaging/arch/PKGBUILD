@@ -1,9 +1,9 @@
 # Local-development recipe. Build only from an explicit Pincer checkout.
 # shellcheck shell=bash disable=SC2034,SC2154
-pkgname=cua-hyprland-plugin-local
+pkgname=pincer-hyprland-plugin-local
 pkgver=0.1.0
 pkgrel=1
-pkgdesc='Discovery-only Cua integration for an exact local Hyprland ABI'
+pkgdesc='Discovery-only Pincer integration for an exact local Hyprland ABI'
 arch=('x86_64' 'aarch64')
 url='https://github.com/ModCritic/pincer'
 license=('MIT')
@@ -12,17 +12,17 @@ options=('!strip' '!debug' '!lto')
 source=()
 sha256sums=()
 
-: "${CUA_SOURCE_ROOT:?Set CUA_SOURCE_ROOT to the root of a Pincer checkout}"
-: "${CUA_HYPRLAND_PACKAGE_VERSION:?Set CUA_HYPRLAND_PACKAGE_VERSION to the exact pacman package version}"
-_source_root="$(realpath -e -- "$CUA_SOURCE_ROOT")"
+: "${PINCER_SOURCE_ROOT:?Set PINCER_SOURCE_ROOT to the root of a Pincer checkout}"
+: "${PINCER_HYPRLAND_PACKAGE_VERSION:?Set PINCER_HYPRLAND_PACKAGE_VERSION to the exact pacman package version}"
+_source_root="$(realpath -e -- "$PINCER_SOURCE_ROOT")"
 _plugin_source="${_source_root}/hyprland-plugin"
-_hyprland_package_version="$CUA_HYPRLAND_PACKAGE_VERSION"
-_hyprland_header_version="${CUA_HYPRLAND_HEADER_VERSION:-0.56.2}"
+_hyprland_package_version="$PINCER_HYPRLAND_PACKAGE_VERSION"
+_hyprland_header_version="${PINCER_HYPRLAND_HEADER_VERSION:-0.56.2}"
 depends=("hyprland=${_hyprland_package_version}")
 
 prepare() {
   [[ -f "${_plugin_source}/CMakeLists.txt" ]] || {
-    printf 'error: CUA_SOURCE_ROOT does not contain the Hyprland plugin source\n' >&2
+    printf 'error: PINCER_SOURCE_ROOT does not contain the Hyprland plugin source\n' >&2
     return 1
   }
 

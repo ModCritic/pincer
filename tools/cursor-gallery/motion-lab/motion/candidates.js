@@ -1,4 +1,4 @@
-// Candidate motion styles for the Cua Driver agent cursor.
+// Candidate motion styles for the Pincer agent cursor.
 //
 // Each candidate = path model x velocity profile x micro-behaviours, with its
 // parameters documented in `params` ({ v: default, doc }). Range values
@@ -34,7 +34,7 @@ import {
   bumpProfile,
   wobbleProfile,
   chain,
-  cuaToday,
+  pincerToday,
   durations,
   glide,
   hold,
@@ -122,17 +122,17 @@ def({
   id: 'minjerk-arc',
   name: 'Min-jerk arc',
   category: 'human-realistic',
-  technique: 'Cua cubic Bezier (random small arc) / minimum-jerk / Fitts',
+  technique: 'Pincer cubic Bezier (random small arc) / minimum-jerk / Fitts',
   look: 'Like fitts-minjerk but each reach bows a little to a random side, so consecutive moves never look copy-pasted.',
   refs: ['flashhogan1985'],
   params: {
     ...FITTS,
-    arcSize: prm([0.04, 0.1], 'Arc size range (Cua arc_size), side is random'),
-    arcFlow: prm([-0.2, 0.2], 'Arc flow range (Cua arc_flow)'),
+    arcSize: prm([0.04, 0.1], 'Arc size range (Pincer arc_size), side is random'),
+    arcFlow: prm([-0.2, 0.2], 'Arc flow range (Pincer arc_flow)'),
   },
   move: (ctx) =>
     glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, {
+      path: paths.pincer(ctx.from, ctx.aim, {
         arcSize: pick(ctx.rng, ctx.p.arcSize) * ctx.rng.sign(),
         arcFlow: pick(ctx.rng, ctx.p.arcFlow),
       }),
@@ -524,7 +524,7 @@ def({
     arcFlow: prm(0.4, 'Arc flow (apex position)'),
   },
   move: (ctx) => {
-    const path = paths.cua(ctx.from, ctx.aim, {
+    const path = paths.pincer(ctx.from, ctx.aim, {
       arcSize: ctx.p.arcSize * side(ctx),
       arcFlow: ctx.p.arcFlow,
     });
@@ -787,12 +787,12 @@ def({
 
 def({
   id: 'dubins-glide',
-  name: 'Dubins glide (Cua today)',
+  name: 'Dubins glide (Pincer today)',
   category: 'cinematic-demo',
   technique:
     'Dubins arc-straight-arc R=80 / speed-based smootherstep envelope / arrival spring (macOS constants)',
-  look: "Today's Cua Driver cursor. Heading-continuous swoops, sometimes a loop when the target is behind the heading.",
-  refs: ['cua-driver'],
+  look: "Today's Pincer cursor. Heading-continuous swoops, sometimes a loop when the target is behind the heading.",
+  refs: ['pincer'],
   heading: 'tangent',
   params: {
     turnRadius: prm(80, 'Minimum turn radius (pt)'),
@@ -805,7 +805,7 @@ def({
   pressMs: () => 120,
   postMs: () => 80,
   move: (ctx) =>
-    cuaToday(ctx, {
+    pincerToday(ctx, {
       turnRadius: ctx.p.turnRadius,
       peakSpeed: ctx.p.peakSpeed,
       minStart: ctx.p.minStart,
@@ -842,14 +842,14 @@ def({
   id: 'keynote-swoop',
   name: 'Keynote swoop',
   category: 'cinematic-demo',
-  technique: 'Cua cubic Bezier arc 0.25-0.35, flow +0.2 / easeInOutCubic / 350 + 0.35 D ms',
+  technique: 'Pincer cubic Bezier arc 0.25-0.35, flow +0.2 / easeInOutCubic / 350 + 0.35 D ms',
   look: 'Wide confident arc, the product-video move. Reads great on a launch video; too theatrical for every click.',
   refs: [],
   heading: 'tangent',
   params: { arcSize: prm([0.25, 0.35], 'Arc size'), arcFlow: prm(0.2, 'Arc flow') },
   move: (ctx) =>
     glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, {
+      path: paths.pincer(ctx.from, ctx.aim, {
         arcSize: pick(ctx.rng, ctx.p.arcSize) * side(ctx),
         arcFlow: ctx.p.arcFlow,
       }),
@@ -926,7 +926,7 @@ def({
   params: { arcSize: prm(0.1, 'Arc size') },
   move: (ctx) =>
     glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, { arcSize: ctx.p.arcSize * side(ctx) }),
+      path: paths.pincer(ctx.from, ctx.aim, { arcSize: ctx.p.arcSize * side(ctx) }),
       profile: ease.outExpo,
       durationMs: clamp(400 + 0.25 * D(ctx), 500, 1100),
     }),
@@ -947,7 +947,7 @@ def({
   },
   move: (ctx) =>
     glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, { arcSize: 0.22 * side(ctx), arcFlow: 0.1 }),
+      path: paths.pincer(ctx.from, ctx.aim, { arcSize: 0.22 * side(ctx), arcFlow: 0.1 }),
       profile: ease.inOutCubic,
       durationMs: durations.sqrt(D(ctx), 26, 300, 1000),
     }),
@@ -965,7 +965,7 @@ def({
   fx: { trail: true },
   move: (ctx) =>
     glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, { arcSize: 0.18 * side(ctx) }),
+      path: paths.pincer(ctx.from, ctx.aim, { arcSize: 0.18 * side(ctx) }),
       profile: ease.inOutCubic,
       durationMs: durations.sqrt(D(ctx), 24, 280, 900),
     }),
@@ -1121,7 +1121,7 @@ def({
   category: 'cinematic-demo',
   technique:
     'Score direct / turn-around / brake candidate arcs (length, angle energy, turn, bounds); spring progress',
-  look: 'Closest public reference to the Codex Computer Use cursor: momentum-aware arcs on a 1.4 s spring. Every move takes about as long whatever the distance; Cua should beat this with Fitts timing.',
+  look: 'Closest public reference to the Codex Computer Use cursor: momentum-aware arcs on a 1.4 s spring. Every move takes about as long whatever the distance; Pincer should beat this with Fitts timing.',
   refs: ['openara'],
   heading: 'tangent',
   fx: { fog: true },
@@ -1222,7 +1222,7 @@ def({
   params: {},
   move: (ctx) =>
     glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, { arcSize: 0.12 * side(ctx) }),
+      path: paths.pincer(ctx.from, ctx.aim, { arcSize: 0.12 * side(ctx) }),
       profile: ease.minJerk,
       durationMs: durations.sqrt(D(ctx), 24, 280, 950),
     }),
@@ -1249,7 +1249,7 @@ def({
   move: (ctx) => {
     const d = Math.max(1, D(ctx));
     return glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, { arcSize: 0.12 * side(ctx) }),
+      path: paths.pincer(ctx.from, ctx.aim, { arcSize: 0.12 * side(ctx) }),
       profile: wobbleProfile((t) => ease.minJerk(Math.min(1, t / 0.6)), {
         amp: Math.min(0.08, ctx.p.ampPx / d),
         cycles: ctx.p.cycles,
@@ -1278,7 +1278,7 @@ def({
     const d = Math.max(1, D(ctx));
     const cap = ctx.p.maxPx / d;
     return glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, { arcSize: 0.15 * side(ctx) }),
+      path: paths.pincer(ctx.from, ctx.aim, { arcSize: 0.15 * side(ctx) }),
       profile: bumpProfile(ease.minJerk, {
         antic: Math.min(cap, pick(ctx.rng, ctx.p.antic)),
         over: Math.min(cap, ctx.p.over),
@@ -2204,8 +2204,8 @@ dc({
   name: 'Signature arc',
   basedOn: ['minjerk-arc', 'anticipate-follow', 'velocity-fog'],
   technique:
-    'Cua arc 0.16 / min-jerk with a 1.8% follow-through (cap 8 pt) / Fitts timing / speed glow',
-  look: 'Proposed Cua default: one confident arc, a whisper of follow-through, soft glow at speed, squish + ripple on click.',
+    'Pincer arc 0.16 / min-jerk with a 1.8% follow-through (cap 8 pt) / Fitts timing / speed glow',
+  look: 'Proposed Pincer default: one confident arc, a whisper of follow-through, soft glow at speed, squish + ripple on click.',
   fx: { fog: true },
   params: {
     arcSize: prm(0.16, 'Arc size'),
@@ -2214,7 +2214,7 @@ dc({
   },
   move: (ctx) =>
     glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, { arcSize: ctx.p.arcSize * side(ctx), arcFlow: 0.15 }),
+      path: paths.pincer(ctx.from, ctx.aim, { arcSize: ctx.p.arcSize * side(ctx), arcFlow: 0.15 }),
       profile: bumpProfile(ease.minJerk, {
         over: Math.min(ctx.p.over, ctx.p.overCapPx / Math.max(1, D(ctx))),
         overAt: 0.82,
@@ -2233,7 +2233,7 @@ dc({
   params: { ampPx: prm(6, 'Overshoot (pt)'), cycles: prm(1.3, 'Wobble cycles') },
   move: (ctx) =>
     glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, { arcSize: 0.12 * side(ctx) }),
+      path: paths.pincer(ctx.from, ctx.aim, { arcSize: 0.12 * side(ctx) }),
       profile: wobbleProfile((t) => ease.minJerk(Math.min(1, t / 0.68)), {
         amp: Math.min(0.05, ctx.p.ampPx / Math.max(1, D(ctx))),
         cycles: ctx.p.cycles,
@@ -2254,7 +2254,7 @@ dc({
   params: { arcSize: prm(0.24, 'Arc size') },
   move: (ctx) =>
     glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, { arcSize: ctx.p.arcSize * side(ctx), arcFlow: 0.2 }),
+      path: paths.pincer(ctx.from, ctx.aim, { arcSize: ctx.p.arcSize * side(ctx), arcFlow: 0.2 }),
       profile: ease.inOutCubic,
       durationMs: dcMs(ctx, 1.15),
     }),
@@ -2273,7 +2273,7 @@ dc({
   move: (ctx) => {
     const d = Math.max(1, D(ctx));
     return glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, { arcSize: 0.14 * side(ctx) }),
+      path: paths.pincer(ctx.from, ctx.aim, { arcSize: 0.14 * side(ctx) }),
       profile: bumpProfile(ease.minJerk, {
         antic: Math.min(ctx.p.antic, 12 / d),
         over: Math.min(ctx.p.over, 10 / d),
@@ -2315,7 +2315,7 @@ dc({
   params: {},
   move: (ctx) =>
     glide(ctx, {
-      path: paths.cua(ctx.from, ctx.aim, { arcSize: 0.2 * side(ctx), arcFlow: 0.1 }),
+      path: paths.pincer(ctx.from, ctx.aim, { arcSize: 0.2 * side(ctx), arcFlow: 0.1 }),
       profile: ease.inOutCubic,
       durationMs: dcMs(ctx, 1.15),
     }),

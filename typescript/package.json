@@ -1,7 +1,7 @@
 {
-  "name": "@trycua/cua-driver",
+  "name": "pincer-driver",
   "version": "0.35.4",
-  "description": "Rust-backed Cua Driver SDK and embedded Node host",
+  "description": "Rust-backed Pincer SDK and embedded Node host",
   "type": "module",
   "license": "MIT",
   "repository": {

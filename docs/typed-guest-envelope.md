@@ -5,7 +5,7 @@ This is the receiver foundation for the narrow slice accepted in
 It is not a released guest endpoint or a Fleet connection recipe.
 
 `DriverEnvelopeReceiver` dispatches the existing version-1 Driver envelopes
-through a canonical `CuaDriverSession`. A trusted guest host creates the session
+through a canonical `PincerSession`. A trusted guest host creates the session
 and chooses its options. Requests cannot choose permission modes or manifest
 paths. The native result envelope is preserved, including structured actions,
 verification results, images, and tool refusals.
@@ -70,8 +70,8 @@ cua-spacesd and Sandbox APIs are unchanged.
 From `rust/`, run:
 
 ```sh
-cargo check -p cua-driver-sdk --locked
-cargo test -p cua-driver-sdk --locked remote_receiver::tests -- --test-threads=1
+cargo check -p pincer-sdk --locked
+cargo test -p pincer-sdk --locked remote_receiver::tests -- --test-threads=1
 ```
 
 Fake-executor tests observe dispatch counts, exact results, cancellation races,

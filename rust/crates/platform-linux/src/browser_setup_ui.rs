@@ -6,7 +6,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use cua_driver_core::browser::{
+use pincer_core::browser::{
     BrowserProduct, BrowserRefusal, BrowserRefusalCode, BrowserSetupDescriptor,
     EXISTING_PROFILE_SETUP_READY_TIMEOUT,
 };
@@ -246,7 +246,7 @@ fn trusted_setup_navigation(
     // arrives in one operation, with no per-keysym synthesis to be mistranslated
     // by the active layout or dropped by a virtual-keyboard seat. `ctrl+a` and
     // `ctrl+v` are plain letters, so they carry no layout dependency of their own.
-    use cua_driver_core::clipboard::ClipboardBackend;
+    use pincer_core::clipboard::ClipboardBackend;
     let clipboard = crate::clipboard::LinuxClipboard::new();
     let restore = clipboard.read_text().ok().flatten();
     clipboard
@@ -672,7 +672,7 @@ pub fn disable(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cua_driver_core::browser::{existing_profile_setup_descriptor, BrowserProduct};
+    use pincer_core::browser::{existing_profile_setup_descriptor, BrowserProduct};
 
     fn descriptor() -> &'static BrowserSetupDescriptor {
         existing_profile_setup_descriptor(BrowserProduct::GoogleChrome).unwrap()

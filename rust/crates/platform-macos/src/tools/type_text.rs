@@ -22,8 +22,8 @@
 //! (e.g., to trigger live-search debounce handlers).
 
 use async_trait::async_trait;
-use cua_driver_contract::TypeTextInput;
-use cua_driver_core::{
+use pincer_contract::TypeTextInput;
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
     tool_args::parse_typed_projection,
@@ -38,7 +38,7 @@ use crate::ax::bindings::{
 use crate::focus_guard;
 use crate::window_change_detector::WindowChangeDetector;
 use core_foundation::base::CFRelease;
-use cua_driver_core::background_input::BackgroundRefusal;
+use pincer_core::background_input::BackgroundRefusal;
 
 use super::ToolState;
 
@@ -71,7 +71,7 @@ fn def() -> &'static ToolDef {
                     "type": "integer",
                     "description": "Window ID. Omit with element_token."
                 },
-                "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                "element_token": pincer_core::tool_schema::element_token_schema(),
                 "x": { "type": "number", "description": "Screenshot-pixel X of the field (get_window_state PNG, as in click). With y and no element_token, pixel-clicks to focus, then types." },
                 "y": { "type": "number", "description": "Screenshot-pixel Y (see x)." },
                 "delay_ms": {
@@ -107,7 +107,7 @@ fn screen_sharing_delivery_error(
     Some(
         ToolResult::error(
             "Screen Sharing text input requires delivery_mode:\"foreground\" and window_id \
-             so Cua Driver can deliver physical HID key transitions safely.",
+             so Pincer can deliver physical HID key transitions safely.",
         )
         .with_structured(serde_json::json!({
             "code": "SCREEN_SHARING_REQUIRES_FOREGROUND_HID",
@@ -129,7 +129,7 @@ impl Tool for TypeTextTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         if args.opt_str("scope").as_deref() == Some("desktop")
             && args.get("pid").is_none()
             && args.get("window_id").is_none()
@@ -138,9 +138,8 @@ impl Tool for TypeTextTool {
                 Ok(input) => input,
                 Err(result) => return result,
             };
-            let text =
-                cua_driver_core::text_sanitize::strip_trailing_agent_protocol_tags(&input.text)
-                    .into_owned();
+            let text = pincer_core::text_sanitize::strip_trailing_agent_protocol_tags(&input.text)
+                .into_owned();
             let delay_ms = args.u64_or("delay_ms", 30).min(200);
             if let Some(refusal) = synthesis_preflight(
                 TextDeliveryRoute::UnicodeSynthesis,
@@ -175,9 +174,9 @@ impl Tool for TypeTextTool {
             Err(e) => return e,
         };
         // Strip trailing agent-protocol closing tags — see
-        // cua_driver_core::text_sanitize docs for rationale.
-        let text = cua_driver_core::text_sanitize::strip_trailing_agent_protocol_tags(&text_raw)
-            .into_owned();
+        // pincer_core::text_sanitize docs for rationale.
+        let text =
+            pincer_core::text_sanitize::strip_trailing_agent_protocol_tags(&text_raw).into_owned();
         let window_id_arg = args.opt_u64("window_id");
         let resolved = match self.state.snapshots.resolve(pid, &args) {
             Ok(r) => r,
@@ -839,7 +838,7 @@ async fn background_keyboard_policy(
     window_id: u32,
     element_ptr: Option<usize>,
 ) -> Result<(super::BackgroundMutationLease, BackgroundKeyboardPolicy), ToolResult> {
-    use cua_driver_core::background_input::{
+    use pincer_core::background_input::{
         decide_background_input, BackgroundAction, BackgroundInputDecision, ExactWindowTarget,
     };
     let lease = super::acquire_background_mutation(pid).await;
@@ -1690,13 +1689,13 @@ const NO_FOCUSED_TEXT_INPUT: &str = "no_focused_text_input";
 
 fn no_focused_text_input_refusal(
     something_focused: bool,
-) -> cua_driver_core::background_input::BackgroundRefusal {
+) -> pincer_core::background_input::BackgroundRefusal {
     let what = if something_focused {
         "the focused element in this window is not a text input"
     } else {
         "no element in this window has keyboard focus"
     };
-    cua_driver_core::background_input::BackgroundRefusal {
+    pincer_core::background_input::BackgroundRefusal {
         code: NO_FOCUSED_TEXT_INPUT,
         reason: format!(
             "{what}, so typed keys would act on the window instead (in Finder they move the \
@@ -1753,7 +1752,7 @@ mod tests {
     #[test]
     fn semantic_only_policy_refuses_terminal_cgevent_rung() {
         let refusal = BackgroundRefusal {
-            code: cua_driver_core::background_input::refusal_codes::SAME_PID_KEYBOARD_AMBIGUITY,
+            code: pincer_core::background_input::refusal_codes::SAME_PID_KEYBOARD_AMBIGUITY,
             reason: "test".into(),
             advice: None,
         };

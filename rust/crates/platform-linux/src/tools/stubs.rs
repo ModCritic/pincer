@@ -2,7 +2,7 @@
 //! Schemas match the macOS platform-macos implementations (cross-platform interface).
 
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
@@ -56,7 +56,7 @@ macro_rules! contract_stub_tool {
             impl $struct_name {
                 pub fn def_static() -> &'static ToolDef {
                     DEF.get_or_init(|| {
-                        let contract = cua_driver_contract::tool_contract($tool_name)
+                        let contract = pincer_contract::tool_contract($tool_name)
                             .expect("canonical cursor contract exists");
                         ToolDef::from_contract(&contract)
                     })
@@ -100,7 +100,7 @@ stub_tool!(
      screenshot — ground on both and cross-check (the tree lies on some surfaces). \
      Choose the modality at ACTION time: an element ax action (element_token) or an \
      element px action (x,y) off the screenshot.",
-    serde_json::json!({"type":"object","required":["pid","window_id"],"properties":{"session": cua_driver_core::tool_schema::session_schema(),"pid":{"type":"integer"},"window_id":{"type":"integer"},"query":{"type":"string"},"include_screenshot":{"type":"boolean","description":"Default true — returns a grounding screenshot alongside the tree. Set false to skip the grab and return tree only (the cheap path for re-indexing before an element ax action)."}},"additionalProperties":false})
+    serde_json::json!({"type":"object","required":["pid","window_id"],"properties":{"session": pincer_core::tool_schema::session_schema(),"pid":{"type":"integer"},"window_id":{"type":"integer"},"query":{"type":"string"},"include_screenshot":{"type":"boolean","description":"Default true — returns a grounding screenshot alongside the tree. Set false to skip the grab and return tree only (the cheap path for re-indexing before an element ax action)."}},"additionalProperties":false})
 );
 
 stub_tool!(
@@ -120,7 +120,7 @@ stub_tool!(
     ClickTool,
     "click",
     "Click at (x, y) or on an AT-SPI element by element_token.",
-    serde_json::json!({"type":"object","required":[],"properties":{"session": cua_driver_core::tool_schema::session_schema(),"pid":{"type":"integer"},"window_id":{"type":"integer"},"element_token": cua_driver_core::tool_schema::element_token_schema(),"x":{"type":"number"},"y":{"type":"number"},"modifier": cua_driver_core::tool_schema::modifier_schema(),"from_zoom":{"type":"boolean"}},"additionalProperties":false})
+    serde_json::json!({"type":"object","required":[],"properties":{"session": pincer_core::tool_schema::session_schema(),"pid":{"type":"integer"},"window_id":{"type":"integer"},"element_token": pincer_core::tool_schema::element_token_schema(),"x":{"type":"number"},"y":{"type":"number"},"modifier": pincer_core::tool_schema::modifier_schema(),"from_zoom":{"type":"boolean"}},"additionalProperties":false})
 );
 
 stub_tool!(
@@ -128,7 +128,7 @@ stub_tool!(
     DoubleClickTool,
     "double_click",
     "Double-click at (x, y) or on an AT-SPI element by element_token.",
-    serde_json::json!({"type":"object","required":["pid"],"properties":{"session": cua_driver_core::tool_schema::session_schema(),"pid":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"},"window_id":{"type":"integer"},"element_token": cua_driver_core::tool_schema::element_token_schema()},"additionalProperties":false})
+    serde_json::json!({"type":"object","required":["pid"],"properties":{"session": pincer_core::tool_schema::session_schema(),"pid":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"},"window_id":{"type":"integer"},"element_token": pincer_core::tool_schema::element_token_schema()},"additionalProperties":false})
 );
 
 stub_tool!(
@@ -136,7 +136,7 @@ stub_tool!(
     RightClickTool,
     "right_click",
     "Right-click (AT-SPI action on element, or synthesized event at x,y).",
-    serde_json::json!({"type":"object","required":["pid"],"properties":{"session": cua_driver_core::tool_schema::session_schema(),"pid":{"type":"integer"},"element_token": cua_driver_core::tool_schema::element_token_schema(),"window_id":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"},"modifier": cua_driver_core::tool_schema::modifier_schema()},"additionalProperties":false})
+    serde_json::json!({"type":"object","required":["pid"],"properties":{"session": pincer_core::tool_schema::session_schema(),"pid":{"type":"integer"},"element_token": pincer_core::tool_schema::element_token_schema(),"window_id":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"},"modifier": pincer_core::tool_schema::modifier_schema()},"additionalProperties":false})
 );
 
 stub_tool!(
@@ -144,7 +144,7 @@ stub_tool!(
     TypeTextTool,
     "type_text",
     "Insert text into the target pid via AT-SPI SetTextContents or XSendEvent keystrokes.",
-    serde_json::json!({"type":"object","required":["pid","text"],"properties":{"session": cua_driver_core::tool_schema::session_schema(),"pid":{"type":"integer"},"text":{"type":"string"},"element_token": cua_driver_core::tool_schema::element_token_schema(),"window_id":{"type":"integer"},"x":{"type":"number","description":"Screenshot-pixel X of the field to type into — the element px action form: pixel-click there to focus, then type. Pass with y, no element_token."},"y":{"type":"number","description":"Screenshot-pixel Y of the field (see x)."}},"additionalProperties":false})
+    serde_json::json!({"type":"object","required":["pid","text"],"properties":{"session": pincer_core::tool_schema::session_schema(),"pid":{"type":"integer"},"text":{"type":"string"},"element_token": pincer_core::tool_schema::element_token_schema(),"window_id":{"type":"integer"},"x":{"type":"number","description":"Screenshot-pixel X of the field to type into — the element px action form: pixel-click there to focus, then type. Pass with y, no element_token."},"y":{"type":"number","description":"Screenshot-pixel Y of the field (see x)."}},"additionalProperties":false})
 );
 
 stub_tool!(
@@ -152,7 +152,7 @@ stub_tool!(
     TypeTextCharsTool,
     "type_text_chars",
     "Type text character-by-character with configurable per-character delay.",
-    serde_json::json!({"type":"object","required":["pid","text"],"properties":{"pid":{"type":"integer"},"text":{"type":"string"},"delay_ms":{"type":"integer"},"window_id":{"type":"integer"},"element_token": cua_driver_core::tool_schema::element_token_schema()},"additionalProperties":false})
+    serde_json::json!({"type":"object","required":["pid","text"],"properties":{"pid":{"type":"integer"},"text":{"type":"string"},"delay_ms":{"type":"integer"},"window_id":{"type":"integer"},"element_token": pincer_core::tool_schema::element_token_schema()},"additionalProperties":false})
 );
 
 stub_tool!(
@@ -160,7 +160,7 @@ stub_tool!(
     PressKeyTool,
     "press_key",
     "Press and release a single key delivered directly to the target pid. No focus steal.",
-    serde_json::json!({"type":"object","required":["pid","key"],"properties":{"session": cua_driver_core::tool_schema::session_schema(),"pid":{"type":"integer"},"key":{"type":"string"},"modifiers":{"type":"array","items":{"type":"string"}},"window_id":{"type":"integer"},"element_token": cua_driver_core::tool_schema::element_token_schema(),"x":{"type":"number","description":"Screenshot-pixel X — the element px action form: pixel-click there to focus, then send the key. Pass with y, no element_token."},"y":{"type":"number","description":"Screenshot-pixel Y (see x)."}},"additionalProperties":false})
+    serde_json::json!({"type":"object","required":["pid","key"],"properties":{"session": pincer_core::tool_schema::session_schema(),"pid":{"type":"integer"},"key":{"type":"string"},"modifiers":{"type":"array","items":{"type":"string"}},"window_id":{"type":"integer"},"element_token": pincer_core::tool_schema::element_token_schema(),"x":{"type":"number","description":"Screenshot-pixel X — the element px action form: pixel-click there to focus, then send the key. Pass with y, no element_token."},"y":{"type":"number","description":"Screenshot-pixel Y (see x)."}},"additionalProperties":false})
 );
 
 stub_tool!(
@@ -168,7 +168,7 @@ stub_tool!(
     HotkeyTool,
     "hotkey",
     "Press a combination of keys simultaneously, e.g. [\"ctrl\",\"c\"] for Copy.",
-    serde_json::json!({"type":"object","required":["pid","keys"],"properties":{"session": cua_driver_core::tool_schema::session_schema(),"pid":{"type":"integer"},"keys":{"type":"array","items":{"type":"string"},"minItems":2},"x":{"type":"number","description":"Screenshot-pixel X — the element px action form: pixel-click there to focus, then send the combo. Pass with y."},"y":{"type":"number","description":"Screenshot-pixel Y (see x)."}},"additionalProperties":false})
+    serde_json::json!({"type":"object","required":["pid","keys"],"properties":{"session": pincer_core::tool_schema::session_schema(),"pid":{"type":"integer"},"keys":{"type":"array","items":{"type":"string"},"minItems":2},"x":{"type":"number","description":"Screenshot-pixel X — the element px action form: pixel-click there to focus, then send the combo. Pass with y."},"y":{"type":"number","description":"Screenshot-pixel Y (see x)."}},"additionalProperties":false})
 );
 
 stub_tool!(
@@ -176,12 +176,12 @@ stub_tool!(
     SetValueTool,
     "set_value",
     "Set the value of an AT-SPI element (text field, dropdown, checkbox).",
-    serde_json::json!({"type":"object","required":["pid","value"],"properties":{"session": cua_driver_core::tool_schema::session_schema(),"pid":{"type":"integer"},"window_id":{"type":"integer"},"element_token": cua_driver_core::tool_schema::element_token_schema(),"value":{"type":"string"}},"additionalProperties":false})
+    serde_json::json!({"type":"object","required":["pid","value"],"properties":{"session": pincer_core::tool_schema::session_schema(),"pid":{"type":"integer"},"window_id":{"type":"integer"},"element_token": pincer_core::tool_schema::element_token_schema(),"value":{"type":"string"}},"additionalProperties":false})
 );
 
 stub_tool!(scroll_m, ScrollTool, "scroll",
     "Scroll the target pid's focused region. direction required; by defaults to line, amount defaults to 3.",
-    serde_json::json!({"type":"object","required":["direction"],"properties":{"session": cua_driver_core::tool_schema::session_schema(),"cursor_id":{"type":"string"},"pid":{"type":"integer"},"direction":{"type":"string","enum":["up","down","left","right"]},"by":{"type":"string","enum":["line","page"]},"amount":{"type":"integer","minimum":1,"maximum":50},"window_id":{"type":"integer"},"element_token": cua_driver_core::tool_schema::element_token_schema()},"additionalProperties":false}));
+    serde_json::json!({"type":"object","required":["direction"],"properties":{"session": pincer_core::tool_schema::session_schema(),"cursor_id":{"type":"string"},"pid":{"type":"integer"},"direction":{"type":"string","enum":["up","down","left","right"]},"by":{"type":"string","enum":["line","page"]},"amount":{"type":"integer","minimum":1,"maximum":50},"window_id":{"type":"integer"},"element_token": pincer_core::tool_schema::element_token_schema()},"additionalProperties":false}));
 
 stub_tool!(
     get_screen_size_m,
@@ -229,7 +229,7 @@ impl Tool for InvokeMenuTool {
             // Menu schemas are portable subsets, not canonical runtime schemas.
             // Match the native menu definition without using the cursor bridge.
             let contract =
-                cua_driver_contract::tool_contract("invoke_menu").expect("invoke_menu contract");
+                pincer_contract::tool_contract("invoke_menu").expect("invoke_menu contract");
             ToolDef {
                 name: contract.name,
                 description: contract.description,
@@ -259,7 +259,7 @@ stub_tool!(
     get_config_m,
     GetConfigTool,
     "get_config",
-    "Return current cua-driver-rs configuration.",
+    "Return current pincer configuration.",
     serde_json::json!({"type":"object","properties":{},"additionalProperties":false})
 );
 
@@ -267,7 +267,7 @@ stub_tool!(
     set_config_m,
     SetConfigTool,
     "set_config",
-    "Update cua-driver-rs configuration.",
+    "Update pincer configuration.",
     serde_json::json!({"type":"object","properties":{"max_image_dimension":{"type":"integer"}},"additionalProperties":false})
 );
 
@@ -295,7 +295,7 @@ mod move_cursor_m {
                 name: "move_cursor".into(),
                 description: "Move the agent cursor overlay to (x, y). Does NOT move the real \
                     mouse cursor — the user's cursor stays where it is.".into(),
-                input_schema: serde_json::json!({"type":"object","required":["x","y"],"properties":{"x":{"type":"number"},"y":{"type":"number"},"session": cua_driver_core::tool_schema::session_schema(),"cursor_id":{"type":"string"}},"additionalProperties":false}),
+                input_schema: serde_json::json!({"type":"object","required":["x","y"],"properties":{"x":{"type":"number"},"y":{"type":"number"},"session": pincer_core::tool_schema::session_schema(),"cursor_id":{"type":"string"}},"additionalProperties":false}),
                 read_only: false, destructive: false, idempotent: true, open_world: false,
             })
         }
@@ -326,19 +326,17 @@ mod move_cursor_m {
 }
 pub use move_cursor_m::MoveCursorTool;
 
-pub fn build_registry() -> cua_driver_core::tool::ToolRegistry {
-    let mut r = cua_driver_core::tool::ToolRegistry::new();
+pub fn build_registry() -> pincer_core::tool::ToolRegistry {
+    let mut r = pincer_core::tool::ToolRegistry::new();
     r.register(Box::new(ListAppsTool));
     r.register(Box::new(ListWindowsTool));
     r.register(Box::new(GetWindowStateTool));
-    r.register(Box::new(
-        cua_driver_core::expectation::VerifyStateTool::new(std::sync::Arc::new(
-            cua_driver_core::expectation::ToolObservationProvider::new(
-                std::sync::Arc::new(ListWindowsTool),
-                std::sync::Arc::new(GetWindowStateTool),
-            ),
+    r.register(Box::new(pincer_core::expectation::VerifyStateTool::new(
+        std::sync::Arc::new(pincer_core::expectation::ToolObservationProvider::new(
+            std::sync::Arc::new(ListWindowsTool),
+            std::sync::Arc::new(GetWindowStateTool),
         )),
-    ));
+    )));
     r.register(Box::new(LaunchAppTool));
     r.register(Box::new(KillAppTool));
     r.register(Box::new(ClickTool));
@@ -361,11 +359,9 @@ pub fn build_registry() -> cua_driver_core::tool::ToolRegistry {
     // health_report is cross-platform — the Linux provider here lets
     // non-Linux hosts running the stubbed registry still advertise
     // the documented schema_version="1" contract.
-    r.register(Box::new(
-        cua_driver_core::health_report::HealthReportTool::new(std::sync::Arc::new(
-            crate::health_report::LinuxHealthProvider,
-        )),
-    ));
+    r.register(Box::new(pincer_core::health_report::HealthReportTool::new(
+        std::sync::Arc::new(crate::health_report::LinuxHealthProvider),
+    )));
     r.register(Box::new(GetConfigTool));
     r.register(Box::new(SetConfigTool));
     r.register(Box::new(GetAccessibilityTreeTool));

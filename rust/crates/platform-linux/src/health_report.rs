@@ -1,6 +1,6 @@
 //! Linux `health_report` provider.
 //!
-//! Implements [`cua_driver_core::health_report::HealthCheckProvider`]
+//! Implements [`pincer_core::health_report::HealthCheckProvider`]
 //! for Linux. Reuses the same probes the Linux `check_permissions`
 //! tool runs — X11 connectivity for AX (driven via XSendEvent +
 //! AT-SPI) and X11 again for the screen capture path.
@@ -9,7 +9,7 @@
 //! applicable on Linux"`; Linux has no TCC.
 
 use async_trait::async_trait;
-use cua_driver_core::health_report::{
+use pincer_core::health_report::{
     CheckData, CheckEntry, HealthCheckProvider, NAME_AX_CAPABILITY, NAME_BINARY_VERSION,
     NAME_BUNDLE_IDENTITY, NAME_PLATFORM_SUPPORTED, NAME_SCREEN_CAPTURE_CAPABILITY,
     NAME_SESSION_ACTIVE, NAME_TCC_ACCESSIBILITY, NAME_TCC_SCREEN_RECORDING,
@@ -154,10 +154,10 @@ async fn check_ax_capability() -> CheckEntry {
          Wayland+Xwayland session over SSH): the X server's per-session auth \
          cookie isn't discoverable, so X11 connects fail 'Authorization required'. \
          Point XAUTHORITY at the Xwayland '-auth' cookie file, or restart the \
-         cua-driver daemon — it auto-discovers the cookie from /proc at startup."
+         pincer daemon — it auto-discovers the cookie from /proc at startup."
     } else if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         "Pure Wayland session: opt into the experimental Wayland backend by \
-         setting CUA_DRIVER_RS_ENABLE_WAYLAND=1, or run the target under XWayland."
+         setting PINCER_ENABLE_WAYLAND=1, or run the target under XWayland."
     } else {
         "Set DISPLAY (X11) — under Wayland, run via XWayland or expose XDG_SESSION_TYPE=x11."
     };
@@ -241,7 +241,7 @@ async fn check_screen_capture_capability() -> CheckEntry {
     }
     let hint = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         "Pure Wayland session: opt into the experimental Wayland backend by \
-         setting CUA_DRIVER_RS_ENABLE_WAYLAND=1, or run the target under XWayland."
+         setting PINCER_ENABLE_WAYLAND=1, or run the target under XWayland."
     } else {
         "Set DISPLAY (X11). Pure Wayland sessions require an XWayland bridge for capture."
     };
@@ -352,7 +352,7 @@ fn classify_wayland_backend(
                     "The RemoteDesktop portal is reachable, but this compositor \
                      has no verified target-activation adapter ({msg}). Portal/libei \
                      input is global and would otherwise affect whichever window is \
-                     focused, potentially the wrong application, so cua-driver \
+                     focused, potentially the wrong application, so pincer \
                      refuses foreground dispatch."
                 ),
                 "On GNOME, install and enable the bundled WinRects Shell helper, then \
@@ -497,7 +497,7 @@ fn wayland_env_name() -> &'static str {
 
 #[cfg(not(target_os = "linux"))]
 fn wayland_env_name() -> &'static str {
-    "CUA_DRIVER_RS_ENABLE_WAYLAND"
+    "PINCER_ENABLE_WAYLAND"
 }
 
 #[cfg(target_os = "linux")]
@@ -637,8 +637,8 @@ fn arch_label() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cua_driver_core::health_report::{CheckStatus, HealthReportTool};
-    use cua_driver_core::tool::Tool;
+    use pincer_core::health_report::{CheckStatus, HealthReportTool};
+    use pincer_core::tool::Tool;
     use std::sync::Arc;
 
     #[test]

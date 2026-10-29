@@ -9,7 +9,7 @@
 # (kTCCServiceScreenCapture): even a fully TCC-granted app is reminded, and on a
 # fresh macOS user the FIRST capture is reminded immediately. In a headless,
 # cloned Lume VM nobody can click "Allow", so any screen-capturing dependency
-# (rcdpd, the Cua driver) would stall the automation.
+# (rcdpd, the Pincer) would stall the automation.
 #
 # The reminder schedule lives in replayd's per-user approvals plist, keyed by
 # bundle id. Pre-dating kScreenCapturePrivacyHintDate (the next-prompt time)
@@ -21,10 +21,10 @@
 #
 # Run inside the Lume golden AS THE TARGET USER (no sudo: this is the user's own
 # group container). Pass one or more bundle ids:
-#   seed-screencapture-approvals.sh com.trycua.rcdphost com.trycua.driver.local
+#   seed-screencapture-approvals.sh io.github.modcritic.pincer.rcdphost io.github.modcritic.pincer.local
 set -euo pipefail
 
-FUTURE_DATE="${CUA_SCREENCAPTURE_FUTURE_DATE:-3024-01-01T00:00:00Z}"
+FUTURE_DATE="${PINCER_SCREENCAPTURE_FUTURE_DATE:-3024-01-01T00:00:00Z}"
 
 (($#)) || { echo "usage: $0 <bundle-id> [<bundle-id>...]" >&2; exit 2; }
 

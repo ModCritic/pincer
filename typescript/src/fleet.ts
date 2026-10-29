@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   openMcpDriverChannel,
   DriverServiceTransportError,
-  type CuaDriverLike,
+  type PincerLike,
   type DriverServiceRequest,
   type DriverServiceResponse,
 } from './index.js';
@@ -41,7 +41,7 @@ export interface FleetDriverClient {
 }
 
 export interface FleetDriverConnection {
-  readonly driver: CuaDriverLike;
+  readonly driver: PincerLike;
   readonly sessionName: string;
   /** Close before releasing the Fleet claim. This never releases the claim. */
   close(): Promise<void>;

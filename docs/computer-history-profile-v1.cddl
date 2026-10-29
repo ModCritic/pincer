@@ -1,4 +1,4 @@
-; Cua History Profile v1
+; Pincer History Profile v1
 ; The file is an RFC 8742 CBOR Sequence whose first item is history-header and
 ; whose remaining items are tagged COSE_Encrypt0 records. The protected COSE
 ; header is exactly {1: 24}; the unprotected header is exactly {5: nonce}.

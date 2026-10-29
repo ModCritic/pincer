@@ -11,7 +11,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use cua_driver_core::video::{VideoBackend, VideoBackendFactory, VideoMetadata};
+use pincer_core::video::{VideoBackend, VideoBackendFactory, VideoMetadata};
 
 pub struct WfRecorderVideoBackendFactory;
 
@@ -203,7 +203,7 @@ impl WfRecorderVideoBackend {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        if let Some(output) = std::env::var_os("CUA_WAYLAND_RECORDING_OUTPUT") {
+        if let Some(output) = std::env::var_os("PINCER_WAYLAND_RECORDING_OUTPUT") {
             command.arg("-o").arg(output);
         }
         let mut child = command

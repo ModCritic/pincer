@@ -95,7 +95,7 @@ export_docs() {
   http_port="${CURSOR_GALLERY_EXPORT_PORT:-$(available_port)}"
   cdp_port="${CURSOR_GALLERY_EXPORT_CDP_PORT:-$(available_port)}"
   capture_dir="$TARGET_DIR/docs-frames"
-  docs_dir="$REPO_ROOT/docs/public/img/cua-driver/cursor-themes"
+  docs_dir="$REPO_ROOT/docs/public/img/pincer/cursor-themes"
   profile_dir="$TARGET_DIR/chrome-profile"
   mkdir -p "$capture_dir" "$docs_dir" "$profile_dir"
 

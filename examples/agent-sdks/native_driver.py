@@ -8,9 +8,9 @@ import json
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
-from cua_driver import (
+from pincer_driver import (
     ActionTarget,
-    CuaDriver,
+    Pincer,
     GetDesktopStateInput,
     PressKeyInput,
     TypeTextInput,
@@ -43,10 +43,10 @@ def parse_args() -> argparse.Namespace:
 
 async def main() -> None:
     args = parse_args()
-    token = f"cua-{uuid4().hex[:10]}"
+    token = f"pincer-{uuid4().hex[:10]}"
     await asyncio.to_thread(fixture_request, args.fixture, "/reset", method="POST")
 
-    driver = CuaDriver.create()
+    driver = Pincer.create()
     mutation_outcome_unknown = False
     try:
         before = await asyncio.wait_for(

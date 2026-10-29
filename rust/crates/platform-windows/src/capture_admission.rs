@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use cua_driver_core::capture_runtime::{
+use pincer_core::capture_runtime::{
     CaptureActionRequest, CapturePublication, CaptureService, CaptureTarget,
     EncodedScreenshotDimensions, NativeActionDimensions, ScreenshotToActionTransform,
 };
@@ -181,13 +181,13 @@ fn live_geometry(_target: WindowsCaptureTarget) -> anyhow::Result<CaptureGeometr
 mod tests {
     use std::sync::Arc;
 
-    use cua_driver_core::capture_runtime::{admission_error_code, CaptureService};
+    use pincer_core::capture_runtime::{admission_error_code, CaptureService};
     use serde_json::json;
 
     use super::{round_action_point, CaptureGeometry, WindowsCaptureBridge, WindowsCaptureTarget};
 
     fn png() -> Vec<u8> {
-        cua_driver_core::image_utils::encode_rgba_to_png(&[10, 20, 30, 255], 1, 1).unwrap()
+        pincer_core::image_utils::encode_rgba_to_png(&[10, 20, 30, 255], 1, 1).unwrap()
     }
 
     fn args() -> serde_json::Value {

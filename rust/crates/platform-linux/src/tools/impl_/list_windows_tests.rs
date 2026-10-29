@@ -60,7 +60,7 @@ fn unavailable_wayland_order_serializes_as_null() {
 #[test]
 fn chromium_launch_detection_uses_executable_basename() {
     assert!(chromium_family_program("/usr/bin/google-chrome-stable"));
-    assert!(chromium_family_program("CuaTestHarness.Electron"));
+    assert!(chromium_family_program("PincerTestHarness.Electron"));
     assert!(chromium_family_program("chromium-browser"));
     assert!(!chromium_family_program("/usr/bin/gnome-text-editor"));
 }

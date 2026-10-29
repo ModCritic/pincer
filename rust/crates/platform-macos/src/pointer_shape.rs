@@ -34,7 +34,7 @@ use core_foundation::base::{CFRelease, CFTypeRef};
 use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
-use cua_driver_core::pointer_shape::{
+use pincer_core::pointer_shape::{
     edge_resize_shape, BackendNames, HitTest, PointerShapeBackend, ScreenRect,
 };
 
@@ -293,7 +293,7 @@ impl PointerShapeBackend for MacPointerShapes {
 /// Install the macOS backend (and the system cursor probe it reads through).
 pub fn install() -> bool {
     crate::cursor::shape::install();
-    cua_driver_core::pointer_shape::set_pointer_shape_backend(MacPointerShapes)
+    pincer_core::pointer_shape::set_pointer_shape_backend(MacPointerShapes)
 }
 
 #[cfg(test)]
@@ -305,12 +305,12 @@ mod tests {
     #[test]
     #[ignore = "moves the real pointer and queries real apps; guest only"]
     fn live_probe_restores_the_pointer() {
-        if std::env::var("CUA_ENV_ALLOW_HOST_APP_EFFECTS").as_deref() != Ok("1") {
+        if std::env::var("PINCER_ENV_ALLOW_HOST_APP_EFFECTS").as_deref() != Ok("1") {
             return;
         }
         let backend = MacPointerShapes;
         let home = backend.pointer_position().expect("pointer");
-        let out = cua_driver_core::pointer_shape::probe_by_warp(
+        let out = pincer_core::pointer_shape::probe_by_warp(
             &backend,
             (home.0 + 40.0, home.1 + 40.0),
             Default::default(),

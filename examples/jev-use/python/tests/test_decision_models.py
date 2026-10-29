@@ -34,7 +34,7 @@ def write_adapter(root: Path, modality: str, revision: str | None = None) -> Non
 
 def request() -> dict:
     return {
-        "schema": "cua.jev_choice_request_v1",
+        "schema": "pincer.jev_choice_request_v1",
         "goal": "Submit the verified form.",
         "capture_id": "capture-1",
         "regions": [
@@ -330,7 +330,7 @@ class DecisionModelsTest(unittest.TestCase):
 
     def test_local_s1_selects_modality_and_binds_the_screenshot(self) -> None:
         try:
-            import cua_s1.four_b  # noqa: F401
+            import pincer_s1.four_b  # noqa: F401
         except ImportError:
             self.skipTest("cua-s1 is not installed")
         with tempfile.TemporaryDirectory() as directory:

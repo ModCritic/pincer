@@ -4,8 +4,8 @@
  * source of text), window scope, allowed action kinds, opt-in risks,
  * foreground permission, step budget, and an app-owned oracle. The built-in
  * tasks drive the AppKit, WPF, WinUI3, and GTK3 harnesses in task mode
- * (CUA_APPKIT_TASK_STATE, CUA_WPF_TASK_STATE, CUA_WINUI3_TASK_STATE,
- * CUA_GTK3_TASK_STATE), whose JSON state file is the oracle.
+ * (PINCER_APPKIT_TASK_STATE, PINCER_WPF_TASK_STATE, PINCER_WINUI3_TASK_STATE,
+ * PINCER_GTK3_TASK_STATE), whose JSON state file is the oracle.
  */
 import { readFile } from 'node:fs/promises';
 
@@ -598,7 +598,7 @@ export function visualFallbackReason(
 }
 
 /**
- * Build the cua.jev_choice_request_v2 the provider receives; no tokens,
+ * Build the pincer.jev_choice_request_v2 the provider receives; no tokens,
  * values, or pixels. A task that declares steps adds the progress counted
  * from this run's performed actions.
  */
@@ -658,10 +658,10 @@ export const HARNESSES: Readonly<Record<string, HarnessSpec>> = {
   appkit: {
     name: 'appkit',
     platform: 'macos',
-    windowTitle: 'CuaTestHarness AppKit',
-    stateSchema: 'cua.appkit_task_state_v1',
-    stateEnv: 'CUA_APPKIT_TASK_STATE',
-    bundleId: 'com.trycua.harness.appkit',
+    windowTitle: 'PincerTestHarness AppKit',
+    stateSchema: 'pincer.appkit_task_state_v1',
+    stateEnv: 'PINCER_APPKIT_TASK_STATE',
+    bundleId: 'io.github.modcritic.pincer.harness.appkit',
   },
   // WPF, WinUI3, and GTK3 show a dedicated task window in task mode: their
   // ordinary main windows scroll, so most controls would be off screen (and
@@ -669,25 +669,25 @@ export const HARNESSES: Readonly<Record<string, HarnessSpec>> = {
   wpf: {
     name: 'wpf',
     platform: 'windows',
-    windowTitle: 'CuaTestHarness WPF Tasks',
-    stateSchema: 'cua.wpf_task_state_v1',
-    stateEnv: 'CUA_WPF_TASK_STATE',
-    processName: 'CuaTestHarness.Wpf',
+    windowTitle: 'PincerTestHarness WPF Tasks',
+    stateSchema: 'pincer.wpf_task_state_v1',
+    stateEnv: 'PINCER_WPF_TASK_STATE',
+    processName: 'PincerTestHarness.Wpf',
   },
   winui3: {
     name: 'winui3',
     platform: 'windows',
-    windowTitle: 'CuaTestHarness WinUI3 Tasks',
-    stateSchema: 'cua.winui3_task_state_v1',
-    stateEnv: 'CUA_WINUI3_TASK_STATE',
-    processName: 'CuaTestHarness.WinUI3',
+    windowTitle: 'PincerTestHarness WinUI3 Tasks',
+    stateSchema: 'pincer.winui3_task_state_v1',
+    stateEnv: 'PINCER_WINUI3_TASK_STATE',
+    processName: 'PincerTestHarness.WinUI3',
   },
   gtk3: {
     name: 'gtk3',
     platform: 'linux',
-    windowTitle: 'CuaTestHarness GTK3 Tasks',
-    stateSchema: 'cua.gtk3_task_state_v1',
-    stateEnv: 'CUA_GTK3_TASK_STATE',
+    windowTitle: 'PincerTestHarness GTK3 Tasks',
+    stateSchema: 'pincer.gtk3_task_state_v1',
+    stateEnv: 'PINCER_GTK3_TASK_STATE',
     processName: 'python3',
   },
 };
@@ -706,9 +706,9 @@ export type TaskHarness = Omit<HarnessSpec, 'platform'> & Readonly<{ platform: H
 export const CANVAS: TaskHarness = {
   name: 'canvas',
   platform: 'any',
-  windowTitle: 'Cua Visual-Only Canvas Fixture',
-  stateSchema: 'cua.visual_canvas_task_state_v1',
-  stateEnv: 'CUA_CANVAS_TASK_STATE',
+  windowTitle: 'Pincer Visual-Only Canvas Fixture',
+  stateSchema: 'pincer.visual_canvas_task_state_v1',
+  stateEnv: 'PINCER_CANVAS_TASK_STATE',
 };
 export const CANVAS_TASK_ID = 'canvas-cancel';
 // Cancel, not Save: see python/native_tasks.py CANVAS_TARGET.

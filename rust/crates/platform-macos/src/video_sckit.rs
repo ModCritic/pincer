@@ -2,7 +2,7 @@
 //!
 //! Replaces the ffmpeg subprocess pipeline with an in-process SCStream +
 //! SCRecordingOutput. The key win is TCC: ScreenCaptureKit runs in the
-//! same process as cua-driver, so it inherits the daemon's Screen
+//! same process as pincer, so it inherits the daemon's Screen
 //! Recording grant. No per-binary subprocess gotcha, no second prompt,
 //! no fast-fail-on-hang heuristic.
 //!
@@ -33,7 +33,7 @@ use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use cua_driver_core::video::{VideoBackend, VideoBackendFactory, VideoMetadata};
+use pincer_core::video::{VideoBackend, VideoBackendFactory, VideoMetadata};
 
 use screencapturekit::prelude::{
     SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration,
@@ -341,7 +341,7 @@ mod tests {
     #[test]
     #[ignore = "requires Screen Recording permission and a display; run with --ignored on a TCC-authorized macOS host"]
     fn short_recording_is_written_when_stop_returns() {
-        let dir = std::env::temp_dir().join(format!("cua-sck-finish-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pincer-sck-finish-{}", std::process::id()));
         let path = dir.join("recording.mp4");
         for _ in 0..5 {
             let backend = SckitVideoBackendFactory

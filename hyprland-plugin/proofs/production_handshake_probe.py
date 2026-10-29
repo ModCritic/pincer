@@ -25,7 +25,7 @@ import sys
 import time
 
 
-ENDPOINTS = ("cua-input-v3.sock", "cua-input-v3-2.sock")
+ENDPOINTS = ("pincer-input-v3.sock", "pincer-input-v3-2.sock")
 CAPACITY = 8
 CLOSE_BOUND = 6.5
 IO_TIMEOUT = 0.5

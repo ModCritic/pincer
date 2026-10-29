@@ -1,6 +1,6 @@
-# cua-driver test fixtures
+# pincer test fixtures
 
-Deterministic host apps and shared fixtures used to verify cua-driver across
+Deterministic host apps and shared fixtures used to verify pincer across
 Windows, macOS, and Linux. The fixtures are source-first: build scripts stage
 local outputs into `rust/test-apps/harness-<name>/`; binaries are not
 committed.
@@ -65,7 +65,7 @@ Host requirements:
 
 ## Test Mapping
 
-Rust tests under `rust/crates/cua-driver-e2e/tests/` consume the staged
+Rust tests under `rust/crates/pincer-e2e/tests/` consume the staged
 `rust/test-apps/harness-<name>/` outputs:
 
 - `cross_platform_behavior_test.rs`: typed Electron/Tauri action matrix.
@@ -74,7 +74,7 @@ Rust tests under `rust/crates/cua-driver-e2e/tests/` consume the staged
   desktop-scope contracts.
 - `protocol_*_test.rs` and schema tests: headless protocol coverage, default.
 
-Rust integration tests under `rust/crates/cua-driver-e2e/tests/` drive
+Rust integration tests under `rust/crates/pincer-e2e/tests/` drive
 the shared Electron/Tauri harnesses through the public MCP interface.
 
 ## App Coverage

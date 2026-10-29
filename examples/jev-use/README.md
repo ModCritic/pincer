@@ -1,11 +1,11 @@
-# jev-use with Cua Driver and TypeSafe Jev
+# jev-use with Pincer and TypeSafe Jev
 
 `jev-use` is a recipe that uses TypeSafe Jev to choose the next browser action
-while Cua Driver observes the page, performs that action, and verifies the
+while Pincer observes the page, performs that action, and verifies the
 result. Equivalent Python and TypeScript programs run the same bounded loop.
 
 The runnable path prefers fresh browser DOM and semantic evidence. It also
-contains an optional adapter for the public `cua.visual_regions_v1` contract.
+contains an optional adapter for the public `pincer.visual_regions_v1` contract.
 The checked-in typed fixtures exercise that adapter without a model or secret.
 At runtime the agents use `parse_visual_regions` only when Driver also
 advertises the capture-bound `click.capture_id` contract. They capture the
@@ -48,7 +48,7 @@ the implementation, standalone runners, and development checks.
 The local fixture contains a small browser task and exposes its submitted value
 through an independent `/state` endpoint. Each runner:
 
-1. opens one persistent `cua-driver mcp` connection;
+1. opens one persistent `pincer mcp` connection;
 2. creates a Driver-owned isolated Chromium profile with `browser_prepare`;
 3. navigates to the loopback fixture with typed browser tools;
 4. captures a browser snapshot before asking for or performing an action;
@@ -75,7 +75,7 @@ the success oracle. The browser fixture above is `FixtureFormTask`, and its
 oracle is the fixture's `/state` endpoint. Browser requests are unchanged: the
 golden files `fixtures/jev-provider-request-golden-*-v1.json` pin the exact
 provider requests and candidate tables for the page-structure and visual
-fixtures, and browser tasks keep sending `cua.jev_choice_request_v1`.
+fixtures, and browser tasks keep sending `pincer.jev_choice_request_v1`.
 
 ### Native desktop tasks
 
@@ -98,7 +98,7 @@ still presented in element order, and the number dropped is logged. Labels that 
 or closing are excluded unless the task allows that risk. Text comes only from
 task parameters. Actions are element-bound `click`, `set_value`, or
 `type_text` with background delivery first; a stale token leads to a fresh
-observation. Native steps send `cua.jev_choice_request_v2`, which adds a
+observation. Native steps send `pincer.jev_choice_request_v2`, which adds a
 per-candidate `source` and compact value-free `elements`. A task that declares
 its required steps also sends `progress`: each step with how often this run has
 performed it, counted only from the runner's own successful actions and never
@@ -126,8 +126,8 @@ and `<harness>-choose-size` (select Large and check I agree). The harness is
 `appkit` (macOS AX), `wpf` or `winui3` (Windows UIA), or `gtk3` (Linux
 AT-SPI). In task mode, each harness shows the same labeled controls, so
 candidate IDs and the mock provider's choices are identical on every platform.
-Task mode is selected with `CUA_APPKIT_TASK_STATE`, `CUA_WPF_TASK_STATE`,
-`CUA_WINUI3_TASK_STATE`, or `CUA_GTK3_TASK_STATE`. WPF, WinUI3, and GTK3 show
+Task mode is selected with `PINCER_APPKIT_TASK_STATE`, `PINCER_WPF_TASK_STATE`,
+`PINCER_WINUI3_TASK_STATE`, or `PINCER_GTK3_TASK_STATE`. WPF, WinUI3, and GTK3 show
 a small dedicated task window.
 A fourth task, `canvas-cancel`, clicks the Cancel card on the cross-platform
 visual-only canvas fixture (a custom-painted Tk window with no accessibility
@@ -144,7 +144,7 @@ state file on every change, and the file is the independent oracle. On
 Windows, the title bar's System menu, Minimize, Maximize, and Close buttons
 are window chrome and never become candidates. WinUI3 reports the same UIA control
 types as WPF, so both share the Windows role table; WinUI3's static `Text`
-labels are not candidates. With Cua Driver 0.30.1 or
+labels are not candidates. With Pincer 0.30.1 or
 later, run from this directory:
 
 ```bash
@@ -166,7 +166,7 @@ uv run --frozen python verify_native.py --harness winui3 --typescript --output-d
 ```
 
 `--capture-dir` also records sanitized `get_window_state` fixtures like the
-ones under `fixtures/native/`. On Linux, Cua Driver 0.30.2 and earlier report
+ones under `fixtures/native/`. On Linux, Pincer 0.30.2 and earlier report
 no `value` for a named text field
 ([#4291](https://github.com/trycua/cua/issues/4291)). With those Drivers,
 `gtk3-save-note` cannot observe its own write, so it keeps offering the write
@@ -175,8 +175,8 @@ until the step budget runs out.
 #### Measure accuracy at larger candidate sets
 
 The task-mode harnesses show only a few controls, so each step offers 4 to 7
-candidates. `CUA_APPKIT_TASK_DENSITY`, `CUA_WPF_TASK_DENSITY`,
-`CUA_WINUI3_TASK_DENSITY`, or `CUA_GTK3_TASK_DENSITY` set to `12` or `24`,
+candidates. `PINCER_APPKIT_TASK_DENSITY`, `PINCER_WPF_TASK_DENSITY`,
+`PINCER_WINUI3_TASK_DENSITY`, or `PINCER_GTK3_TASK_DENSITY` set to `12` or `24`,
 together with the task-state variable, adds benign distractor controls
 (toolbar-style buttons, labeled text fields, checkboxes, and radio groups, some
 close to a task control such as "Save draft" or "Note title") before the task
@@ -199,7 +199,7 @@ uv run --frozen python measure_native.py replay --provider s1 --reps 5 \
 ```
 
 `fixtures/native/` has density 12 and 24 captures for all four harnesses
-(`appkit`, `wpf`, `winui3`, and `gtk3`). Measured live with Cua Driver 0.30.4
+(`appkit`, `wpf`, `winui3`, and `gtk3`). Measured live with Pincer 0.30.4
 on macOS, Windows, and Linux, with both the Python and TypeScript runners,
 TypeSafe Jev and Cua-S1 chose correctly in all 1,680 decisions at about 4,
 12, and 24 candidates. The per-harness tables are in upstream's RFC 4268
@@ -210,9 +210,9 @@ decision record (`rfcs/4268-jev-use-native-candidates.md` in trycua/cua).
 The native runners also accept `--provider s1`, and `verify_native.py` accepts
 `--s1`. Loading Cua-S1 takes 10 to 35 seconds, so a per-step model load would
 not fit inside Driver's 60-second capture lifetime. The runners therefore send
-each validated `cua.jev_choice_request_v2` request to an already loaded model
-behind a loopback HTTP endpoint, and read one `cua.decision_choice_v1`
-response. `CUA_S1_DECISION_URL` names that endpoint. It must be a plain
+each validated `pincer.jev_choice_request_v2` request to an already loaded model
+behind a loopback HTTP endpoint, and read one `pincer.decision_choice_v1`
+response. `PINCER_S1_DECISION_URL` names that endpoint. It must be a plain
 `http://` URL on `127.0.0.1`, `localhost`, or `::1`; a model on another host is
 reached through an SSH tunnel. The runner rejects a response whose schema,
 `capture_id`, kind, selected ID, or probabilities do not match the request, and
@@ -227,12 +227,12 @@ validator rejects a newer optional field such as `progress`, and the runner
 then stops with a logged `S1ServiceError` outcome. For example, to verify the native tasks with it:
 
 ```bash
-export CUA_S1_DECISION_URL=http://127.0.0.1:8791/decide
+export PINCER_S1_DECISION_URL=http://127.0.0.1:8791/decide
 uv run --frozen python verify_native.py --harness appkit --typescript --s1 --output-dir /tmp/jev-native-s1
 ```
 
 The MCP connection stays open across the entire loop. This preserves the
-explicit named Cua Driver session and avoids rebuilding tool state for every
+explicit named Pincer session and avoids rebuilding tool state for every
 step.
 Page references are snapshot-bound, so the runners take another snapshot after
 the page changes rather than reusing an older reference.
@@ -245,17 +245,17 @@ produce no executable visual candidate.
 
 ## Install the prerequisites
 
-Install Cua Driver so that `cua-driver` is on `PATH`, or set `CUA_DRIVER_BIN`
+Install Pincer so that `pincer` is on `PATH`, or set `PINCER_BIN`
 to its absolute executable path. You need an unlocked desktop and a signed
-Chromium-based browser that Cua Driver can prepare. Python with `uv` supplies
+Chromium-based browser that Pincer can prepare. Python with `uv` supplies
 the fixture and Python agent. Node.js 22 or later and npm are needed only for
 the optional TypeScript agent.
 
-The agents start `cua-driver mcp` with the MCP SDK's minimal default
+The agents start `pincer mcp` with the MCP SDK's minimal default
 environment plus the desktop-session variables (`DISPLAY`, `WAYLAND_DISPLAY`,
 `XAUTHORITY`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`,
 `AT_SPI_BUS_ADDRESS`, `XDG_SESSION_TYPE`, `XDG_CURRENT_DESKTOP`) and any
-`CUA_DRIVER_*` variables. Other variables, including `TYPESAFE_API_KEY`, are
+`PINCER_*` variables. Other variables, including `TYPESAFE_API_KEY`, are
 not passed to the Driver. On Linux, run the agents from the logged-in desktop
 session so those variables are set.
 
@@ -324,7 +324,7 @@ structure offers no executable candidate, because only then can a visual
 region add one. This avoids several seconds of CPU parsing per step on the
 default fixture. `--visual-observation always` restores the per-step parse,
 which also sends regions to Jev alongside page refs, and `off` disables it
-(reason `disabled`). `ok` means a validated `cua.visual_regions_v1`
+(reason `disabled`). `ok` means a validated `pincer.visual_regions_v1`
 observation was available for that decision. `not_installed` is Driver's stable code when the perception
 extension is absent. `error` carries Driver's error code or a local
 `capture_mismatch`, `invalid_visual_result`, `capture_missing`, or
@@ -385,7 +385,7 @@ The fixture prints its local URL. Leave it running while you run either demo.
 ## Run the deterministic mock proof
 
 The mock adapter returns deterministic typed choices through the same provider
-boundary used by the live adapter. It proves the Cua Driver MCP lifecycle,
+boundary used by the live adapter. It proves the Pincer MCP lifecycle,
 browser observation and action loop, snapshot-bound references, and independent
 postcondition check. It does not prove that the TypeSafe service accepted the
 request or made the same choices.
@@ -430,7 +430,7 @@ The live adapter sends the task state, any typed visual-region summary, and one
 bounded choice question to TypeSafe. It rejects an answer outside the supplied
 candidate table.
 The runner still owns the control loop: Jev selects one bounded next action,
-Cua Driver performs it, and the fixture's `/state` endpoint establishes the
+Pincer performs it, and the fixture's `/state` endpoint establishes the
 postcondition. Keep sensitive page content out of live runs unless sending it
 to the configured provider is appropriate.
 
@@ -441,8 +441,8 @@ Record live verification separately when you run it with a valid key.
 
 Applications that already own capture, candidate construction, execution, and
 verification can call the provider adapter as a single-request process. The
-required Python interface reads one `cua.jev_choice_request_v1` JSON document
-from stdin and writes one `cua.jev_choice_v1` response to stdout:
+required Python interface reads one `pincer.jev_choice_request_v1` JSON document
+from stdin and writes one `pincer.jev_choice_v1` response to stdout:
 
 ```bash
 uv run python/choose_action.py --mock < fixtures/jev-choice-request-v1.json
@@ -495,9 +495,9 @@ tests integration rather than general agent capability.
 
 The Python and TypeScript programs are the two complete agent loops. They use a
 persistent MCP transport and repeat one explicit session label because browser
-targets and snapshot refs belong to that session. Use the Cua Driver CLI for
+targets and snapshot refs belong to that session. Use the Pincer CLI for
 installation and diagnostics,
-for example `cua-driver doctor` and `cua-driver status`, rather than maintaining
+for example `pincer doctor` and `pincer status`, rather than maintaining
 a third copy of the loop.
 
 The default fixture exposes semantic browser refs, so the normal proof does
@@ -542,8 +542,8 @@ not change the existing Python or TypeScript runners.
 ## Relationship to PR #3914
 
 [PR #3914](https://github.com/trycua/cua/pull/3914) proposes an optional Jev
-policy head inside the Cua Driver binary. This directory is a complementary
-standalone example: it composes the public TypeSafe SDKs with the existing Cua
+policy head inside the Pincer binary. This directory is a complementary
+standalone example: it composes the public TypeSafe SDKs with the existing Pincer
 Driver MCP surface and keeps the decide-act-verify loop in application code.
 It does not depend on the proposed `suggest_action` tool.
 
@@ -552,5 +552,5 @@ It does not depend on the proposed `suggest_action` tool.
 The example was inspired by
 [`awlevin/typesafe-computer-use`](https://github.com/awlevin/typesafe-computer-use),
 an MIT-licensed early TypeSafe computer-use integration. This implementation
-uses Cua Driver's current typed browser and MCP contracts and does not copy its
+uses Pincer's current typed browser and MCP contracts and does not copy its
 source code.

@@ -1,7 +1,7 @@
 {
  "_fixture": {
   "sanitized": "Recorded with the runner's re-observation arguments (the canvas task's max_depth 1, timeout_ms 5000). Screenshot bytes, tree_markdown, local file paths, and Driver guidance notes removed.",
-  "source": "Cua visual-only canvas fixture (tests/fixtures/apps/cross-platform/visual-only-canvas, Tk 9.0), observed by get_window_state: macOS 26.5.2 Lume VM (1x display), released Cua Driver 0.30.2. AX exposes the window, its two unlabeled window buttons, and the application menu bar."
+  "source": "Pincer visual-only canvas fixture (tests/fixtures/apps/cross-platform/visual-only-canvas, Tk 9.0), observed by get_window_state: macOS 26.5.2 Lume VM (1x display), released Pincer 0.30.2. AX exposes the window, its two unlabeled window buttons, and the application menu bar."
  },
  "app_name": "python3.12",
  "background_input": {
@@ -45,7 +45,7 @@
     "x": 5.0,
     "y": 35.0
    },
-   "label": "Cua Visual-Only Canvas Fixture",
+   "label": "Pincer Visual-Only Canvas Fixture",
    "role": "AXWindow",
    "screenshot_frame": {
     "h": 488,
@@ -308,5 +308,5 @@
   "y": 35.0
  },
  "window_id": 190,
- "window_title": "Cua Visual-Only Canvas Fixture"
+ "window_title": "Pincer Visual-Only Canvas Fixture"
 }

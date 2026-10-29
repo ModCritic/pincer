@@ -1,7 +1,7 @@
 /* Independent foreground adversary. Build with the generated wlr virtual
  * pointer client protocol and libwayland-client. This deliberately exercises
  * the PRIMARY seat in a disposable test session; background actions must go
- * through Cua Driver, not this program. A bounded hold always releases. */
+ * through Pincer, not this program. A bounded hold always releases. */
 #define _POSIX_C_SOURCE 200809L
 #include <wayland-client.h>
 #include "wlr-virtual-pointer-unstable-v1-client-protocol.h"

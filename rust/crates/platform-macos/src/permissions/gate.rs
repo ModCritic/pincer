@@ -6,7 +6,7 @@
 //!
 //!   1. Inspect TCC state on `serve` startup.
 //!   2. If any required grant is missing, print a clear explanation
-//!      (which grant, why cua-driver needs it, what to do next).
+//!      (which grant, why pincer needs it, what to do next).
 //!   3. Open the relevant `System Settings` pane(s) via the
 //!      `x-apple.systempreferences:` URL scheme.
 //!   4. Poll TCC state every second.  Emit a "still waiting" line every
@@ -16,13 +16,13 @@
 //!      return — `serve` proceeds normally.
 //!
 //! Opt-out: `--no-permissions-gate` flag or
-//! `CUA_DRIVER_RS_PERMISSIONS_GATE` set to `0` / `false` / `no` / `off`
+//! `PINCER_PERMISSIONS_GATE` set to `0` / `false` / `no` / `off`
 //! (case-insensitive) skips the entire flow.  Intended for CI / headless
 //! automation where blocking on user input would deadlock the runner.
 //!
 //! Why no GUI window: the Swift gate uses AppKit + SwiftUI which would
 //! require a full overlay + NSApplication run loop just to display a
-//! dialog.  cua-driver-rs already has a separate AppKit thread for the
+//! dialog.  pincer already has a separate AppKit thread for the
 //! cursor overlay, and grafting another window onto it is a recipe for
 //! main-thread deadlocks.  A terminal-driven flow is uglier but reliable
 //! and works headless (with the opt-out flag), which is exactly the
@@ -41,8 +41,8 @@ use crate::permissions::status::{
     current_status, request_accessibility, request_screen_recording, PermissionsStatus,
 };
 
-const PERMISSION_PROBE_ARG: &str = "--cua-internal-permission-probe";
-const PERMISSION_PROBE_REQUEST_ARG: &str = "--cua-internal-permission-probe-request";
+const PERMISSION_PROBE_ARG: &str = "--pincer-internal-permission-probe";
+const PERMISSION_PROBE_REQUEST_ARG: &str = "--pincer-internal-permission-probe-request";
 
 /// Which TCC grant is missing.  Each variant maps 1:1 to a System Settings
 /// pane URL via [`MissingPermission::settings_url`].
@@ -66,11 +66,11 @@ impl MissingPermission {
     pub fn rationale(self) -> &'static str {
         match self {
             Self::Accessibility => {
-                "lets cua-driver read the accessibility tree of running apps and \
+                "lets pincer read the accessibility tree of running apps and \
                  send clicks / keystrokes via AX RPC."
             }
             Self::ScreenRecording => {
-                "lets cua-driver capture per-window screenshots so agents can see \
+                "lets pincer capture per-window screenshots so agents can see \
                  the current UI state alongside the tree."
             }
         }
@@ -131,7 +131,7 @@ pub fn run_permission_probe_if_requested() -> Option<i32> {
             Some(0)
         }
         Err(error) => {
-            eprintln!("cua-driver permission probe: {error}");
+            eprintln!("pincer permission probe: {error}");
             Some(1)
         }
     }
@@ -235,10 +235,10 @@ impl Default for GateOpts {
 
 impl GateOpts {
     /// Construct from the standard env-var
-    /// (`CUA_DRIVER_RS_PERMISSIONS_GATE` set to `0` / `false` / `no` /
+    /// (`PINCER_PERMISSIONS_GATE` set to `0` / `false` / `no` /
     /// `off`, case-insensitive, disables the gate), an explicit
     /// `--no-permissions-gate` flag, and embedded mode
-    /// (`CUA_DRIVER_EMBEDDED=1`).  Any signal is sufficient to opt out.
+    /// (`PINCER_EMBEDDED=1`).  Any signal is sufficient to opt out.
     /// Embedded mode opts out because the host app owns the grant flow;
     /// the driver must never raise its own prompts.
     pub fn from_env_and_flag(no_gate_flag: bool) -> Self {
@@ -246,7 +246,7 @@ impl GateOpts {
         // CI scripts can use any of `0`, `false`, `no`, `off`, `FALSE`,
         // `Off`, etc. without surprises.  Anything not in this set leaves
         // the gate active — fail-safe default for first-launch UX.
-        let env_disabled = std::env::var("CUA_DRIVER_RS_PERMISSIONS_GATE")
+        let env_disabled = std::env::var("PINCER_PERMISSIONS_GATE")
             .ok()
             .map(|v| {
                 let lower = v.to_ascii_lowercase();
@@ -254,14 +254,14 @@ impl GateOpts {
             })
             .unwrap_or(false);
         Self {
-            opt_out: no_gate_flag || env_disabled || cua_driver_core::embedded_mode(),
+            opt_out: no_gate_flag || env_disabled || pincer_core::embedded_mode(),
             ..Self::default()
         }
     }
 }
 
-const GATE_START_ENV: &str = "CUA_DRIVER_RS_GATE_START_UNIX";
-const GATE_TELEMETRY_START_MILLIS_ENV: &str = "CUA_DRIVER_RS_GATE_TELEMETRY_START_MILLIS";
+const GATE_START_ENV: &str = "PINCER_GATE_START_UNIX";
+const GATE_TELEMETRY_START_MILLIS_ENV: &str = "PINCER_GATE_TELEMETRY_START_MILLIS";
 
 static GATE_ENGAGED: AtomicBool = AtomicBool::new(false);
 static GATE_MISSING_ACCESSIBILITY: AtomicBool = AtomicBool::new(false);
@@ -409,7 +409,7 @@ where
     //   System Settings → Privacy & Security → {Accessibility,Screen Recording}
     // with its toggle ready to flip. Without that registration, our
     // "Open System Settings" button takes the user to a pane where
-    // CuaDriver simply isn't listed — they see nothing to grant.
+    // Pincer simply isn't listed — they see nothing to grant.
     //
     // The Swift gate did the same registration via the matching
     // `Permissions.requestAccessibility()` / `requestScreenRecording()`
@@ -553,7 +553,7 @@ pub fn wait_for_grants(opts: &GateOpts) -> Result<()> {
 
     loop {
         if last_missing.is_empty() {
-            println!("[cua-driver] permissions granted — continuing startup");
+            println!("[pincer] permissions granted — continuing startup");
             let _ = std::io::stdout().flush();
             return Ok(());
         }
@@ -576,7 +576,7 @@ pub fn wait_for_grants(opts: &GateOpts) -> Result<()> {
             // user sees progress without waiting for the next status tick.
             if !new_missing.is_empty() {
                 println!(
-                    "[cua-driver] progress — still waiting on: {}",
+                    "[pincer] progress — still waiting on: {}",
                     fmt_missing(&new_missing)
                 );
                 let _ = std::io::stdout().flush();
@@ -588,7 +588,7 @@ pub fn wait_for_grants(opts: &GateOpts) -> Result<()> {
 
         if last_status_print.elapsed() >= opts.status_interval {
             println!(
-                "[cua-driver] still waiting on: {} \
+                "[pincer] still waiting on: {} \
                  (open System Settings → Privacy & Security to grant)",
                 fmt_missing(&last_missing)
             );
@@ -601,10 +601,10 @@ pub fn wait_for_grants(opts: &GateOpts) -> Result<()> {
 fn print_banner(missing: &[MissingPermission], open_settings: bool) {
     println!();
     println!("──────────────────────────────────────────────────────────────");
-    println!(" cua-driver needs your permission before desktop tools can run");
+    println!(" pincer needs your permission before desktop tools can run");
     println!("──────────────────────────────────────────────────────────────");
     println!();
-    println!(" Missing TCC grant(s) for the Cua Driver app identity:");
+    println!(" Missing TCC grant(s) for the Pincer app identity:");
     for m in missing {
         println!("   • {}", m.label());
         println!("       {}", m.rationale());
@@ -624,8 +624,8 @@ fn print_banner(missing: &[MissingPermission], open_settings: bool) {
     println!(" Grant each item, then this prompt will auto-continue.");
     println!();
     println!(" Skip this gate (CI / headless): re-run with");
-    println!("   cua-driver serve --no-permissions-gate");
-    println!(" or set CUA_DRIVER_RS_PERMISSIONS_GATE to 0/false/no/off");
+    println!("   pincer serve --no-permissions-gate");
+    println!(" or set PINCER_PERMISSIONS_GATE to 0/false/no/off");
     println!(" (case-insensitive) in the environment.");
     println!();
     let _ = std::io::stdout().flush();
@@ -644,7 +644,7 @@ mod tests {
     use super::*;
 
     /// Crate-wide env-var test lock — `from_env_and_flag` reads
-    /// `CUA_DRIVER_EMBEDDED`, which the `check_permissions` tests mutate.
+    /// `PINCER_EMBEDDED`, which the `check_permissions` tests mutate.
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         crate::permissions::test_env_lock()
     }
@@ -772,7 +772,7 @@ mod tests {
     #[test]
     fn flag_disables_gate() {
         let _guard = env_lock();
-        std::env::remove_var("CUA_DRIVER_RS_PERMISSIONS_GATE");
+        std::env::remove_var("PINCER_PERMISSIONS_GATE");
         let opts = GateOpts::from_env_and_flag(true);
         assert!(opts.opt_out, "--no-permissions-gate must opt out");
     }
@@ -780,8 +780,8 @@ mod tests {
     #[test]
     fn neither_flag_nor_env_does_not_opt_out() {
         let _guard = env_lock();
-        std::env::remove_var("CUA_DRIVER_RS_PERMISSIONS_GATE");
-        std::env::remove_var(cua_driver_core::EMBEDDED_ENV);
+        std::env::remove_var("PINCER_PERMISSIONS_GATE");
+        std::env::remove_var(pincer_core::EMBEDDED_ENV);
         let opts = GateOpts::from_env_and_flag(false);
         assert!(!opts.opt_out);
     }
@@ -789,13 +789,13 @@ mod tests {
     #[test]
     fn embedded_mode_opts_out_of_gate() {
         let _guard = env_lock();
-        std::env::remove_var("CUA_DRIVER_RS_PERMISSIONS_GATE");
-        std::env::set_var(cua_driver_core::EMBEDDED_ENV, "1");
+        std::env::remove_var("PINCER_PERMISSIONS_GATE");
+        std::env::set_var(pincer_core::EMBEDDED_ENV, "1");
         assert!(GateOpts::from_env_and_flag(false).opt_out);
         // Only the exact value "1" enables embedded mode.
-        std::env::set_var(cua_driver_core::EMBEDDED_ENV, "true");
+        std::env::set_var(pincer_core::EMBEDDED_ENV, "true");
         assert!(!GateOpts::from_env_and_flag(false).opt_out);
-        std::env::remove_var(cua_driver_core::EMBEDDED_ENV);
+        std::env::remove_var(pincer_core::EMBEDDED_ENV);
     }
 
     #[test]
@@ -805,14 +805,14 @@ mod tests {
         // else (including empty string or unknown garbage) leaves the gate
         // active — fail-safe default for first-launch UX.
         for v in &["1", "true", "yes", "on", "garbage", ""] {
-            std::env::set_var("CUA_DRIVER_RS_PERMISSIONS_GATE", v);
+            std::env::set_var("PINCER_PERMISSIONS_GATE", v);
             let opts = GateOpts::from_env_and_flag(false);
             assert!(
                 !opts.opt_out,
                 "env={v:?} must not opt out (only 0/false/no/off do)"
             );
         }
-        std::env::remove_var("CUA_DRIVER_RS_PERMISSIONS_GATE");
+        std::env::remove_var("PINCER_PERMISSIONS_GATE");
     }
 
     #[test]
@@ -823,7 +823,7 @@ mod tests {
         for v in &[
             "0", "false", "FALSE", "False", "no", "NO", "No", "off", "OFF", "Off", "TrUe",
         ] {
-            std::env::set_var("CUA_DRIVER_RS_PERMISSIONS_GATE", v);
+            std::env::set_var("PINCER_PERMISSIONS_GATE", v);
             let opts = GateOpts::from_env_and_flag(false);
             // "TrUe" is in the list intentionally — it must NOT opt out
             // (it's not in the off-sentinel set), so split the assertion.
@@ -836,7 +836,7 @@ mod tests {
                 "env={v:?} opt_out mismatch (expected {expected_opt_out})"
             );
         }
-        std::env::remove_var("CUA_DRIVER_RS_PERMISSIONS_GATE");
+        std::env::remove_var("PINCER_PERMISSIONS_GATE");
     }
 
     #[test]

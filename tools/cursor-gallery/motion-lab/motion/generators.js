@@ -12,7 +12,7 @@ import {
   asymmetricMinJerk,
   catmullRom,
   clamp,
-  cuaBezier,
+  pincerBezier,
   cubic,
   dist,
   dubinsPath,
@@ -94,7 +94,7 @@ export function hold(p, ms, offset) {
 
 export const paths = {
   line: (a, b) => makePath((u) => lerpPt(a, b, u), 8),
-  cua: (a, b, o) => makePath(cuaBezier(a, b, o)),
+  pincer: (a, b, o) => makePath(pincerBezier(a, b, o)),
   arc: (a, b, bulge) => makePath(arcPath(a, b, bulge)),
   // Cubic bezier with control points scattered around the chord, the
   // "random bezier" humaniser used by many bot frameworks.
@@ -168,10 +168,10 @@ export function speedLaw(
   return pinEnds(out, ctx.from, ctx.aim);
 }
 
-// Today's Cua Driver glide: Dubins arc-straight-arc path, smootherstep speed
+// Today's Pincer glide: Dubins arc-straight-arc path, smootherstep speed
 // envelope between start/end floor speeds, then a spring settle that
 // overshoots along the arrival heading (render_state.rs tick_swift_constants).
-export function cuaToday(ctx, o = {}) {
+export function pincerToday(ctx, o = {}) {
   const {
     peakSpeed = 900,
     minStart = 300,
@@ -183,7 +183,7 @@ export function cuaToday(ctx, o = {}) {
     restHeading = Math.PI / 4,
   } = o;
   const th1 = restHeading + Math.PI;
-  const th0 = ctx.state.cuaHeading ?? th1;
+  const th0 = ctx.state.pincerHeading ?? th1;
   const dub = dubinsPath(ctx.from, th0, ctx.aim, th1, turnRadius);
   const p = dub ? makePath(dub.fn, 512) : paths.line(ctx.from, ctx.aim);
   const L = Math.max(1, p.length);
@@ -226,7 +226,7 @@ export function cuaToday(ctx, o = {}) {
     out.push({ t: t * 1000, x: end.x + ox, y: end.y + oy });
   }
   out.push({ t: (t + dt) * 1000, x: end.x, y: end.y });
-  ctx.state.cuaHeading = th1;
+  ctx.state.pincerHeading = th1;
   return out;
 }
 

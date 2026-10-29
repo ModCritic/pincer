@@ -1,7 +1,7 @@
 {
  "_fixture": {
   "sanitized": "Recorded by verify_native.py --capture-dir. Screenshot bytes, tree_markdown, local file paths, and Driver guidance notes removed.",
-  "source": "Cua visual-only canvas fixture (tests/fixtures/apps/cross-platform/visual-only-canvas, Tk 8.6), observed by get_window_state: Windows 11 25H2 interactive RDP session, released Cua Driver 0.30.2. UIA exposes only the title bar."
+  "source": "Pincer visual-only canvas fixture (tests/fixtures/apps/cross-platform/visual-only-canvas, Tk 8.6), observed by get_window_state: Windows 11 25H2 interactive RDP session, released Pincer 0.30.2. UIA exposes only the title bar."
  },
  "app_name": "python.exe",
  "capture_id": "capture_9fdc37ed0b5b489092199ca0013c7ba0_0000000000000000",
@@ -21,7 +21,7 @@
     "x": 232,
     "y": 211
    },
-   "label": "Cua Visual-Only Canvas Fixture",
+   "label": "Pincer Visual-Only Canvas Fixture",
    "role": "TitleBar",
    "screenshot_frame": {
     "h": 28,
@@ -29,7 +29,7 @@
     "x": 16,
     "y": 2
    },
-   "value": "Cua Visual-Only Canvas Fixture"
+   "value": "Pincer Visual-Only Canvas Fixture"
   },
   {
    "actions": [
@@ -125,5 +125,5 @@
   "y": 208
  },
  "window_id": 196848,
- "window_title": "Cua Visual-Only Canvas Fixture"
+ "window_title": "Pincer Visual-Only Canvas Fixture"
 }

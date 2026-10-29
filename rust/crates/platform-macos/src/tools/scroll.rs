@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use core_foundation::base::{CFRelease, CFTypeRef};
-use cua_driver_contract::{ScrollBy, ScrollDirection, ScrollInput};
-use cua_driver_core::{
+use pincer_contract::{ScrollBy, ScrollDirection, ScrollInput};
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
     tool_args::parse_typed_projection,
@@ -99,11 +99,11 @@ fn def() -> &'static ToolDef {
                     "description": "Wheel notches or key repetitions, clamped to the maximum. Default 3."
                 },
                 "window_id": { "type": "integer", "description": "Window ID. Required with x/y; optional with element_token." },
-                "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                "element_token": pincer_core::tool_schema::element_token_schema(),
                 "x": { "type": "number", "description": "Window-local screenshot X (get_window_state PNG). With y, wheel-scrolls at that point; needs window_id." },
                 "y": { "type": "number", "description": "Window-local screenshot Y." },
                 "scope": { "type": "string", "enum": ["window", "desktop"], "default": "window", "description": "\"desktop\" with x,y and no pid/window_id uses get_desktop_state coordinates." },
-                "delivery_mode": cua_driver_core::tool_schema::delivery_mode_schema_with("Default \"background\": no fronting or focus steal. \"foreground\": briefly front the window, act, restore the prior app; last resort when background did not land.")
+                "delivery_mode": pincer_core::tool_schema::delivery_mode_schema_with("Default \"background\": no fronting or focus steal. \"foreground\": briefly front the window, act, restore the prior app; last resort when background did not land.")
             },
             "additionalProperties": false
         }),
@@ -121,7 +121,7 @@ impl Tool for ScrollTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         if args.opt_str("scope").as_deref() == Some("desktop")
             && args.get("pid").is_none()
             && args.get("window_id").is_none()
@@ -212,7 +212,7 @@ impl Tool for ScrollTool {
                             .gate_again(
                                 wid,
                                 pre_focus_ptr,
-                                cua_driver_core::background_input::BackgroundAction::AxSemantic,
+                                pincer_core::background_input::BackgroundAction::AxSemantic,
                             )
                             .await
                         {
@@ -223,7 +223,7 @@ impl Tool for ScrollTool {
                             pid,
                             wid,
                             pre_focus_ptr,
-                            cua_driver_core::background_input::BackgroundAction::AxSemantic,
+                            pincer_core::background_input::BackgroundAction::AxSemantic,
                         )
                         .await
                         {
@@ -336,7 +336,7 @@ impl Tool for ScrollTool {
                             .gate_again(
                                 wid,
                                 Some(element_ptr),
-                                cua_driver_core::background_input::BackgroundAction::AxSemantic,
+                                pincer_core::background_input::BackgroundAction::AxSemantic,
                             )
                             .await
                     } else {
@@ -344,7 +344,7 @@ impl Tool for ScrollTool {
                             pid,
                             wid,
                             Some(element_ptr),
-                            cua_driver_core::background_input::BackgroundAction::AxSemantic,
+                            pincer_core::background_input::BackgroundAction::AxSemantic,
                         )
                         .await
                         {
@@ -484,7 +484,7 @@ impl Tool for ScrollTool {
                             .gate_again(
                                 wid,
                                 pre_focus_ptr,
-                                cua_driver_core::background_input::BackgroundAction::WindowPointer,
+                                pincer_core::background_input::BackgroundAction::WindowPointer,
                             )
                             .await
                         {
@@ -495,7 +495,7 @@ impl Tool for ScrollTool {
                             pid,
                             wid,
                             pre_focus_ptr,
-                            cua_driver_core::background_input::BackgroundAction::WindowPointer,
+                            pincer_core::background_input::BackgroundAction::WindowPointer,
                         )
                         .await
                         {
@@ -614,7 +614,7 @@ impl Tool for ScrollTool {
                         .gate_again(
                             wid,
                             pre_focus_ptr,
-                            cua_driver_core::background_input::BackgroundAction::GenericKey,
+                            pincer_core::background_input::BackgroundAction::GenericKey,
                         )
                         .await
                     {
@@ -625,7 +625,7 @@ impl Tool for ScrollTool {
                         pid,
                         wid,
                         pre_focus_ptr,
-                        cua_driver_core::background_input::BackgroundAction::GenericKey,
+                        pincer_core::background_input::BackgroundAction::GenericKey,
                     )
                     .await
                     {
@@ -703,7 +703,7 @@ async fn electron_reveal_scroll(
     lease: &mut Option<super::BackgroundMutationLease>,
 ) -> ToolResult {
     let unavailable = || {
-        cua_driver_core::delivery::background_unavailable_result(
+        pincer_core::delivery::background_unavailable_result(
             ELECTRON_BACKGROUND_SCROLL_UNAVAILABLE,
             "background_unavailable",
             "Electron/Chromium windows drop background wheel events and keystrokes on macOS",
@@ -725,7 +725,7 @@ async fn electron_reveal_scroll(
                     .gate_again(
                         wid,
                         pre_focus_ptr,
-                        cua_driver_core::background_input::BackgroundAction::AxSemantic,
+                        pincer_core::background_input::BackgroundAction::AxSemantic,
                     )
                     .await
             }
@@ -733,7 +733,7 @@ async fn electron_reveal_scroll(
                 pid,
                 wid,
                 pre_focus_ptr,
-                cua_driver_core::background_input::BackgroundAction::AxSemantic,
+                pincer_core::background_input::BackgroundAction::AxSemantic,
             )
             .await
             .map(|granted| *lease = Some(granted)),

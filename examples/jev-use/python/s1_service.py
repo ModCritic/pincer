@@ -3,12 +3,12 @@
 Loading Cua-S1 costs 10 to 35 seconds, which does not fit inside Driver's
 60-second capture lifetime when every step starts a new process. The native
 runners therefore reach an already loaded model through a small HTTP service
-on the loopback interface. ``CUA_S1_DECISION_URL`` names its decide endpoint,
+on the loopback interface. ``PINCER_S1_DECISION_URL`` names its decide endpoint,
 for example ``http://127.0.0.1:8791/decide``.
 
-The service receives the same validated ``cua.jev_choice_request_v1`` or
+The service receives the same validated ``pincer.jev_choice_request_v1`` or
 ``_v2`` request that every other provider sees and returns one
-``cua.decision_choice_v1`` response. This module checks that response strictly
+``pincer.decision_choice_v1`` response. This module checks that response strictly
 before the runner resolves the selected ID to its own immutable candidate. The
 request never contains element tokens, values, secrets, or pixels.
 """
@@ -26,9 +26,9 @@ from urllib.parse import urlsplit
 
 from choose_action import validate_request
 
-DECISION_SCHEMA = "cua.decision_choice_v1"
+DECISION_SCHEMA = "pincer.decision_choice_v1"
 DECISION_KINDS = frozenset({"selected", "reobserve", "abstain", "error"})
-URL_ENV = "CUA_S1_DECISION_URL"
+URL_ENV = "PINCER_S1_DECISION_URL"
 DEFAULT_TIMEOUT_S = 30.0
 MAX_RESPONSE_BYTES = 256 * 1024
 
@@ -63,9 +63,9 @@ def _finite_unit(value: Any) -> bool:
 
 
 def validate_decision(decision: Any, request: Mapping[str, Any]) -> dict[str, Any]:
-    """Check a ``cua.decision_choice_v1`` response against the request it answers."""
+    """Check a ``pincer.decision_choice_v1`` response against the request it answers."""
     if not isinstance(decision, dict) or decision.get("schema") != DECISION_SCHEMA:
-        raise S1ServiceError("response is not a cua.decision_choice_v1 decision")
+        raise S1ServiceError("response is not a pincer.decision_choice_v1 decision")
     kind = decision.get("kind")
     if kind not in DECISION_KINDS:
         raise S1ServiceError("response kind is not supported")

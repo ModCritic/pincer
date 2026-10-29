@@ -303,7 +303,7 @@ fn post_pointer_moved(point: CGPoint) -> anyhow::Result<()> {
 
 /// Scroll the foreground desktop surface at a logical screen point through the
 /// global HID queue. Mirrors computer-server's pynput wheel behavior while
-/// preserving cua-driver's explicit direction/amount contract.
+/// preserving pincer's explicit direction/amount contract.
 pub fn scroll_wheel_desktop(
     x: f64,
     y: f64,

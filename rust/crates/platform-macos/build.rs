@@ -13,7 +13,7 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=CoreGraphics");
 
     // The ScreenCaptureKit bindings pull in Swift runtime libraries such as
-    // libswift_Concurrency.dylib. The cua-driver binary emits these rpaths in
+    // libswift_Concurrency.dylib. The pincer binary emits these rpaths in
     // its own build.rs, but platform-macos' unit-test binary is linked from
     // this package, so it needs the same runtime search paths here.
     emit_swift_runtime_link_args();

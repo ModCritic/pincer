@@ -12,8 +12,8 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
-cua-driver-core = { path = "../cua-driver-core" }
-cua-driver-contract = { path = "../cua-driver-contract" }
+pincer-core = { path = "../pincer-core" }
+pincer-contract = { path = "../pincer-contract" }
 cursor-overlay = { path = "../cursor-overlay" }
 pip-preview = { path = "../pip-preview" }
 zeroize = { workspace = true }
@@ -67,7 +67,7 @@ windows = { version = "0.58", features = [
     # Locale-independent TCP listener ownership for browser endpoint proof.
     "Win32_NetworkManagement_IpHelper",
     "Win32_Networking_WinSock",
-    # `cua-driver doctor` interactive-session probe:
+    # `pincer doctor` interactive-session probe:
     # - Win32_System_RemoteDesktop → ProcessIdToSessionId
     # - Win32_System_StationsAndDesktops → OpenWindowStationW
     "Win32_System_RemoteDesktop",

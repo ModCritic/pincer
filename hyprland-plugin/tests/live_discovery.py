@@ -24,7 +24,7 @@ def hyprctl(*args):
 
 
 def status():
-    value = json.loads(hyprctl("-j", "cua:status"))
+    value = json.loads(hyprctl("-j", "pincer:status"))
     if value.get("experiment"):
         assert value["state"] == "input_experiment"
         assert value["experiment"]["test_only"] is True

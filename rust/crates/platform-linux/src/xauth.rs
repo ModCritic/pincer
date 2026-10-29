@@ -1,6 +1,6 @@
 //! Xwayland `XAUTHORITY` auto-discovery for SSH-driven Wayland sessions.
 //!
-//! When cua-driver is driven over SSH against a Wayland+Xwayland desktop,
+//! When pincer is driven over SSH against a Wayland+Xwayland desktop,
 //! `DISPLAY` is typically inherited (e.g. `:0`) but `XAUTHORITY` is not.
 //! Xwayland authenticates X11 clients with a per-session MIT cookie passed to
 //! it via its own `-auth <file>` argument, which an X11 client cannot guess —
@@ -36,12 +36,12 @@ pub fn ensure_xauthority_discovered() {
             // thread reads the environment.
             std::env::set_var("XAUTHORITY", &auth);
             tracing::info!(
-                target: "cua-driver",
+                target: "pincer",
                 "XAUTHORITY was unset; adopted the running X server's auth cookie at {auth} (#1926)"
             );
         } else {
             tracing::debug!(
-                target: "cua-driver",
+                target: "pincer",
                 "XAUTHORITY unset and no X server -auth cookie found in /proc; \
                  X11 connects may fail with 'Authorization required' (#1926)"
             );

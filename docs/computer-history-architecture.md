@@ -1,17 +1,17 @@
-# Computer History for Cua Driver
+# Computer History for Pincer
 
 **Last updated:** 2026-08-15
 
-This document defines an opt-in computer-history capability for Cua Driver. It
+This document defines an opt-in computer-history capability for Pincer. It
 is intentionally staged. The first stage records a narrow, encrypted history
-of Cua-mediated actions on macOS, Windows, and Linux and exposes two
+of Pincer-mediated actions on macOS, Windows, and Linux and exposes two
 permission-gated read-only operations. Later stages may add richer local
 context, stronger audit semantics, process isolation, and an NVIDIA OpenShell
 policy adapter.
 
 ## Summary
 
-Computer History gives users an encrypted local record of what Cua Driver did, when it did it, which application it targeted, and what outcome the driver could truthfully confirm. It is off by default and records only an explicit allowlist of structured metadata.
+Computer History gives users an encrypted local record of what Pincer did, when it did it, which application it targeted, and what outcome the driver could truthfully confirm. It is off by default and records only an explicit allowlist of structured metadata.
 
 The defining privacy boundary is permanent:
 
@@ -23,11 +23,11 @@ The defining privacy boundary is permanent:
 - no file paths;
 - no free-form diagnostic details.
 
-Preview 0 is action-history-first. It does not continuously observe the desktop. It records only Cua Driver session lifecycle, history controls, permission-gated history reads, and Cua-mediated computer actions. Ambient app/window events, window titles, URLs, model summarization, agent mutation/export, and unsupported operating systems are later stages with independent gates.
+Preview 0 is action-history-first. It does not continuously observe the desktop. It records only Pincer session lifecycle, history controls, permission-gated history reads, and Pincer-mediated computer actions. Ambient app/window events, window titles, URLs, model summarization, agent mutation/export, and unsupported operating systems are later stages with independent gates.
 
 ## Motivation
 
-Cua Driver already has strong internal representations of session lifecycle and action outcomes, but users do not have a durable, inspectable answer to questions such as:
+Pincer already has strong internal representations of session lifecycle and action outcomes, but users do not have a durable, inspectable answer to questions such as:
 
 - What actions did the driver perform during this session?
 - Which applications did it act on?
@@ -51,19 +51,19 @@ value of giving agents bounded prior-run context without weakening user privacy.
 
 1. Ship an experimental desktop Preview 0 behind both a daemon admission flag and explicit persistent user opt-in.
 2. Reuse the canonical tool-dispatch and action-outcome seams. Do not build a second action runtime.
-3. Encrypt every Preview 0 history record at rest with a namespace key protected by macOS Keychain, Windows Credential Manager, or Linux Secret Service and per-chunk derived keys. Store records as the Cua History Profile: a CBOR Sequence of per-record COSE_Encrypt0 objects containing CloudEvents JSON. There is no plaintext fallback.
+3. Encrypt every Preview 0 history record at rest with a namespace key protected by macOS Keychain, Windows Credential Manager, or Linux Secret Service and per-chunk derived keys. Store records as the Pincer History Profile: a CBOR Sequence of per-record COSE_Encrypt0 objects containing CloudEvents JSON. There is no plaintext fallback.
 4. Keep history event data local and separate from product telemetry. Existing fixed-enum CLI command counters may report that a history command ran, but never include history fields, identifiers, results, counts, paths, or content.
 5. Never block or fail a computer action because history is slow or unavailable.
 6. Keep the event, storage, and permission contracts platform-neutral and keep native adapters thin.
-7. Expose exactly two read-only agent operations in Preview 0: `history_status` (`history.status`) and `history_query` (`history.query`). Route both through the existing Cua risk, permission, policy, and capability-manifest evaluator, and audit successful reads inside encrypted history.
+7. Expose exactly two read-only agent operations in Preview 0: `history_status` (`history.status`) and `history_query` (`history.query`). Route both through the existing Pincer risk, permission, policy, and capability-manifest evaluator, and audit successful reads inside encrypted history.
 8. Add mutation/export operations, optional sensitive-metadata scopes, process isolation, an NVIDIA OpenShell policy adapter, model summarization, and additional platforms only after independent privacy and compatibility review.
 
 ## Goals
 
-- Give users an inspectable history of Cua-mediated computer actions.
+- Give users an inspectable history of Pincer-mediated computer actions.
 - Preserve a strict metadata-only privacy boundary.
 - Make consent, pause, resume, retention, quota, deletion, and access visible.
-- Reuse Cua Driver's existing daemon, session, authorization, action-result, and platform contracts.
+- Reuse Pincer's existing daemon, session, authorization, action-result, and platform contracts.
 - Keep one schema across macOS, Windows, and Linux without changing Preview 0 records per platform.
 - Define a storage profile that has interoperable implementations across macOS, Windows, and Linux.
 - Keep storage, key custody, and authorization behind separate contracts so a future NVIDIA OpenShell policy adapter can govern callers without owning native host keys or files.
@@ -77,7 +77,7 @@ value of giving agents bounded prior-run context without weakening user privacy.
 - Exposing agent mutation, deletion, raw encrypted chunks, keys, unrestricted queries, or model-generated summaries in Preview 0.
 - Claiming physical secure erasure or complete rollback resistance.
 - Claiming parity where an operating system or desktop cannot supply the same native evidence.
-- Using history as product telemetry or uploading it to Cua services.
+- Using history as product telemetry or uploading it to Pincer services.
 
 ## Terminology
 
@@ -85,7 +85,7 @@ value of giving agents bounded prior-run context without weakening user privacy.
 - **History event:** one allowlisted structured lifecycle, control, action, or health record.
 - **History writer:** the non-blocking in-daemon Preview 0 component that persists events.
 - **History store:** the namespace-aware encrypted local directory holding history chunks and non-sensitive format metadata.
-- **Cua History Profile:** the versioned composition of CBOR Sequence framing, COSE_Encrypt0 record protection, and a CloudEvents JSON event envelope defined by this document.
+- **Pincer History Profile:** the versioned composition of CBOR Sequence framing, COSE_Encrypt0 record protection, and a CloudEvents JSON event envelope defined by this document.
 - **Key provider:** the platform adapter that creates, loads, and destroys device-local history keys without exposing them to callers.
 - **Vault:** the separate, least-privilege encrypted storage process introduced at Beta. Preview 0 is encrypted but remains daemon-owned.
 - **Query broker:** the policy-enforcing boundary that mediates access to the hardened vault.
@@ -97,24 +97,24 @@ value of giving agents bounded prior-run context without weakening user privacy.
 
 The implementation must extend current source-of-truth contracts:
 
-- [`cua-driver-core/src/tool.rs`](../rust/crates/cua-driver-core/src/tool.rs) is the canonical dispatch chokepoint. It joins the resolved tool name, sanitized arguments, timing, dispatch, and resulting action record.
-- [`cua-driver-core/src/action_record.rs`](../rust/crates/cua-driver-core/src/action_record.rs) provides `ActionExecutionRecord::stable_projection()`, the validated source for fixed effect, route, delivery, evidence-kind, and escalation-kind fields.
-- [`cua-driver-core/src/session.rs`](../rust/crates/cua-driver-core/src/session.rs) owns session lifecycle. Its current `SessionObserver` is a single `OnceLock` registration already used by telemetry; history must not try to register a competing observer.
-- [`cua-driver-core/src/server.rs`](../rust/crates/cua-driver-core/src/server.rs) exposes a deliberately content-free `ToolCompletionObservation`. It is useful for fixed classifications but is not, by itself, a complete history event.
-- [`cua-driver-core/src/recording.rs`](../rust/crates/cua-driver-core/src/recording.rs) demonstrates begin/finish hooks around dispatch and argument sanitization. History may reuse that hook shape but never its screenshot-bearing storage or consent model.
+- [`pincer-core/src/tool.rs`](../rust/crates/pincer-core/src/tool.rs) is the canonical dispatch chokepoint. It joins the resolved tool name, sanitized arguments, timing, dispatch, and resulting action record.
+- [`pincer-core/src/action_record.rs`](../rust/crates/pincer-core/src/action_record.rs) provides `ActionExecutionRecord::stable_projection()`, the validated source for fixed effect, route, delivery, evidence-kind, and escalation-kind fields.
+- [`pincer-core/src/session.rs`](../rust/crates/pincer-core/src/session.rs) owns session lifecycle. Its current `SessionObserver` is a single `OnceLock` registration already used by telemetry; history must not try to register a competing observer.
+- [`pincer-core/src/server.rs`](../rust/crates/pincer-core/src/server.rs) exposes a deliberately content-free `ToolCompletionObservation`. It is useful for fixed classifications but is not, by itself, a complete history event.
+- [`pincer-core/src/recording.rs`](../rust/crates/pincer-core/src/recording.rs) demonstrates begin/finish hooks around dispatch and argument sanitization. History may reuse that hook shape but never its screenshot-bearing storage or consent model.
 - The `platform-macos`, `platform-windows`, and `platform-linux` history adapters
   provide native key custody and per-action application identity without adding
   a continuous observer or widening the shared event schema.
-- [`cua-driver/src/serve.rs`](../rust/crates/cua-driver/src/serve.rs), [`cua-driver-core/src/daemon.rs`](../rust/crates/cua-driver-core/src/daemon.rs), and [`cua-driver-core/src/socket_io.rs`](../rust/crates/cua-driver-core/src/socket_io.rs) own the daemon and client transport.
-- [`cua-driver/src/cli.rs`](../rust/crates/cua-driver/src/cli.rs) preserves the
+- [`pincer/src/serve.rs`](../rust/crates/pincer/src/serve.rs), [`pincer-core/src/daemon.rs`](../rust/crates/pincer-core/src/daemon.rs), and [`pincer-core/src/socket_io.rs`](../rust/crates/pincer-core/src/socket_io.rs) own the daemon and client transport.
+- [`pincer/src/cli.rs`](../rust/crates/pincer/src/cli.rs) preserves the
   verified installed product, namespace, permission mode, grants, compatibility
   mode, socket, and history admission across daemon relaunch on each platform.
 - Upstream's `scripts/uninstall.sh` and `scripts/uninstall.ps1`, which this
   fork removed, preserve history during a normal uninstall and perform exact
   installed-helper cryptographic purge before package removal when purge is
   explicit.
-- [`cua-driver-core/src/authorization.rs`](../rust/crates/cua-driver-core/src/authorization.rs), [`cua-driver-core/src/policy.rs`](../rust/crates/cua-driver-core/src/policy.rs), and [`cua-driver-core/src/session_manifest.rs`](../rust/crates/cua-driver-core/src/session_manifest.rs) are authoritative for the Preview 0 read-only history operations and remain the stable seam for a later NVIDIA OpenShell adapter.
-- [`cua-driver/src/bundle.rs`](../rust/crates/cua-driver/src/bundle.rs) is authoritative for release/local namespace separation and default state paths.
+- [`pincer-core/src/authorization.rs`](../rust/crates/pincer-core/src/authorization.rs), [`pincer-core/src/policy.rs`](../rust/crates/pincer-core/src/policy.rs), and [`pincer-core/src/session_manifest.rs`](../rust/crates/pincer-core/src/session_manifest.rs) are authoritative for the Preview 0 read-only history operations and remain the stable seam for a later NVIDIA OpenShell adapter.
+- [`pincer/src/bundle.rs`](../rust/crates/pincer/src/bundle.rs) is authoritative for release/local namespace separation and default state paths.
 
 Preview 0 adds a dedicated history hook beside recording's dispatch hooks. It does not widen product telemetry and does not depend on a new `AXObserver` stream.
 
@@ -143,7 +143,7 @@ view describes the roadmap. Preview 0 does not include those components.
 
 ```mermaid
 flowchart LR
-    U[You explicitly opt in] --> D[Cua Driver performs an action]
+    U[You explicitly opt in] --> D[Pincer performs an action]
     D --> V[Encrypted local history]
     V --> H[You inspect it or authorize a query]
 
@@ -163,8 +163,8 @@ flowchart LR
     K[Native credential store\nnamespace root key] --> W
     W --> S[CBOR Sequence\nCOSE-encrypted CloudEvents]
 
-    U[User CLI] -->|enable pause inspect delete| D[Cua Driver daemon]
-    G[Agent] --> P[Existing Cua permission system]
+    U[User CLI] -->|enable pause inspect delete| D[Pincer daemon]
+    G[Agent] --> P[Existing Pincer permission system]
     P -->|history.status or history.query| D
     D -->|serialized bounded read| W
     S -->|metadata-only result| D
@@ -217,15 +217,15 @@ flowchart TB
 Preview 0 records:
 
 - history enable, disable, pause, resume, flush, quota, recovery, and delete events;
-- Cua Driver session start and end events;
-- the start and completion of Cua-mediated, state-changing computer actions;
+- Pincer session start and end events;
+- the start and completion of Pincer-mediated, state-changing computer actions;
 - fixed action outcome fields derived from the validated action record;
 - per-action fixed-field application identity available during target resolution;
 - writer health and dropped-event counts.
 
 Preview 0 does not record:
 
-- passive activity outside Cua-mediated actions;
+- passive activity outside Pincer-mediated actions;
 - read-only snapshots or accessibility-tree reads;
 - window titles or URLs;
 - text-entry length, text classifications, key events, or clipboard events;
@@ -235,8 +235,8 @@ Preview 0 does not record:
 
 ```mermaid
 flowchart LR
-    U[User CLI] -->|enable pause inspect delete| D[Cua Driver daemon]
-    G[Agent runtime] -->|history_status or history_query| P[Existing Cua permission system]
+    U[User CLI] -->|enable pause inspect delete| D[Pincer daemon]
+    G[Agent runtime] -->|history_status or history_query| P[Existing Pincer permission system]
     P -->|authorized read only| D
     A[Canonical tool dispatch] --> H[History hook]
     O[Validated action outcome] --> H
@@ -256,8 +256,8 @@ flowchart LR
 
 Two independent gates are required:
 
-1. `cua-driver serve --experimental-history` admits the preview capability for that daemon generation. Without it, history mutation commands are unavailable.
-2. `cua-driver history enable` records explicit user consent and persists `history_enabled: true` in the namespace-specific driver configuration.
+1. `pincer serve --experimental-history` admits the preview capability for that daemon generation. Without it, history mutation commands are unavailable.
+2. `pincer history enable` records explicit user consent and persists `history_enabled: true` in the namespace-specific driver configuration.
 
 Admission alone never starts capture. Opt-in alone cannot bypass a daemon that was started without the experimental admission flag.
 
@@ -306,7 +306,7 @@ for diagnosis, but it never persists enabled state or writes plaintext history.
 
 ### Standards profile
 
-The Cua History Profile composes these open specifications:
+The Pincer History Profile composes these open specifications:
 
 - [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html) for CBOR;
 - [RFC 8610](https://www.rfc-editor.org/rfc/rfc8610.html) for the CDDL definition of profile items;
@@ -316,7 +316,7 @@ The Cua History Profile composes these open specifications:
 - [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869.html) for HKDF-SHA-256 chunk-key derivation; and
 - [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/main/cloudevents/spec.md) and its [JSON event format](https://github.com/cloudevents/spec/blob/main/cloudevents/formats/json-format.md) for the logical event envelope.
 
-These specifications define the primitives. This document defines the Cua-specific profile that composes them, including key derivation, nonce construction, limits, recovery behavior, event types, and the privacy allowlist. The implementation must check in the exact CDDL for the file header and sequence items beside the event JSON Schema. A conforming reader does not need Cua-specific cryptographic or framing code, but it must implement this profile's validation rules.
+These specifications define the primitives. This document defines the Pincer-specific profile that composes them, including key derivation, nonce construction, limits, recovery behavior, event types, and the privacy allowlist. The implementation must check in the exact CDDL for the file header and sequence items beside the event JSON Schema. A conforming reader does not need Pincer-specific cryptographic or framing code, but it must implement this profile's validation rules.
 
 ### Event envelope
 
@@ -326,12 +326,12 @@ Every Preview 0 record is a CloudEvents 1.0 JSON event inside the encrypted COSE
 {
   "specversion": "1.0",
   "id": "11111111111111111111111111111111",
-  "source": "urn:cua-driver:history:22222222222222222222222222222222",
-  "type": "cua-driver.history.action_completed.v0",
+  "source": "urn:pincer:history:22222222222222222222222222222222",
+  "type": "pincer.history.action_completed.v0",
   "subject": "action/44444444444444444444444444444444",
   "time": "2026-08-14T12:00:00Z",
   "datacontenttype": "application/json",
-  "dataschema": "urn:cua-driver:schema:history-event:v0",
+  "dataschema": "urn:pincer:schema:history-event:v0",
   "data": {
     "session_id": "33333333333333333333333333333333",
     "action_id": "44444444444444444444444444444444",
@@ -339,7 +339,7 @@ Every Preview 0 record is a CloudEvents 1.0 JSON event inside the encrypted COSE
     "platform": "macos",
     "process_model": "in_daemon",
     "capability": "computer.pointer.click",
-    "caller_category": "cua_runtime",
+    "caller_category": "pincer_runtime",
     "payload": {
       "kind": "action_completed",
       "effect": "confirmed",
@@ -362,12 +362,12 @@ Readers must reject unknown `dataschema` identifiers and unknown fields they can
 
 | Event | Allowlisted payload |
 |---|---|
-| `cua-driver.history.control.v0` | one fixed operation: `enable`, `disable`, `pause`, `resume`, `flush`, or `delete` |
-| `cua-driver.history.session_started.v0` / `session_ended.v0` | fixed phase and optional opaque session id |
-| `cua-driver.history.action_started.v0` | opaque action/session ids, one fixed capability, optional bounded application identity |
-| `cua-driver.history.action_completed.v0` | the same opaque ids/capability/application plus fixed effect, route, delivery, delivered count, evidence kinds, and escalation kind |
-| `cua-driver.history.access.v0` | fixed caller operation (`agent_query` or `local_cli`) and returned-event count |
-| `cua-driver.history.health.v0` | fixed health category and count; reserved for writer-emitted health summaries |
+| `pincer.history.control.v0` | one fixed operation: `enable`, `disable`, `pause`, `resume`, `flush`, or `delete` |
+| `pincer.history.session_started.v0` / `session_ended.v0` | fixed phase and optional opaque session id |
+| `pincer.history.action_started.v0` | opaque action/session ids, one fixed capability, optional bounded application identity |
+| `pincer.history.action_completed.v0` | the same opaque ids/capability/application plus fixed effect, route, delivery, delivered count, evidence kinds, and escalation kind |
+| `pincer.history.access.v0` | fixed caller operation (`agent_query` or `local_cli`) and returned-event count |
+| `pincer.history.health.v0` | fixed health category and count; reserved for writer-emitted health summaries |
 
 Delete-all closes the writer and writes no plaintext or encrypted tombstone after destroying the namespace key. Its fixed outcome is returned only to the local CLI.
 
@@ -447,15 +447,15 @@ The default root is derived from the product namespace and native user-state
 location:
 
 ```text
-macOS:   ~/Library/Application Support/{cua-driver|cua-driver-local}/computer-history/
-Windows: %LOCALAPPDATA%\{cua-driver|cua-driver-local}\computer-history\
-Linux:   ${XDG_STATE_HOME:-~/.local/state}/{cua-driver|cua-driver-local}/computer-history/
+macOS:   ~/Library/Application Support/{pincer|pincer-local}/computer-history/
+Windows: %LOCALAPPDATA%\{pincer|pincer-local}\computer-history\
+Linux:   ${XDG_STATE_HOME:-~/.local/state}/{pincer|pincer-local}/computer-history/
 ```
 
 Preview 0 does not expose a file-root override. Production capture and purge
 are confined to the platform-derived root for the exact product namespace.
 Tests isolate storage by constructing `HistoryConfig` directly or by using an
-isolated native user-state root. A new or empty root receives a Cua History
+isolated native user-state root. A new or empty root receives a Pincer History
 ownership marker. Preview builds created before this marker existed were never
 publicly released and are not auto-adopted: any non-empty unmarked or malformed
 root, symlinked root or managed entry, Windows reparse point, or unexpected
@@ -466,7 +466,7 @@ filesystem mutations remains outside the threat model defined below.
 
 ```text
 computer-history/
-├── .cua-history-root-v1       # fixed ownership marker; no user data
+├── .pincer-history-root-v1       # fixed ownership marker; no user data
 ├── admission.json             # non-secret preview admission preference
 ├── state.json                 # enabled and paused booleans only
 ├── writer.lock                # empty OS-lock coordination file
@@ -479,7 +479,7 @@ Chunk filenames use random store-local identifiers that are not the session or a
 
 ### Key-provider boundary
 
-`cua-driver-core` depends on a narrow `KeyProvider` contract: create or load a random device-local key, load one exact opaque key reference into zeroizing memory, and destroy that exact reference. Every operation takes an explicit release or local-development namespace. The contract never exposes a platform credential-store path, account name, raw operating-system error, export operation, or plaintext fallback. Its key epoch and per-chunk key reference fields allow later rotation without changing the v1 file framing.
+`pincer-core` depends on a narrow `KeyProvider` contract: create or load a random device-local key, load one exact opaque key reference into zeroizing memory, and destroy that exact reference. Every operation takes an explicit release or local-development namespace. The contract never exposes a platform credential-store path, account name, raw operating-system error, export operation, or plaintext fallback. Its key epoch and per-chunk key reference fields allow later rotation without changing the v1 file framing.
 
 Preview 0 implements this contract with macOS Keychain, Windows Credential
 Manager, and Linux Secret Service. Each provider creates a random 256-bit key,
@@ -487,7 +487,7 @@ reads it back before enabling capture, maps locked/corrupt/unavailable failures
 to fixed categories, zeroizes key bytes, and verifies absence after deletion.
 There is no file-key or environment-key fallback.
 
-Release builds use the macOS Data Protection Keychain and a signing-team-qualified access group tied to `com.trycua.driver`. Apple's [Data Protection Keychain guidance](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains) and [provisioning-profile guidance](https://developer.apple.com/documentation/technotes/tn3125-inside-code-signing-provisioning-profiles) make the embedded Developer ID provisioning profile part of this boundary: it must authorize the exact restricted access-group entitlement carried by the packaged executable. `history enable` verifies those signed entitlements before admitting the installed preview. A build that cannot access its item returns a fixed key-unavailable, key-locked, or key-corrupt category, keeps capture disabled, and never creates a replacement key over an existing stream. Ad-hoc local-development builds cannot use that release access group, so their separate `cua-driver-local` namespace uses a non-synchronizing login-Keychain item. It remains encrypted and has no plaintext fallback, but it does not claim the release build's `ThisDeviceOnly` Data Protection class.
+Release builds use the macOS Data Protection Keychain and a signing-team-qualified access group tied to `io.github.modcritic.pincer`. Apple's [Data Protection Keychain guidance](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains) and [provisioning-profile guidance](https://developer.apple.com/documentation/technotes/tn3125-inside-code-signing-provisioning-profiles) make the embedded Developer ID provisioning profile part of this boundary: it must authorize the exact restricted access-group entitlement carried by the packaged executable. `history enable` verifies those signed entitlements before admitting the installed preview. A build that cannot access its item returns a fixed key-unavailable, key-locked, or key-corrupt category, keeps capture disabled, and never creates a replacement key over an existing stream. Ad-hoc local-development builds cannot use that release access group, so their separate `pincer-local` namespace uses a non-synchronizing login-Keychain item. It remains encrypted and has no plaintext fallback, but it does not claim the release build's `ThisDeviceOnly` Data Protection class.
 
 ### Preview 0 encryption format
 
@@ -506,15 +506,15 @@ Encryption is a Preview 0 requirement:
   because an ad-hoc signature has no installed-product access group.
 - Windows uses the current user's Credential Manager through the native
   credentials API. The exact product namespace and fixed history account name
-  select one credential; another Windows user or Cua release/local namespace
+  select one credential; another Windows user or Pincer release/local namespace
   cannot enumerate it through the provider contract.
 - Linux uses the current desktop user's Secret Service collection. An absent,
-  locked, denied, or malformed Secret Service fails closed. Cua Driver never
+  locked, denied, or malformed Secret Service fails closed. Pincer never
   substitutes an environment variable, plaintext file, or process-local key.
 - Release and local-development builds use different native credential service
   namespaces and cannot unwrap each other's history.
 - Decrypted key material lives only in zeroizing memory owned by the writer/query path; it is never logged, serialized, included in diagnostics, or returned over daemon protocols.
-- Chunk keys are derived from the namespace key with HKDF-SHA-256. The random 128-bit chunk identifier is the salt. The info value contains `cua-driver/history-profile/v1/chunk-key`, the opaque stream identifier, and the key epoch. This separates keys across chunks, streams, epochs, and profile versions.
+- Chunk keys are derived from the namespace key with HKDF-SHA-256. The random 128-bit chunk identifier is the salt. The info value contains `pincer/history-profile/v1/chunk-key`, the opaque stream identifier, and the key epoch. This separates keys across chunks, streams, epochs, and profile versions.
 - Each `.cborseq` file is an RFC 8742 CBOR Sequence. Its first item is a deterministic, definite-length CBOR header containing only the profile version, COSE algorithm identifier, key epoch, opaque key reference, opaque stream and chunk identifiers, and bounded format metadata. The exact encoded header bytes become external authenticated data for every record in that file.
 - Every later sequence item is a tagged COSE_Encrypt0 object whose ciphertext contains exactly one CloudEvents JSON event. The COSE protected header contains only the standard algorithm identifier. The unprotected header contains only the standard 96-bit IV parameter. The exact encoded file header is external authenticated data. Neither COSE header contains a history payload field.
 - Preview 0 uses RFC 9053 algorithm 24, ChaCha20/Poly1305 with a 256-bit key, 128-bit authentication tag, and 96-bit nonce.
@@ -555,32 +555,32 @@ Preview 0 exposes lifecycle and destructive controls only through local CLI
 requests to a daemon-private method. The daemon authenticates the same-user
 Unix-socket or named-pipe peer, resolves its executable from the kernel-reported
 peer PID, and requires the exact helper inside the verified installed product.
-macOS release admission additionally pins the Cua signing team and Apple
+macOS release admission additionally pins the Pincer signing team and Apple
 code-signing trust anchor. Caller-declared direct-CLI routing fields remain
 defense in depth and cannot authenticate an arbitrary same-user process:
 
 ```text
-cua-driver history enable
-cua-driver history disable
-cua-driver history pause
-cua-driver history resume
-cua-driver history status [--json]
-cua-driver history list [limit] [--json]
-cua-driver history show <sequence> [--json]
-cua-driver history flush
-cua-driver history delete --yes
+pincer history enable
+pincer history disable
+pincer history pause
+pincer history resume
+pincer history status [--json]
+pincer history list [limit] [--json]
+pincer history show <sequence> [--json]
+pincer history flush
+pincer history delete --yes
 ```
 
 Mutation commands follow the driver's protected-action rules. `delete` requires an explicit human-facing confirmation unless the caller supplies an existing trusted confirmation mechanism defined by the driver; it is never exposed as an agent tool in Preview 0.
 
 ### Preview 0 agent hydration
 
-An agent runtime hydrates from history through the normal Cua Driver tool path:
+An agent runtime hydrates from history through the normal Pincer tool path:
 
 ```mermaid
 sequenceDiagram
     participant A as Agent runtime
-    participant R as Cua tool registry
+    participant R as Pincer tool registry
     participant P as Existing permission system
     participant H as Encrypted history
 
@@ -597,7 +597,7 @@ sequenceDiagram
     R-->>A: bounded events enter agent context
 ```
 
-The agent first checks `history_status`. If history is available, it requests at most 200 metadata-only events with optional sequence and session bounds. A session bound may be the opaque id returned by an earlier query or a caller-known session label, which is transformed with the same namespace-local keyed derivation before comparison; the raw label is never written. The existing Cua permission mode, policy ceilings, and capability manifest decide whether each distinct tool may run. Standard mode requires an explicit operation-scoped history grant. In bounded mode the manifest must grant both the exact tool and the matching `resources.computer_history.operations` value. Query results can enter the model context, so the tool description and response explicitly disclose that fact. The agent cannot enable, pause, resume, delete, change retention, export raw chunks, or obtain keys.
+The agent first checks `history_status`. If history is available, it requests at most 200 metadata-only events with optional sequence and session bounds. A session bound may be the opaque id returned by an earlier query or a caller-known session label, which is transformed with the same namespace-local keyed derivation before comparison; the raw label is never written. The existing Pincer permission mode, policy ceilings, and capability manifest decide whether each distinct tool may run. Standard mode requires an explicit operation-scoped history grant. In bounded mode the manifest must grant both the exact tool and the matching `resources.computer_history.operations` value. Query results can enter the model context, so the tool description and response explicitly disclose that fact. The agent cannot enable, pause, resume, delete, change retention, export raw chunks, or obtain keys.
 
 A future NVIDIA OpenShell policy adapter may constrain sandboxed callers and
 feed the same stable `history.status` and `history.query` capability decision.
@@ -731,7 +731,7 @@ Typed text, raw arguments/results, screenshots, clipboard contents, accessibilit
 
 Beta moves key ownership and storage into a separate least-privilege process
 and adds an NVIDIA OpenShell policy adapter around the read-only capability
-contract introduced in Preview 0. Cua Driver keeps a platform-neutral internal
+contract introduced in Preview 0. Pincer keeps a platform-neutral internal
 capability contract so native policy and NVIDIA OpenShell reach the same
 host-side authorization decision.
 
@@ -759,14 +759,14 @@ flowchart LR
 ### Process boundary
 
 - The vault process performs no network I/O.
-- It cannot execute Cua tools.
+- It cannot execute Pincer tools.
 - Agent transports cannot connect to it directly.
 - IPC follows the driver's existing authenticated local socket/framing conventions.
-- The host policy/query broker authenticates the caller, maps one requested operation to one history capability, and evaluates the current Cua Driver authorization contract. It holds caller and policy context but not the vault key.
+- The host policy/query broker authenticates the caller, maps one requested operation to one history capability, and evaluates the current Pincer authorization contract. It holds caller and policy context but not the vault key.
 - The model broker holds neither vault keys nor direct raw-chunk access.
 
 An external sandbox policy may govern the caller, tool selection, network path,
-and credential exposure without governing the native host process. The Cua
+and credential exposure without governing the native host process. The Pincer
 Driver daemon and vault therefore remain host-side security boundaries, and
 the host broker still authenticates and authorizes every request before it
 reaches history data.
@@ -841,7 +841,7 @@ The normalized event envelope is shared from Preview 0, but platform support is 
 
 | Capability | macOS | Windows | Linux/X11 | Linux/Wayland |
 |---|---|---|---|---|
-| Cua-mediated action history | Preview 0 | Preview 0 | Preview 0 | Preview 0 |
+| Pincer-mediated action history | Preview 0 | Preview 0 | Preview 0 | Preview 0 |
 | App identity | bundle ID | executable identity | `WM_CLASS`, then process identity | compositor `app_id`, then process identity |
 | Ambient focus history | later | later | later | compositor-dependent |
 | Window title opt-in | Preview 1 or later | later | later | partial/compositor-dependent |
@@ -854,7 +854,7 @@ Missing OS or compositor capabilities therefore produce less context. Adapters
 never substitute screenshots, OCR, raw text, or guessed values. Explicit
 limitation metadata would require a future schema revision.
 
-Each platform supplies a reviewed `KeyProvider` adapter for the same Cua History
+Each platform supplies a reviewed `KeyProvider` adapter for the same Pincer History
 Profile. Preview 0 uses macOS Keychain, Windows Credential Manager, and Linux
 Secret Service. The exact backend must pass native locked, missing, corrupt,
 namespace-isolation, and key-destruction tests before that platform qualifies
@@ -879,12 +879,12 @@ mutation when it encounters a newer schema. Upgrade, rollback, reinstall, and
 purge tests must exercise these rules against packaged applications before a
 platform qualifies.
 
-- Preview 0 uses Cua History Profile `v1` and event data schema `urn:cua-driver:schema:history-event:v0`; both are explicitly experimental.
+- Preview 0 uses Pincer History Profile `v1` and event data schema `urn:pincer:schema:history-event:v0`; both are explicitly experimental.
 - Additive fields may be introduced within v0 only when old readers safely ignore them.
 - Removing, reinterpreting, or making an optional field required creates a new schema version.
 - Changing CBOR sequence structure, COSE message type, algorithm, nonce construction, header meaning, key derivation, or event media type creates a new profile version. An algorithm or key rotation within the existing profile uses a new key epoch only when every reader can select it without ambiguity.
 - No supported Preview 0 format is plaintext. Development-only plaintext prototypes are never imported automatically; the preview must identify and refuse them, and an explicit cleanup path must remove them before capture can start.
-- Preview 1 preserves the Cua History Profile or performs an explicit encrypted-to-encrypted migration that verifies record counts and authentication before switching formats.
+- Preview 1 preserves the Pincer History Profile or performs an explicit encrypted-to-encrypted migration that verifies record counts and authentication before switching formats.
 - The Beta vault reads supported earlier schemas or runs an explicit migration; it never silently drops unsupported records.
 - Disabling the feature leaves data intact. Deletion is a separate explicit operation.
 - Normal uninstall also leaves encrypted data, preferences, and namespace-scoped keys intact; only explicit purge performs key destruction and file cleanup.
@@ -951,7 +951,7 @@ Rejected. Application identity, timestamps, and action history are personal data
 
 ### Use a custom encrypted frame format
 
-Rejected. A custom frame codec would make every platform reimplement parsing, algorithm identifiers, and record protection. The Cua History Profile uses CBOR Sequence and COSE for those mechanics and limits custom code to the profile rules and event schema.
+Rejected. A custom frame codec would make every platform reimplement parsing, algorithm identifiers, and record protection. The Pincer History Profile uses CBOR Sequence and COSE for those mechanics and limits custom code to the profile rules and event schema.
 
 ### Store NVIDIA OpenShell policy documents with history or make them the storage format
 
@@ -968,12 +968,12 @@ Deferred. Bounded authenticated-record scanning is sufficient while the experime
 
 ### Increment 0A: schema and redaction boundary
 
-- Add CloudEvents-compatible platform-neutral history event types, stable operation-specific capability names, and a closed JSON serializer in `cua-driver-core`.
+- Add CloudEvents-compatible platform-neutral history event types, stable operation-specific capability names, and a closed JSON serializer in `pincer-core`.
 - Add persisted-field allowlist and adversarial privacy tests.
 - Add a namespace-aware configuration/storage resolver and a platform-neutral
   `KeyProvider` contract with macOS Keychain, Windows Credential Manager, and
   Linux Secret Service implementations.
-- Implement and check in Cua History Profile v1 CDDL and event JSON Schema: deterministic CBOR headers, fail-closed RFC 8742 sequence validation, tagged COSE_Encrypt0 records, HKDF chunk-key derivation, and RFC 9053 ChaCha20/Poly1305.
+- Implement and check in Pincer History Profile v1 CDDL and event JSON Schema: deterministic CBOR headers, fail-closed RFC 8742 sequence validation, tagged COSE_Encrypt0 records, HKDF chunk-key derivation, and RFC 9053 ChaCha20/Poly1305.
 - Select maintained cryptographic and serialization crates, pin them through the repository lockfile, document their versions and rationale, and pass repository license and advisory checks without handwritten cryptographic primitives.
 - Add standards-profile fixtures that can be decoded by an independent CBOR/COSE implementation.
 - Add nonce-uniqueness across clean and writer restart; positional sequence/IV validation; wrong-key; authentication-failure; incomplete-final-item refusal; complete-item corruption refusal; and no-plaintext-fallback tests.
@@ -1004,7 +1004,7 @@ Deferred. Bounded authenticated-record scanning is sufficient while the experime
 - Add thin Windows and Linux application-identity adapters without titles,
   paths, typed text, screenshots, or raw arguments.
 - Protect the namespace root key with Windows Credential Manager and Linux
-  Secret Service, preserving the same Cua History Profile and fail-closed
+  Secret Service, preserving the same Pincer History Profile and fail-closed
   behavior.
 - Authenticate local control callers by their exact installed executable and
   preserve the managed Windows task or Linux systemd user service across
@@ -1072,7 +1072,7 @@ Deferred. Bounded authenticated-record scanning is sufficient while the experime
 - writer failure does not change action result;
 - raw-file scans cannot find fixture event content or serialized JSON payloads;
 - visible CBOR and COSE headers contain only the profile's generic allowlist;
-- an independent standards-based reader parses the sequence and COSE structure before Cua-specific event validation;
+- an independent standards-based reader parses the sequence and COSE structure before Pincer-specific event validation;
 - delete-all closes the writer, destroys every exact-namespace native-credential reference, and removes original readable paths;
 - restart restores explicit enabled/disabled state and refuses an incomplete or corrupt tail without appending;
 - installed auto-launch restores preview admission without conflating it with enabled state and refuses a mismatched source, namespace, version, or signing identity during the enable relaunch;
@@ -1114,11 +1114,11 @@ The Preview 0 encryption construction is decided above. These later-stage questi
 
 The architecture constraints are:
 
-- narrow the first stage on each supported desktop to Cua-mediated action
+- narrow the first stage on each supported desktop to Pincer-mediated action
   history;
 - use real dispatch/action/session seams instead of hypothetical capture components;
 - make the Preview 0 privacy schema an explicit allowlist;
-- compose the disk format from CBOR Sequence, COSE_Encrypt0, and CloudEvents while defining the Cua-specific profile with checked-in CDDL and JSON Schema;
+- compose the disk format from CBOR Sequence, COSE_Encrypt0, and CloudEvents while defining the Pincer-specific profile with checked-in CDDL and JSON Schema;
 - define one cross-platform `KeyProvider` boundary with native macOS, Windows,
   and Linux implementations, and fail closed on release-identity changes;
 - make nonce uniqueness structural across crashes and in-process writer restarts, and reject missing, reordered, duplicated, or position-mismatched records;
@@ -1139,4 +1139,4 @@ The architecture constraints are:
 - ship only permission-gated, read-only agent hydration in Preview 0; defer
   agent mutation/export, process isolation, models, ambient observers, and
   additional platform adapters behind explicit gates;
-- keep the proposal independent and grounded in Cua Driver's requirements and current repository contracts.
+- keep the proposal independent and grounded in Pincer's requirements and current repository contracts.

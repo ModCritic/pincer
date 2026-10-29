@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh — stage the Electron test fixture app for cua-driver tests / modality
+# build.sh — stage the Electron test fixture app for pincer tests / modality
 # recordings on Linux and macOS.
 #
 # On Linux we run the app straight from node_modules (electron's prebuilt
@@ -7,7 +7,7 @@
 # with `electron . --no-sandbox --disable-gpu --force-renderer-accessibility`
 # under Xvfb + a dbus session so Chromium's web-AX tree registers on AT-SPI.
 #
-# On macOS we stage Electron.app as CuaTestHarness.Electron.app and place the
+# On macOS we stage Electron.app as PincerTestHarness.Electron.app and place the
 # same app resources under Contents/Resources/app.
 set -euo pipefail
 
@@ -15,8 +15,8 @@ elecDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 crossDir="$(dirname "$elecDir")"
 appsDir="$(dirname "$crossDir")"
 harnessDir="$(dirname "$appsDir")"
-cuaDriverDir="$(cd "$harnessDir/../.." && pwd)"
-outDir="$cuaDriverDir/rust/test-apps/harness-electron"
+pincerDir="$(cd "$harnessDir/../.." && pwd)"
+outDir="$pincerDir/rust/test-apps/harness-electron"
 platform="$(uname -s)"
 
 if ! command -v npm >/dev/null 2>&1; then
@@ -33,9 +33,9 @@ cp -r "$harnessDir/shared/web/." "$elecDir/web/"
 # Certification runs archive any inherited dependency tree and reinstall from
 # the lockfile. This keeps a same-SHA rerun independent of worker state without
 # deleting evidence from the previous fixture build.
-if [[ "${CUA_E2E_FRESH_FIXTURE_STATE:-0}" == 1 ]]; then
-  fixtureRunId="${CUA_E2E_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
-  fixtureArchiveRoot="${TMPDIR:-/tmp}/cua-electron-fixture-archive"
+if [[ "${PINCER_E2E_FRESH_FIXTURE_STATE:-0}" == 1 ]]; then
+  fixtureRunId="${PINCER_E2E_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+  fixtureArchiveRoot="${TMPDIR:-/tmp}/pincer-electron-fixture-archive"
   fixtureArchive="${fixtureArchiveRoot}/node_modules.${fixtureRunId}"
   if [[ -e "$fixtureArchive" ]]; then
     echo "[ERROR] refusing to overwrite fixture archive: $fixtureArchive" >&2
@@ -69,7 +69,7 @@ electron_install_complete() {
   fi
 }
 
-if [[ "${CUA_E2E_FRESH_FIXTURE_STATE:-0}" != 1 ]] && ! electron_install_complete; then
+if [[ "${PINCER_E2E_FRESH_FIXTURE_STATE:-0}" != 1 ]] && ! electron_install_complete; then
   echo "[INSTALL] npm install (first run)..."
   npm install --silent
 fi
@@ -132,7 +132,7 @@ if [ "$platform" = "Darwin" ]; then
   electronBin="$electronApp/Contents/MacOS/Electron"
   [ -x "$electronBin" ] || { echo "[ERROR] Electron.app missing after npm install" >&2; exit 1; }
 
-  bundle="$outDir/CuaTestHarness.Electron.app"
+  bundle="$outDir/PincerTestHarness.Electron.app"
   echo "[STAGE] Copying Electron.app + app resources to $bundle ..."
   cp -R "$electronApp" "$bundle"
   appDir="$bundle/Contents/Resources/app"
@@ -150,9 +150,9 @@ if [ "$platform" = "Darwin" ]; then
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key><string>Electron</string>
-    <key>CFBundleIdentifier</key><string>com.trycua.harness.electron</string>
-    <key>CFBundleName</key><string>CuaTestHarness.Electron</string>
-    <key>CFBundleDisplayName</key><string>CuaTestHarness.Electron</string>
+    <key>CFBundleIdentifier</key><string>io.github.modcritic.pincer.harness.electron</string>
+    <key>CFBundleName</key><string>PincerTestHarness.Electron</string>
+    <key>CFBundleDisplayName</key><string>PincerTestHarness.Electron</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0.0</string>
     <key>CFBundleVersion</key><string>1</string>
@@ -181,14 +181,14 @@ else
   cp "$elecDir/preload.js" "$appDir/"
   cp "$elecDir/package.json" "$appDir/"
   cp -r "$elecDir/web" "$appDir/web"
-  mv "$outDir/electron" "$outDir/CuaTestHarness.Electron.bin"
-  cp "$elecDir/launcher-linux.sh" "$outDir/CuaTestHarness.Electron"
-  chmod +x "$outDir/CuaTestHarness.Electron" "$outDir/CuaTestHarness.Electron.bin"
+  mv "$outDir/electron" "$outDir/PincerTestHarness.Electron.bin"
+  cp "$elecDir/launcher-linux.sh" "$outDir/PincerTestHarness.Electron"
+  chmod +x "$outDir/PincerTestHarness.Electron" "$outDir/PincerTestHarness.Electron.bin"
 
   cat <<EOF
-[OK]    Staged: $outDir/CuaTestHarness.Electron
+[OK]    Staged: $outDir/PincerTestHarness.Electron
 [NOTE]  Launch under Xvfb + dbus with the Chromium flags Linux needs:
-          CuaTestHarness.Electron --no-sandbox --disable-gpu --force-renderer-accessibility
+          PincerTestHarness.Electron --no-sandbox --disable-gpu --force-renderer-accessibility
         (--force-renderer-accessibility is what populates the web-AX tree on AT-SPI.)
         Or run in place from this dir:  npm run start:linux
 EOF

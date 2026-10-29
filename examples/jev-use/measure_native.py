@@ -5,7 +5,7 @@ Two subcommands produce the same per-decision records and the same table:
 ``replay`` runs the native task specs offline over captured, sanitized
 ``get_window_state`` fixtures. For each task it walks the task's declared
 steps: at every decision point it builds the real candidate set and
-``cua.jev_choice_request_v2`` from the fixture, asks the provider, records the
+``pincer.jev_choice_request_v2`` from the fixture, asks the provider, records the
 decision, then applies the *correct* action's effect to the fixture (select a
 radio, toggle a checkbox, fill a field) and continues, so every decision point
 is scored even after a wrong choice. ``--cap-order`` compares strict

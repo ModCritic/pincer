@@ -276,7 +276,7 @@ fn enumerate_windows(
         };
 
         // z_index: CGWindowList front-to-back → assign reverse index.
-        let z_index = cua_driver_core::window_target::z_index_from_front_to_back(total, idx);
+        let z_index = pincer_core::window_target::z_index_from_front_to_back(total, idx);
 
         results.push(WindowInfo {
             window_id,

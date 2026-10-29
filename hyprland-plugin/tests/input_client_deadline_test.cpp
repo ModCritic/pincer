@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <iostream>
 
-using cua::hyprland::InputClientDeadline;
+using pincer::hyprland::InputClientDeadline;
 using namespace std::chrono_literals;
 
 namespace {

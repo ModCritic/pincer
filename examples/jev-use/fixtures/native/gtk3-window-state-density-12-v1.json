@@ -1,6 +1,6 @@
 {
  "_fixture": {
-  "source": "CuaTestHarness GTK3 task mode with CUA_GTK3_TASK_DENSITY=12 (initial), observed by cua-driver 0.30.4 get_window_state on X11 with AT-SPI",
+  "source": "PincerTestHarness GTK3 task mode with PINCER_GTK3_TASK_DENSITY=12 (initial), observed by pincer 0.30.4 get_window_state on X11 with AT-SPI",
   "sanitized": "Recorded by verify_native.py --capture-dir. Screenshot bytes, tree_markdown, local file paths, and Driver guidance notes removed."
  },
  "app_name": "Main.py",
@@ -593,5 +593,5 @@
   "y": 365
  },
  "window_id": 50331651,
- "window_title": "CuaTestHarness GTK3 Tasks"
+ "window_title": "PincerTestHarness GTK3 Tasks"
 }

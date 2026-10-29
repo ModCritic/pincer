@@ -9,7 +9,7 @@
 #include <sys/un.h>
 
 namespace {
-using cua::hyprland::OwnedSocketPath;
+using pincer::hyprland::OwnedSocketPath;
 using Result = OwnedSocketPath::CleanupResult;
 
 void check(bool condition, const char* message) {
@@ -22,7 +22,7 @@ void check(bool condition, const char* message) {
 class TempDirectory {
   public:
     TempDirectory() {
-        char pattern[] = "/tmp/cua-owned-socket-XXXXXX";
+        char pattern[] = "/tmp/pincer-owned-socket-XXXXXX";
         const char* created = mkdtemp(pattern);
         check(created != nullptr, "create temporary directory");
         path = created;
@@ -145,7 +145,7 @@ void test_metadata_identity() {
     const auto path = directory.path + "/socket";
     BoundSocket socket(path);
     const auto captured = metadata(path);
-    namespace detail = cua::hyprland::owned_socket_path_detail;
+    namespace detail = pincer::hyprland::owned_socket_path_detail;
     check(detail::matches_identity(captured, captured, getuid()), "same owned identity matches");
     auto changed = captured;
     changed.st_uid = captured.st_uid == 0 ? 1 : 0;

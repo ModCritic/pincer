@@ -5,7 +5,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 namespace owned_socket_path_detail {
 
 inline bool is_owned_socket(const struct stat& metadata, uid_t owner) noexcept {
@@ -86,4 +86,4 @@ class OwnedSocketPath {
     int m_error = 0;
 };
 
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

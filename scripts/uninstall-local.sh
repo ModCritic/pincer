@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Remove only the source-built cua-driver-local product. The released
-# cua-driver installation has different names and paths and is never touched.
+# Remove only the source-built pincer-local product. The released
+# pincer installation has different names and paths and is never touched.
 set -euo pipefail
 
 RESET_TCC=1
@@ -22,41 +22,41 @@ while [[ $# -gt 0 ]]; do
 done
 
 OS="$(uname -s 2>/dev/null || echo unknown)"
-HOME_DIR="${CUA_DRIVER_LOCAL_HOME:-$HOME/.cua-driver-local}"
-BIN_DIR="${CUA_DRIVER_LOCAL_INSTALL_DIR:-$HOME/.local/bin}"
-CLI_LINK="$BIN_DIR/cua-driver-local"
-APP_BUNDLE="/Applications/CuaDriverLocal.app"
+HOME_DIR="${PINCER_LOCAL_HOME:-$HOME/.pincer-local}"
+BIN_DIR="${PINCER_LOCAL_INSTALL_DIR:-$HOME/.local/bin}"
+CLI_LINK="$BIN_DIR/pincer-local"
+APP_BUNDLE="/Applications/PincerLocal.app"
 if [[ "$OS" == "Darwin" ]]; then
-    CACHE_DIR="$HOME/Library/Caches/cua-driver-local"
+    CACHE_DIR="$HOME/Library/Caches/pincer-local"
 else
-    CACHE_DIR="$HOME/.cache/cua-driver-local"
+    CACHE_DIR="$HOME/.cache/pincer-local"
 fi
-LAUNCHAGENT="$HOME/Library/LaunchAgents/com.trycua.cua-driver-local.plist"
-SYSTEMD_UNIT="$HOME/.config/systemd/user/cua-driver-local.service"
+LAUNCHAGENT="$HOME/Library/LaunchAgents/io.github.modcritic.pincer-local.plist"
+SYSTEMD_UNIT="$HOME/.config/systemd/user/pincer-local.service"
 
 log() { printf '==> %s\n' "$*"; }
 
 case "$HOME_DIR" in
     /*) ;;
-    *) echo "error: CUA_DRIVER_LOCAL_HOME must be an absolute path" >&2; exit 2 ;;
+    *) echo "error: PINCER_LOCAL_HOME must be an absolute path" >&2; exit 2 ;;
 esac
-if [[ "$HOME_DIR" == "$HOME" || "$HOME_DIR" == "$HOME/.cua-driver" || "$HOME_DIR" == "/" ]]; then
+if [[ "$HOME_DIR" == "$HOME" || "$HOME_DIR" == "$HOME/.pincer" || "$HOME_DIR" == "/" ]]; then
     echo "error: refusing unsafe or release-owned local home: $HOME_DIR" >&2
     exit 2
 fi
 case "$BIN_DIR" in
     /*) ;;
-    *) echo "error: CUA_DRIVER_LOCAL_INSTALL_DIR must be an absolute path" >&2; exit 2 ;;
+    *) echo "error: PINCER_LOCAL_INSTALL_DIR must be an absolute path" >&2; exit 2 ;;
 esac
 
 if [[ "$VALIDATE_ONLY" == "1" ]]; then
-    printf 'cli=%s\nhome=%s\ncache=%s\napp=%s\nbundle=com.trycua.driver.local\nlaunchagent=%s\nsystemd=%s\n' \
+    printf 'cli=%s\nhome=%s\ncache=%s\napp=%s\nbundle=io.github.modcritic.pincer.local\nlaunchagent=%s\nsystemd=%s\n' \
         "$CLI_LINK" "$HOME_DIR" "$CACHE_DIR" "$APP_BUNDLE" "$LAUNCHAGENT" "$SYSTEMD_UNIT"
     exit 0
 fi
 
 if [[ "$FORCE" != "1" ]]; then
-    printf 'Remove the local cua-driver identity and its state? [y/N] '
+    printf 'Remove the local pincer identity and its state? [y/N] '
     read -r reply
     case "$reply" in y|Y|yes|YES) ;; *) log "cancelled"; exit 0 ;; esac
 fi
@@ -89,16 +89,16 @@ if [[ "$OS" == "Darwin" && -f "$LAUNCHAGENT" ]]; then
     log "removed LaunchAgent $LAUNCHAGENT"
 elif [[ "$OS" == "Linux" && -f "$SYSTEMD_UNIT" ]]; then
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl --user disable --now cua-driver-local.service 2>/dev/null || true
+        systemctl --user disable --now pincer-local.service 2>/dev/null || true
     fi
     rm -f "$SYSTEMD_UNIT"
     log "removed systemd user unit $SYSTEMD_UNIT"
 fi
-# See the note in _install-local-rust.sh: `pkill -x cua-driver-local` never
+# See the note in _install-local-rust.sh: `pkill -x pincer-local` never
 # matches on Linux, because `-x` compares against the 15-char truncated
 # `comm` and the name is 16. Match argv[0], anchored so the launcher shells
 # that merely mention the path in their script text are left alone.
-for _daemon_bin in "$CLI_LINK" "$HOME_DIR/packages/current/cua-driver-local"; do
+for _daemon_bin in "$CLI_LINK" "$HOME_DIR/packages/current/pincer-local"; do
     [ -n "$_daemon_bin" ] || continue
     pkill -f "^${_daemon_bin}([[:space:]]|\$)" >/dev/null 2>&1 || true
 done
@@ -111,9 +111,9 @@ if [[ "$OS" == "Darwin" && "$RESET_TCC" == "1" ]] && command -v tccutil >/dev/nu
         [[ ! -x "$LSREGISTER" ]] || "$LSREGISTER" -f "$APP_BUNDLE" >/dev/null 2>&1 || true
     fi
     for service in Accessibility ScreenCapture AppleEvents; do
-        tccutil reset "$service" com.trycua.driver.local >/dev/null 2>&1 || true
+        tccutil reset "$service" io.github.modcritic.pincer.local >/dev/null 2>&1 || true
     done
-    log "revoked TCC grants for com.trycua.driver.local"
+    log "revoked TCC grants for io.github.modcritic.pincer.local"
 fi
 
 # Remove the CLI only if it is an installer-created link into the local product.
@@ -131,12 +131,12 @@ fi
 
 # Skill links use the shared pack name, so target ownership is mandatory.
 for skill_link in \
-    "$HOME/.claude/skills/cua-driver" \
-    "$HOME/.agents/skills/cua-driver" \
-    "$HOME/.openclaw/skills/cua-driver" \
-    "$HOME/.config/opencode/skills/cua-driver" \
-    "$HOME/.gemini/skills/cua-driver" \
-    "$HOME/.hermes/skills/cua-driver"; do
+    "$HOME/.claude/skills/pincer" \
+    "$HOME/.agents/skills/pincer" \
+    "$HOME/.openclaw/skills/pincer" \
+    "$HOME/.config/opencode/skills/pincer" \
+    "$HOME/.gemini/skills/pincer" \
+    "$HOME/.hermes/skills/pincer"; do
     if [[ -L "$skill_link" ]]; then
         target="$(resolve_link "$skill_link")"
         if is_local_target "$target"; then
@@ -159,7 +159,7 @@ try:
 except (OSError, ValueError):
     raise SystemExit(0)
 
-anchors = ("cua-driver-local", os.environ["LOCAL_HOME"], os.environ["LOCAL_APP"])
+anchors = ("pincer-local", os.environ["LOCAL_HOME"], os.environ["LOCAL_APP"])
 removed = []
 
 def is_local(server):
@@ -185,7 +185,7 @@ for project_name, project in (data.get("projects") or {}).items():
         scrub(project.get("mcpServers"), f"project:{project_name}")
 
 if removed:
-    backup = f"{path}.bak-cua-driver-local-uninstall-{int(time.time())}"
+    backup = f"{path}.bak-pincer-local-uninstall-{int(time.time())}"
     shutil.copy2(path, backup)
     fd, temporary = tempfile.mkstemp(prefix=".claude.json.", dir=os.path.dirname(path) or ".", text=True)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -200,10 +200,10 @@ fi
 # names without the -local suffix and cannot be reached by these paths.
 [[ ! -d "$CACHE_DIR" ]] || { rm -rf "$CACHE_DIR"; log "removed $CACHE_DIR"; }
 
-# A caller may override CUA_DRIVER_LOCAL_HOME, so never recursively delete that
+# A caller may override PINCER_LOCAL_HOME, so never recursively delete that
 # root. Require the installer's local executable marker, remove only known
 # runtime-owned children, and leave any unrelated files in place.
-LOCAL_HOME_MARKER="$HOME_DIR/packages/current/cua-driver-local"
+LOCAL_HOME_MARKER="$HOME_DIR/packages/current/pincer-local"
 if [[ -e "$LOCAL_HOME_MARKER" || -L "$LOCAL_HOME_MARKER" ]]; then
     rm -rf "$HOME_DIR/packages" "$HOME_DIR/skills"
     rm -f \
@@ -225,7 +225,7 @@ if [[ -e "$LOCAL_HOME_MARKER" || -L "$LOCAL_HOME_MARKER" ]]; then
         log "removed local runtime payloads from $HOME_DIR; preserved unrelated files"
     fi
 elif [[ -d "$HOME_DIR" ]]; then
-    log "$HOME_DIR has no cua-driver-local install marker; leaving it untouched"
+    log "$HOME_DIR has no pincer-local install marker; leaving it untouched"
 fi
 if [[ "$OS" == "Darwin" && -d "$APP_BUNDLE" ]]; then
     if [[ -w "$(dirname "$APP_BUNDLE")" ]]; then
@@ -236,4 +236,4 @@ if [[ "$OS" == "Darwin" && -d "$APP_BUNDLE" ]]; then
     log "removed $APP_BUNDLE"
 fi
 
-log "cua-driver-local uninstalled; release cua-driver was left untouched"
+log "pincer-local uninstalled; release pincer was left untouched"

@@ -29,7 +29,7 @@ pub use status::{current_status, PermissionsStatus};
 
 /// Crate-wide lock serializing tests that mutate process-global env vars.
 /// Per-module locks are not enough: `gate` and `check_permissions` tests
-/// share `CUA_DRIVER_EMBEDDED`.
+/// share `PINCER_EMBEDDED`.
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();

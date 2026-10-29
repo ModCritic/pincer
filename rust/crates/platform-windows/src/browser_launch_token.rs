@@ -1,6 +1,6 @@
 //! Pure decision logic for the token that runs a Windows isolated browser.
 //!
-//! Cua Driver launches an isolated Chrome or Edge only from a vendor-signed
+//! Pincer launches an isolated Chrome or Edge only from a vendor-signed
 //! installation that the token running the browser cannot modify. An
 //! elevated token (an elevated administrator, the built-in Administrator, or
 //! any administrator when UAC is off) can modify `Program Files`, so such a
@@ -127,9 +127,9 @@ pub(crate) fn validate_standard_user_token(
 /// standard-user token. The Driver never falls back to its elevated token.
 pub(crate) fn standard_user_token_unavailable_message(reason: &str) -> String {
     format!(
-        "Cua Driver is running elevated and could not prepare a verified standard-user token \
+        "Pincer is running elevated and could not prepare a verified standard-user token \
          for the isolated browser ({reason}); it refuses to run the browser with its elevated \
-         token. Run Cua Driver from a non-elevated session to use isolated browsers"
+         token. Run Pincer from a non-elevated session to use isolated browsers"
     )
 }
 
@@ -480,7 +480,7 @@ mod tests {
         let program = r"C:\Program Files\Google\Chrome\Application\chrome.exe";
         let args = [
             "--remote-debugging-port=0",
-            r"--user-data-dir=C:\Users\Jane Doe\AppData\Local\CuaDriver\BrowserProfiles\isolated-1",
+            r"--user-data-dir=C:\Users\Jane Doe\AppData\Local\Pincer\BrowserProfiles\isolated-1",
             "",
             r"trailing\",
             r"spaced trailing\\",

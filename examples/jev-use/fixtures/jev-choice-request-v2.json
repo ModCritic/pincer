@@ -1,5 +1,5 @@
 {
-  "schema": "cua.jev_choice_request_v2",
+  "schema": "pincer.jev_choice_request_v2",
   "goal": "Set the counter to 3 by pressing Increment.",
   "capture_id": "capture-native-1",
   "snapshot_id": "s0000002a",

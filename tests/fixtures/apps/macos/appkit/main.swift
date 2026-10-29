@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Cua AI, Inc.
 
-// CuaTestHarness.AppKit — deterministic Cocoa AppKit host app for the
-// cua-driver-rs test harness. Mirrors the role of CuaTestHarness.Wpf.
+// PincerTestHarness.AppKit — deterministic Cocoa AppKit host app for the
+// pincer test harness. Mirrors the role of PincerTestHarness.Wpf.
 //
 // Single-file Swift, compiled with swiftc against AppKit. Wrapped in a
 // minimal .app bundle by build.sh so AX / TCC behaves like a real app.
@@ -15,7 +15,7 @@
 //   click_target   — NSButton (AX-addressable) records click/double_click/right_click
 //   slider         — NSSlider drives drag / set_value (slider_value=)
 //   checkable_controls — NSButton checkbox (agreed=)
-//   erroring_toggles — opt-in (CUA_APPKIT_ERRORING_TOGGLES=1): two checkboxes
+//   erroring_toggles — opt-in (PINCER_APPKIT_ERRORING_TOGGLES=1): two checkboxes
 //                    whose accessibility press raises, so AppKit answers AXPress
 //                    with an AX error; one toggles before raising (#3835)
 //   context_menu   — NSButton + NSMenu (Cut/Copy/Paste → menu_action=)
@@ -23,23 +23,23 @@
 //   scroll_target  — NSScrollView with a tall body and offset label
 //   ns_menubar     — main menu item with known title (Mac-specific)
 //   exit           — NSButton terminates the app
-//   jev_use_tasks  — opt-in (CUA_APPKIT_TASK_STATE=<path>): a labeled Note
+//   jev_use_tasks  — opt-in (PINCER_APPKIT_TASK_STATE=<path>): a labeled Note
 //                    field with a Save button and Small/Medium/Large radio
 //                    buttons, plus an app-owned JSON state file rewritten on
 //                    every counter, checkbox, size, and save change. Ordinary
 //                    launches do not add these controls or write any file.
-//                    CUA_APPKIT_TASK_DENSITY=12|24 (task mode only) also adds
+//                    PINCER_APPKIT_TASK_DENSITY=12|24 (task mode only) also adds
 //                    benign distractor controls in a sidebar before them, for
 //                    measuring jev-use accuracy at larger candidate sets.
 //
 // AX identifiers (via `setAccessibilityIdentifier(_:)`) match the IDs in
-// scenarios.json. Window title is set to "CuaTestHarness AppKit" so the
+// scenarios.json. Window title is set to "PincerTestHarness AppKit" so the
 // Rust tests can find it via NSWorkspace / accessibility queries.
 
 import AppKit
 
 // MARK: - Constants (must match ../scenarios/scenarios.json `appkit`)
-let kWindowTitle = "CuaTestHarness AppKit"
+let kWindowTitle = "PincerTestHarness AppKit"
 let kWindowAID = "wnd-main"
 let kIncrementButtonAID = "btn-increment"
 let kCounterLabelAID = "lbl-counter"
@@ -56,7 +56,7 @@ let kSliderAID = "sld-value"
 let kSliderValueAID = "lbl-slider-value"
 let kCheckboxAID = "chk-agree"
 let kCheckStateAID = "lbl-chk-state"
-let kErroringTogglesEnv = "CUA_APPKIT_ERRORING_TOGGLES"
+let kErroringTogglesEnv = "PINCER_APPKIT_ERRORING_TOGGLES"
 let kActsThenErrorsAID = "chk-acts-then-errors"
 let kErrorsOnlyAID = "chk-errors-only"
 let kErroringTogglesStateAID = "lbl-erroring-toggles"
@@ -72,15 +72,15 @@ let kScrollTopMarker = "SCROLL_TOP_MARKER_v1"
 let kScrollBottomMarker = "SCROLL_BOTTOM_MARKER_v1"
 let kExitButtonAID = "btn-exit"
 let kMenuItemTitle = "Harness Test Item"
-let kSecondaryWindowTitle = "CuaTestHarness AppKit Secondary"
-let kSheetWindowTitle = "CuaTestHarness AppKit Sheet"
-let kFloatingWindowTitle = "CuaTestHarness AppKit Floating"
-let kTaskStateEnv = "CUA_APPKIT_TASK_STATE"
-let kTaskStateSchema = "cua.appkit_task_state_v1"
+let kSecondaryWindowTitle = "PincerTestHarness AppKit Secondary"
+let kSheetWindowTitle = "PincerTestHarness AppKit Sheet"
+let kFloatingWindowTitle = "PincerTestHarness AppKit Floating"
+let kTaskStateEnv = "PINCER_APPKIT_TASK_STATE"
+let kTaskStateSchema = "pincer.appkit_task_state_v1"
 let kNoteFieldAID = "txt-note"
 let kSaveNoteButtonAID = "btn-save-note"
 let kSizeOptions = ["Small", "Medium", "Large"]
-let kTaskDensityEnv = "CUA_APPKIT_TASK_DENSITY"
+let kTaskDensityEnv = "PINCER_APPKIT_TASK_DENSITY"
 // Opt-in distractor controls (#4312). The labels are benign (no risky-action
 // phrase) and match the GTK3 harness, so candidate IDs agree across platforms.
 // Some are unrelated to every task; some are close to a task control ("Save
@@ -586,7 +586,7 @@ final class HarnessWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
     }
 
     /// Atomically rewrite the app-owned task state. The jev-use task oracle
-    /// reads this file; it never depends on Cua Driver's own observations.
+    /// reads this file; it never depends on Pincer's own observations.
     private func writeTaskState() {
         guard let path = taskStatePath else { return }
         taskStateSequence += 1
@@ -748,16 +748,16 @@ final class HarnessWindowController: NSObject, NSTextFieldDelegate, NSTableViewD
     /// synthetic command and has a child process create the external oracle;
     /// arbitrary field contents are never executed.
     private func runControlledCommand(_ command: String) {
-        guard command == "printf cua-press-key",
-              let oraclePath = ProcessInfo.processInfo.environment["CUA_APPKIT_COMMAND_ORACLE"]
+        guard command == "printf pincer-press-key",
+              let oraclePath = ProcessInfo.processInfo.environment["PINCER_APPKIT_COMMAND_ORACLE"]
         else { return }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [
             "-c",
-            "printf cua-press-key > \"$1\"",
-            "cua-appkit-command",
+            "printf pincer-press-key > \"$1\"",
+            "pincer-appkit-command",
             oraclePath,
         ]
         do {
@@ -861,7 +861,7 @@ func writeBringToFrontWindowReport(
     main: NSWindow,
     matrix: BringToFrontMatrixWindows?
 ) {
-    guard let path = ProcessInfo.processInfo.environment["CUA_HARNESS_WINDOW_REPORT"] else {
+    guard let path = ProcessInfo.processInfo.environment["PINCER_HARNESS_WINDOW_REPORT"] else {
         return
     }
     var lines = ["main=\(main.windowNumber)"]
@@ -962,11 +962,11 @@ final class SingleClickReceiver: NSView {
 }
 
 @main
-struct CuaAppKitHarness {
+struct PincerAppKitHarness {
     static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
-        if let directory = ProcessInfo.processInfo.environment["CUA_APPKIT_SNAPSHOT_DIR"] {
+        if let directory = ProcessInfo.processInfo.environment["PINCER_APPKIT_SNAPSHOT_DIR"] {
             let fixture = SnapshotPublicationFixture(directory: URL(fileURLWithPath: directory))
             fixture.show()
             app.activate(ignoringOtherApps: true)
@@ -977,12 +977,12 @@ struct CuaAppKitHarness {
         let controller = HarnessWindowController()
         installMenuBar(target: controller)
         controller.show()
-        if ProcessInfo.processInfo.environment["CUA_APPKIT_KEEP_ORDERED_FRONT"] == "1" {
+        if ProcessInfo.processInfo.environment["PINCER_APPKIT_KEEP_ORDERED_FRONT"] == "1" {
             _ = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak window = controller.window] _ in
                 window?.orderFrontRegardless()
             }
         }
-        if let path = ProcessInfo.processInfo.environment["CUA_APPKIT_POINTER_ORACLE"] {
+        if let path = ProcessInfo.processInfo.environment["PINCER_APPKIT_POINTER_ORACLE"] {
             let receiver = SingleClickReceiver(
                 frame: controller.window.contentView!.bounds,
                 journal: URL(fileURLWithPath: path)
@@ -996,12 +996,12 @@ struct CuaAppKitHarness {
             ])
         }
         var matrixWindows: BringToFrontMatrixWindows?
-        if let mode = ProcessInfo.processInfo.environment["CUA_HARNESS_BRING_TO_FRONT_MODE"] {
+        if let mode = ProcessInfo.processInfo.environment["PINCER_HARNESS_BRING_TO_FRONT_MODE"] {
             matrixWindows = BringToFrontMatrixWindows(parent: controller.window, mode: mode)
         }
         app.activate(ignoringOtherApps: true)
         writeBringToFrontWindowReport(main: controller.window, matrix: matrixWindows)
-        if let delay = ProcessInfo.processInfo.environment["CUA_APPKIT_LAUNCH_DELAY_MS"]
+        if let delay = ProcessInfo.processInfo.environment["PINCER_APPKIT_LAUNCH_DELAY_MS"]
             .flatMap(Double.init), delay > 0 {
             // A slow launch on demand: the titled window is already registered
             // with WindowServer, but the app has not entered its run loop, so

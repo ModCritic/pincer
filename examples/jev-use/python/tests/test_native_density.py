@@ -252,7 +252,7 @@ class DistractorLabelTest(unittest.TestCase):
                 )
                 self.assertEqual(list(gtk3["DISTRACTOR_FIELDS"]), self.csharp_list(source, "DistractorFields"))
                 self.assertIn("[12] = (8, 3, 1, 1), [24] = (26, 12, 4, 2)", source)
-                self.assertIn(f'"CUA_{harness.upper()}_TASK_DENSITY"', source)
+                self.assertIn(f'"PINCER_{harness.upper()}_TASK_DENSITY"', source)
         labels = [
             *gtk3["DISTRACTOR_BUTTONS"], *gtk3["DISTRACTOR_CHECKBOXES"], *gtk3["DISTRACTOR_FIELDS"],
             *(label for group in gtk3["DISTRACTOR_RADIO_GROUPS"] for label in group),

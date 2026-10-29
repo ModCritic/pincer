@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Cua AI, Inc.
 
-// CuaTestHarness.WKWebView — macOS analogue of the Windows WebView2 harness.
+// PincerTestHarness.WKWebView — macOS analogue of the Windows WebView2 harness.
 //
 // A minimal AppKit NSWindow hosting a WKWebView (Apple WebKit, NOT Chromium)
 // that loads the SAME shared web DOM as the WebView2 / Electron harnesses
@@ -9,8 +9,8 @@
 // file into the app bundle's Resources/web/ so the harness is self-contained
 // and reuses the canonical web content rather than duplicating it in source.
 //
-// Window title is "CuaTestHarness WKWebView" (substring-matched by the
-// cua-driver harness-discovery tooling). The content size is pinned and
+// Window title is "PincerTestHarness WKWebView" (substring-matched by the
+// pincer harness-discovery tooling). The content size is pinned and
 // isRestorable=false so the window geometry does not drift between launches
 // (mirrors the fixed-size fix applied to the other macOS harnesses), which
 // keeps pixel-coordinate calibration stable for the modality recorder.
@@ -18,7 +18,7 @@
 import AppKit
 import WebKit
 
-let kWindowTitle = "CuaTestHarness WKWebView"
+let kWindowTitle = "PincerTestHarness WKWebView"
 let kContentSize = NSSize(width: 700, height: 820)
 
 final class HarnessAppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
@@ -38,10 +38,10 @@ final class HarnessAppDelegate: NSObject, NSApplicationDelegate, WKNavigationDel
         window.setContentSize(kContentSize)
 
         let config = WKWebViewConfiguration()
-        let journalURL = ProcessInfo.processInfo.environment["CUA_E2E_FIXTURE_JOURNAL_URL"] ?? ""
+        let journalURL = ProcessInfo.processInfo.environment["PINCER_E2E_FIXTURE_JOURNAL_URL"] ?? ""
         if let encoded = try? JSONEncoder().encode(journalURL),
            let literal = String(data: encoded, encoding: .utf8) {
-            let source = "window.__CUA_E2E_FIXTURE_JOURNAL_URL = \(literal);"
+            let source = "window.__PINCER_E2E_FIXTURE_JOURNAL_URL = \(literal);"
             config.userContentController.addUserScript(WKUserScript(
                 source: source,
                 injectionTime: .atDocumentStart,
@@ -69,7 +69,7 @@ final class HarnessAppDelegate: NSObject, NSApplicationDelegate, WKNavigationDel
 }
 
 @main
-struct CuaWKWebViewHarness {
+struct PincerWKWebViewHarness {
     // Retained for the lifetime of the process (NSApplication.delegate is weak).
     static let delegate = HarnessAppDelegate()
 

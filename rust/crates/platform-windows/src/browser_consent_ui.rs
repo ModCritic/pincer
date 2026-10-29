@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use cua_driver_core::browser::{
+use pincer_core::browser::{
     BrowserConsentOutcome, BrowserConsentRequest, BrowserRefusal, BrowserRefusalCode,
 };
 use windows::core::Interface;

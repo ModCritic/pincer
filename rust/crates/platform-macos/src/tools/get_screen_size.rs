@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use cua_driver_contract::GetScreenSizeInput;
-use cua_driver_core::{
+use pincer_contract::GetScreenSizeInput;
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
     tool_args::parse_typed_input,
@@ -20,7 +20,7 @@ fn def() -> &'static ToolDef {
             Requires no TCC permissions."
             .into(),
         input_schema: serde_json::json!({"type":"object","properties":{
-            "session": cua_driver_core::tool_schema::session_schema()
+            "session": pincer_core::tool_schema::session_schema()
         },"additionalProperties":false}),
         read_only: true,
         destructive: false,

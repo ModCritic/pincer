@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>cua-driver Web Harness</title>
+  <title>pincer Web Harness</title>
   <style>
     :root { color-scheme: light dark; }
     body {
@@ -52,27 +52,27 @@
   </style>
 </head>
 <body>
-  <h2 data-cua-id="page-heading">cua-driver Web Harness</h2>
-  <p data-cua-id="page-marker" class="marker">WEB_HARNESS_MARKER_v1</p>
+  <h2 data-pincer-id="page-heading">pincer Web Harness</h2>
+  <p data-pincer-id="page-marker" class="marker">WEB_HARNESS_MARKER_v1</p>
 
   <main class="harness-grid">
   <fieldset>
     <legend>counter</legend>
     <div class="row">
-      <button id="btn-increment"  data-cua-id="btn-increment">Increment</button>
-      <button id="btn-reset"      data-cua-id="btn-reset">Reset</button>
-      <span class="mirror" id="lbl-counter" data-cua-id="lbl-counter">counter=0</span>
+      <button id="btn-increment"  data-pincer-id="btn-increment">Increment</button>
+      <button id="btn-reset"      data-pincer-id="btn-reset">Reset</button>
+      <span class="mirror" id="lbl-counter" data-pincer-id="lbl-counter">counter=0</span>
     </div>
   </fieldset>
 
   <fieldset>
     <legend>text_input</legend>
     <div class="row">
-      <input type="text" id="txt-input" data-cua-id="txt-input"
+      <input type="text" id="txt-input" data-pincer-id="txt-input"
              aria-label="txt-input" placeholder="type here"
              autocapitalize="off" autocorrect="off" spellcheck="false" />
-      <span class="mirror" id="lbl-input-mirror" data-cua-id="lbl-input-mirror">mirror=</span>
-      <input type="number" id="number-input" data-cua-id="number-input"
+      <span class="mirror" id="lbl-input-mirror" data-pincer-id="lbl-input-mirror">mirror=</span>
+      <input type="number" id="number-input" data-pincer-id="number-input"
              aria-label="number-input" value="42" autofocus />
     </div>
   </fieldset>
@@ -80,21 +80,21 @@
   <fieldset>
     <legend>keyboard_task</legend>
     <div class="row">
-      <input type="text" id="keyboard-input" data-cua-id="keyboard-input"
+      <input type="text" id="keyboard-input" data-pincer-id="keyboard-input"
              aria-label="keyboard-input" placeholder="keyboard input"
              autocapitalize="off" autocorrect="off" spellcheck="false" />
-      <span class="mirror" id="keyboard-status" data-cua-id="keyboard-status">key_state=none</span>
+      <span class="mirror" id="keyboard-status" data-pincer-id="keyboard-status">key_state=none</span>
     </div>
   </fieldset>
 
   <fieldset>
     <legend>text_editor_task</legend>
     <div class="row">
-      <textarea id="editor-document" data-cua-id="editor-document" aria-label="editor-document"
+      <textarea id="editor-document" data-pincer-id="editor-document" aria-label="editor-document"
                 autocapitalize="off" autocorrect="off" spellcheck="false"
                 rows="3" cols="42">Initial conformance text.\nStatus: DRAFT\n</textarea>
-      <button id="editor-save" data-cua-id="editor-save" aria-label="editor-save Save">Save</button>
-      <span class="mirror" id="editor-status" data-cua-id="editor-status">editor_status=draft</span>
+      <button id="editor-save" data-pincer-id="editor-save" aria-label="editor-save Save">Save</button>
+      <span class="mirror" id="editor-status" data-pincer-id="editor-status">editor_status=draft</span>
     </div>
   </fieldset>
 
@@ -102,91 +102,91 @@
     <legend>slider</legend>
     <div class="row">
       <input type="range" min="0" max="100" value="0"
-             id="sld-value" data-cua-id="sld-value" />
-      <span class="mirror" id="lbl-slider-value" data-cua-id="lbl-slider-value">slider_value=0</span>
+             id="sld-value" data-pincer-id="sld-value" />
+      <span class="mirror" id="lbl-slider-value" data-pincer-id="lbl-slider-value">slider_value=0</span>
     </div>
   </fieldset>
 
   <fieldset>
     <legend>drag_task</legend>
     <div class="row">
-      <div id="drag-source" data-cua-id="drag-source" aria-label="drag-source">Drag source</div>
-      <div id="drop-target" data-cua-id="drop-target" aria-label="drop-target">Drop target</div>
-      <span class="mirror" id="drag-status" data-cua-id="drag-status">drag_status=idle</span>
+      <div id="drag-source" data-pincer-id="drag-source" aria-label="drag-source">Drag source</div>
+      <div id="drop-target" data-pincer-id="drop-target" aria-label="drop-target">Drop target</div>
+      <span class="mirror" id="drag-status" data-pincer-id="drag-status">drag_status=idle</span>
     </div>
   </fieldset>
 
   <fieldset>
     <legend>scroll_target</legend>
     <div class="row">
-      <div id="scroll-tall" data-cua-id="scroll-tall" aria-label="scroll-tall"
+      <div id="scroll-tall" data-pincer-id="scroll-tall" aria-label="scroll-tall"
            style="height:120px;width:260px;overflow-y:auto;border:1px solid #ccc;padding:4px;">
-        <div id="scroll-top" data-cua-id="scroll-top">SCROLL_TOP_MARKER_v1</div>
-        <div data-cua-id="scroll-target-label">scroll-tall</div>
+        <div id="scroll-top" data-pincer-id="scroll-top">SCROLL_TOP_MARKER_v1</div>
+        <div data-pincer-id="scroll-target-label">scroll-tall</div>
         <div id="scroll-lines"></div>
-        <div id="scroll-bottom" data-cua-id="scroll-bottom">SCROLL_BOTTOM_MARKER_v1</div>
+        <div id="scroll-bottom" data-pincer-id="scroll-bottom">SCROLL_BOTTOM_MARKER_v1</div>
       </div>
-      <span class="mirror" id="lbl-scroll-offset" data-cua-id="lbl-scroll-offset">scroll_offset=0</span>
-      <span class="mirror" id="lbl-scroll-client-height" data-cua-id="lbl-scroll-client-height">scroll_client_height=0</span>
+      <span class="mirror" id="lbl-scroll-offset" data-pincer-id="lbl-scroll-offset">scroll_offset=0</span>
+      <span class="mirror" id="lbl-scroll-client-height" data-pincer-id="lbl-scroll-client-height">scroll_client_height=0</span>
     </div>
   </fieldset>
 
   <fieldset>
     <legend>click_target</legend>
     <div class="row">
-      <span id="click-target" data-cua-id="border-click-target" role="button"
+      <span id="click-target" data-pincer-id="border-click-target" role="button"
             tabindex="0" aria-label="border-click-target">Click target (left / right / double)</span>
     </div>
     <div class="row">
-      <span class="mirror" id="lbl-last-action" data-cua-id="lbl-last-action">last_action=none</span>
-      <span class="mirror" id="lbl-click-count"  data-cua-id="lbl-click-count">clicks=0</span>
+      <span class="mirror" id="lbl-last-action" data-pincer-id="lbl-last-action">last_action=none</span>
+      <span class="mirror" id="lbl-click-count"  data-pincer-id="lbl-click-count">clicks=0</span>
     </div>
   </fieldset>
 
   <fieldset>
     <legend>child_window</legend>
     <div class="row">
-      <button id="btn-open-child-window" data-cua-id="btn-open-child-window">Open child window</button>
-      <span class="mirror" id="lbl-child-window-state" data-cua-id="lbl-child-window-state">child_windows=0</span>
+      <button id="btn-open-child-window" data-pincer-id="btn-open-child-window">Open child window</button>
+      <span class="mirror" id="lbl-child-window-state" data-pincer-id="lbl-child-window-state">child_windows=0</span>
     </div>
   </fieldset>
 
   <fieldset>
     <legend>checkable_controls</legend>
     <div class="row">
-      <label><input type="checkbox" id="chk-agreed" data-cua-id="chk-agreed" /> I agree</label>
+      <label><input type="checkbox" id="chk-agreed" data-pincer-id="chk-agreed" /> I agree</label>
     </div>
     <div class="row">
-      <label><input type="radio" name="prio" value="Low"    id="rdo-low"  data-cua-id="rdo-low" checked /> Low</label>
-      <label><input type="radio" name="prio" value="Medium" id="rdo-med"  data-cua-id="rdo-med" /> Medium</label>
-      <label><input type="radio" name="prio" value="High"   id="rdo-high" data-cua-id="rdo-high" /> High</label>
+      <label><input type="radio" name="prio" value="Low"    id="rdo-low"  data-pincer-id="rdo-low" checked /> Low</label>
+      <label><input type="radio" name="prio" value="Medium" id="rdo-med"  data-pincer-id="rdo-med" /> Medium</label>
+      <label><input type="radio" name="prio" value="High"   id="rdo-high" data-pincer-id="rdo-high" /> High</label>
     </div>
     <div class="row">
-      <span class="state" id="lbl-chk-state" data-cua-id="lbl-chk-state">agreed=false, prio=Low</span>
+      <span class="state" id="lbl-chk-state" data-pincer-id="lbl-chk-state">agreed=false, prio=Low</span>
     </div>
   </fieldset>
 
   <fieldset>
     <legend>combo_box</legend>
     <div class="row">
-      <select id="cbo-color" data-cua-id="cbo-color">
-        <option value="red"    data-cua-id="cbo-item-red">red</option>
-        <option value="green"  data-cua-id="cbo-item-green" selected>green</option>
-        <option value="blue"   data-cua-id="cbo-item-blue">blue</option>
-        <option value="orange" data-cua-id="cbo-item-orange">orange</option>
+      <select id="cbo-color" data-pincer-id="cbo-color">
+        <option value="red"    data-pincer-id="cbo-item-red">red</option>
+        <option value="green"  data-pincer-id="cbo-item-green" selected>green</option>
+        <option value="blue"   data-pincer-id="cbo-item-blue">blue</option>
+        <option value="orange" data-pincer-id="cbo-item-orange">orange</option>
       </select>
-      <span class="mirror" id="lbl-combo-value" data-cua-id="lbl-combo-value">color=green</span>
+      <span class="mirror" id="lbl-combo-value" data-pincer-id="lbl-combo-value">color=green</span>
     </div>
   </fieldset>
 
   <fieldset>
     <legend>navigation</legend>
     <div class="row">
-      <a id="lnk-anchor" data-cua-id="lnk-anchor" href="#section-target">Jump to section</a>
-      <span class="mirror" id="lbl-nav-state" data-cua-id="lbl-nav-state">hash=</span>
+      <a id="lnk-anchor" data-pincer-id="lnk-anchor" href="#section-target">Jump to section</a>
+      <span class="mirror" id="lbl-nav-state" data-pincer-id="lbl-nav-state">hash=</span>
     </div>
     <div style="height: 8px"></div>
-    <h3 id="section-target" data-cua-id="section-target">SECTION_TARGET_MARKER_v1</h3>
+    <h3 id="section-target" data-pincer-id="section-target">SECTION_TARGET_MARKER_v1</h3>
   </fieldset>
 
   </main>
@@ -214,7 +214,7 @@
 
   $('editor-save').addEventListener('click', () => {
     const value = $('editor-document').value;
-    localStorage.setItem('cua-editor-document', value);
+    localStorage.setItem('pincer-editor-document', value);
     $('editor-status').textContent = `editor_status=saved:${value}`;
   });
 
@@ -310,9 +310,9 @@
   $('btn-open-child-window').addEventListener('click', () => {
     childWindowCount++;
     $('lbl-child-window-state').textContent = `child_windows=${childWindowCount}`;
-    const child = window.open('', `cua-harness-child-${childWindowCount}`, 'width=320,height=220');
+    const child = window.open('', `pincer-harness-child-${childWindowCount}`, 'width=320,height=220');
     if (child) {
-      child.document.write(`<!doctype html><title>Cua child ${childWindowCount}</title><p>CHILD_WINDOW_MARKER_v1</p>`);
+      child.document.write(`<!doctype html><title>Pincer child ${childWindowCount}</title><p>CHILD_WINDOW_MARKER_v1</p>`);
       child.document.close();
     }
   });
@@ -321,27 +321,27 @@
   // the targeting surface, but it is not a delivery oracle: embedded WebKit
   // can retain stale accessible text after the DOM has already changed.
   (function startFixtureJournal() {
-    const journalUrl = window.cuaE2E?.journalUrl ||
-      window.__CUA_E2E_FIXTURE_JOURNAL_URL || '';
+    const journalUrl = window.pincerE2E?.journalUrl ||
+      window.__PINCER_E2E_FIXTURE_JOURNAL_URL || '';
     if (!journalUrl) return;
 
     let queued = false;
     const publish = () => {
       queued = false;
       const state = {};
-      document.querySelectorAll('[data-cua-id]').forEach(element => {
+      document.querySelectorAll('[data-pincer-id]').forEach(element => {
         const entry = { text: (element.textContent || '').trim() };
         if ('value' in element) entry.value = element.value;
         if ('checked' in element) entry.checked = element.checked;
-        if (element.dataset.cuaId === 'scroll-tall') {
+        if (element.dataset.pincerId === 'scroll-tall') {
           // Scroll-event mirrors can lag the actual DOM offset.
           entry.scrollTop = element.scrollTop;
           entry.clientHeight = element.clientHeight;
         }
-        state[element.dataset.cuaId] = entry;
+        state[element.dataset.pincerId] = entry;
       });
-      if (window.cuaE2E?.publishFixtureState) {
-        window.cuaE2E.publishFixtureState(state);
+      if (window.pincerE2E?.publishFixtureState) {
+        window.pincerE2E.publishFixtureState(state);
         return;
       }
       fetch(journalUrl, {

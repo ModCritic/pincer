@@ -4,13 +4,13 @@ import { randomUUID } from 'node:crypto';
 
 import {
   ActionTarget,
-  CuaDriver,
+  Pincer,
   GetDesktopStateInput,
   PressKeyInput,
   TypeTextInput,
-} from '@trycua/cua-driver';
+} from 'pincer-driver';
 
-const fixture = process.env.CUA_FIXTURE_URL ?? 'http://127.0.0.1:8765';
+const fixture = process.env.PINCER_FIXTURE_URL ?? 'http://127.0.0.1:8765';
 const timeoutMs = 10_000;
 const desktopTarget = new ActionTarget.Desktop({ displayId: 'primary' });
 
@@ -44,10 +44,10 @@ async function waitForSubmission(token: string): Promise<void> {
   throw new Error('the fixture did not observe the submitted value');
 }
 
-const token = `cua-${randomUUID().slice(0, 10)}`;
+const token = `pincer-${randomUUID().slice(0, 10)}`;
 await resetFixture();
 
-const driver = CuaDriver.create(undefined);
+const driver = Pincer.create(undefined);
 let mutationOutcomeUnknown = false;
 
 try {

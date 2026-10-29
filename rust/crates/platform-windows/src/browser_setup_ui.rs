@@ -6,7 +6,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use cua_driver_core::browser::{
+use pincer_core::browser::{
     BrowserRefusal, BrowserRefusalCode, BrowserSetupDescriptor,
     EXISTING_PROFILE_SETUP_READY_TIMEOUT,
 };
@@ -776,7 +776,7 @@ pub fn disable(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cua_driver_core::browser::{existing_profile_setup_descriptor, BrowserProduct};
+    use pincer_core::browser::{existing_profile_setup_descriptor, BrowserProduct};
 
     fn descriptor() -> &'static BrowserSetupDescriptor {
         existing_profile_setup_descriptor(BrowserProduct::GoogleChrome).unwrap()
@@ -1080,7 +1080,7 @@ mod tests {
         };
         push(
             "Window",
-            "cua-driver Web Harness - Profile 1 - Microsoft Edge",
+            "pincer Web Harness - Profile 1 - Microsoft Edge",
             None,
             &[],
             0,
@@ -1089,7 +1089,7 @@ mod tests {
         );
         push(
             "Pane",
-            "cua-driver Web Harness - Microsoft Edge",
+            "pincer Web Harness - Microsoft Edge",
             None,
             &[],
             1,
@@ -1172,7 +1172,7 @@ mod tests {
         );
         push(
             "TabItem",
-            "cua-driver Web Harness - Memory usage - 26.6 MB",
+            "pincer Web Harness - Memory usage - 26.6 MB",
             None,
             &["select"],
             8,
@@ -1203,7 +1203,7 @@ mod tests {
     #[test]
     fn edge_153_cleanup_uses_native_chrome_without_reading_the_page_renderer() {
         let edge = existing_profile_setup_descriptor(BrowserProduct::MicrosoftEdge).unwrap();
-        let fixture = edge_153_native_chrome("127.0.0.1:58963/fixture", "cua-driver Web Harness");
+        let fixture = edge_153_native_chrome("127.0.0.1:58963/fixture", "pincer Web Harness");
         assert!(
             !needs_setup_page_renderer(&fixture, edge),
             "an unrelated active page must not require renderer-owned nodes"

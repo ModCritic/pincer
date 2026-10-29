@@ -1,4 +1,4 @@
-//! Linux platform backend for cua-driver-rs.
+//! Linux platform backend for pincer.
 //!
 //! Background automation on Linux via:
 //! - /proc filesystem for process enumeration
@@ -15,10 +15,10 @@
 // helpers they call. They are live on Linux, where dead_code stays enforced.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 // Tool helpers return `Result<_, ToolResult>`: the error arm is the finished
-// tool reply (see the note in cua-driver-core), not a propagated error.
+// tool reply (see the note in pincer-core), not a propagated error.
 #![allow(clippy::result_large_err)]
 
-use cua_driver_core::tool::ToolRegistry;
+use pincer_core::tool::ToolRegistry;
 
 pub mod health_report;
 pub mod overlay;
@@ -87,7 +87,7 @@ pub mod pointer_shape_map;
 #[cfg(target_os = "linux")]
 pub mod pointer_shape;
 
-/// Install the Linux [`cua_driver_core::pointer_shape::PointerShapeBackend`]
+/// Install the Linux [`pincer_core::pointer_shape::PointerShapeBackend`]
 /// (and the X11 real-cursor probe for `cursor_shape`). False off Linux, when
 /// no display is reachable, or when a backend is already installed.
 pub fn install_pointer_shape_backend() -> bool {
@@ -156,7 +156,7 @@ pub(crate) mod test_env {
     /// `WAYLAND_DISPLAY` is set but window ids are X11 ones.
     pub(crate) fn xwayland_mode_display() -> DisplayOverride {
         let guard = unreachable_x11_display();
-        std::env::set_var("WAYLAND_DISPLAY", "wayland-cua-test-missing");
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-pincer-test-missing");
         std::env::remove_var(crate::wayland::ENABLE_WAYLAND_ENV);
         guard
     }
@@ -221,12 +221,12 @@ pub fn no_display_hint() -> String {
     if is_wsl() {
         " — no usable display detected (WSL). WSLg provides $DISPLAY/$WAYLAND_DISPLAY \
          under a recent Windows 11 + 'wsl --update'; on older setups install an X server \
-         (e.g. VcXsrv) and export DISPLAY. cua-driver needs a real display to capture and \
+         (e.g. VcXsrv) and export DISPLAY. pincer needs a real display to capture and \
          report screen size."
             .to_owned()
     } else if neither_display_set {
         " — no usable display detected: neither $DISPLAY (X11) nor $WAYLAND_DISPLAY is set. \
-         Start an X server / Wayland compositor (or Xvfb for headless) before running cua-driver."
+         Start an X server / Wayland compositor (or Xvfb for headless) before running pincer."
             .to_owned()
     } else {
         String::new()
@@ -248,7 +248,7 @@ pub fn register_tools_with_cursor(cfg: cursor_overlay::CursorConfig, compat: boo
 }
 
 pub fn register_tools_with_cursor_and_provider(
-    provider: Option<std::sync::Arc<dyn cua_driver_core::consent::ProtectedConsentProvider>>,
+    provider: Option<std::sync::Arc<dyn pincer_core::consent::ProtectedConsentProvider>>,
     cfg: cursor_overlay::CursorConfig,
     compat: bool,
 ) -> ToolRegistry {

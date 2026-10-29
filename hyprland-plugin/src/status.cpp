@@ -1,11 +1,11 @@
-#include "cua_hyprland/status.hpp"
+#include "pincer_hyprland/status.hpp"
 
-#include "cua_hyprland/protocol.hpp"
+#include "pincer_hyprland/protocol.hpp"
 
 #include <format>
 #include <string>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 namespace {
 
 bool continuation(unsigned char value) {
@@ -117,7 +117,7 @@ bool is_valid_utf8(std::string_view value) {
 
 std::string render_status_json(const StatusReport& report) {
     return std::format(
-        R"({{"name":"cua-hyprland-plugin","plugin_version":"{}",)"
+        R"({{"name":"pincer-hyprland-plugin","plugin_version":"{}",)"
         R"("state":"discovery_only","protocol":{{"major":{},"minor":{},)"
         R"("max_frame_bytes":{}}},"compositor_epoch":{},"abi":{{)"
         R"("compiled_hash":"{}","runtime_hash":"{}","match":{}}},)"
@@ -143,7 +143,7 @@ std::string render_status_json(const StatusReport& report) {
 
 std::string render_status_text(const StatusReport& report) {
     return std::format(
-        "cua-hyprland-plugin {}\nconfigured: {}\ntransport: {}\nsocket: {}\n"
+        "pincer-hyprland-plugin {}\nconfigured: {}\ntransport: {}\nsocket: {}\n"
         "last error: {}\nprotocol: {}.{}\ncompositor epoch: {}\n"
         "ABI compiled: {}\nABI runtime: {}\nABI match: {}\n"
         "connections: accepted={}, "
@@ -163,4 +163,4 @@ std::string render_status_text(const StatusReport& report) {
         report.timed_out_idle, report.malformed_frames);
 }
 
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

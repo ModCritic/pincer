@@ -28,7 +28,7 @@
 //! - Wayland: in the default XWayland mode this X11 overlay starts only when
 //!   KWin is XWayland's window manager (see `x11_overlay_allowed`). Elsewhere
 //!   nothing draws the cursor in XWayland mode, and [`active_renderer`] reports
-//!   `None`. With `CUA_DRIVER_RS_ENABLE_WAYLAND=1` the native backends in
+//!   `None`. With `PINCER_ENABLE_WAYLAND=1` the native backends in
 //!   `wayland::overlay` and the GNOME Shell helper draw it instead, and this
 //!   overlay stays off on every compositor.
 //!
@@ -266,7 +266,7 @@ pub(crate) fn missing_renderer_reason() -> &'static str {
     if !native_wayland && std::env::var_os("WAYLAND_DISPLAY").is_some() && !x11_overlay_allowed() {
         "no agent cursor is drawn in XWayland mode outside KWin: the X11 overlay \
          only runs on KWin's XWayland, and the native Wayland overlay needs \
-         CUA_DRIVER_RS_ENABLE_WAYLAND=1"
+         PINCER_ENABLE_WAYLAND=1"
     } else {
         "no agent cursor overlay is running (it is disabled, or it failed to start)"
     }
@@ -442,9 +442,9 @@ pub fn init(cfg: CursorConfig) {
             },
         ));
     });
-    cua_driver_core::cursor_events::install_cursor_event_sink(std::sync::Arc::new(
-        |event: cua_driver_core::cursor_events::CursorEvent| {
-            use cua_driver_core::cursor_events::{CursorEvent, CursorEventPhase};
+    pincer_core::cursor_events::install_cursor_event_sink(std::sync::Arc::new(
+        |event: pincer_core::cursor_events::CursorEvent| {
+            use pincer_core::cursor_events::{CursorEvent, CursorEventPhase};
             let (session, cmd) = match event {
                 CursorEvent::SetSessionLabel { session, label } => {
                     (session, OverlayCommand::SetSessionLabel(label))
@@ -491,9 +491,9 @@ pub fn send_command(cmd: OverlayCommand) {
 
 /// Whether commands for `key` reach a renderer: not the empty no-cursor key,
 /// and not a human-origin session, whose client draws the human's own cursor
-/// (see `cua_driver_core::agent_cursor`).
+/// (see `pincer_core::agent_cursor`).
 pub(crate) fn draws_cursor(key: &str) -> bool {
-    !key.is_empty() && !cua_driver_core::agent_cursor::overlay_suppressed(key)
+    !key.is_empty() && !pincer_core::agent_cursor::overlay_suppressed(key)
 }
 
 pub fn send_command_for(key: CursorKey, cmd: OverlayCommand) {
@@ -550,7 +550,7 @@ fn wayland_arrival_budget(glide_duration_ms: f64) -> Duration {
 /// owns it, only that session's end hides it, and it hides after the shared
 /// agent idle timeout (the helper has no idle fade of its own).
 #[cfg(target_os = "linux")]
-static SHELL_HELPER_SURFACE: Mutex<Option<cua_driver_core::agent_cursor::SharedCursorSurface>> =
+static SHELL_HELPER_SURFACE: Mutex<Option<pincer_core::agent_cursor::SharedCursorSurface>> =
     Mutex::new(None);
 #[cfg(target_os = "linux")]
 static SHELL_HELPER_IDLE: std::sync::Condvar = std::sync::Condvar::new();
@@ -559,7 +559,7 @@ static SHELL_HELPER_IDLE: std::sync::Condvar = std::sync::Condvar::new();
 /// reaches the helper: `true` draws a command, or hides for `Remove`.
 #[cfg(target_os = "linux")]
 fn shell_helper_surface_event(msg: &OverlayMsg, now: Instant) -> bool {
-    use cua_driver_core::agent_cursor::{SharedCursorSurface, SharedSurfaceAction};
+    use pincer_core::agent_cursor::{SharedCursorSurface, SharedSurfaceAction};
     let mut guard = SHELL_HELPER_SURFACE.lock().unwrap();
     let surface = guard.get_or_insert_with(SharedCursorSurface::new);
     let reach = match msg {
@@ -589,11 +589,9 @@ fn start_shell_helper_idle_watch() {
     static STARTED: OnceLock<()> = OnceLock::new();
     STARTED.get_or_init(|| {
         let spawned = std::thread::Builder::new()
-            .name("cua-shell-cursor-idle".into())
+            .name("pincer-shell-cursor-idle".into())
             .spawn(|| {
-                use cua_driver_core::agent_cursor::{
-                    SharedSurfaceAction, AGENT_CURSOR_IDLE_TIMEOUT,
-                };
+                use pincer_core::agent_cursor::{SharedSurfaceAction, AGENT_CURSOR_IDLE_TIMEOUT};
                 let mut guard = SHELL_HELPER_SURFACE.lock().unwrap();
                 loop {
                     let deadline = guard
@@ -951,7 +949,7 @@ pub fn run_on_thread() {
     // Wayland layer-shell overlay is started LAZILY on the first
     // send_command_for() that targets a Wayland session (see the
     // wayland::overlay::forward() path). Starting it eagerly here added
-    // ~100-300ms to cua-driver mcp startup — enough to push the CI
+    // ~100-300ms to pincer mcp startup — enough to push the CI
     // `cursor-click-gif` test (20s budget for the full launch_app →
     // click → type sequence) over its limit, intermittently. The
     // forward() path's own ensure_started() OnceLock guarantees the
@@ -960,7 +958,7 @@ pub fn run_on_thread() {
     // future commands reuse it).
 
     std::thread::Builder::new()
-        .name("cua-overlay-x11".into())
+        .name("pincer-overlay-x11".into())
         .spawn(move || {
             run_overlay_thread(cfg, rx);
         })
@@ -1454,9 +1452,9 @@ fn run_overlay_thread(cfg: CursorConfig, rx: std::sync::mpsc::Receiver<OverlayMs
     .ok();
 
     // Set window title (identifies our overlay, matches Windows convention).
-    // `Cua.` namespace mirrors the Windows class-name + install-path
+    // `Pincer.` namespace mirrors the Windows class-name + install-path
     // convention.
-    let title = format!("Cua.AgentCursorOverlay.{}", cfg.cursor_id);
+    let title = format!("Pincer.AgentCursorOverlay.{}", cfg.cursor_id);
     conn.change_property8(
         PropMode::REPLACE,
         win,
@@ -3186,10 +3184,10 @@ mod tests {
     /// A human-origin session (a Cua Spaces viewer's relayed input) never
     /// reaches the X11, layer-shell or shell-helper renderers, including the
     /// Wayland glide; an agent's session does. The rule itself lives in
-    /// `cua_driver_core::agent_cursor`.
+    /// `pincer_core::agent_cursor`.
     #[test]
     fn human_origin_sessions_draw_no_agent_cursor() {
-        use cua_driver_core::agent_cursor::{set_input_origin, InputOrigin};
+        use pincer_core::agent_cursor::{set_input_origin, InputOrigin};
         let human = "overlay-test-human-origin-session";
         assert!(draws_cursor(human));
         set_input_origin(human, InputOrigin::Human);
@@ -3489,7 +3487,7 @@ mod tests {
         init(cfg);
         run_on_thread();
 
-        let title = format!("Cua.AgentCursorOverlay.{cursor_id}");
+        let title = format!("Pincer.AgentCursorOverlay.{cursor_id}");
         let overlay = find_named_window(&conn, root, title.as_bytes())?;
         wait_for_bounding_shape(&conn, overlay, true, "daemon startup")?;
         let desktop_after = conn
@@ -3736,7 +3734,7 @@ mod tests {
         let overlay = find_named_window(
             &conn,
             root,
-            format!("Cua.AgentCursorOverlay.{cursor_id}").as_bytes(),
+            format!("Pincer.AgentCursorOverlay.{cursor_id}").as_bytes(),
         )?;
         let deadline = Instant::now() + Duration::from_secs(3);
         while !crate::overlay::x11_overlay_live() {

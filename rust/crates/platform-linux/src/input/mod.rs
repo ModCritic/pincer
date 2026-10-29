@@ -213,7 +213,7 @@ fn mpx_op_guard(cursor_id: &str) -> std::sync::MutexGuard<'static, ()> {
         .insert(cursor_id.to_owned(), std::time::Instant::now());
     MPX_IDLE_REAPER.call_once(|| {
         std::thread::Builder::new()
-            .name("cua-mpx-idle-reaper".into())
+            .name("pincer-mpx-idle-reaper".into())
             .spawn(|| loop {
                 sleep(MPX_IDLE_REAPER_PERIOD);
                 let _op = MPX_OP_LOCK
@@ -257,7 +257,7 @@ fn master_pointer_name(cursor_id: &str) -> String {
     }
     // Unknown procfs identity cannot safely participate in automatic recovery.
     // Preserve ordinary operation, with the legacy name and cleanup behavior.
-    let prefix = "CUA ";
+    let prefix = "PINCER ";
     let suffix = format!(" mp-{}-{nonce}", std::process::id());
     let max_cursor_bytes = EVDEV_UINPUT_NAME_MAX_BYTES
         .saturating_sub(prefix.len() + suffix.len() + UINPUT_POINTER_SUFFIX.len());
@@ -844,7 +844,7 @@ pub(crate) fn reap_orphaned_master_pointers() {
             };
             if candidate.stale_in(&owner) {
                 remove_master_pointer(display, id)?;
-                tracing::info!(device_id = id, "removed orphaned Cua MPX master pair");
+                tracing::info!(device_id = id, "removed orphaned Pincer MPX master pair");
             }
         }
         Ok(())
@@ -1288,7 +1288,7 @@ fn x_server_time(display: *mut x11::xlib::Display) -> x11::xlib::Time {
         let root = x11::xlib::XDefaultRootWindow(display);
         let win = x11::xlib::XCreateSimpleWindow(display, root, -1, -1, 1, 1, 0, 0, 0);
         x11::xlib::XSelectInput(display, win, x11::xlib::PropertyChangeMask);
-        let atom = x11::xlib::XInternAtom(display, c"CUA_TIME_PROBE".as_ptr(), x11::xlib::False);
+        let atom = x11::xlib::XInternAtom(display, c"PINCER_TIME_PROBE".as_ptr(), x11::xlib::False);
         x11::xlib::XChangeProperty(
             display,
             win,
@@ -2300,8 +2300,8 @@ fn click_cadence() -> (u64, u64) {
             .unwrap_or(default)
     }
     (
-        env_ms("CUA_MPX_PRESS_MS", 12),
-        env_ms("CUA_MPX_CLICK_GAP_MS", CLICK_DELAY_MS),
+        env_ms("PINCER_MPX_PRESS_MS", 12),
+        env_ms("PINCER_MPX_CLICK_GAP_MS", CLICK_DELAY_MS),
     )
 }
 
@@ -4859,7 +4859,7 @@ pub fn inject_tk_send(text: &str) -> Result<bool> {
 
     // Escape the text for safe Tcl interpolation (braces for literal strings).
     // Tcl's `send` command: `send <target-app-name> <tcl-command>`.
-    // We target "cua-tk-target" (the name the test app registers with) and
+    // We target "pincer-tk-target" (the name the test app registers with) and
     // insert at the entry widget's current cursor position.
     let tcl_text = text
         .replace("\\", "\\\\")
@@ -4879,7 +4879,7 @@ pub fn inject_tk_send(text: &str) -> Result<bool> {
         r#"set ::done 0
 set ::rc 0
 after 5000 {{ set ::rc 2; set ::done 1 }}
-if {{[catch {{send -async cua-tk-target {{.entry insert insert {{{}}}}}}} err]}} {{
+if {{[catch {{send -async pincer-tk-target {{.entry insert insert {{{}}}}}}} err]}} {{
     puts stderr "tk send failed: $err"
     exit 1
 }}
@@ -5114,8 +5114,8 @@ mod path_tests {
         assert!(normalized.is_char_boundary(normalized.len()));
 
         assert_eq!(
-            normalize_uinput_device_name("CUA\0pointer\n"),
-            "CUA_pointer_"
+            normalize_uinput_device_name("PINCER\0pointer\n"),
+            "PINCER_pointer_"
         );
     }
 
@@ -5154,7 +5154,7 @@ mod path_tests {
     #[test]
     #[ignore = "requires a writable /dev/uinput device"]
     fn real_uinput_accepts_normalized_overlong_multibyte_name() {
-        let overlong_name = format!("CUA {}{UINPUT_POINTER_SUFFIX}", "鼠".repeat(100));
+        let overlong_name = format!("PINCER {}{UINPUT_POINTER_SUFFIX}", "鼠".repeat(100));
         let device = create_uinput_pointer(&overlong_name)
             .expect("normalized device name should create a real uinput pointer");
         drop(device);

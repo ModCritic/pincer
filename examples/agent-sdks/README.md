@@ -1,14 +1,15 @@
-# Cua Driver SDK and agent examples
+# Pincer SDK and agent examples
 
 These executable examples cover two intentionally different boundaries:
 
-- **Native application route:** Python or Node imports `cua-driver` in process.
+- **Native application route:** Python imports `pincer_driver` and Node imports
+  `pincer-driver` in process.
   Claude Agent SDK can wrap a narrow set of those calls as in-process custom
   tools.
-- **MCP agent route:** Claude or Codex launches `cua-driver mcp`. The agent SDK
+- **MCP agent route:** Claude or Codex launches `pincer mcp`. The agent SDK
   already supplies the language-independent MCP client.
 
-Codex SDK does not expose direct custom-tool callbacks. Its Cua Driver examples
+Codex SDK does not expose direct custom-tool callbacks. Its Pincer examples
 therefore use MCP rather than inventing a bespoke native adapter.
 
 ## Deterministic perceive → act → verify fixture
@@ -24,6 +25,9 @@ desktop, type a unique value, press Enter, and verify the submitted value
 through the independent `/state` endpoint. A timeout after a mutation is
 treated as an unknown outcome: the examples observe the fixture before any
 retry.
+
+Both installs take the SDK from this repository's `python/` and `typescript/`
+folders, since Pincer publishes no packages. Build the SDK there first.
 
 Python:
 
@@ -67,7 +71,7 @@ npm run claude -- --route mcp \
 ```
 
 The native route supplies four narrow in-process callbacks: observe, click,
-type, and key press. The MCP route discovers the complete live Cua Driver tool
+type, and key press. The MCP route discovers the complete live Pincer tool
 surface. Set `CLAUDE_MODEL` optionally.
 
 ## Codex SDK: MCP
@@ -87,13 +91,13 @@ npm run codex -- \
 ```
 
 Set `CODEX_MODEL` optionally. Both scripts configure one long-lived
-`cua-driver mcp` transport. Its first admitted stateful call creates an
+`pincer mcp` transport. Its first admitted stateful call creates an
 implicit session, later unnamed calls reuse it, and transport shutdown runs
 the same cleanup as an explicit `end_session`.
 
 ## Environment and safety
 
-- Put `cua-driver` on `PATH`, or set `CUA_DRIVER_BIN` for MCP examples.
+- Put `pincer` on `PATH`, or set `PINCER_BIN` for MCP examples.
 - Select an exact window or desktop target on each action. Sessions do not
   store capture modality.
 - Authenticate the chosen agent SDK using its normal local login or API key.

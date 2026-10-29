@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Cua AI, Inc.
 
-// ExampleAgentHarness — minimal reference host for embedding cua-driver.
-// Mirrored verbatim in Skills/cua-driver/EMBEDDING.md ("Minimal host
+// ExampleAgentHarness — minimal reference host for embedding pincer.
+// Mirrored verbatim in Skills/pincer/EMBEDDING.md ("Minimal host
 // example") — keep the two in sync.
 //
 // Runs the one-grant demo sequence from EMBEDDING.md end to end:
 //   1. Requests Accessibility + Screen Recording AS THE HOST (the only
 //      prompts the user ever sees), then
-//   2. spawns an embedded cua-driver daemon plus its stdio MCP proxy and
+//   2. spawns an embedded pincer daemon plus its stdio MCP proxy and
 //      verifies attribution, takes a background screenshot,
 //      reads a background app's window state, and glides the agent-cursor
 //      overlay — with zero driver-side prompts.
 //
 // Launched via `open` (see demo.sh) the app has no terminal, so all
-// output also goes to /tmp/cua-embedded-demo.log.
+// output also goes to /tmp/pincer-embedded-demo.log.
 
 import Foundation
 import ApplicationServices
 import CoreGraphics
 
-let logPath = "/tmp/cua-embedded-demo.log"
+let logPath = "/tmp/pincer-embedded-demo.log"
 FileManager.default.createFile(atPath: logPath, contents: nil)
 let logFile = FileHandle(forWritingAtPath: logPath)!
 func log(_ line: String) {
@@ -44,12 +44,12 @@ if !ax || !sr {
 
 // 2. Spawn the daemon as a DIRECT child (never via `open`/NSWorkspace —
 //    that breaks responsibility inheritance), then attach an MCP proxy.
-let driverPath = ProcessInfo.processInfo.environment["CUA_DRIVER_PATH"]
-    ?? "/usr/local/bin/cua-driver"
-let socketPath = "/tmp/cua-embedded-\(ProcessInfo.processInfo.processIdentifier).sock"
+let driverPath = ProcessInfo.processInfo.environment["PINCER_PATH"]
+    ?? "/usr/local/bin/pincer"
+let socketPath = "/tmp/pincer-embedded-\(ProcessInfo.processInfo.processIdentifier).sock"
 var env = ProcessInfo.processInfo.environment
-env["CUA_DRIVER_EMBEDDED"] = "1"
-env["CUA_DRIVER_HOST_BUNDLE_ID"] = Bundle.main.bundleIdentifier ?? ""
+env["PINCER_EMBEDDED"] = "1"
+env["PINCER_HOST_BUNDLE_ID"] = Bundle.main.bundleIdentifier ?? ""
 
 let daemon = Process()
 daemon.executableURL = URL(fileURLWithPath: driverPath)
@@ -120,7 +120,7 @@ send(["jsonrpc": "2.0", "id": nextId, "method": "initialize", "params": [
     "clientInfo": ["name": "ExampleAgentHarness", "version": "0.1"]]])
 _ = readMessage()
 send(["jsonrpc": "2.0", "method": "notifications/initialized"])
-log("embedded cua-driver daemon + proxy started (\(driverPath)); no driver prompt should have appeared")
+log("embedded pincer daemon + proxy started (\(driverPath)); no driver prompt should have appeared")
 
 // 4. health_report must observe this actual parent app, and
 //    check_permissions must report host attribution and matching TCC results.

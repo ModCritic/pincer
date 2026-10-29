@@ -15,11 +15,11 @@ fn main() {
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/debug/cua-driver.exe");
+        .join("target/debug/pincer.exe");
     let out = Command::new(&exe)
         .arg("list-tools")
         .output()
-        .expect("run cua-driver list-tools");
+        .expect("run pincer list-tools");
     assert!(out.status.success(), "list-tools failed: {:?}", out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let lines: Vec<&str> = stdout.lines().collect();

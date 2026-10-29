@@ -41,7 +41,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use cua_driver_core::window_observation::WindowObservationBounds;
+use pincer_core::window_observation::WindowObservationBounds;
 
 use crate::apps;
 use crate::focus_steal::{self, SuppressionLease};
@@ -184,7 +184,7 @@ fn window_summaries(windows: &[WindowEvent]) -> String {
         .join("; ")
 }
 
-/// Returns true when a window belongs to this cua-driver process, including
+/// Returns true when a window belongs to this pincer process, including
 /// transient UI such as the agent cursor overlay. Those windows are internal
 /// implementation details rather than action-triggered application windows.
 fn is_daemon_window(window: &WindowInfo) -> bool {
@@ -268,7 +268,7 @@ fn take_late() -> Option<Late> {
 }
 
 /// Resolve the post-action observation bounds from raw host values against
-/// the macOS defaults. Pure; `cua_driver_core::window_observation` owns the
+/// the macOS defaults. Pure; `pincer_core::window_observation` owns the
 /// parsing and clamping rules shared with the Linux adapter.
 #[cfg(test)]
 fn observation_bounds_from(
@@ -284,7 +284,7 @@ fn observation_bounds_from(
 }
 
 /// Post-action observation bounds chosen by the embedding host through
-/// `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS` / `CUA_DRIVER_WINDOW_CHANGE_POLL_MS`
+/// `PINCER_WINDOW_CHANGE_TIMEOUT_MS` / `PINCER_WINDOW_CHANGE_POLL_MS`
 /// on the daemon environment; `DEFAULT_TIMEOUT` / `DEFAULT_POLL_INTERVAL`
 /// when unset or unparsable.
 pub(crate) fn host_observation_bounds() -> WindowObservationBounds {
@@ -397,8 +397,8 @@ impl Snapshot {
     /// or the timeout elapses.
     ///
     /// An embedding host that already observes the target continuously
-    /// can bound this window through `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS` /
-    /// `CUA_DRIVER_WINDOW_CHANGE_POLL_MS` on the daemon's environment.
+    /// can bound this window through `PINCER_WINDOW_CHANGE_TIMEOUT_MS` /
+    /// `PINCER_WINDOW_CHANGE_POLL_MS` on the daemon's environment.
     /// Unset or unparsable values keep the defaults, so public callers see
     /// no behavior change.
     ///
@@ -516,7 +516,7 @@ impl Snapshot {
         });
         let still_mine = move || lock(&TAIL).as_ref().is_some_and(|tail| tail.id == id);
         let spawned = std::thread::Builder::new()
-            .name("cua-window-watch".into())
+            .name("pincer-window-watch".into())
             .spawn(move || {
                 loop {
                     std::thread::sleep(poll_interval);
@@ -638,7 +638,7 @@ mod tests {
         let daemon_pid = std::process::id() as i32;
         let cur = vec![
             win(1, daemon_pid + 1, "Safari", "Home"),
-            win(2, daemon_pid, "Cua Driver", ""),
+            win(2, daemon_pid, "Pincer", ""),
             win(3, daemon_pid + 2, "Mail", "Inbox"),
         ];
 
@@ -780,9 +780,7 @@ mod tests {
 
     #[test]
     fn host_bounds_too_large_values_are_clamped() {
-        use cua_driver_core::window_observation::{
-            MAX_WINDOW_CHANGE_POLL, MAX_WINDOW_CHANGE_TIMEOUT,
-        };
+        use pincer_core::window_observation::{MAX_WINDOW_CHANGE_POLL, MAX_WINDOW_CHANGE_TIMEOUT};
         let b = observation_bounds_from(Some("3600000"), Some("60000"));
         assert_eq!(b.timeout, MAX_WINDOW_CHANGE_TIMEOUT);
         assert_eq!(b.poll, MAX_WINDOW_CHANGE_POLL);

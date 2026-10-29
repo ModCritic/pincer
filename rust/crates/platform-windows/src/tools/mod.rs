@@ -3,7 +3,7 @@
 //! On Windows, delegates to real win32/uia/input/capture implementations.
 //! On other platforms, returns "not implemented" stubs so the crate still compiles.
 
-use cua_driver_core::tool::ToolRegistry;
+use pincer_core::tool::ToolRegistry;
 
 #[cfg(target_os = "windows")]
 mod impl_;
@@ -17,7 +17,7 @@ pub fn build_registry(compat: bool) -> ToolRegistry {
 
 pub fn build_registry_with_provider(
     compat: bool,
-    provider: Option<std::sync::Arc<dyn cua_driver_core::consent::ProtectedConsentProvider>>,
+    provider: Option<std::sync::Arc<dyn pincer_core::consent::ProtectedConsentProvider>>,
 ) -> ToolRegistry {
     #[cfg(target_os = "windows")]
     return impl_::build_registry_with_provider(compat, provider);

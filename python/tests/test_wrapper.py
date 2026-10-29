@@ -1,4 +1,4 @@
-"""Tests for the cua-driver Python wrapper."""
+"""Tests for the pincer Python wrapper."""
 
 import importlib.util
 import io
@@ -12,8 +12,8 @@ import pytest
 
 
 def load_wrapper_module() -> Any:
-    module_path = Path(__file__).resolve().parents[1] / "src/cua_driver/wrapper.py"
-    spec = importlib.util.spec_from_file_location("cua_driver_wrapper", module_path)
+    module_path = Path(__file__).resolve().parents[1] / "src/pincer_driver/wrapper.py"
+    spec = importlib.util.spec_from_file_location("pincer_wrapper", module_path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -30,16 +30,16 @@ def test_get_binary_path():
     try:
         binary_path = get_binary_path()
         assert binary_path.exists()
-        assert binary_path.name in ("cua-driver", "cua-driver.exe")
+        assert binary_path.name in ("pincer", "pincer.exe")
     except FileNotFoundError:
         # Expected in development without building
         pytest.skip("Binary not bundled yet (run build_wheel.py first)")
 
 
-def test_run_cua_driver_version(monkeypatch):
-    """Test running cua-driver --version through the wrapper."""
+def test_run_pincer_version(monkeypatch):
+    """Test running pincer --version through the wrapper."""
     wrapper = load_wrapper_module()
-    get_binary_path, run_cua_driver = wrapper.get_binary_path, wrapper.run_cua_driver
+    get_binary_path, run_pincer = wrapper.get_binary_path, wrapper.run_pincer
 
     try:
         binary_path = get_binary_path()
@@ -47,14 +47,14 @@ def test_run_cua_driver_version(monkeypatch):
         pytest.skip("Binary not bundled yet")
 
     # Run with --version
-    exit_code = run_cua_driver(["--version"])
+    exit_code = run_pincer(["--version"])
     assert exit_code == 0
 
 
 def test_wrapper_preserves_exit_code():
     """Test that the wrapper preserves the binary's exit code."""
     wrapper = load_wrapper_module()
-    get_binary_path, run_cua_driver = wrapper.get_binary_path, wrapper.run_cua_driver
+    get_binary_path, run_pincer = wrapper.get_binary_path, wrapper.run_pincer
 
     try:
         binary_path = get_binary_path()
@@ -62,14 +62,14 @@ def test_wrapper_preserves_exit_code():
         pytest.skip("Binary not bundled yet")
 
     # Invalid command should return non-zero
-    exit_code = run_cua_driver(["--this-flag-does-not-exist"])
+    exit_code = run_pincer(["--this-flag-does-not-exist"])
     assert exit_code != 0
 
 
 def test_subprocess_args(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Test that subprocess is called with correct arguments."""
     wrapper = load_wrapper_module()
-    mock_binary = Path("/fake/path/cua-driver")
+    mock_binary = Path("/fake/path/pincer")
     mock_run = Mock(return_value=Mock(returncode=0))
     monkeypatch.setattr(wrapper, "get_binary_path", Mock(return_value=mock_binary))
     monkeypatch.setattr(wrapper.subprocess, "run", mock_run)
@@ -85,7 +85,7 @@ def test_subprocess_args(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
         monkeypatch.setattr(sys, "stdout", stdout)
         monkeypatch.setattr(sys, "stderr", stderr)
 
-        wrapper.run_cua_driver(["mcp", "--help"])
+        wrapper.run_pincer(["mcp", "--help"])
 
         mock_run.assert_called_once()
         call_args = mock_run.call_args
@@ -93,7 +93,7 @@ def test_subprocess_args(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
         assert call_args[1]["stdin"] is stdin
         assert call_args[1]["stdout"] is stdout
         assert call_args[1]["stderr"] is stderr
-        assert call_args[1]["env"]["CUA_DRIVER_INSTALL_CHANNEL"] == "python_package"
+        assert call_args[1]["env"]["PINCER_INSTALL_CHANNEL"] == "python_package"
 
 
 @pytest.mark.parametrize("stream_name", ["stdin", "stdout", "stderr"])
@@ -116,7 +116,7 @@ def test_subprocess_falls_back_for_fileno_less_stdio(
         for name, stream in streams.items():
             monkeypatch.setattr(sys, name, stream)
 
-        exit_code = wrapper.run_cua_driver(["-c", "pass"])
+        exit_code = wrapper.run_pincer(["-c", "pass"])
 
         assert exit_code == 0
 
@@ -137,11 +137,11 @@ def test_subprocess_preserves_exact_exit_code(
     """The stdio fallback does not change the child's exit-code contract."""
     wrapper = load_wrapper_module()
     monkeypatch.setattr(
-        wrapper, "get_binary_path", Mock(return_value=Path("/fake/path/cua-driver"))
+        wrapper, "get_binary_path", Mock(return_value=Path("/fake/path/pincer"))
     )
     monkeypatch.setattr(wrapper.subprocess, "run", Mock(return_value=Mock(returncode=42)))
 
-    assert wrapper.run_cua_driver(["--version"]) == 42
+    assert wrapper.run_pincer(["--version"]) == 42
 
 
 def test_subprocess_preserves_explicit_install_channel(
@@ -151,27 +151,27 @@ def test_subprocess_preserves_explicit_install_channel(
     wrapper = load_wrapper_module()
     mock_run = Mock(return_value=Mock(returncode=0))
     monkeypatch.setattr(
-        wrapper, "get_binary_path", Mock(return_value=Path("/fake/path/cua-driver"))
+        wrapper, "get_binary_path", Mock(return_value=Path("/fake/path/pincer"))
     )
     monkeypatch.setattr(wrapper.subprocess, "run", mock_run)
-    monkeypatch.setenv("CUA_DRIVER_INSTALL_CHANNEL", "update_apply")
+    monkeypatch.setenv("PINCER_INSTALL_CHANNEL", "update_apply")
 
-    wrapper.run_cua_driver(["--version"])
+    wrapper.run_pincer(["--version"])
 
     child_env = mock_run.call_args.kwargs["env"]
-    assert child_env["CUA_DRIVER_INSTALL_CHANNEL"] == "update_apply"
-    assert os.environ["CUA_DRIVER_INSTALL_CHANNEL"] == "update_apply"
+    assert child_env["PINCER_INSTALL_CHANNEL"] == "update_apply"
+    assert os.environ["PINCER_INSTALL_CHANNEL"] == "update_apply"
 
 
 def test_keyboard_interrupt_handling(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test that KeyboardInterrupt returns exit code 130."""
     wrapper = load_wrapper_module()
     monkeypatch.setattr(
-        wrapper, "get_binary_path", Mock(return_value=Path("/fake/path/cua-driver"))
+        wrapper, "get_binary_path", Mock(return_value=Path("/fake/path/pincer"))
     )
     monkeypatch.setattr(
         wrapper.subprocess, "run", Mock(side_effect=KeyboardInterrupt())
     )
 
-    exit_code = wrapper.run_cua_driver(["mcp"])
+    exit_code = wrapper.run_pincer(["mcp"])
     assert exit_code == 130

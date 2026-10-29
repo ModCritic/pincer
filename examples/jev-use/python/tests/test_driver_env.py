@@ -24,8 +24,8 @@ class DriverEnvironmentTest(unittest.TestCase):
             self.assertNotIn(name, env)
 
     def test_forwards_driver_variables(self):
-        env = driver_environment({"CUA_DRIVER_PERMISSION_MODE": "unrestricted"})
-        self.assertEqual(env["CUA_DRIVER_PERMISSION_MODE"], "unrestricted")
+        env = driver_environment({"PINCER_PERMISSION_MODE": "unrestricted"})
+        self.assertEqual(env["PINCER_PERMISSION_MODE"], "unrestricted")
 
     def test_does_not_forward_provider_credentials(self):
         with mock.patch.dict(

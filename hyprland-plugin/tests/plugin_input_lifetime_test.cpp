@@ -34,7 +34,7 @@ void check(bool value, const char* message) {
 
 // This mock tests the entry point's ownership decisions, not native wl_seat
 // delivery. Native resource-count and surviving-client tests remain separate.
-namespace cua::hyprland {
+namespace pincer::hyprland {
 struct InputExperiment::Impl {};
 struct InputExperiment::DesktopListeners {};
 class PrimaryTrace {};
@@ -50,13 +50,13 @@ std::string InputExperiment::status_json() const { return "{}"; }
 
 int main() {
     std::array<char, 64> pattern{};
-    const std::string seed = "/tmp/cua-input-lifetime-api-XXXXXX";
+    const std::string seed = "/tmp/pincer-input-lifetime-api-XXXXXX";
     seed.copy(pattern.data(), seed.size());
     const auto* directory = mkdtemp(pattern.data());
     check(directory != nullptr, "create isolated runtime");
     const auto hypr = std::string(directory) + "/hypr";
     const auto instance = hypr + "/mock";
-    const auto socket = instance + "/cua-inject-v2.sock";
+    const auto socket = instance + "/pincer-inject-v2.sock";
     check(mkdir(hypr.c_str(), 0700) == 0 && mkdir(instance.c_str(), 0700) == 0,
           "create private instance path");
     check(setenv("XDG_RUNTIME_DIR", directory, 1) == 0 &&
@@ -67,7 +67,7 @@ int main() {
     const auto initial_status = HyprlandAPI::registered_legacy_command->fn(FORMAT_JSON, {});
     check(created == 0 && initial_status.find(R"("configured":false)") != std::string::npos,
           "plugin starts with input disabled");
-#ifdef CUA_HYPRLAND_INPUT
+#ifdef PINCER_HYPRLAND_INPUT
     check(advertises_keyboard_behavior(initial_status),
           "disabled v3 module advertises its compiled keyboard behavior before enable");
 #else
@@ -79,7 +79,7 @@ int main() {
     };
     for (unsigned i = 0; i < 20; ++i) {
         toggle(true);
-#ifdef CUA_HYPRLAND_INPUT
+#ifdef PINCER_HYPRLAND_INPUT
         const auto status = HyprlandAPI::registered_legacy_command->fn(FORMAT_JSON, {});
         check(status.find("\"state\":\"input_v3_candidate\"") != std::string::npos &&
                   status.find("trusted_local_per_action") != std::string::npos &&
@@ -100,7 +100,7 @@ int main() {
         toggle(false);
         check(destroyed == 0 && access(socket.c_str(), F_OK) != 0,
               "disable stops transport but retains seat owner");
-#ifdef CUA_HYPRLAND_INPUT
+#ifdef PINCER_HYPRLAND_INPUT
         check(advertises_keyboard_behavior(HyprlandAPI::registered_legacy_command->fn(FORMAT_JSON, {})),
               "disabled v3 module keeps advertising its keyboard behavior");
 #endif

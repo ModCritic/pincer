@@ -14,8 +14,8 @@
 //!   to full-window space using the most recent `zoom` context stored per-pid.
 
 use async_trait::async_trait;
-use cua_driver_contract::ClickButton;
-use cua_driver_core::{
+use pincer_contract::ClickButton;
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
     tool_args::parse_legacy_click_input,
@@ -251,13 +251,13 @@ fn def() -> &'static ToolDef {
             // but omitted for windowless `scope:"desktop"` clicks — so it is NOT
             // in `required`; the code validates it with a clear error when needed.
             // (Keeps the contract consistent across platforms; see
-            // cua_driver_core::tool_schema.)
+            // pincer_core::tool_schema.)
             "required": [],
             "properties": {
                 "session": { "type": "string", "description": "For multi-call work, prefer a short public session label and repeat it on every call that accepts it." },
                 "pid":           { "type": "integer", "description": "Target process ID. Optional with element_token (it carries the pid)." },
                 "window_id":     { "type": "integer", "description": "Target window ID. Omit with element_token." },
-                "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                "element_token": pincer_core::tool_schema::element_token_schema(),
                 "capture_id": { "type": "string", "description": "Optional capture ID from get_window_state or get_desktop_state. With x,y it is consumed atomically; stale or mismatched captures are refused." },
                 "x":             { "type": "number",  "description": "X in screenshot pixels (get_window_state PNG, or get_desktop_state PNG for a desktop target)." },
                 "y":             { "type": "number",  "description": "Y in screenshot pixels from the image selected by target." },
@@ -308,7 +308,7 @@ impl Tool for ClickTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
 
         // ── Window-less screen-absolute branch (scope="desktop") ──────
         // x,y given with NO pid and NO window_id → the coordinates are TRUE
@@ -544,9 +544,9 @@ impl Tool for ClickTool {
             // target refuses instead of acting on the wrong window.
             let _mutation_lease = if !delivery_mode.is_foreground() {
                 let gate_action = if button_str == "middle" {
-                    cua_driver_core::background_input::BackgroundAction::WindowPointer
+                    pincer_core::background_input::BackgroundAction::WindowPointer
                 } else {
-                    cua_driver_core::background_input::BackgroundAction::AxSemantic
+                    pincer_core::background_input::BackgroundAction::AxSemantic
                 };
                 match super::gate_background_window_action(pid, wid, Some(element_ptr), gate_action)
                     .await
@@ -706,7 +706,7 @@ impl Tool for ClickTool {
                     .gate_again(
                         wid,
                         Some(element_ptr),
-                        cua_driver_core::background_input::BackgroundAction::WindowPointer,
+                        pincer_core::background_input::BackgroundAction::WindowPointer,
                     )
                     .await
                     .is_err()
@@ -1017,7 +1017,7 @@ impl Tool for ClickTool {
                         pid,
                         wid,
                         None,
-                        cua_driver_core::background_input::BackgroundAction::WindowPointer,
+                        pincer_core::background_input::BackgroundAction::WindowPointer,
                     )
                     .await
                     {

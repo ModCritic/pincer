@@ -202,8 +202,8 @@ pub fn chain_at_point(
                     continue;
                 };
                 if coords == HitCoords::Screen && !inside(node.extents, x, y) {
-                    if std::env::var_os("CUA_ATSPI_DEBUG").is_some() {
-                        eprintln!("[cua-atspi] frame {:?} misses ({x},{y})", node.extents);
+                    if std::env::var_os("PINCER_ATSPI_DEBUG").is_some() {
+                        eprintln!("[pincer-atspi] frame {:?} misses ({x},{y})", node.extents);
                     }
                     continue;
                 }
@@ -211,9 +211,9 @@ pub fn chain_at_point(
                     .await
                     .and_then(|r| r.ok())
                     .unwrap_or_default();
-                if std::env::var_os("CUA_ATSPI_DEBUG").is_some() {
+                if std::env::var_os("PINCER_ATSPI_DEBUG").is_some() {
                     eprintln!(
-                        "[cua-atspi] hit frame {name:?} {:?} at ({x},{y})",
+                        "[pincer-atspi] hit frame {name:?} {:?} at ({x},{y})",
                         node.extents
                     );
                 }

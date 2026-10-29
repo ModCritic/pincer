@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(cua_kwin_target_helper LANGUAGES CXX)
+project(pincer_kwin_target_helper LANGUAGES CXX)
 
 set(CMAKE_AUTOMOC ON)
 set(BUILD_SHARED_LIBS ON)
@@ -13,8 +13,8 @@ include(KDECMakeSettings)
 set(KDE_INSTALL_PLUGINDIR "${CMAKE_INSTALL_LIBDIR}/qt6/plugins")
 set(KDE_INSTALL_QTPLUGINDIR "${CMAKE_INSTALL_LIBDIR}/qt6/plugins")
 
-kcoreaddons_add_plugin(cua_kwin_target_helper
+kcoreaddons_add_plugin(pincer_kwin_target_helper
     SOURCES kwin_target_helper.cpp
     INSTALL_NAMESPACE "kwin/effects/plugins")
-target_compile_features(cua_kwin_target_helper PRIVATE cxx_std_20)
-target_link_libraries(cua_kwin_target_helper PRIVATE KWin::kwin Qt6::Core Qt6::DBus)
+target_compile_features(pincer_kwin_target_helper PRIVATE cxx_std_20)
+target_link_libraries(pincer_kwin_target_helper PRIVATE KWin::kwin Qt6::Core Qt6::DBus)

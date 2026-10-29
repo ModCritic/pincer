@@ -1,12 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-const fixtureConfig = ipcRenderer.sendSync('cua-e2e-config');
+const fixtureConfig = ipcRenderer.sendSync('pincer-e2e-config');
 const fixtureJournalUrl = fixtureConfig.journalUrl || '';
 
-contextBridge.exposeInMainWorld('cuaE2E', {
+contextBridge.exposeInMainWorld('pincerE2E', {
   journalUrl: fixtureJournalUrl,
   publishFixtureState(state) {
-    if (fixtureJournalUrl) ipcRenderer.send('cua-e2e-fixture-state', state);
+    if (fixtureJournalUrl) ipcRenderer.send('pincer-e2e-fixture-state', state);
   },
 });
 
@@ -15,7 +15,7 @@ let setupClick;
 
 function record(kind, details = {}) {
   if (!sentinelMode) return;
-  ipcRenderer.send('cua-e2e-sentinel-event', {
+  ipcRenderer.send('pincer-e2e-sentinel-event', {
     kind,
     at_ms: Date.now(),
     ...details,
@@ -34,15 +34,15 @@ function record(kind, details = {}) {
 }
 
 if (sentinelMode) {
-  ipcRenderer.on('cua-e2e-sentinel-arm-setup-click', (_event, token) => {
+  ipcRenderer.on('pincer-e2e-sentinel-arm-setup-click', (_event, token) => {
     setupClick = { token, step: 0 };
     record('setup-click-armed', { token });
   });
   window.addEventListener('DOMContentLoaded', () => {
     document.body.innerHTML = `
       <main style="min-height:100vh;background:#146c43;color:white;display:grid;place-content:center;text-align:center;font:24px system-ui">
-        <h1 style="font-size:52px;margin:0 0 16px">CUA OCCLUSION SENTINEL</h1>
-        <p>CUA_OCCLUSION_SENTINEL_v1</p>
+        <h1 style="font-size:52px;margin:0 0 16px">PINCER OCCLUSION SENTINEL</h1>
+        <p>PINCER_OCCLUSION_SENTINEL_v1</p>
       </main>
     `;
     record('ready');
@@ -78,5 +78,5 @@ if (sentinelMode) {
   window.addEventListener('contextmenu', event =>
     record('contextmenu', { x: event.clientX, y: event.clientY })
   );
-  ipcRenderer.on('cua-e2e-sentinel-heartbeat-probe', () => record('heartbeat'));
+  ipcRenderer.on('pincer-e2e-sentinel-heartbeat-probe', () => record('heartbeat'));
 }

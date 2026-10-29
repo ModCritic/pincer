@@ -1,8 +1,8 @@
 /**
- * Shared Cua Driver runtime for the Eve tools in `agent/tools/`.
+ * Shared Pincer runtime for the Eve tools in `agent/tools/`.
  *
  * Eve runs authored tools in the app runtime, so this module imports the
- * in-process `@trycua/cua-driver` SDK directly. It is modeled on
+ * in-process `pincer-driver` SDK directly. It is modeled on
  * `../../../agent-sdks/native-tools.ts`: every mutation is followed by a fresh
  * observation, and an action whose outcome is unknown is reported as such
  * instead of being retried.
@@ -14,13 +14,13 @@ import {
   ClickButton,
   ClickInput,
   ClickPosition,
-  CuaDriver,
+  Pincer,
   GetDesktopStateInput,
   InputDeliveryMode,
   PressKeyInput,
   ToolResult,
   TypeTextInput,
-} from '@trycua/cua-driver';
+} from 'pincer-driver';
 import { toolOutput, toolOutputPart } from 'eve/tools';
 
 /** JSON-serializable tool result. Eve persists tool outputs durably. */
@@ -32,7 +32,7 @@ export type DesktopObservation = {
 
 const TIMEOUT_MS = 30_000;
 
-let driver: ReturnType<typeof CuaDriver.create> | undefined;
+let driver: ReturnType<typeof Pincer.create> | undefined;
 const desktopTarget = new ActionTarget.Desktop({ displayId: 'primary' });
 
 /**
@@ -41,8 +41,8 @@ const desktopTarget = new ActionTarget.Desktop({ displayId: 'primary' });
  * `eve dev` can load a new runtime generation after a source change; that
  * generation creates its own client on first use.
  */
-function client(): ReturnType<typeof CuaDriver.create> {
-  driver ??= CuaDriver.create(undefined);
+function client(): ReturnType<typeof Pincer.create> {
+  driver ??= Pincer.create(undefined);
   return driver;
 }
 

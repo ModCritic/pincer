@@ -417,7 +417,7 @@ pub fn has_chromium_descendant(hwnd: u64) -> bool {
 /// previous foreground HWND and previous cursor position after the click).
 ///
 /// UIAccess constraint: `SetForegroundWindow` is restricted from non-UIAccess
-/// processes when not driven by user input. The `cua-driver-uia` worker runs
+/// processes when not driven by user input. The `pincer-uia` worker runs
 /// at UIAccess integrity precisely so this restriction is lifted; outside the
 /// worker, the foreground swap may silently fail and SendInput land on the
 /// wrong window. Callers should funnel Chromium coord clicks through the
@@ -730,7 +730,7 @@ fn send_click_synthesized_mods_impl(
 ///
 /// Same UIAccess constraints as [`send_click_synthesized`] — the
 /// `SetForegroundWindow` swap is rejected from non-UIAccess processes
-/// when foreground-lock is active; route through `cua-driver-uia.exe`
+/// when foreground-lock is active; route through `pincer-uia.exe`
 /// for reliable operation.
 pub fn send_drag_synthesized(
     target: u64,

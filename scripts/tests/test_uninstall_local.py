@@ -20,15 +20,15 @@ def _executable(path: Path, body: str) -> None:
 def test_unix_local_uninstall_removes_owned_links_and_preserves_release(tmp_path: Path) -> None:
     home = tmp_path / "home"
     fake_bin = tmp_path / "fake-bin"
-    local_home = home / ".cua-driver-local"
-    release_home = home / ".cua-driver"
+    local_home = home / ".pincer-local"
+    release_home = home / ".pincer"
     local_bin = home / ".local/bin"
-    local_cache = home / ".cache/cua-driver-local"
-    release_cache = home / ".cache/cua-driver"
+    local_cache = home / ".cache/pincer-local"
+    release_cache = home / ".cache/pincer"
     for path in (fake_bin, local_home, release_home, local_bin, local_cache, release_cache):
         path.mkdir(parents=True, exist_ok=True)
 
-    local_marker = local_home / "packages/current/cua-driver-local"
+    local_marker = local_home / "packages/current/pincer-local"
     local_marker.parent.mkdir(parents=True)
     local_marker.write_text("local\n", encoding="utf-8")
     for runtime_file in (
@@ -42,17 +42,17 @@ def test_unix_local_uninstall_removes_owned_links_and_preserves_release(tmp_path
     _executable(fake_bin / "pkill", "exit 0")
     _executable(fake_bin / "systemctl", "exit 0")
 
-    local_cli = local_bin / "cua-driver-local"
-    local_cli.symlink_to(local_home / "packages/current/cua-driver-local")
-    release_cli = local_bin / "cua-driver"
-    release_cli.symlink_to(release_home / "packages/current/cua-driver")
+    local_cli = local_bin / "pincer-local"
+    local_cli.symlink_to(local_home / "packages/current/pincer-local")
+    release_cli = local_bin / "pincer"
+    release_cli.symlink_to(release_home / "packages/current/pincer")
 
-    local_skill = home / ".agents/skills/cua-driver"
+    local_skill = home / ".agents/skills/pincer"
     local_skill.parent.mkdir(parents=True)
-    local_skill.symlink_to(local_home / "skills/cua-driver")
+    local_skill.symlink_to(local_home / "skills/pincer")
 
-    local_unit = home / ".config/systemd/user/cua-driver-local.service"
-    release_unit = home / ".config/systemd/user/cua-driver.service"
+    local_unit = home / ".config/systemd/user/pincer-local.service"
+    release_unit = home / ".config/systemd/user/pincer.service"
     local_unit.parent.mkdir(parents=True)
     local_unit.write_text("local\n", encoding="utf-8")
     release_unit.write_text("release\n", encoding="utf-8")
@@ -75,8 +75,8 @@ def test_unix_local_uninstall_removes_owned_links_and_preserves_release(tmp_path
         {
             "HOME": str(home),
             "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "CUA_DRIVER_LOCAL_HOME": str(local_home),
-            "CUA_DRIVER_LOCAL_INSTALL_DIR": str(local_bin),
+            "PINCER_LOCAL_HOME": str(local_home),
+            "PINCER_LOCAL_INSTALL_DIR": str(local_bin),
         }
     )
     result = subprocess.run(
@@ -106,9 +106,9 @@ def test_unix_local_uninstall_removes_owned_links_and_preserves_release(tmp_path
 def test_unix_local_uninstall_keeps_shared_skill_link_owned_by_release(tmp_path: Path) -> None:
     home = tmp_path / "home"
     fake_bin = tmp_path / "fake-bin"
-    release_skill_target = home / ".cua-driver/skills/cua-driver"
+    release_skill_target = home / ".pincer/skills/pincer"
     release_skill_target.mkdir(parents=True)
-    skill_link = home / ".agents/skills/cua-driver"
+    skill_link = home / ".agents/skills/pincer"
     skill_link.parent.mkdir(parents=True)
     skill_link.symlink_to(release_skill_target)
     _executable(fake_bin / "uname", "printf 'Linux\\n'")
@@ -134,18 +134,18 @@ def test_local_uninstall_contract_is_explicit_on_both_platforms() -> None:
     windows = (SCRIPTS / "uninstall-local.ps1").read_text(encoding="utf-8-sig")
 
     for token in (
-        "/Applications/CuaDriverLocal.app",
-        "com.trycua.driver.local",
-        ".cua-driver-local",
-        "cua-driver-local.service",
-        "com.trycua.cua-driver-local.plist",
+        "/Applications/PincerLocal.app",
+        "io.github.modcritic.pincer.local",
+        ".pincer-local",
+        "pincer-local.service",
+        "io.github.modcritic.pincer-local.plist",
     ):
         assert token in unix
     for token in (
-        "cua-driver-local-serve",
-        "cua-driver-uia-local",
-        ".cua-driver-local",
-        "Programs\\Cua\\cua-driver-local\\bin",
+        "pincer-local-serve",
+        "pincer-uia-local",
+        ".pincer-local",
+        "Programs\\Pincer\\pincer-local\\bin",
     ):
         assert token in windows
     assert "Test-LocalLinkTarget" in windows
@@ -172,7 +172,7 @@ def test_unix_local_uninstall_rejects_release_home_override(tmp_path: Path) -> N
     env.update(
         {
             "HOME": str(home),
-            "CUA_DRIVER_LOCAL_HOME": str(home / ".cua-driver"),
+            "PINCER_LOCAL_HOME": str(home / ".pincer"),
         }
     )
     result = subprocess.run(

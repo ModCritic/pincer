@@ -1,11 +1,11 @@
 // Canvas renderer for the motion lab: draws a scene, its UI state at time t
-// (derived from plan events), effects, and the in-scene Cua agent cursor.
+// (derived from plan events), effects, and the in-scene Pincer agent cursor.
 // This never touches the real system pointer.
 
 import { STAGE, center, inside } from './motion/scenes.js';
 import { sampleAt } from './motion/plan.js';
 
-// Cua Driver cursor body (cursor-overlay/assets/build_default_theme.py
+// Pincer cursor body (cursor-overlay/assets/build_default_theme.py
 // CURSOR_PATH), hotspot at (55, 30). Fill BLUE, 5 pt white stroke, blue glow.
 const CURSOR_D =
   'M55 30 C48 28 42 33 43 41 C43 41 64 98 64 98 C67 106 73 106 77 99 C77 99 86 79 86 79 C88 75 91 72 95 70 C95 70 108 63 108 63 C115 59 114 53 107 50 C107 50 55 30 55 30 Z';

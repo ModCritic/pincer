@@ -19,8 +19,8 @@ time = { workspace = true }
 # Insertion-ordered map for the keyed per-session cursor render collection.
 # IndexMap gives deterministic iteration order = stable cursor z-order frame
 # to frame (a plain HashMap would flicker overlapping cursors).
-cua-driver-core = { path = "../cua-driver-core" }
-cua-driver-contract = { path = "../cua-driver-contract" }
+pincer-core = { path = "../pincer-core" }
+pincer-contract = { path = "../pincer-contract" }
 cursor-overlay = { path = "../cursor-overlay" }
 pip-preview = { path = "../pip-preview" }
 

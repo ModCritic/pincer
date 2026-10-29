@@ -30,9 +30,9 @@ test('journal samples live scroll geometry without an event or DOM mutation', ()
   const html = readFileSync(join(__dirname, 'index.html'), 'utf8');
   const source = html.match(/\(function startFixtureJournal\(\) \{[\s\S]*?\n  \}\)\(\);/);
   assert.ok(source, 'shared fixture journal exists');
-  const scroll = { dataset: { cuaId: 'scroll-tall' }, textContent: 'contents', scrollTop: 208, clientHeight: 128 };
-  const mirror = { dataset: { cuaId: 'lbl-scroll-offset' }, textContent: 'scroll_offset=104', scrollTop: 0, clientHeight: 16 };
-  const field = { dataset: { cuaId: 'input' }, textContent: '', value: '42', checked: false, scrollTop: 0, clientHeight: 20 };
+  const scroll = { dataset: { pincerId: 'scroll-tall' }, textContent: 'contents', scrollTop: 208, clientHeight: 128 };
+  const mirror = { dataset: { pincerId: 'lbl-scroll-offset' }, textContent: 'scroll_offset=104', scrollTop: 0, clientHeight: 16 };
+  const field = { dataset: { pincerId: 'input' }, textContent: '', value: '42', checked: false, scrollTop: 0, clientHeight: 20 };
   const readonly = value => new Proxy(value, {
     get(target, key) {
       const result = target[key];
@@ -49,13 +49,13 @@ test('journal samples live scroll geometry without an event or DOM mutation', ()
     document: {
       body: {},
       querySelectorAll(selector) {
-        assert.equal(selector, '[data-cua-id]');
+        assert.equal(selector, '[data-pincer-id]');
         return [scroll, mirror, field].map(readonly);
       },
       addEventListener() {},
     },
     window: {
-      cuaE2E: {
+      pincerE2E: {
         journalUrl: 'http://fixture.invalid',
         publishFixtureState(state) { publications.push(JSON.parse(JSON.stringify(state))); },
       },

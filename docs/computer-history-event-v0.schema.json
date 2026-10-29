@@ -1,29 +1,29 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:cua-driver:schema:history-event:v0",
-  "title": "Cua Driver Computer History Event v0",
+  "$id": "urn:pincer:schema:history-event:v0",
+  "title": "Pincer Computer History Event v0",
   "type": "object",
   "additionalProperties": false,
   "required": ["specversion", "id", "source", "type", "subject", "time", "datacontenttype", "dataschema", "data"],
   "properties": {
     "specversion": { "const": "1.0" },
     "id": { "$ref": "#/$defs/opaqueId" },
-    "source": { "type": "string", "pattern": "^urn:cua-driver:history:[0-9a-f]{32}$" },
+    "source": { "type": "string", "pattern": "^urn:pincer:history:[0-9a-f]{32}$" },
     "type": {
       "enum": [
-        "cua-driver.history.control.v0",
-        "cua-driver.history.action_started.v0",
-        "cua-driver.history.action_completed.v0",
-        "cua-driver.history.session_started.v0",
-        "cua-driver.history.session_ended.v0",
-        "cua-driver.history.access.v0",
-        "cua-driver.history.health.v0"
+        "pincer.history.control.v0",
+        "pincer.history.action_started.v0",
+        "pincer.history.action_completed.v0",
+        "pincer.history.session_started.v0",
+        "pincer.history.session_ended.v0",
+        "pincer.history.access.v0",
+        "pincer.history.health.v0"
       ]
     },
     "subject": { "type": "string", "minLength": 1, "maxLength": 160 },
     "time": { "type": "string", "format": "date-time" },
     "datacontenttype": { "const": "application/json" },
-    "dataschema": { "const": "urn:cua-driver:schema:history-event:v0" },
+    "dataschema": { "const": "urn:pincer:schema:history-event:v0" },
     "data": { "$ref": "#/$defs/data" }
   },
   "$defs": {
@@ -48,7 +48,7 @@
         "platform": { "enum": ["macos", "windows", "linux"] },
         "process_model": { "const": "in_daemon" },
         "capability": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "caller_category": { "const": "cua_runtime" },
+        "caller_category": { "const": "pincer_runtime" },
         "application": { "$ref": "#/$defs/application" },
         "payload": { "$ref": "#/$defs/payload" }
       }

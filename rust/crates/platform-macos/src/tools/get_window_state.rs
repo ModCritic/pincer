@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::{Content, ToolResult},
     tool::{Tool, ToolDef},
 };
@@ -36,7 +36,7 @@ fn def() -> &'static ToolDef {
             A new snapshot of the same (pid, window_id) replaces the previous one and stales its tokens (`invalidated_snapshot_ids`). `include_screenshot:false` returns the tree only and keeps the last screenshot's pixel frame while the window keeps its size; `include_accessibility_tree:false` returns only the screenshot and keeps the current snapshot's rows and tokens valid (use it, not `max_elements:1`, when you just need to look); adding `display_only:true` (live previews) also leaves the pixel frame alone. The tree can lie on some surfaces (Electron, Catalyst, virtualized rows with `h:1` frames): cross-check the screenshot, and use pixel x,y at action time only for elements missing from the tree.\n\
             \n\
             Refusals: `window_id_not_found`; `window_owner_pid_mismatch` names the real `owner_pid` (sandboxed Open/Save panels belong to a panel service). `degraded_reason` `ax_window_unresolved` or `ax_app_launching` (the latter with `truncation_reason: app_lookup_timeout`) means an empty tree: re-snapshot, or act with `delivery_mode:\"foreground\"`. `px_frame_mismatch` / `px_capture_unavailable` omit the unprovable screenshot; the AX payload stays valid.".into(),
-        input_schema: cua_driver_core::window_state_view::extend_input_schema(serde_json::json!({
+        input_schema: pincer_core::window_state_view::extend_input_schema(serde_json::json!({
             "type": "object",
             "required": ["pid", "window_id"],
             "properties": {
@@ -66,7 +66,7 @@ fn def() -> &'static ToolDef {
                     "minimum": 1,
                     "description": "Cap on walk depth. Default 25."
                 },
-                "timeout_ms": cua_driver_core::tool_schema::timeout_ms_schema(),
+                "timeout_ms": pincer_core::tool_schema::timeout_ms_schema(),
                 "max_image_dimension": {
                     "type": "integer",
                     "minimum": 0,
@@ -131,11 +131,11 @@ impl Tool for GetWindowStateTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        let display_only = match cua_driver_core::window_state_view::display_only(&args) {
+        let display_only = match pincer_core::window_state_view::display_only(&args) {
             Ok(display_only) => display_only,
             Err(refusal) => return refusal,
         };
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let pid = match args.require_i32("pid") {
             Ok(v) => v,
             Err(e) => return e,
@@ -173,7 +173,7 @@ impl Tool for GetWindowStateTool {
             }
         }
 
-        let view = match cua_driver_core::window_state_view::ViewOptions::from_args(&args) {
+        let view = match pincer_core::window_state_view::ViewOptions::from_args(&args) {
             Ok(view) => view,
             Err(refusal) => return refusal,
         };
@@ -254,7 +254,7 @@ impl Tool for GetWindowStateTool {
             .and_then(|v| v.as_u64())
             .map(|v| v.max(1) as usize)
             .unwrap_or(crate::ax::tree::DEFAULT_MAX_DEPTH);
-        let timeout_ms = cua_driver_core::tool_schema::resolve_timeout_ms(args.get("timeout_ms"));
+        let timeout_ms = pincer_core::tool_schema::resolve_timeout_ms(args.get("timeout_ms"));
 
         // A model-facing read lists the menu bar's top-level titles only; a
         // query or full_output walks every menu as before.
@@ -274,7 +274,7 @@ impl Tool for GetWindowStateTool {
                         Some(window_id),
                         q.as_deref(),
                         max_depth,
-                        cua_driver_core::walk_budget::WalkBudget::new(timeout_ms, max_elements),
+                        pincer_core::walk_budget::WalkBudget::new(timeout_ms, max_elements),
                     )
                 });
                 let payload = crate::ax::snapshot::AxSnapshot::from_nodes(&tree.nodes);
@@ -326,7 +326,7 @@ impl Tool for GetWindowStateTool {
         // The portable `max_image_dimension` is an explicit per-call override,
         // including 0 for native resolution. Without it, the configured
         // ceiling applies.
-        let max_dim = cua_driver_core::image_utils::ImageDimensionLimits {
+        let max_dim = pincer_core::image_utils::ImageDimensionLimits {
             configured: effective_max_dim,
             max_image_dimension,
         }
@@ -565,7 +565,7 @@ impl Tool for GetWindowStateTool {
             (None, Some(r)) if scope_matched => build_elements_array_with_token(&r.nodes, None),
             _ => Vec::new(),
         };
-        let elements_json = cua_driver_core::element_query::project_elements_for_query(
+        let elements_json = pincer_core::element_query::project_elements_for_query(
             elements_json,
             query.as_deref(),
             &tree_md,
@@ -574,7 +574,7 @@ impl Tool for GetWindowStateTool {
         // points, delivered pixels per point (backing scale x downsizing).
         let elements_json = match (screenshot_frame.as_ref(), screenshot_dims) {
             (Some((bounds, _)), Some((width, _))) if bounds.width > 0.0 => {
-                cua_driver_core::element_frame::with_screenshot_frames(
+                pincer_core::element_frame::with_screenshot_frames(
                     elements_json,
                     (bounds.x, bounds.y),
                     f64::from(width) / bounds.width,
@@ -616,12 +616,12 @@ impl Tool for GetWindowStateTool {
         // registered (unresolved window scope).
         if let Some(sid) = snapshot_id {
             structured["snapshot_id"] =
-                serde_json::json!(cua_driver_core::element_token::format_snapshot_id(sid));
+                serde_json::json!(pincer_core::element_token::format_snapshot_id(sid));
         }
         let invalidated: Vec<String> = removed
             .into_iter()
             .chain(replaced.into_iter().flatten())
-            .map(cua_driver_core::element_token::format_snapshot_id)
+            .map(pincer_core::element_token::format_snapshot_id)
             .collect();
         if !invalidated.is_empty() {
             content.push(Content::text(format!(
@@ -634,7 +634,7 @@ impl Tool for GetWindowStateTool {
             structured["capture_id"] = serde_json::json!(capture_id);
         }
         if let Some(id) = refreshed {
-            let sid = cua_driver_core::element_token::format_snapshot_id(id);
+            let sid = pincer_core::element_token::format_snapshot_id(id);
             content.push(Content::text(format!(
                 "Screenshot only: snapshot {sid} keeps its rows, and its element_tokens \
                  ({sid}:N) stay valid."
@@ -723,8 +723,8 @@ impl Tool for GetWindowStateTool {
             let capture_available = screenshot_dims.is_some();
             let report = tokio::task::spawn_blocking(move || {
                 let facts = crate::ax::exact_target::gather_background_facts(pid, window_id, None);
-                cua_driver_core::background_input::background_input_capability_report(
-                    cua_driver_core::background_input::ExactWindowTarget { pid, window_id },
+                pincer_core::background_input::background_input_capability_report(
+                    pincer_core::background_input::ExactWindowTarget { pid, window_id },
                     &facts,
                     Some(capture_available),
                 )
@@ -784,23 +784,23 @@ impl Tool for GetWindowStateTool {
             structured["off_space_staleness"] = serde_json::json!(note);
             content.push(Content::text(note));
         }
-        cua_driver_core::window_inspection::mark_browser_chrome_capture_coverage(
+        pincer_core::window_inspection::mark_browser_chrome_capture_coverage(
             &mut structured,
             chromium_browser_window(pid).then_some(
-                cua_driver_core::window_inspection::BrowserChromeCaptureCoverage::MayBeIncomplete,
+                pincer_core::window_inspection::BrowserChromeCaptureCoverage::MayBeIncomplete,
             ),
         );
         if display_only {
-            cua_driver_core::window_state_view::mark_display_only(&mut structured);
+            pincer_core::window_state_view::mark_display_only(&mut structured);
         }
         if !observation_only {
             let focus_probe = || focused_element_description(pid, tree_result.as_ref());
-            cua_driver_core::window_state_view::apply(
+            pincer_core::window_state_view::apply(
                 &view,
-                &cua_driver_core::window_state_view::ViewContext {
+                &pincer_core::window_state_view::ViewContext {
                     pid: i64::from(pid),
                     window_id: u64::from(window_id),
-                    key: cua_driver_core::window_state_view::ViewKey {
+                    key: pincer_core::window_state_view::ViewKey {
                         query: query.clone(),
                         max_elements,
                         max_depth: args
@@ -1030,11 +1030,11 @@ fn element_entry(node: &crate::ax::tree::AXNode, snapshot_id: Option<u32>) -> se
         // Surface 6: opaque token paired to the integer index.
         // Tools accept either; the token has explicit validity
         // (invalidated when the next snapshot supersedes this
-        // one in the per-pid LRU). See cua-driver-core's
+        // one in the per-pid LRU). See pincer-core's
         // `element_token` module.
         if let Some(sid) = snapshot_id {
             entry["element_token"] =
-                serde_json::json!(cua_driver_core::element_token::token_for(sid, idx));
+                serde_json::json!(pincer_core::element_token::token_for(sid, idx));
         }
     } else {
         entry["display_only"] = serde_json::Value::Bool(true);
@@ -1345,7 +1345,7 @@ mod tests {
             let result = tool.invoke(args).await;
             assert_eq!(
                 serde_json::to_value(result).unwrap(),
-                serde_json::to_value(cua_driver_core::protocol::ToolResult::error(
+                serde_json::to_value(pincer_core::protocol::ToolResult::error(
                     "display_only requires include_accessibility_tree:false"
                 ))
                 .unwrap()

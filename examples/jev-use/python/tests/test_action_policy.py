@@ -39,14 +39,14 @@ def inputs(
         ],
     }
     decision = {
-        "schema": "cua.decision_choice_v1",
+        "schema": "pincer.decision_choice_v1",
         "kind": "selected",
         "capture_id": "capture-1",
         "selected_id": action.candidate_id,
         "probabilities": {action.candidate_id: 0.777, "reobserve": 0.123, "abstain": 0.1},
     }
     parsed = {
-        "schema": "cua.visual_regions_v1",
+        "schema": "pincer.visual_regions_v1",
         "capture": {
             "capture_id": "capture-1",
             "source": {"kind": "window", "pid": 10, "window_id": 20},
@@ -82,7 +82,7 @@ class ActionPolicyTest(unittest.TestCase):
     def test_selected_wrong_text_never_reaches_dispatch(self) -> None:
         request, decision, parsed, action = inputs("Send", "Save")
         request.update(
-            {"schema": "cua.jev_choice_request_v1", "goal": "Choose one.", "history": []}
+            {"schema": "pincer.jev_choice_request_v1", "goal": "Choose one.", "history": []}
         )
 
         class WrongSelectionModel:

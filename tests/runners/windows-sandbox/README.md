@@ -11,5 +11,5 @@ Run it from the repository root on a Windows host with Windows Sandbox enabled:
 ```
 
 The host script builds selected Rust test binaries and Windows fixtures, maps
-the repository root into the sandbox as `C:\cua-driver`, and streams logs from the
+the repository root into the sandbox as `C:\pincer`, and streams logs from the
 inside-sandbox runner.

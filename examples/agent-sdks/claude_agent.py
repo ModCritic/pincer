@@ -1,4 +1,4 @@
-"""Run a Claude Agent SDK desktop task through Cua Driver native tools or MCP."""
+"""Run a Claude Agent SDK desktop task through Pincer native tools or MCP."""
 
 from __future__ import annotations
 
@@ -35,13 +35,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def driver_binary() -> str:
-    configured = os.environ.get("CUA_DRIVER_BIN")
+    configured = os.environ.get("PINCER_BIN")
     if configured:
         return configured
-    discovered = shutil.which("cua-driver")
+    discovered = shutil.which("pincer")
     if discovered:
         return discovered
-    raise RuntimeError("cua-driver is not on PATH; set CUA_DRIVER_BIN")
+    raise RuntimeError("pincer is not on PATH; set PINCER_BIN")
 
 
 def prompt(task: str, route: Route) -> str:
@@ -52,13 +52,13 @@ def prompt(task: str, route: Route) -> str:
         else "The native SDK client owns one implicit lifecycle session; custom "
         "tools do not expose lifecycle."
     )
-    return f"""Complete this trusted desktop task through Cua Driver:
+    return f"""Complete this trusted desktop task through Pincer:
 
 {task}
 
 Route: {route}. {lifecycle} Select an exact window or desktop target for every
 action; session identity never selects capture modality or permission authority.
-Use only the supplied Cua tools for desktop observation and interaction. Inspect
+Use only the supplied Pincer tools for desktop observation and interaction. Inspect
 state before each action and verify state after it. A timeout after a mutation
 means the outcome is unknown: observe before retrying and never blindly replay.
 Do not purchase, send, delete, expose credentials, or perform another
@@ -101,7 +101,7 @@ def native_server(runtime: NativeDesktopTools):
         return await runtime.press_key(args["key"])
 
     return create_sdk_mcp_server(
-        name="cua_native",
+        name="pincer_native",
         version="1.0.0",
         tools=[observe_desktop, click_desktop, type_text, press_key],
     )
@@ -128,13 +128,13 @@ async def run_native(task: str) -> None:
             model=os.environ.get("CLAUDE_MODEL"),
             cwd=Path.cwd(),
             tools=[],
-            mcp_servers={"cua_native": native_server(runtime)},
+            mcp_servers={"pincer_native": native_server(runtime)},
             strict_mcp_config=True,
             allowed_tools=[
-                "mcp__cua_native__observe_desktop",
-                "mcp__cua_native__click_desktop",
-                "mcp__cua_native__type_text",
-                "mcp__cua_native__press_key",
+                "mcp__pincer_native__observe_desktop",
+                "mcp__pincer_native__click_desktop",
+                "mcp__pincer_native__type_text",
+                "mcp__pincer_native__press_key",
             ],
             permission_mode="dontAsk",
             max_turns=40,
@@ -151,7 +151,7 @@ async def run_mcp(task: str) -> None:
         cwd=Path.cwd(),
         tools=[],
         mcp_servers={
-            "cua_driver": {
+            "pincer": {
                 "type": "stdio",
                 "command": binary,
                 "args": ["mcp"],
@@ -160,7 +160,7 @@ async def run_mcp(task: str) -> None:
         strict_mcp_config=True,
         # Claude's MCP allowlist accepts the server name to enable all
         # tools from that server; wildcard tool-name globs are unsupported.
-        allowed_tools=["mcp__cua_driver"],
+        allowed_tools=["mcp__pincer"],
         permission_mode="dontAsk",
         max_turns=40,
     )

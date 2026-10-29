@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use cua_driver_contract::MoveCursorInput;
-use cua_driver_core::{
+use pincer_contract::MoveCursorInput;
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
     tool_args::parse_typed_projection,
@@ -44,7 +44,7 @@ fn def() -> &'static ToolDef {
                 "y": { "type": "number", "description": "Destination Y, in the same space as x." },
                 "scope": { "type": "string", "enum": ["window", "desktop"], "default": "window", "description": "\"window\" (default) moves only the agent cursor overlay; \"desktop\" moves the real OS pointer." },
                 "cursor_id": { "type": "string", "description": "Cursor instance to move. Default: 'default'." },
-                "delivery_mode": cua_driver_core::tool_schema::delivery_mode_schema_with("Desktop scope only. Default \"background\": refuses, before moving anything, when the point is over a window of an app that is not in front, since that would move the user's pointer. \"foreground\": move the real pointer anyway; only when nobody is using this screen or the user agreed.")
+                "delivery_mode": pincer_core::tool_schema::delivery_mode_schema_with("Desktop scope only. Default \"background\": refuses, before moving anything, when the point is over a window of an app that is not in front, since that would move the user's pointer. \"foreground\": move the real pointer anyway; only when nobody is using this screen or the user agreed.")
             },
             "additionalProperties": false
         }),
@@ -62,7 +62,7 @@ impl Tool for MoveCursorTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         if args.opt_str("scope").as_deref() == Some("desktop") {
             let input = match parse_typed_projection::<MoveCursorInput>("move_cursor", &args) {
                 Ok(input) => input,
@@ -139,7 +139,7 @@ impl MoveCursorTool {
     /// do not reach its tracking areas (VM check, 11 Oct 2026: BenchLab saw no
     /// hover through the SkyLight, public or both routes).
     async fn move_over_window(&self, args: &Value, pid: i32, wid: u32) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         if !self.state.cursor_overlay_available {
             return super::cursor_overlay_unavailable();
         }

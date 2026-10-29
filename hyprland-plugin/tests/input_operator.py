@@ -51,7 +51,7 @@ def canonical_message(epoch, challenge, target, expires_unix_ms, capabilities):
     caps = unsigned(capabilities, 15)
     if not caps:
         raise ValueError("at least one capability is required")
-    return ("CUA_TEST_LEASE_1\n" + "\n".join(tokens + [str(expiry), str(caps)]) + "\n").encode("ascii")
+    return ("PINCER_TEST_LEASE_1\n" + "\n".join(tokens + [str(expiry), str(caps)]) + "\n").encode("ascii")
 
 
 def validate_expiry(expires_unix_ms, now_ms):

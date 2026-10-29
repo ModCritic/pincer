@@ -22,7 +22,7 @@ mod set_window_frame;
 mod type_text;
 // `screenshot` / `screenshot_compat` modules removed in PR #1692 —
 // `get_window_state` is the canonical screenshot path. The capture functions they wrapped (ScreenCaptureKit, CGWindow,
-// etc.) live elsewhere under CuaDriverCore::Capture and are reached
+// etc.) live elsewhere under PincerCore::Capture and are reached
 // through GetWindowStateTool.
 mod check_permissions;
 mod cursor_tools;
@@ -40,7 +40,7 @@ mod set_config;
 mod type_text_chars;
 mod zoom;
 
-use cua_driver_core::{
+use pincer_core::{
     tool::{Tool, ToolRegistry},
     window_target::{PidOnlyWindowTargetGuard, WindowTargetCandidate, WindowTargetCandidates},
 };
@@ -51,9 +51,9 @@ use crate::{ax::snapshot::Snapshots, cursor::state::CursorRegistry};
 
 fn native_window_id(
     window_id: Option<u64>,
-) -> Result<Option<u32>, cua_driver_core::protocol::ToolResult> {
+) -> Result<Option<u32>, pincer_core::protocol::ToolResult> {
     window_id.map(u32::try_from).transpose().map_err(|_| {
-        cua_driver_core::protocol::ToolResult::error("window_id is out of range for macOS.")
+        pincer_core::protocol::ToolResult::error("window_id is out of range for macOS.")
     })
 }
 
@@ -124,7 +124,7 @@ fn window_target_candidates_for_pid(
 #[cfg(test)]
 mod pid_window_target_tests {
     use super::*;
-    use cua_driver_core::window_target::{resolve_pid_window_target, PidWindowTargetResolution};
+    use pincer_core::window_target::{resolve_pid_window_target, PidWindowTargetResolution};
 
     fn window(window_id: u32, pid: i32) -> crate::windows::WindowInfo {
         crate::windows::WindowInfo {
@@ -261,16 +261,16 @@ pub use check_permissions::{
     PERMISSIONS_HOST_REQUEST_ARG,
 };
 
-pub use cua_driver_core::snapshot_store::ZoomContext;
+pub use pincer_core::snapshot_store::ZoomContext;
 
-/// The shared per-call delivery mode; see [`cua_driver_core::delivery`].
+/// The shared per-call delivery mode; see [`pincer_core::delivery`].
 ///
 /// On macOS, `Foreground` briefly fronts the target window, acts, then
 /// restores the prior frontmost (see
 /// [`crate::input::skylight::with_foreground_assist`]). It is the only way
 /// `click` reaches a foreground rung and is orthogonal to addressing
 /// (`element_index` vs `x/y`, which selects AX vs pixel).
-pub use cua_driver_core::delivery::DeliveryMode;
+pub use pincer_core::delivery::DeliveryMode;
 
 /// Convert a pure background-input refusal into the structured refusal result
 /// shape shared by exact-target tools: `code`, `effect: "refused"`, the
@@ -278,8 +278,8 @@ pub use cua_driver_core::delivery::DeliveryMode;
 pub(crate) fn background_refusal_result(
     pid: i32,
     window_id: u32,
-    refusal: &cua_driver_core::background_input::BackgroundRefusal,
-) -> cua_driver_core::protocol::ToolResult {
+    refusal: &pincer_core::background_input::BackgroundRefusal,
+) -> pincer_core::protocol::ToolResult {
     let mut structured = serde_json::json!({
         "code": refusal.code,
         "effect": "refused",
@@ -293,7 +293,7 @@ pub(crate) fn background_refusal_result(
             "reason": refusal.reason,
         });
     }
-    cua_driver_core::protocol::ToolResult::error(format!(
+    pincer_core::protocol::ToolResult::error(format!(
         "Background input refused ({}): {}",
         refusal.code, refusal.reason
     ))
@@ -349,8 +349,8 @@ impl BackgroundMutationLease {
         &self,
         window_id: u32,
         element_ptr: Option<usize>,
-        action: cua_driver_core::background_input::BackgroundAction,
-    ) -> Result<(), cua_driver_core::protocol::ToolResult> {
+        action: pincer_core::background_input::BackgroundAction,
+    ) -> Result<(), pincer_core::protocol::ToolResult> {
         decide_background_window_action(self.pid, window_id, element_ptr, action).await
     }
 }
@@ -359,9 +359,9 @@ async fn decide_background_window_action(
     pid: i32,
     window_id: u32,
     element_ptr: Option<usize>,
-    action: cua_driver_core::background_input::BackgroundAction,
-) -> Result<(), cua_driver_core::protocol::ToolResult> {
-    use cua_driver_core::background_input::{
+    action: pincer_core::background_input::BackgroundAction,
+) -> Result<(), pincer_core::protocol::ToolResult> {
+    use pincer_core::background_input::{
         decide_background_input, BackgroundInputDecision, ExactWindowTarget,
     };
     let element_guard =
@@ -374,7 +374,7 @@ async fn decide_background_window_action(
     {
         Ok(facts) => facts,
         Err(error) => {
-            return Err(cua_driver_core::protocol::ToolResult::error(format!(
+            return Err(pincer_core::protocol::ToolResult::error(format!(
                 "Could not gather exact-target facts for pid {pid} window {window_id}: {error}"
             )));
         }
@@ -394,8 +394,8 @@ pub(crate) async fn gate_background_window_action(
     pid: i32,
     window_id: u32,
     element_ptr: Option<usize>,
-    action: cua_driver_core::background_input::BackgroundAction,
-) -> Result<BackgroundMutationLease, cua_driver_core::protocol::ToolResult> {
+    action: pincer_core::background_input::BackgroundAction,
+) -> Result<BackgroundMutationLease, pincer_core::protocol::ToolResult> {
     let lease = acquire_background_mutation(pid).await;
     lease.gate_again(window_id, element_ptr, action).await?;
     Ok(lease)
@@ -410,7 +410,7 @@ pub(crate) async fn acquire_background_mutation(pid: i32) -> BackgroundMutationL
 
 /// Finish the post-action observation window and release the wildcard
 /// focus-steal lease. The observation bound is a daemon-launch setting
-/// (`CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS` / `CUA_DRIVER_WINDOW_CHANGE_POLL_MS`),
+/// (`PINCER_WINDOW_CHANGE_TIMEOUT_MS` / `PINCER_WINDOW_CHANGE_POLL_MS`),
 /// never a per-call argument: every ingress strips `_`-prefixed arguments, so
 /// a tool call cannot shorten focus protection for itself.
 pub(crate) async fn finish_window_observation(
@@ -439,8 +439,8 @@ pub(crate) async fn focus_by_pixel(
     session_id: Option<String>,
     from_zoom: bool,
     mutation_lease: Option<&BackgroundMutationLease>,
-) -> Result<(), cua_driver_core::protocol::ToolResult> {
-    use cua_driver_core::tool::Tool;
+) -> Result<(), pincer_core::protocol::ToolResult> {
+    use pincer_core::tool::Tool;
     let mut click_args = serde_json::json!({
         "pid": pid, "x": x, "y": y,
         "delivery_mode": "background",
@@ -453,7 +453,7 @@ pub(crate) async fn focus_by_pixel(
                 .gate_again(
                     wid,
                     None,
-                    cua_driver_core::background_input::BackgroundAction::WindowPointer,
+                    pincer_core::background_input::BackgroundAction::WindowPointer,
                 )
                 .await?;
         }
@@ -496,7 +496,7 @@ pub(crate) async fn focus_by_pixel(
             return Ok(());
         }
     } else if !foreground {
-        return Err(cua_driver_core::protocol::ToolResult::error(format!(
+        return Err(pincer_core::protocol::ToolResult::error(format!(
             "focus pixel-click at ({x:.0},{y:.0}) failed."
         )));
     }
@@ -524,7 +524,7 @@ pub(crate) async fn focus_by_pixel(
         .invoke(click_args)
         .await;
     if focus.is_error == Some(true) {
-        return Err(cua_driver_core::protocol::ToolResult::error(format!(
+        return Err(pincer_core::protocol::ToolResult::error(format!(
             "focus pixel-click at ({x:.0},{y:.0}) failed."
         )));
     }
@@ -625,12 +625,12 @@ impl Default for DriverConfig {
 /// Path to the persistent JSON config file shared by the CLI and MCP session.
 pub fn config_file_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
-    std::path::PathBuf::from(format!("{home}/.cua-driver/config.json"))
+    std::path::PathBuf::from(format!("{home}/.pincer/config.json"))
 }
 
-/// Load `DriverConfig` from `~/.cua-driver/config.json`, falling back to
+/// Load `DriverConfig` from `~/.pincer/config.json`, falling back to
 /// defaults for any missing or unrecognised keys.  Called at MCP startup so
-/// that `cua-driver config set max_image_dimension 1024` (CLI) carries over
+/// that `pincer config set max_image_dimension 1024` (CLI) carries over
 /// into the next MCP session without requiring a per-call `set_config`.
 pub fn load_driver_config() -> DriverConfig {
     let mut cfg = DriverConfig::default();
@@ -673,7 +673,7 @@ pub async fn desktop_screenshot_point(x: f64, y: f64) -> (f64, f64) {
     (x / ratio, y / ratio)
 }
 
-/// Persist a single key/value pair to `~/.cua-driver/config.json`.
+/// Persist a single key/value pair to `~/.pincer/config.json`.
 /// Merges with any existing file contents so other keys are preserved.
 /// Returns `Err` if the directory cannot be created or the file cannot be written.
 pub fn write_driver_config_key(key: &str, value: &serde_json::Value) -> Result<(), String> {
@@ -695,7 +695,7 @@ pub fn write_driver_config_key(key: &str, value: &serde_json::Value) -> Result<(
 
 /// Per-session config overrides layered over the global persisted `DriverConfig`.
 ///
-/// The cua-driver daemon is one shared process: every `cua-driver mcp` proxy
+/// The pincer daemon is one shared process: every `pincer mcp` proxy
 /// connects to it and shares its `ToolState`. `DriverConfig` is therefore
 /// multi-tenant AND persisted to disk — so without session scoping, session A's
 /// `set_config max_image_dimension=...` clobbers session B's value and flips the
@@ -730,7 +730,7 @@ impl SessionConfigRegistry {
         // overrides) must NOT re-create the entry — it would be invisible and
         // never reaped again. `fire_session_end` marks ENDED_SESSIONS *before*
         // running the config-clear hook, so this check is authoritative.
-        if cua_driver_core::session::is_session_ended(session) {
+        if pincer_core::session::is_session_ended(session) {
             return;
         }
         let mut map = self.inner.lock().unwrap();
@@ -789,7 +789,7 @@ pub struct ToolState {
     /// successful no-op.
     pub cursor_overlay_available: bool,
     /// Direct and embedded hosts own TCC request UX. Their runtime may inspect
-    /// permission state but must not raise Cua-owned prompts.
+    /// permission state but must not raise Pincer-owned prompts.
     pub host_owns_permission_ux: bool,
     /// Advisory host identity for permission diagnostics only.
     pub host_bundle_id: Option<String>,
@@ -808,7 +808,7 @@ impl ToolState {
         host_bundle_id: Option<String>,
     ) -> Self {
         Self::new_with_capture_service(
-            Arc::new(cua_driver_core::capture_runtime::CaptureService::default()),
+            Arc::new(pincer_core::capture_runtime::CaptureService::default()),
             cursor_overlay_available,
             host_owns_permission_ux,
             host_bundle_id,
@@ -816,7 +816,7 @@ impl ToolState {
     }
 
     fn new_with_capture_service(
-        capture_service: Arc<cua_driver_core::capture_runtime::CaptureService>,
+        capture_service: Arc<pincer_core::capture_runtime::CaptureService>,
         cursor_overlay_available: bool,
         host_owns_permission_ux: bool,
         host_bundle_id: Option<String>,
@@ -825,8 +825,8 @@ impl ToolState {
             snapshots: Arc::new(Snapshots::new()),
             cursor_registry: Arc::new(CursorRegistry::new()),
             capture_bindings: Arc::new(capture_binding::MacCaptureBindings::new(capture_service)),
-            // Load persisted config from ~/.cua-driver/config.json so that
-            // `cua-driver config set` changes carry over into MCP sessions.
+            // Load persisted config from ~/.pincer/config.json so that
+            // `pincer config set` changes carry over into MCP sessions.
             config: Arc::new(std::sync::RwLock::new(load_driver_config())),
             session_config: Arc::new(SessionConfigRegistry::new()),
             cdp_sessions: Arc::new(crate::browser::CdpSessionCache::new()),
@@ -843,8 +843,8 @@ impl ToolState {
 pub(super) fn target_pid(
     state: &ToolState,
     args: &serde_json::Value,
-) -> Result<i32, cua_driver_core::protocol::ToolResult> {
-    use cua_driver_core::tool_args::ArgsExt;
+) -> Result<i32, pincer_core::protocol::ToolResult> {
+    use pincer_core::tool_args::ArgsExt;
     if args.get("pid").is_some_and(|pid| !pid.is_null()) {
         return args.require_i32("pid");
     }
@@ -855,9 +855,9 @@ pub(super) fn target_pid(
         .get("element_token")
         .is_some_and(|token| !token.is_null())
     {
-        return Err(cua_driver_core::element_token::stale_token_without_pid());
+        return Err(pincer_core::element_token::stale_token_without_pid());
     }
-    Err(cua_driver_core::protocol::ToolResult::error(
+    Err(pincer_core::protocol::ToolResult::error(
         "Missing required integer field: pid. Pass pid, or pass an element_token from the \
          current get_window_state (a token names its own pid).",
     ))
@@ -868,7 +868,7 @@ pub(super) fn screenshot_scale(
     args: &serde_json::Value,
     pid: i32,
     window_id: Option<u32>,
-) -> Result<f64, cua_driver_core::protocol::ToolResult> {
+) -> Result<f64, pincer_core::protocol::ToolResult> {
     state
         .snapshots
         .screenshot_scale(pid, window_id.map(u64::from), args)
@@ -879,7 +879,7 @@ pub(super) fn zoom_context(
     args: &serde_json::Value,
     pid: i32,
     window_id: Option<u32>,
-) -> Result<ZoomContext, cua_driver_core::protocol::ToolResult> {
+) -> Result<ZoomContext, pincer_core::protocol::ToolResult> {
     state.snapshots.zoom(
         pid,
         window_id.map(u64::from),
@@ -887,11 +887,11 @@ pub(super) fn zoom_context(
     )
 }
 
-pub(crate) fn cursor_overlay_unavailable() -> cua_driver_core::protocol::ToolResult {
+pub(crate) fn cursor_overlay_unavailable() -> pincer_core::protocol::ToolResult {
     let message = "macOS agent cursor overlay is unavailable: this runtime owner has no certified \
                    AppKit main-thread host adapter or no Window Server graphic-session access; \
                    use a GUI private worker or standalone service for cursor-overlay controls";
-    cua_driver_core::protocol::ToolResult::error(message).with_structured(serde_json::json!({
+    pincer_core::protocol::ToolResult::error(message).with_structured(serde_json::json!({
         "status": "refused",
         "refusal": {
             "code": "facility_unavailable",
@@ -920,7 +920,7 @@ pub fn register_all(
     ));
     let cursor_outcome_reader = {
         let cursor_registry = state.cursor_registry.clone();
-        cua_driver_core::session::register_scoped_cursor_outcome_reader(std::sync::Arc::new(
+        pincer_core::session::register_scoped_cursor_outcome_reader(std::sync::Arc::new(
             move |session_id| {
                 let state = cursor_registry.get(session_id);
                 let motion_customized = state.is_some()
@@ -933,7 +933,7 @@ pub fn register_all(
                     .count()
                     .max(1);
                 match state {
-                    Some(state) => cua_driver_core::session::bounded_cursor_outcome(
+                    Some(state) => pincer_core::session::bounded_cursor_outcome(
                         true,
                         state.config.enabled,
                         crate::cursor::overlay::is_visible_for_session(session_id),
@@ -941,7 +941,7 @@ pub fn register_all(
                         motion_customized,
                         active_cursor_count,
                     ),
-                    None => cua_driver_core::session::bounded_cursor_outcome(
+                    None => pincer_core::session::bounded_cursor_outcome(
                         false,
                         false,
                         false,
@@ -954,8 +954,8 @@ pub fn register_all(
         ))
     };
     registry.retain_cursor_outcome_reader(cursor_outcome_reader);
-    if let Some(runtime_scope) = cua_driver_core::tool::current_dispatch_runtime_scope() {
-        let prefix = format!("__cua_runtime_{runtime_scope}:");
+    if let Some(runtime_scope) = pincer_core::tool::current_dispatch_runtime_scope() {
+        let prefix = format!("__pincer_runtime_{runtime_scope}:");
         let cursor_registry = state.cursor_registry.clone();
         let capture_bindings = state.capture_bindings.clone();
         registry.retain_runtime_cleanup(move || {
@@ -983,7 +983,7 @@ pub fn register_all(
         let cursor_registry = state.cursor_registry.clone();
         let capture_bindings = state.capture_bindings.clone();
         let registration =
-            cua_driver_core::session::register_scoped_session_end_hook(move |session_id| {
+            pincer_core::session::register_scoped_session_end_hook(move |session_id| {
                 session_config.clear(session_id);
                 snapshots.retire_session_screenshots(session_id);
                 capture_bindings.retire_session(session_id);
@@ -998,7 +998,7 @@ pub fn register_all(
             });
         registry.retain_session_end_hook(registration);
         let revive_registration =
-            cua_driver_core::session::register_scoped_session_revive_hook(move |session_id| {
+            pincer_core::session::register_scoped_session_revive_hook(move |session_id| {
                 crate::cursor::overlay::revive_cursor(session_id.to_owned());
             });
         registry.retain_session_revive_hook(revive_registration);
@@ -1009,14 +1009,12 @@ pub fn register_all(
     registry.register(Box::new(get_window_state::GetWindowStateTool::new(
         state.clone(),
     )));
-    registry.register(Box::new(
-        cua_driver_core::expectation::VerifyStateTool::new(Arc::new(
-            cua_driver_core::expectation::ToolObservationProvider::new(
-                Arc::new(list_windows::ListWindowsTool),
-                Arc::new(get_window_state::GetWindowStateTool::new(state.clone())),
-            ),
+    registry.register(Box::new(pincer_core::expectation::VerifyStateTool::new(
+        Arc::new(pincer_core::expectation::ToolObservationProvider::new(
+            Arc::new(list_windows::ListWindowsTool),
+            Arc::new(get_window_state::GetWindowStateTool::new(state.clone())),
         )),
-    ));
+    )));
     registry.register(Box::new(launch_app::LaunchAppTool));
     registry.register(Box::new(kill_app::KillAppTool));
     let pid_window_candidates: WindowTargetCandidates = Arc::new(pid_window_target_candidates);
@@ -1062,7 +1060,7 @@ pub fn register_all(
         scroll::ScrollTool::new(state.clone()),
         &pid_window_candidates,
     ));
-    cua_driver_core::clipboard::register_clipboard_tools(
+    pincer_core::clipboard::register_clipboard_tools(
         registry,
         Arc::new(clipboard::MacosClipboard::new()),
     );
@@ -1070,9 +1068,8 @@ pub fn register_all(
     // screenshot the Claude Code computer-use compat loop relies on now comes
     // from `get_window_state` (which always returns BOTH the tree AND a
     // screenshot — perception is mode-agnostic) for a window, or `get_desktop_state` for the whole screen.
-    // `compat` no longer gates a tool swap here — the flag's live purpose is to
-    // register the MCP server under the `cua-computer-use` name, which is what
-    // triggers Claude Code's computer-use beta-tool injection (see cli.rs).
+    // `compat` no longer gates a tool swap here; the flag is accepted only so
+    // older setup commands keep working (see cli.rs).
     let _ = compat;
     registry.register(Box::new(get_screen_size::GetScreenSizeTool));
     registry.register(Box::new(get_desktop_state::GetDesktopStateTool::new(
@@ -1097,13 +1094,11 @@ pub fn register_all(
     )));
     // `health_report` — single-call end-to-end diagnostics. Stable
     // schema_version="1" contract aimed at downstream consumers who must
-    // not have to know cua-driver internals. Provider is platform-specific; tool plumbing is in
-    // `cua_driver_core::health_report`.
-    registry.register(Box::new(
-        cua_driver_core::health_report::HealthReportTool::new(Arc::new(
-            health_report::MacosHealthProvider,
-        )),
-    ));
+    // not have to know pincer internals. Provider is platform-specific; tool plumbing is in
+    // `pincer_core::health_report`.
+    registry.register(Box::new(pincer_core::health_report::HealthReportTool::new(
+        Arc::new(health_report::MacosHealthProvider),
+    )));
     registry.register(Box::new(get_config::GetConfigTool::new(state.clone())));
     registry.register(Box::new(set_config::SetConfigTool::new(state.clone())));
     registry.register(Box::new(
@@ -1121,14 +1116,14 @@ pub fn register_all(
     // Touch the struct so it stays in this crate for the alias resolver.
     let _: &type_text_chars::TypeTextCharsTool =
         &type_text_chars::TypeTextCharsTool::new(state.clone());
-    let browser_engine = cua_driver_core::browser::BrowserEngine::new_with_runtime_services(
+    let browser_engine = pincer_core::browser::BrowserEngine::new_with_runtime_services(
         Arc::new(crate::browser::MacOsBrowserPlatform::new(
             state.cursor_registry.clone(),
         )),
         registry.approval_broker(),
         registry.protected_resource_ownership(),
     );
-    cua_driver_core::browser::register_browser_tools(&browser_engine, registry);
+    pincer_core::browser::register_browser_tools(&browser_engine, registry);
     // Recording / replay + session-lifecycle tools are platform-independent.
     registry.register_recording_tools();
     registry.register_session_tools();
@@ -1137,7 +1132,7 @@ pub fn register_all(
 #[cfg(test)]
 mod session_config_guard_tests {
     use super::*;
-    use cua_driver_core::session::fire_session_end;
+    use pincer_core::session::fire_session_end;
 
     fn overrides(max_dim: u32) -> ConfigOverrides {
         ConfigOverrides {
@@ -1154,7 +1149,7 @@ mod session_config_guard_tests {
         let global = DriverConfig::default();
         let sid = "wb-config-ended-Q9R8S7";
         fire_session_end(sid);
-        assert!(cua_driver_core::session::is_session_ended(sid));
+        assert!(pincer_core::session::is_session_ended(sid));
 
         reg.set(sid, overrides(800));
         let dim = reg.effective_max_image_dimension(Some(sid), &global);
@@ -1169,7 +1164,7 @@ mod session_config_guard_tests {
         let reg = SessionConfigRegistry::new();
         let global = DriverConfig::default();
         let sid = "wb-config-live-T1U2V3";
-        assert!(!cua_driver_core::session::is_session_ended(sid));
+        assert!(!pincer_core::session::is_session_ended(sid));
         reg.set(sid, overrides(800));
         let dim = reg.effective_max_image_dimension(Some(sid), &global);
         assert_eq!(dim, 800, "live session override must apply");
@@ -1179,9 +1174,9 @@ mod session_config_guard_tests {
 #[cfg(test)]
 mod cursor_overlay_facility_tests {
     use super::*;
-    use cua_driver_core::tool::Tool;
+    use pincer_core::tool::Tool;
 
-    fn assert_facility_unavailable(result: cua_driver_core::protocol::ToolResult) {
+    fn assert_facility_unavailable(result: pincer_core::protocol::ToolResult) {
         assert_eq!(result.is_error, Some(true));
         let refusal = result
             .structured_content
@@ -1210,7 +1205,7 @@ mod cursor_overlay_facility_tests {
     }
 }
 
-// RecordingSession lives in cua-driver-core, but its `start()` pulls in the
+// RecordingSession lives in pincer-core, but its `start()` pulls in the
 // macOS cursor sampler (CoreGraphics), so the start-guard test runs here in
 // platform-macos where build.rs links the frameworks — the core crate's test
 // binary has no CoreGraphics linkage.
@@ -1253,8 +1248,8 @@ mod pixel_focus_readback_tests {
 
 #[cfg(test)]
 mod recording_start_guard_tests {
-    use cua_driver_core::recording::RecordingSession;
-    use cua_driver_core::session::fire_session_end;
+    use pincer_core::recording::RecordingSession;
+    use pincer_core::session::fire_session_end;
 
     #[test]
     fn start_refuses_for_ended_session_owner() {
@@ -1264,7 +1259,7 @@ mod recording_start_guard_tests {
         let rec = RecordingSession::new();
         let sid = "wb-recording-ended-W4X5Y6";
         fire_session_end(sid);
-        assert!(cua_driver_core::session::is_session_ended(sid));
+        assert!(pincer_core::session::is_session_ended(sid));
 
         let dir = std::env::temp_dir().join("wb-rec-ended");
         let err = rec.start(dir.to_str().unwrap(), false, Some(sid));
@@ -1279,7 +1274,7 @@ mod recording_start_guard_tests {
     fn start_succeeds_for_live_session_owner() {
         let rec = RecordingSession::new();
         let sid = "wb-recording-live-Z7A8B9";
-        assert!(!cua_driver_core::session::is_session_ended(sid));
+        assert!(!pincer_core::session::is_session_ended(sid));
         let dir = std::env::temp_dir().join("wb-rec-live");
         // record_video=false avoids spawning ffmpeg in the test.
         let ok = rec.start(dir.to_str().unwrap(), false, Some(sid));

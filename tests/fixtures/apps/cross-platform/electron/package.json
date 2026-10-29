@@ -1,7 +1,7 @@
 {
-  "name": "cua-test-harness-electron",
+  "name": "pincer-test-harness-electron",
   "version": "1.0.0",
-  "description": "cua-driver Electron test harness — loads the same shared/web/index.html as CuaTestHarness.WebView",
+  "description": "pincer Electron test harness — loads the same shared/web/index.html as PincerTestHarness.WebView",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -17,8 +17,8 @@
     "electron-builder": "25.0.5"
   },
   "build": {
-    "appId": "com.trycua.harness.electron",
-    "productName": "CuaTestHarness.Electron",
+    "appId": "io.github.modcritic.pincer.harness.electron",
+    "productName": "PincerTestHarness.Electron",
     "directories": {
       "output": "dist"
     },
@@ -42,7 +42,7 @@
       "category": "Development"
     },
     "portable": {
-      "artifactName": "CuaTestHarness.Electron.exe"
+      "artifactName": "PincerTestHarness.Electron.exe"
     }
   }
 }

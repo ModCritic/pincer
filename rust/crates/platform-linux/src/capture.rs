@@ -47,7 +47,7 @@ pub fn screenshot_window_bytes(xid: u64) -> Result<Vec<u8>> {
 /// Capture a window by X11 XID. Returns (base64_png, width, height).
 pub fn screenshot_window(xid: u64) -> Result<(String, u32, u32)> {
     let bytes = screenshot_window_bytes(xid)?;
-    let (w, h) = cua_driver_core::image_utils::png_dimensions(&bytes)?;
+    let (w, h) = pincer_core::image_utils::png_dimensions(&bytes)?;
     Ok((BASE64.encode(&bytes), w, h))
 }
 
@@ -379,7 +379,7 @@ fn packed_zpixmap_to_png(data: &[u8], w: u32, h: u32, decoder: PixelDecoder) -> 
             rgba.push(255);
         }
     }
-    cua_driver_core::image_utils::encode_rgba_to_png(&rgba, w, h)
+    pincer_core::image_utils::encode_rgba_to_png(&rgba, w, h)
 }
 
 fn xid_to_window(xid: u64) -> Result<u32> {
@@ -930,20 +930,20 @@ impl XGetImageSession {
 
 /// Public version of png_dimensions for use in tool code.
 pub fn png_dimensions_pub(data: &[u8]) -> Result<(u32, u32)> {
-    cua_driver_core::image_utils::png_dimensions(data)
+    pincer_core::image_utils::png_dimensions(data)
 }
 
 // NOTE: the previously-inline `png_dimensions`, `write_uncompressed_png`,
 // `write_png_chunk`, `zlib_store`, `adler32` (and `crc32_ieee` below)
-// were extracted to `cua_driver_core::image_utils` in the 2026-05 dedup
+// were extracted to `pincer_core::image_utils` in the 2026-05 dedup
 // audit so all three platforms call the same code. See
-// `CUA_DRIVER_RS_DEDUP_AUDIT.md`. RGBA-encoding callers below now go
-// through `cua_driver_core::image_utils::encode_rgba_to_png`.
+// `PINCER_DEDUP_AUDIT.md`. RGBA-encoding callers below now go
+// through `pincer_core::image_utils::encode_rgba_to_png`.
 
 /// Capture the primary display (root window) as raw PNG bytes.
 ///
 /// Dispatch:
-/// - Native Wayland (`CUA_DRIVER_RS_ENABLE_WAYLAND=1` + Wayland session):
+/// - Native Wayland (`PINCER_ENABLE_WAYLAND=1` + Wayland session):
 ///   routes through [`crate::wayland::screenshot_display_dispatch`] which
 ///   owns the complete GNOME helper → wlroots screencopy →
 ///   ext-image-copy-capture-v1 → portal Screenshot → X11 cascade. An
@@ -1021,7 +1021,7 @@ pub(crate) fn screenshot_display_bytes_x11() -> Result<Vec<u8>> {
         let (b, g, r) = (chunk[0], chunk[1], chunk[2]);
         rgba.extend_from_slice(&[r, g, b, 255]);
     }
-    cua_driver_core::image_utils::encode_rgba_to_png(&rgba, w, h)
+    pincer_core::image_utils::encode_rgba_to_png(&rgba, w, h)
 }
 
 /// Capture a rectangle of the root window (what is on the screen there,
@@ -1067,38 +1067,38 @@ pub fn screenshot_root_region_png(x: i32, y: i32, width: u32, height: u32) -> Re
         let (b, g, r) = (chunk[0], chunk[1], chunk[2]);
         rgba.extend_from_slice(&[r, g, b, 255]);
     }
-    cua_driver_core::image_utils::encode_rgba_to_png(&rgba, w, h)
+    pincer_core::image_utils::encode_rgba_to_png(&rgba, w, h)
 }
 
 /// Capture the primary display, returning (base64_png, width, height).
 pub fn screenshot_display() -> Result<(String, u32, u32)> {
     let png_bytes = screenshot_display_bytes()?;
-    let (w, h) = cua_driver_core::image_utils::png_dimensions(&png_bytes)?;
+    let (w, h) = pincer_core::image_utils::png_dimensions(&png_bytes)?;
     Ok((BASE64.encode(&png_bytes), w, h))
 }
 
 // PNG/JPEG/resize/crosshair helpers — re-exports of the shared
-// `cua_driver_core::image_utils` module. The previous file-local copies were
+// `pincer_core::image_utils` module. The previous file-local copies were
 // near-identical to the macOS and Windows versions; the dedup-audit
 // (2026-05) moved them all to one place.
 
 /// Convert PNG bytes to JPEG at the given quality (1–95).
 pub fn png_bytes_to_jpeg(png_bytes: &[u8], quality: u8) -> Result<Vec<u8>> {
-    cua_driver_core::image_utils::png_bytes_to_jpeg(png_bytes, quality)
+    pincer_core::image_utils::png_bytes_to_jpeg(png_bytes, quality)
 }
 
 /// Downscale `png_bytes` so neither dimension exceeds `max_dim`.
 /// If `max_dim == 0` or the image already fits, returns a copy of the
 /// original bytes unchanged.
 pub fn resize_png_if_needed(png_bytes: &[u8], max_dim: u32) -> Result<Vec<u8>> {
-    cua_driver_core::image_utils::resize_png_if_needed(png_bytes, max_dim)
+    pincer_core::image_utils::resize_png_if_needed(png_bytes, max_dim)
 }
 
 /// Draw a red crosshair at pixel (cx, cy) on a PNG image and return
 /// modified PNG bytes. Used by recording's click-marker callback to
 /// produce click.png.
 pub fn crosshair_png_bytes(png_bytes: &[u8], cx: f64, cy: f64) -> Result<Vec<u8>> {
-    cua_driver_core::image_utils::crosshair_png_bytes(png_bytes, cx, cy)
+    pincer_core::image_utils::crosshair_png_bytes(png_bytes, cx, cy)
 }
 
 #[cfg(test)]
@@ -1399,8 +1399,8 @@ mod tests {
     fn xshm_success_short_circuits_other_linux_capture_backends() {
         use std::rc::Rc;
 
-        let png = cua_driver_core::image_utils::encode_rgba_to_png(&[255, 0, 0, 255], 1, 1)
-            .expect("1x1 PNG");
+        let png =
+            pincer_core::image_utils::encode_rgba_to_png(&[255, 0, 0, 255], 1, 1).expect("1x1 PNG");
         assert!(!png.is_empty());
 
         let xshm_calls = Rc::new(Cell::new(0u32));
@@ -1689,7 +1689,7 @@ mod tests {
             ] {
                 let png = raw_frame_png(frame);
                 assert_eq!(
-                    cua_driver_core::image_utils::png_dimensions(&png).unwrap(),
+                    pincer_core::image_utils::png_dimensions(&png).unwrap(),
                     (67, 43)
                 );
                 let rgba = decode_png_rgba(&png);
@@ -1755,10 +1755,10 @@ mod tests {
         const IMPORT_REPEATS: usize = 10;
 
         let display = std::env::var("DISPLAY").expect("DISPLAY must be set");
-        let second_display =
-            std::env::var("CUA_X11_SECOND_DISPLAY").expect("CUA_X11_SECOND_DISPLAY must be set");
-        let restart_display =
-            std::env::var("CUA_X11_RESTART_DISPLAY").expect("CUA_X11_RESTART_DISPLAY must be set");
+        let second_display = std::env::var("PINCER_X11_SECOND_DISPLAY")
+            .expect("PINCER_X11_SECOND_DISPLAY must be set");
+        let restart_display = std::env::var("PINCER_X11_RESTART_DISPLAY")
+            .expect("PINCER_X11_RESTART_DISPLAY must be set");
         assert_ne!(
             display, second_display,
             "tests require distinct DISPLAY values"
@@ -1862,7 +1862,7 @@ mod tests {
             decode_png_rgba(&resized_import)
         );
         assert_eq!(
-            cua_driver_core::image_utils::png_dimensions(&resized_shm).unwrap(),
+            pincer_core::image_utils::png_dimensions(&resized_shm).unwrap(),
             (u32::from(W2), u32::from(H2))
         );
         let resized_seg = xshm.buffer.as_ref().expect("resized SHM buffer").seg;

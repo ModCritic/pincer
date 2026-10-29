@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Install the cua WinRects GNOME Shell extension — supplies window screen
+# Install the pincer WinRects GNOME Shell extension — supplies window screen
 # geometry (for AT-SPI coordinate reconstruction) and renders the agent cursor
 # on GNOME Mutter Wayland, where a normal client can do neither. Best-effort:
-# cua-driver works without it (just no screen coords / no cursor on Mutter).
+# pincer works without it (just no screen coords / no cursor on Mutter).
 #
 # Other apps bundle the same helper (same UUID, shared additive API versions),
 # so a newer installed copy is kept. Pass --force to install this one anyway.
 set -euo pipefail
-UUID="winrects@cua"
+UUID="winrects@pincer"
 SRC="$(cd "$(dirname "$0")" && pwd)/$UUID"
 DEST="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/$UUID"
 FORCE=0
@@ -19,7 +19,7 @@ BUNDLED=$(metadata_version "$SRC/metadata.json")
 INSTALLED=$(metadata_version "$DEST/metadata.json")
 if [ "$FORCE" != 1 ] && [ "${INSTALLED:-0}" -gt "${BUNDLED:-0}" ]; then
   echo "Keeping the installed $UUID v$INSTALLED: it is newer than this bundle's v${BUNDLED:-?}."
-  echo "Its API includes everything this cua-driver uses. Pass --force to replace it."
+  echo "Its API includes everything this pincer uses. Pass --force to replace it."
 else
   mkdir -p "$DEST"
   cp -f "$SRC/metadata.json" "$SRC/extension.js" "$DEST/"

@@ -1,4 +1,4 @@
-//! Shared delivery-mode logic for cua-driver-rs Windows input tools.
+//! Shared delivery-mode logic for pincer Windows input tools.
 //!
 //! Mirrors the macOS `DeliveryMode` model (see platform-macos
 //! `tools::DeliveryMode`): each input tool accepts an optional
@@ -10,7 +10,7 @@
 //!   `would_be_silently_dropped(target, event_kind)` returns true, the tool
 //!   returns a structured `background_unavailable` error so the caller can
 //!   retry that action with `delivery_mode:"foreground"`. This is
-//!   the default because cua-driver's value proposition is that input never
+//!   the default because pincer's value proposition is that input never
 //!   steals foreground — surfacing an honest error beats silently fronting.
 //!
 //! - `foreground` — SendInput with a brief `SetForegroundWindow(target)`
@@ -63,8 +63,8 @@ impl EventKind {
     }
 }
 
-/// The shared per-call delivery mode; see [`cua_driver_core::delivery`].
-pub use cua_driver_core::delivery::DeliveryMode;
+/// The shared per-call delivery mode; see [`pincer_core::delivery`].
+pub use pincer_core::delivery::DeliveryMode;
 
 /// JSON-schema fragment for the `delivery_mode` field. Include this in every
 /// input tool's `input_schema.properties.delivery_mode`. Two modes, matching
@@ -73,7 +73,7 @@ pub fn delivery_mode_schema() -> Value {
     // Borrow the canonical SHAPE (type/enum) from the shared cross-platform
     // builder so it can never drift from the consistency gate, while keeping the
     // Windows-specific prose (UIA Invoke / PostMessage / background_unavailable).
-    cua_driver_core::tool_schema::delivery_mode_schema_with(
+    pincer_core::tool_schema::delivery_mode_schema_with(
         "Input delivery mode. 'background' (default) never swaps foreground: \
          it routes through UIA Invoke / PostMessage and the window is never \
          raised. For targets whose input stack silently drops posted events \
@@ -296,18 +296,18 @@ pub fn read_class_name(hwnd: u64) -> String {
 pub fn background_unavailable_error(
     hwnd: u64,
     kind: EventKind,
-) -> cua_driver_core::protocol::ToolResult {
+) -> pincer_core::protocol::ToolResult {
     let class = read_class_name(hwnd);
     let text = format!(
         "Background delivery is not available for target window class \
          '{class}' on this event kind ({}). Retry this action with \
-         delivery_mode:\"foreground\"; Cua Driver will activate the target for \
+         delivery_mode:\"foreground\"; Pincer will activate the target for \
          the action and restore the previous foreground afterward.",
         kind.name()
     );
     // Windows analog of the macOS escalation signal: this surface drops
     // background input, so the deliberate next rung is foreground delivery.
-    cua_driver_core::delivery::background_unavailable_result(
+    pincer_core::delivery::background_unavailable_result(
         text,
         "background_unavailable",
         "background input is dropped by this surface; retry this \
@@ -327,7 +327,7 @@ pub fn background_unavailable_error_with_cause(
     hwnd: u64,
     kind: EventKind,
     cause: impl Into<String>,
-) -> cua_driver_core::protocol::ToolResult {
+) -> pincer_core::protocol::ToolResult {
     let class = read_class_name(hwnd);
     let cause = cause.into();
     let cause_lower = cause.to_ascii_lowercase();
@@ -341,11 +341,11 @@ pub fn background_unavailable_error_with_cause(
     let text = format!(
         "Background delivery is not available for target window class \
          '{class}' on this event kind ({}): {cause}. Retry this action with \
-         delivery_mode:\"foreground\"; Cua Driver will activate the target for \
+         delivery_mode:\"foreground\"; Pincer will activate the target for \
          the action and restore the previous foreground afterward.",
         kind.name()
     );
-    cua_driver_core::delivery::background_unavailable_result(
+    pincer_core::delivery::background_unavailable_result(
         text,
         code,
         "background input could not be delivered by the coordinate \
@@ -419,7 +419,7 @@ mod tests {
             .contains("occluded"));
 
         let text = match &result.content[0] {
-            cua_driver_core::protocol::Content::Text { text, .. } => text,
+            pincer_core::protocol::Content::Text { text, .. } => text,
             _ => panic!("expected text content"),
         };
         assert!(text.contains("occluded"), "result text lost cause: {text}");

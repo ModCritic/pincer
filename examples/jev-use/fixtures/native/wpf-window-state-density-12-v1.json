@@ -1,9 +1,9 @@
 {
  "_fixture": {
   "sanitized": "Recorded by verify_native.py --capture-dir. Screenshot bytes, tree_markdown, local file paths, and Driver guidance notes removed.",
-  "source": "CuaTestHarness task window with CUA_WPF_TASK_DENSITY=12 (initial), observed by get_window_state: Windows WPF harness (CUA_WPF_TASK_STATE), released Cua Driver 0.30.4 from the canonical install.ps1 on an Azure Windows VM (interactive RDP session)"
+  "source": "PincerTestHarness task window with PINCER_WPF_TASK_DENSITY=12 (initial), observed by get_window_state: Windows WPF harness (PINCER_WPF_TASK_STATE), released Pincer 0.30.4 from the canonical install.ps1 on an Azure Windows VM (interactive RDP session)"
  },
- "app_name": "CuaTestHarness.Wpf.exe",
+ "app_name": "PincerTestHarness.Wpf.exe",
  "capture_id": "capture_e7b465bec67d4230804aa300873aa629_0000000000000000",
  "element_count": 29,
  "elements": [
@@ -21,7 +21,7 @@
     "x": 484,
     "y": 249
    },
-   "label": "CuaTestHarness WPF Tasks",
+   "label": "PincerTestHarness WPF Tasks",
    "role": "TitleBar",
    "screenshot_frame": {
     "h": 28,
@@ -29,7 +29,7 @@
     "x": 16,
     "y": 2
    },
-   "value": "CuaTestHarness WPF Tasks"
+   "value": "PincerTestHarness WPF Tasks"
   },
   {
    "actions": [
@@ -715,5 +715,5 @@
   "y": 246
  },
  "window_id": 132166,
- "window_title": "CuaTestHarness WPF Tasks"
+ "window_title": "PincerTestHarness WPF Tasks"
 }

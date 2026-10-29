@@ -1,7 +1,7 @@
 //! Saved default cursor motion.
 //!
 //! `cursor.motion.style`, `cursor.motion.timing` and
-//! `cursor.motion.effects.<name>` live in `~/.cua-driver/config.json`
+//! `cursor.motion.effects.<name>` live in `~/.pincer/config.json`
 //! (`{"cursor": {"motion": {...}}}`) next to the other persistent driver
 //! settings. They seed the motion of every session cursor created after the
 //! value is read. Precedence, highest first: a per-call
@@ -73,11 +73,11 @@ impl SavedMotionDefaults {
     }
 }
 
-/// `~/.cua-driver/config.json`, the file `set_config` writes everywhere.
+/// `~/.pincer/config.json`, the file `set_config` writes everywhere.
 pub fn default_config_path() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(|home| PathBuf::from(home).join(".cua-driver").join("config.json"))
+        .map(|home| PathBuf::from(home).join(".pincer").join("config.json"))
 }
 
 fn allowed_styles() -> String {
@@ -85,8 +85,8 @@ fn allowed_styles() -> String {
 }
 
 pub(crate) fn effect_flag(key: &str, value: &Value) -> Result<Option<bool>, String> {
-    cua_driver_contract::CursorEffectSetting::from_json(value)
-        .map(cua_driver_contract::CursorEffectSetting::override_value)
+    pincer_contract::CursorEffectSetting::from_json(value)
+        .map(pincer_contract::CursorEffectSetting::override_value)
         .ok_or_else(|| format!("{key} must be on, off or default, got {value}"))
 }
 
@@ -347,7 +347,7 @@ pub fn set_active(saved: SavedMotionDefaults) {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = saved;
 }
 
-/// Load `~/.cua-driver/config.json` into the process-wide copy.
+/// Load `~/.pincer/config.json` into the process-wide copy.
 pub fn load_active() -> SavedMotionDefaults {
     let saved = default_config_path()
         .map(|path| load_from(&path))
@@ -363,7 +363,7 @@ pub fn read_saved() -> SavedMotionDefaults {
         .unwrap_or_default()
 }
 
-/// Validate, persist to `~/.cua-driver/config.json`, and make the value the
+/// Validate, persist to `~/.pincer/config.json`, and make the value the
 /// default for cursors created from now on.
 pub fn set_key(key: &str, value: &Value) -> Result<SavedMotionDefaults, String> {
     let path = default_config_path().ok_or_else(|| "$HOME is not set".to_string())?;
@@ -377,8 +377,10 @@ mod tests {
     use super::*;
 
     fn temp_path(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("cua-motion-defaults-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "pincer-motion-defaults-{name}-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         dir.join("config.json")
     }
@@ -530,7 +532,7 @@ mod tests {
 
     #[test]
     fn typed_effect_roundtrip_preserves_reset_and_omission_when_applied() {
-        use cua_driver_contract::{SetAgentCursorMotionInput, StartSessionInput};
+        use pincer_contract::{SetAgentCursorMotionInput, StartSessionInput};
 
         let base = MotionConfig::default()
             .with_style_args(&json!({"effects": {

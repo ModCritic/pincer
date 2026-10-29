@@ -15,7 +15,7 @@ fn main() {
     let mut pipe = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
-        .open(r"\\.\pipe\cua-driver")
+        .open(r"\\.\pipe\pincer")
         .expect("open pipe");
 
     fn req(p: &mut std::fs::File, json: &str) -> String {
@@ -76,7 +76,7 @@ fn main() {
 
     // 4. Start with output_dir, opt out of video (no ffmpeg dependency).
     let dir = std::env::temp_dir()
-        .join("cua-rec-parity")
+        .join("pincer-rec-parity")
         .to_string_lossy()
         .into_owned()
         .replace('\\', "\\\\");

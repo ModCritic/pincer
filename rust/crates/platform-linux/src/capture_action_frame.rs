@@ -1,4 +1,4 @@
-use cua_driver_core::capture_runtime::{
+use pincer_core::capture_runtime::{
     CaptureActionRequest, CapturePublication, CaptureService, CaptureTarget,
     EncodedScreenshotDimensions, NativeActionDimensions, ScreenshotToActionTransform,
 };
@@ -84,7 +84,7 @@ pub fn publish_desktop_region(
     png_bytes: &[u8],
     encoded_dimensions: (u32, u32),
     native_action_dimensions: (u32, u32),
-    region: cua_driver_core::image_utils::PixelRect,
+    region: pincer_core::image_utils::PixelRect,
 ) -> anyhow::Result<String> {
     publish(
         service,
@@ -101,7 +101,7 @@ pub fn publish_desktop_region(
 /// pixels.
 fn region_transform(
     encoded: (u32, u32),
-    region: cua_driver_core::image_utils::PixelRect,
+    region: pincer_core::image_utils::PixelRect,
 ) -> anyhow::Result<ScreenshotToActionTransform> {
     anyhow::ensure!(
         encoded.0 > 0 && encoded.1 > 0,
@@ -281,13 +281,12 @@ pub fn retire_runtime(service: &CaptureService) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cua_driver_core::capture_runtime::admission_error_code;
+    use pincer_core::capture_runtime::admission_error_code;
     use sha2::{Digest, Sha256};
 
     fn png(width: u32, height: u32, value: u8) -> Vec<u8> {
         let rgba = vec![value; (width * height * 4) as usize];
-        cua_driver_core::image_utils::encode_rgba_to_png(&rgba, width, height)
-            .expect("encode fixture")
+        pincer_core::image_utils::encode_rgba_to_png(&rgba, width, height).expect("encode fixture")
     }
 
     fn args(session: &str) -> Value {
@@ -395,7 +394,7 @@ mod tests {
     fn desktop_region_capture_maps_back_to_the_full_desktop() {
         let service = CaptureService::default();
         let call_args = args("region");
-        let region = cua_driver_core::image_utils::PixelRect {
+        let region = pincer_core::image_utils::PixelRect {
             x: 2240,
             y: 1380,
             width: 320,
@@ -527,10 +526,10 @@ mod tests {
         assert_eq!(dispatches, 0);
         assert!(refusal
             .unwrap_err()
-            .downcast_ref::<cua_driver_core::capture_runtime::CaptureActionError>()
+            .downcast_ref::<pincer_core::capture_runtime::CaptureActionError>()
             .is_some_and(|error| {
                 *error
-                == cua_driver_core::capture_runtime::CaptureActionError::NativeActionFrameMismatch
+                    == pincer_core::capture_runtime::CaptureActionError::NativeActionFrameMismatch
             }));
         assert_eq!(
             admit_window(&service, &call_args, &id, 8, 13, (1.25, 1.5), (8, 6),).unwrap(),

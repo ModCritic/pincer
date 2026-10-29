@@ -1,11 +1,11 @@
 // Per-platform role table for native accessibility candidates (RFC #4268).
 // Mirrors python/native_roles.py; see that module for the full rationale.
 //
-// Cua Driver reports raw platform roles (macOS AX, Windows UIA
+// Pincer reports raw platform roles (macOS AX, Windows UIA
 // control_type_name, Linux AT-SPI role names) and does not normalize them, so
 // jev-use owns this closed mapping. Every table is keyed by the output of
 // normalizedRole, a port of Driver's private normalized_role in
-// cua-driver-core/src/expectation.rs, so raw roles that Driver's verify_state
+// pincer-core/src/expectation.rs, so raw roles that Driver's verify_state
 // treats as the same role can never map to different role classes here.
 
 export type Platform = 'macos' | 'windows' | 'linux';
@@ -87,7 +87,7 @@ export const RAW_ROLES: Readonly<Record<Platform, Readonly<Record<RoleClass, rea
   },
 };
 
-/** Port of Driver's normalized_role (cua-driver-core/src/expectation.rs). */
+/** Port of Driver's normalized_role (pincer-core/src/expectation.rs). */
 export function normalizedRole(role: string): string {
   let normalized = [...role]
     .filter((character) => /^[A-Za-z0-9]$/.test(character))

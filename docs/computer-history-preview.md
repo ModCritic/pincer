@@ -1,18 +1,18 @@
 # Try the Computer History desktop preview
 
-This guide shows you how to enable Cua Driver's encrypted Computer History,
+This guide shows you how to enable Pincer's encrypted Computer History,
 inspect it, let an authorized agent read it, and remove it. It applies to
 nightly macOS, Windows, and Linux builds that include the experimental preview.
 
 Computer History is off by default. The preview records metadata for actions
-performed through Cua Driver. It does not watch unrelated desktop activity.
+performed through Pincer. It does not watch unrelated desktop activity.
 
 ## Before you start
 
 - Use macOS, Windows, or Linux in an interactive desktop session.
 - Use a build that includes Computer History. For Pincer, build from source;
   see the [README](../README.md#build-from-source).
-- Grant Cua Driver the usual permissions required for the actions you want it
+- Grant Pincer the usual permissions required for the actions you want it
   to perform. Computer History does not add permission to perform an action.
 - On Linux, run a desktop Secret Service implementation such as GNOME
   Keyring. The preview fails closed if no unlocked Secret Service is available.
@@ -43,7 +43,7 @@ installation, run the installer above again with the nightly channel option.
 Confirm the installed version:
 
 ```bash
-cua-driver --version
+pincer --version
 ```
 
 ## Enable Computer History
@@ -51,19 +51,19 @@ cua-driver --version
 Run:
 
 ```bash
-cua-driver history enable
+pincer history enable
 ```
 
 The command admits the experimental feature, initializes its device-local
 native credential, verifies an encrypted write and read, and then enables
-capture. If the installed daemon must restart, Cua Driver preserves its
+capture. If the installed daemon must restart, Pincer preserves its
 existing permission mode, capability manifest, approval flags, compatibility
 mode, and launch grants.
 
 Check the result:
 
 ```bash
-cua-driver history status
+pincer history status
 ```
 
 The default retention period is 7 days and the default encrypted-store quota
@@ -78,13 +78,13 @@ after the query-visible cutoff.
 List recent events:
 
 ```bash
-cua-driver history list 50
+pincer history list 50
 ```
 
 Show one event by sequence number:
 
 ```bash
-cua-driver history show 42
+pincer history show 42
 ```
 
 Use `--json` with `status`, `list`, or `show` when another local program needs
@@ -92,13 +92,13 @@ structured output.
 
 ## Let an agent hydrate from history
 
-Connect the agent through the normal Cua Driver tool path. The preview exposes
+Connect the agent through the normal Pincer tool path. The preview exposes
 two read-only tools:
 
 - `history_status`, which requires `history.status`;
 - `history_query`, which requires `history.query`.
 
-The existing Cua permission mode, policy ceiling, and capability manifest make
+The existing Pincer permission mode, policy ceiling, and capability manifest make
 the decision for each call. A permitted query returns at most 200 metadata
 events. The result can enter the agent's model context, and the encrypted store
 records a fixed access-audit event.
@@ -111,19 +111,19 @@ encryption key through these tools.
 Pause capture without clearing the enabled preference:
 
 ```bash
-cua-driver history pause
+pincer history pause
 ```
 
 Resume it:
 
 ```bash
-cua-driver history resume
+pincer history resume
 ```
 
 Disable capture and stop the writer:
 
 ```bash
-cua-driver history disable
+pincer history disable
 ```
 
 These commands preserve existing encrypted history.
@@ -133,10 +133,10 @@ These commands preserve existing encrypted history.
 Delete the encrypted store and destroy its exact namespace native key:
 
 ```bash
-cua-driver history delete --yes
+pincer history delete --yes
 ```
 
-This is cryptographic deletion. Cua Driver does not claim physical erasure from
+This is cryptographic deletion. Pincer does not claim physical erasure from
 APFS snapshots, backups, copied ciphertext, SSD wear leveling, or memory that a
 process already decrypted.
 
@@ -153,8 +153,8 @@ To purge history while uninstalling on macOS or Linux, run:
 On Windows, run:
 
 ```powershell
-$env:CUA_DRIVER_RS_UNINSTALL_FORCE = '1'
-$env:CUA_DRIVER_RS_UNINSTALL_PURGE = '1'
+$env:PINCER_UNINSTALL_FORCE = '1'
+$env:PINCER_UNINSTALL_PURGE = '1'
 irm https://cua.ai/driver/uninstall.ps1 | iex
 ```
 
@@ -167,7 +167,7 @@ that user's context.
 Disable capture before switching binaries:
 
 ```bash
-cua-driver history disable
+pincer history disable
 ```
 
 Then run the installer again without the nightly channel option.
@@ -181,7 +181,7 @@ The encrypted event allowlist contains:
 
 - time and monotonic sequence;
 - opaque session and action identifiers;
-- a fixed Cua capability;
+- a fixed Pincer capability;
 - an optional fixed-field platform application identifier and display name;
 - fixed action outcome, delivery, route, evidence, and escalation categories;
 - lifecycle, access-audit, and writer-health events.
@@ -190,7 +190,7 @@ The preview never stores screenshots, video, audio, typed text, raw keystrokes,
 clipboard contents, raw tool arguments or results, accessibility trees, file
 paths, window titles, URLs, or free-form diagnostics.
 
-Files use the Cua History Profile: a CBOR Sequence of COSE_Encrypt0 records with
+Files use the Pincer History Profile: a CBOR Sequence of COSE_Encrypt0 records with
 CloudEvents JSON inside each encrypted payload. ChaCha20-Poly1305 authenticates
 each record. A namespace root key protected by macOS Keychain, Windows
 Credential Manager, or Linux Secret Service and per-chunk HKDF keys protect
@@ -204,12 +204,12 @@ machine does not provide recovery.
 
 Default encrypted-store locations are:
 
-- macOS: `~/Library/Application Support/cua-driver/computer-history`;
-- Windows: `%LOCALAPPDATA%\cua-driver\computer-history`;
-- Linux: `$XDG_STATE_HOME/cua-driver/computer-history`, or
-  `~/.local/state/cua-driver/computer-history` when `XDG_STATE_HOME` is unset.
+- macOS: `~/Library/Application Support/pincer/computer-history`;
+- Windows: `%LOCALAPPDATA%\pincer\computer-history`;
+- Linux: `$XDG_STATE_HOME/pincer/computer-history`, or
+  `~/.local/state/pincer/computer-history` when `XDG_STATE_HOME` is unset.
 
-Local-development installs use `cua-driver-local` instead of `cua-driver` in
+Local-development installs use `pincer-local` instead of `pincer` in
 both filesystem and native-key namespaces.
 
 ## Troubleshooting
@@ -217,15 +217,15 @@ both filesystem and native-key namespaces.
 **`history_preview_not_admitted`**
 
 The running local-development daemon was not started with the preview flag.
-Restart that daemon with `cua-driver serve --experimental-history`, then run
-`cua-driver history enable` again. Installed nightly builds handle the verified
+Restart that daemon with `pincer serve --experimental-history`, then run
+`pincer history enable` again. Installed nightly builds handle the verified
 relaunch automatically.
 
 **`history_key_locked` or `history_key_unavailable`**
 
 Unlock the login session and its native credential store (Keychain, Credential
 Manager, or Secret Service), then retry. On Linux, also confirm that a Secret
-Service implementation is running. Capture stays disabled and Cua Driver does
+Service implementation is running. Capture stays disabled and Pincer does
 not create plaintext files.
 
 **`history_quota_reached`**
@@ -237,12 +237,12 @@ growth and does not block the computer action that encountered the full store.
 
 The reader found an invalid, incomplete, reordered, or unauthenticated record.
 It refuses the affected store instead of repairing or skipping evidence. If
-you accept permanent data loss, `cua-driver history delete --yes` destroys the
+you accept permanent data loss, `pincer history delete --yes` destroys the
 namespace key and removes the corrupt encrypted store so capture can start
 fresh.
 
 ## Architecture and format
 
-See [Computer History for Cua Driver](computer-history-architecture.md) for the
+See [Computer History for Pincer](computer-history-architecture.md) for the
 staged architecture, security limits, storage profile, launch gates, and later
 NVIDIA OpenShell integration plan.

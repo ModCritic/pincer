@@ -1,6 +1,6 @@
 //! Windows `health_report` provider.
 //!
-//! Implements [`cua_driver_core::health_report::HealthCheckProvider`]
+//! Implements [`pincer_core::health_report::HealthCheckProvider`]
 //! for `win32`. Reuses the existing UIA + DXGI probes — see
 //! [`crate::diagnostics::ui_automation_available`] for AX and a fresh
 //! `D3D11CreateDevice` probe for screen capture.
@@ -9,7 +9,7 @@
 //! applicable on Windows"` rather than `fail`; Windows has no TCC.
 
 use async_trait::async_trait;
-use cua_driver_core::health_report::{
+use pincer_core::health_report::{
     CheckData, CheckEntry, HealthCheckProvider, NAME_AX_CAPABILITY, NAME_BINARY_VERSION,
     NAME_BUNDLE_IDENTITY, NAME_PLATFORM_SUPPORTED, NAME_SCREEN_CAPTURE_CAPABILITY,
     NAME_SESSION_ACTIVE, NAME_TCC_ACCESSIBILITY, NAME_TCC_SCREEN_RECORDING,
@@ -210,8 +210,8 @@ fn arch_label() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cua_driver_core::health_report::HealthReportTool;
-    use cua_driver_core::tool::Tool;
+    use pincer_core::health_report::HealthReportTool;
+    use pincer_core::tool::Tool;
     use std::sync::Arc;
 
     // End-to-end through the dispatcher: every Windows canonical name

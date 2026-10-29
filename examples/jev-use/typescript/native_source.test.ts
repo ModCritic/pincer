@@ -175,7 +175,7 @@ test('mock provider follows task preferences', () => {
 test('app-state oracle and classification', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'jev-native-'));
   const path = join(directory, 'state.json');
-  const state = { schema: 'cua.appkit_task_state_v1', pid: 42, counter: 3, agreed: true, size: 'large', note_saved: 'n' };
+  const state = { schema: 'pincer.appkit_task_state_v1', pid: 42, counter: 3, agreed: true, size: 'large', note_saved: 'n' };
   writeFileSync(path, JSON.stringify(state));
   const counter = appkitTask('appkit-counter', path, { pid: 42 });
   assert.equal(counter.classify(await counter.readOracle(), 3), 'verified');

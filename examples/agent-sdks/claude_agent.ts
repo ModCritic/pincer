@@ -1,4 +1,4 @@
-/** Run a Claude Agent SDK desktop task through native Cua tools or MCP. */
+/** Run a Claude Agent SDK desktop task through native Pincer tools or MCP. */
 
 import {
   createSdkMcpServer,
@@ -44,7 +44,7 @@ async function runAgent(options: Options, prompt: string): Promise<void> {
 
 function nativeServer(runtime: NativeDesktopTools) {
   return createSdkMcpServer({
-    name: 'cua_native',
+    name: 'pincer_native',
     version: '1.0.0',
     tools: [
       tool(
@@ -80,13 +80,13 @@ function taskPrompt(task: string, route: Route): string {
     route === 'mcp'
       ? 'The MCP transport owns one implicit lifecycle session. Omit the session field for ordinary calls so the runtime creates and reuses it.'
       : 'The native SDK client owns one implicit lifecycle session; custom tools do not expose lifecycle.';
-  return `Complete this trusted desktop task through Cua Driver:
+  return `Complete this trusted desktop task through Pincer:
 
 ${task}
 
 Route: ${route}. ${lifecycle} Select an exact window or desktop target for every
 action; session identity never selects capture modality or permission authority.
-Use only supplied Cua tools for desktop observation and interaction. Inspect
+Use only supplied Pincer tools for desktop observation and interaction. Inspect
 before each action and verify afterward. If a mutation times out, observe before
 any retry; never blindly replay an action with an unknown outcome. Do not
 purchase, send, delete, expose credentials, or perform another irreversible
@@ -100,13 +100,13 @@ async function runNative(task: string): Promise<void> {
       {
         model: process.env.CLAUDE_MODEL,
         tools: [],
-        mcpServers: { cua_native: nativeServer(runtime) },
+        mcpServers: { pincer_native: nativeServer(runtime) },
         strictMcpConfig: true,
         allowedTools: [
-          'mcp__cua_native__observe_desktop',
-          'mcp__cua_native__click_desktop',
-          'mcp__cua_native__type_text',
-          'mcp__cua_native__press_key',
+          'mcp__pincer_native__observe_desktop',
+          'mcp__pincer_native__click_desktop',
+          'mcp__pincer_native__type_text',
+          'mcp__pincer_native__press_key',
         ],
         permissionMode: 'dontAsk',
         maxTurns: 40,
@@ -119,18 +119,18 @@ async function runNative(task: string): Promise<void> {
 }
 
 async function runMcp(task: string): Promise<void> {
-  const binary = process.env.CUA_DRIVER_BIN ?? 'cua-driver';
+  const binary = process.env.PINCER_BIN ?? 'pincer';
   await runAgent(
     {
       model: process.env.CLAUDE_MODEL,
       tools: [],
       mcpServers: {
-        cua_driver: { type: 'stdio', command: binary, args: ['mcp'] },
+        pincer: { type: 'stdio', command: binary, args: ['mcp'] },
       },
       strictMcpConfig: true,
       // A bare MCP server name enables all of its tools. Claude does not
       // support wildcard tool-name globs in this allowlist.
-      allowedTools: ['mcp__cua_driver'],
+      allowedTools: ['mcp__pincer'],
       permissionMode: 'dontAsk',
       maxTurns: 40,
     },

@@ -271,7 +271,7 @@ session state, and OS integration have one owner. On macOS, permission prompts
 and grants attach to the running driver identity, and UI work depends on the
 daemon's run loop. Windows also has daemon and UIAccess process concerns. Some
 authorization and runtime configuration is fixed for the daemon lifetime. The
-relevant startup and proxy rules are in [`cli.rs`](../rust/crates/cua-driver/src/cli.rs).
+relevant startup and proxy rules are in [`cli.rs`](../rust/crates/pincer/src/cli.rs).
 
 Embedding would therefore require decisions about host identity, permission
 attribution, global state, event-loop ownership, concurrency, crash recovery,
@@ -312,7 +312,7 @@ breaking removal of currently preserved platform data.
 UniFFI is one way to make language bindings call Rust-defined interfaces. It is
 not the only way to prevent contract drift.
 
-The Cua Driver [`cua-driver-contract`](../rust/crates/cua-driver-contract/src/lib.rs)
+The Cua Driver [`cua-driver-contract`](../rust/crates/pincer-contract/src/lib.rs)
 crate binds each published tool to typed Rust inputs and successful structured
 outputs. Those types produce the manifest and are exported through the compiled
 UniFFI SDK. The live session handlers consume the same inputs directly. Each

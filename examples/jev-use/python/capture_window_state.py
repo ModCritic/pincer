@@ -45,7 +45,7 @@ def sanitize(payload: dict[str, Any], source: str) -> dict[str, Any]:
 
 async def capture(pid: int, title: str, source: str, max_depth: int | None = None) -> dict[str, Any]:
     params = StdioServerParameters(
-        command=os.getenv("CUA_DRIVER_BIN", "cua-driver"), args=["mcp"], env=driver_environment()
+        command=os.getenv("PINCER_BIN", "pincer"), args=["mcp"], env=driver_environment()
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:

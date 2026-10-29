@@ -96,7 +96,7 @@ def run(args):
     expected_motion = [] if plan.get('moving_primary') else None
     motion_errors = []
     done = threading.Event()
-    trace = Trace(args.input_directory / 'cua-input-test.sock')
+    trace = Trace(args.input_directory / 'pincer-input-test.sock')
     before_app_files = {}
     timeline_lock = threading.Lock()
 
@@ -142,7 +142,7 @@ def run(args):
         return result['structuredContent']
 
     def watch():
-        observer = Trace(args.input_directory / 'cua-input-test.sock')
+        observer = Trace(args.input_directory / 'pincer-input-test.sock')
         rows = []
         try:
             while not done.wait(0.05):
@@ -225,7 +225,7 @@ def run(args):
             request = json.loads((args.evidence / f'grant-request-{index}.json').read_text())
             grant = json.loads((args.evidence / f'grant-{index}.json').read_text())
             assert all(grant[key] == request[key] for key in ('epoch', 'challenge', 'target'))
-            endpoint = 'cua-input-test.sock' if request['lane'] == 0 else 'cua-input-test-2.sock'
+            endpoint = 'pincer-input-test.sock' if request['lane'] == 0 else 'pincer-input-test-2.sock'
             operator = Trace(args.input_directory / endpoint)
             operators.append(operator)
             operator.exchange(grant['packet'])

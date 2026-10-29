@@ -10,7 +10,7 @@ The [concurrent real-app follow-up](../docs/realapp-validation.md) records two-l
 Calc/Inkscape tasks, moving-primary measurement, a warp-and-return negative
 control, per-lane Cancel, and global Stop on its exact tested candidate.
 
-Neither stable Cua Driver `0.23.2` nor nightly provides isolated background
+Neither stable Pincer `0.23.2` nor nightly provides isolated background
 input through this plugin. Normal-build discovery covers protocol negotiation,
 status, and liveness only; application target discovery and input mutation are
 not enabled.
@@ -75,7 +75,7 @@ With the exact module already loaded and discovery enabled in a disposable
 Hyprland session, run the live transport check:
 
 ```bash
-python3 tests/live_discovery.py --reload-module /absolute/path/to/cua-hyprland-plugin.so
+python3 tests/live_discovery.py --reload-module /absolute/path/to/pincer-hyprland-plugin.so
 ```
 
 The script checks real packet negotiation, liveness, all six mutation refusals,
@@ -89,7 +89,7 @@ To test two-instance isolation and clean restart inside a disposable Hyprland
 Wayland desktop, run the owned-process lifecycle runner:
 
 ```bash
-python3 tests/nested_lifecycle.py --module /absolute/path/to/cua-hyprland-plugin.so
+python3 tests/nested_lifecycle.py --module /absolute/path/to/pincer-hyprland-plugin.so
 ```
 
 The runner starts two nested Hyprland processes with temporary configs, finds
@@ -114,7 +114,7 @@ require running it in the Fleet guest or another declared Wayland environment.
 The session-lifetime candidate replaces hot-reload recovery with config-toggle
 recovery. For that candidate, use `--case toggle --toggle-file PATH`, where
 `PATH` is a test-owned Lua include sourced by the disposable compositor config
-and contains exactly `hl.config({plugin = {cua = {enabled = true}}})` followed
+and contains exactly `hl.config({plugin = {pincer = {enabled = true}}})` followed
 by a newline. The runner verifies disable and re-enable through plugin status,
 requires a new admission epoch and approval, and keeps the same applications
 running. It refuses the historical `reload` case before input or unload when
@@ -337,7 +337,7 @@ Build an Omarchy/Arch Fleet image from this repository's source using
 `packaging/arch/PKGBUILD`. Record the source SHA, exact Hyprland package version,
 plugin package version, module digest, and image identity. The lane must prove:
 
-- installation only under `/usr/lib/cua/hyprland/`, with no configuration edit,
+- installation only under `/usr/lib/pincer/hyprland/`, with no configuration edit,
   service enablement, autoload, or replacement of Hyprland-owned files;
 - explicit load, JSON discovery/status inspection, one-shot client negotiation,
   long-lived client reconnect, explicit unload, and clean Hyprland restart;
@@ -354,7 +354,7 @@ evidence. Chromium and Electron rows must record their effective Ozone backend
 and confirm they render and expose the intended fixture before testing a
 refusal.
 
-Run the repository's ordinary Linux source/unit checks and relevant Cua Driver
+Run the repository's ordinary Linux source/unit checks and relevant Pincer
 catalogs on the exact candidate SHA. Fleet validates reproducible packaging and
 lifecycle behavior; it is not the final hardware claim.
 
@@ -373,7 +373,7 @@ packaging, mutation behavior, or harness changes afterward, rerun the evidence
 affected by that change before promotion.
 
 The exact initial baseline is Omarchy `4.0.2-1`, Hyprland `0.56.2`,
-xdg-desktop-portal-hyprland `1.4.1`, Cua Driver `0.23.2`, and UWSM/SDDM. Record
+xdg-desktop-portal-hyprland `1.4.1`, Pincer `0.23.2`, and UWSM/SDDM. Record
 all five values with the candidate SHA and plugin module digest.
 
 Run each row separately and retain the typed protocol result plus the listed
@@ -402,10 +402,10 @@ an untyped failure, a black frame treated as capture success, focus or cursor
 movement, input leakage, or a client that cannot reconnect fails certification.
 
 `hyprctl` evidence is limited to compositor administration and the plugin's
-`cua:status` surface. Record every focus, workspace, DPMS, load, status, and
+`pincer:status` surface. Record every focus, workspace, DPMS, load, status, and
 unload command separately; none is application mutation proof. Likewise,
-`list_apps` filtering and the choice and authorization of `cua-driver serve` or
-individual `cua-driver call` requests are driver-side tests, not plugin
+`list_apps` filtering and the choice and authorization of `pincer serve` or
+individual `pincer call` requests are driver-side tests, not plugin
 capabilities. They may be exercised to diagnose an agent integration, but
 must not appear in the plugin capability result.
 

@@ -341,7 +341,7 @@ pub fn scroll_element(
     idx: usize,
     direction: &str,
     amount: usize,
-    by: cua_driver_contract::ScrollBy,
+    by: pincer_contract::ScrollBy,
 ) -> Result<ScrollProgress> {
     native::scroll_element(pid, idx, direction, amount, by)
 }

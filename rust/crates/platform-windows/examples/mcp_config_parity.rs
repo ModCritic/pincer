@@ -10,7 +10,7 @@ fn main() {
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/debug/cua-driver.exe");
+        .join("target/debug/pincer.exe");
 
     let cases = [
         // Each (args, expected substrings)
@@ -18,32 +18,29 @@ fn main() {
             vec![],
             vec![
                 "\"mcpServers\"",
-                "\"cua-driver\"",
+                "\"pincer\"",
                 "\"command\":",
                 "\"args\": [\"mcp\"]",
             ],
         ),
         (
             vec!["--client", "claude"],
-            vec!["claude mcp add --transport stdio cua-driver"],
+            vec!["claude mcp add --transport stdio pincer"],
         ),
-        (vec!["--client", "codex"], vec!["codex mcp add cua-driver"]),
+        (vec!["--client", "codex"], vec!["codex mcp add pincer"]),
         (
             vec!["--client", "cursor"],
             vec!["\"type\": \"stdio\"", "\"mcpServers\""],
         ),
         (
             vec!["--client", "openclaw"],
-            vec!["openclaw mcp set cua-driver"],
+            vec!["openclaw mcp set pincer"],
         ),
         (
             vec!["--client", "opencode"],
             vec!["opencode.ai/config.json", "\"type\": \"local\""],
         ),
-        (
-            vec!["--client", "hermes"],
-            vec!["mcp_servers:", "cua-driver:"],
-        ),
+        (vec!["--client", "hermes"], vec!["mcp_servers:", "pincer:"]),
         (
             vec!["--client", "pi"],
             vec!["does not support MCP natively"],

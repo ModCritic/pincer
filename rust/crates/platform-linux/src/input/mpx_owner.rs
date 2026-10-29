@@ -61,7 +61,7 @@ impl Owner {
         process[..4].copy_from_slice(&self.pid.to_be_bytes());
         process[4..].copy_from_slice(&self.start_ticks.to_be_bytes());
         format!(
-            "CUA v1.{}.{}.{}",
+            "PINCER v1.{}.{}.{}",
             URL_SAFE_NO_PAD.encode(self.domain),
             URL_SAFE_NO_PAD.encode(process),
             URL_SAFE_NO_PAD.encode(nonce.to_be_bytes())
@@ -70,7 +70,7 @@ impl Owner {
 
     pub(super) fn from_pointer_name(name: &str) -> Option<Self> {
         let mut parts = name
-            .strip_prefix("CUA v1.")?
+            .strip_prefix("PINCER v1.")?
             .strip_suffix(" pointer")?
             .split('.');
         let domain: [u8; 16] = URL_SAFE_NO_PAD
@@ -157,8 +157,8 @@ mod tests {
             assert!(Owner::from_pointer_name(&format!("{name}{suffix}")).is_none());
         }
         for name in [
-            "CUA legacy mp-123-1 pointer",
-            "CUA v1.bad.bad.bad pointer",
+            "PINCER legacy mp-123-1 pointer",
+            "PINCER v1.bad.bad.bad pointer",
             "ordinary pointer",
         ] {
             assert!(Owner::from_pointer_name(name).is_none());

@@ -187,7 +187,7 @@ mod tests {
                 vec![(0, 0), (1919, 1079), (960, 540), (1, 1)],
             ),
             (
-                // HiDPI secondary. cua-driver runs Per-Monitor-V2 DPI-aware (see
+                // HiDPI secondary. pincer runs Per-Monitor-V2 DPI-aware (see
                 // win32 manifest), so GetSystemMetrics returns PIXEL extents
                 // regardless of DPI scaling — the normalization math is identical
                 // to the same-resolution case. We exercise a larger secondary

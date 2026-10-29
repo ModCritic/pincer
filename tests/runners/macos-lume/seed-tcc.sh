@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Host-side helper: seed CuaDriverLocal.app Accessibility + Screen Recording
+# Host-side helper: seed PincerLocal.app Accessibility + Screen Recording
 # in one or more running, SIP-disabled Lume macOS VMs.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GUEST_HELPER="${SCRIPT_DIR}/seed-tcc-guest.sh"
-REMOTE_HELPER="/tmp/cua-driver-seed-tcc-guest.sh"
-APP_PATH="/Applications/CuaDriverLocal.app"
+REMOTE_HELPER="/tmp/pincer-seed-tcc-guest.sh"
+APP_PATH="/Applications/PincerLocal.app"
 BINARY_PATH=""
-EXPECTED_CLIENT="com.trycua.driver.local"
+EXPECTED_CLIENT="io.github.modcritic.pincer.local"
 SSH_USER="${LUME_SSH_USER:-lume}"
 SSH_PASSWORD="${LUME_SSH_PASSWORD-${VM_PASSWORD:-lume}}"
-SSH_TIMEOUT="${CUA_TCC_LUME_SSH_TIMEOUT:-120}"
-SSH_KNOWN_HOSTS="${CUA_TCC_SSH_KNOWN_HOSTS:-/dev/null}"
+SSH_TIMEOUT="${PINCER_TCC_LUME_SSH_TIMEOUT:-120}"
+SSH_KNOWN_HOSTS="${PINCER_TCC_SSH_KNOWN_HOSTS:-/dev/null}"
 STORAGE="${LUME_STORAGE:-}"
-SUDO_PASSWORD="${CUA_TCC_SUDO_PASSWORD:-${VM_PASSWORD:-lume}}"
+SUDO_PASSWORD="${PINCER_TCC_SUDO_PASSWORD:-${VM_PASSWORD:-lume}}"
 READ_SUDO_PASSWORD_STDIN=0
 ALLOW_ADHOC=0
 VMS=()
@@ -32,18 +32,18 @@ usage() {
   cat <<'USAGE'
 Usage: seed-tcc.sh [options] <vm-name> [<vm-name> ...]
 
-Seed macOS Accessibility and Screen Recording TCC rows for CuaDriverLocal.app
+Seed macOS Accessibility and Screen Recording TCC rows for PincerLocal.app
 inside running, SSH-reachable, SIP-disabled Lume macOS VMs. This does not
 install the app. Run install-local first, then run this from the host.
 
 Options:
   --app PATH                 App bundle to grant inside the guest
-                             (default: /Applications/CuaDriverLocal.app)
+                             (default: /Applications/PincerLocal.app)
   --binary PATH              Executable to derive the code requirement from.
                              Defaults to CFBundleExecutable inside --app.
                              Only valid when --app names an app bundle.
   --expected-client ID       Expected TCC client identifier
-                             (default: com.trycua.driver.local)
+                             (default: io.github.modcritic.pincer.local)
   --allow-adhoc              Allow cdhash-only ad-hoc signatures. The default
                              requires a certificate-backed local/release identity.
   --ssh-user USER            Lume SSH user (default: lume)
@@ -53,12 +53,12 @@ Options:
   --timeout SECONDS          Per-VM connect/copy/command timeout (default: 120)
   --storage STORAGE          Lume storage name/path to pass to lume get
   --sudo-password-stdin      Read the guest sudo password from stdin instead of
-                             using CUA_TCC_SUDO_PASSWORD, VM_PASSWORD, or lume.
+                             using PINCER_TCC_SUDO_PASSWORD, VM_PASSWORD, or lume.
   -h, --help                 Show this help.
 
 Example for two workers:
   tests/runners/macos-lume/seed-tcc.sh \
-    cua-driver-worker-a cua-driver-worker-b
+    pincer-worker-a pincer-worker-b
 USAGE
 }
 
@@ -199,11 +199,11 @@ ensure_askpass_helper() {
   if [[ -n "${ASKPASS_HELPER}" ]]; then
     return
   fi
-  ASKPASS_DIR="$(/usr/bin/mktemp -d /tmp/cua-driver-tcc-askpass.XXXXXX)"
+  ASKPASS_DIR="$(/usr/bin/mktemp -d /tmp/pincer-tcc-askpass.XXXXXX)"
   ASKPASS_HELPER="${ASKPASS_DIR}/askpass.sh"
   cat > "${ASKPASS_HELPER}" <<'ASKPASS'
 #!/bin/sh
-printf '%s\n' "$CUA_TCC_SSH_PASSWORD"
+printf '%s\n' "$PINCER_TCC_SSH_PASSWORD"
 ASKPASS
   chmod 700 "${ASKPASS_HELPER}"
 }
@@ -231,7 +231,7 @@ run_ssh() {
     DISPLAY="${DISPLAY:-:0}" \
       SSH_ASKPASS="${ASKPASS_HELPER}" \
       SSH_ASKPASS_REQUIRE=force \
-      CUA_TCC_SSH_PASSWORD="${SSH_PASSWORD}" \
+      PINCER_TCC_SSH_PASSWORD="${SSH_PASSWORD}" \
       run_with_timeout ssh "${opts[@]}" "${target}" "${command}"
   else
     opts+=(-o BatchMode=yes)
@@ -255,7 +255,7 @@ copy_to_guest() {
     DISPLAY="${DISPLAY:-:0}" \
       SSH_ASKPASS="${ASKPASS_HELPER}" \
       SSH_ASKPASS_REQUIRE=force \
-      CUA_TCC_SSH_PASSWORD="${SSH_PASSWORD}" \
+      PINCER_TCC_SSH_PASSWORD="${SSH_PASSWORD}" \
       run_with_timeout scp "${opts[@]}" "${source}" "${target}"
   else
     opts+=(-o BatchMode=yes)
@@ -269,11 +269,11 @@ for vm in "${VMS[@]}"; do
   copy_to_guest "${ip}" "${GUEST_HELPER}" "${REMOTE_HELPER}"
   run_ssh "${ip}" "chmod 700 $(shell_quote "${REMOTE_HELPER}")"
 
-  remote_cmd="CUA_TCC_APP_PATH=$(shell_quote "${APP_PATH}")"
-  remote_cmd+=" CUA_TCC_BINARY_PATH=$(shell_quote "${BINARY_PATH}")"
-  remote_cmd+=" CUA_TCC_EXPECTED_CLIENT=$(shell_quote "${EXPECTED_CLIENT}")"
-  remote_cmd+=" CUA_TCC_ALLOW_ADHOC=${ALLOW_ADHOC}"
-  remote_cmd+=" CUA_TCC_READ_SUDO_PASSWORD=1"
+  remote_cmd="PINCER_TCC_APP_PATH=$(shell_quote "${APP_PATH}")"
+  remote_cmd+=" PINCER_TCC_BINARY_PATH=$(shell_quote "${BINARY_PATH}")"
+  remote_cmd+=" PINCER_TCC_EXPECTED_CLIENT=$(shell_quote "${EXPECTED_CLIENT}")"
+  remote_cmd+=" PINCER_TCC_ALLOW_ADHOC=${ALLOW_ADHOC}"
+  remote_cmd+=" PINCER_TCC_READ_SUDO_PASSWORD=1"
   remote_cmd+=" $(shell_quote "${REMOTE_HELPER}")"
 
   echo "[${vm}] seeding Accessibility + Screen Recording for ${EXPECTED_CLIENT}"

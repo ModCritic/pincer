@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cua-driver"
+name = "pincer-driver"
 version = "0.35.4"
-description = "Rust-backed Cua Driver SDK and bundled executable for client applications"
+description = "Rust-backed Pincer SDK and bundled executable for client applications"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
@@ -47,15 +47,15 @@ Repository = "https://github.com/ModCritic/pincer"
 Issues = "https://github.com/ModCritic/pincer/issues"
 
 [project.scripts]
-cua-driver = "cua_driver.__main__:main"
+pincer = "pincer_driver.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cua_driver"]
+packages = ["src/pincer_driver"]
 artifacts = [
-    "src/cua_driver/bin/*",
-    "src/cua_driver/*.dylib",
-    "src/cua_driver/*.so",
-    "src/cua_driver/*.dll",
+    "src/pincer_driver/bin/*",
+    "src/pincer_driver/*.dylib",
+    "src/pincer_driver/*.so",
+    "src/pincer_driver/*.dll",
 ]
 pure-python = false
 

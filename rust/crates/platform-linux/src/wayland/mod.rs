@@ -99,7 +99,7 @@ fn current_foreground_target() -> Option<(u32, u64)> {
 
 /// Name of the opt-in env var that unlocks the experimental native-Wayland
 /// backend.
-pub const ENABLE_WAYLAND_ENV: &str = "CUA_DRIVER_RS_ENABLE_WAYLAND";
+pub const ENABLE_WAYLAND_ENV: &str = "PINCER_ENABLE_WAYLAND";
 
 /// Whether the user has opted into the experimental native-Wayland backend.
 ///
@@ -109,7 +109,7 @@ pub const ENABLE_WAYLAND_ENV: &str = "CUA_DRIVER_RS_ENABLE_WAYLAND";
 /// capture still depends on the staging `ext-image-copy-capture-v1`
 /// protocol, so the backend stays OFF by default and a pure-Wayland
 /// session is reported as unsupported unless the user explicitly sets
-/// `CUA_DRIVER_RS_ENABLE_WAYLAND=1`. Any value other than empty / `0` /
+/// `PINCER_ENABLE_WAYLAND=1`. Any value other than empty / `0` /
 /// `false` enables it.
 pub fn wayland_enabled() -> bool {
     match std::env::var(ENABLE_WAYLAND_ENV) {
@@ -179,22 +179,23 @@ fn wl_sockets(dir: &str) -> std::collections::HashSet<String> {
         .collect()
 }
 
-/// "Bring your own compositor": if `CUA_WAYLAND_NEST` is set, spawn a private
+/// "Bring your own compositor": if `PINCER_WAYLAND_NEST` is set, spawn a private
 /// **headless wlroots compositor** (labwc by default) and point this process —
 /// and therefore every app it launches (`launch_app`), every capture (`grim`),
 /// and all enumeration/injection — at it via `WAYLAND_DISPLAY`. This lets
-/// cua-driver automate apps in its **own** Wayland session on ANY host,
+/// pincer automate apps in its **own** Wayland session on ANY host,
 /// including KDE (kwin) and GNOME (mutter) which expose no client protocols for
 /// this, without ever touching the host compositor or its focus. Idempotent.
 pub fn ensure_nested_session() {
     use std::sync::OnceLock;
     static DONE: OnceLock<()> = OnceLock::new();
-    if std::env::var_os("CUA_WAYLAND_NEST").is_none() {
+    if std::env::var_os("PINCER_WAYLAND_NEST").is_none() {
         return;
     }
     DONE.get_or_init(|| {
         let xdg = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run/user/0".into());
-        let comp = std::env::var("CUA_WAYLAND_NEST_COMPOSITOR").unwrap_or_else(|_| "labwc".into());
+        let comp =
+            std::env::var("PINCER_WAYLAND_NEST_COMPOSITOR").unwrap_or_else(|_| "labwc".into());
         let before = wl_sockets(&xdg);
         let spawned = std::process::Command::new(&comp)
             .env("WLR_BACKENDS", "headless")
@@ -218,20 +219,22 @@ pub fn ensure_nested_session() {
                         std::env::remove_var("DISPLAY");
                         // Publish the nested socket so external tools (e.g. a
                         // `grim` recorder) can target the same session we drive.
-                        let _ = std::fs::write(format!("{xdg}/.cua-nested-display"), &sock);
-                        tracing::info!("cua nested compositor '{comp}' up: WAYLAND_DISPLAY={sock}");
+                        let _ = std::fs::write(format!("{xdg}/.pincer-nested-display"), &sock);
+                        tracing::info!(
+                            "pincer nested compositor '{comp}' up: WAYLAND_DISPLAY={sock}"
+                        );
                         break;
                     }
                     if std::time::Instant::now() >= deadline {
                         tracing::error!(
-                            "cua nested compositor '{comp}': no Wayland socket appeared"
+                            "pincer nested compositor '{comp}': no Wayland socket appeared"
                         );
                         break;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 }
             }
-            Err(e) => tracing::error!("cua nested compositor '{comp}' spawn failed: {e}"),
+            Err(e) => tracing::error!("pincer nested compositor '{comp}' spawn failed: {e}"),
         }
     });
 }
@@ -880,7 +883,7 @@ fn capture_via_screencopy() -> anyhow::Result<Vec<u8>> {
                 rgba.extend_from_slice(&[r, g, b, a]);
             }
         }
-        cua_driver_core::image_utils::encode_rgba_to_png(&rgba, w, h)
+        pincer_core::image_utils::encode_rgba_to_png(&rgba, w, h)
     })();
 
     // Always tear down regardless of result.
@@ -903,7 +906,7 @@ fn capture_via_screencopy() -> anyhow::Result<Vec<u8>> {
 pub(crate) fn anon_shm(size: usize) -> anyhow::Result<(i32, *mut libc::c_void)> {
     // memfd_create is Linux-only and is the cleanest path; fall back to
     // shm_open if memfd isn't available for any reason.
-    let name = b"cua-scrcopy\0";
+    let name = b"pincer-scrcopy\0";
     let fd = unsafe { libc::memfd_create(name.as_ptr() as *const libc::c_char, libc::MFD_CLOEXEC) };
     if fd < 0 {
         return Err(anyhow::anyhow!(
@@ -1612,7 +1615,7 @@ pub fn activate_window_for_input_target(
     if is_inject_mode() {
         let pid = target_pid.ok_or_else(|| {
             anyhow::anyhow!(
-                "foreground_unavailable: cua-compositor activation requires a verified target pid"
+                "foreground_unavailable: pincer-compositor activation requires a verified target pid"
             )
         })?;
         inject_send(&[format!("f {pid}")])?;
@@ -1734,7 +1737,7 @@ fn normalize_click_xy(x: i32, y: i32, w: u32, h: u32) -> (i32, i32) {
     )
 }
 
-/// Map a cua/X11 pointer button (1=left / 2=middle / 3=right) to its evdev
+/// Map a pincer/X11 pointer button (1=left / 2=middle / 3=right) to its evdev
 /// code, which is what `zwlr_virtual_pointer_v1::button` expects.
 pub fn evdev_pointer_button(button: u8) -> u32 {
     match button {
@@ -2117,8 +2120,8 @@ fn move_cursor_absolute_vptr(
 /// Press-drag-release on a native Wayland toplevel. Emits one button press at
 /// `(from_x, from_y)`, then `steps` interpolated motion events along the
 /// straight segment to `(to_x, to_y)`, then a release. Coordinates are
-/// output-relative; window-local coords need the nested cua-compositor
-/// injection socket (`CUA_INJECT_SOCKET`).
+/// output-relative; window-local coords need the nested pincer-compositor
+/// injection socket (`PINCER_INJECT_SOCKET`).
 pub fn drag(
     window_id: u64,
     from: (i32, i32),
@@ -2399,7 +2402,7 @@ impl crate::input::PathPointer for LibeiPathPointer {
         libei::pointer_button(
             f64::from(x),
             f64::from(y),
-            cua_button_to_libei(button),
+            pincer_button_to_libei(button),
             true,
         )
     }
@@ -2408,7 +2411,7 @@ impl crate::input::PathPointer for LibeiPathPointer {
         libei::pointer_button(
             f64::from(x),
             f64::from(y),
-            cua_button_to_libei(button),
+            pincer_button_to_libei(button),
             false,
         )
     }
@@ -2702,7 +2705,7 @@ fn partition_modifiers(keys: &[String]) -> anyhow::Result<(Vec<String>, String)>
     Ok((mods, final_key))
 }
 
-/// Map cua key names to X keysym names that `wtype -k` understands. Unknown
+/// Map pincer key names to X keysym names that `wtype -k` understands. Unknown
 /// values pass through (single characters and valid keysym names work as-is).
 fn key_to_keysym(key: &str) -> String {
     match key.to_lowercase().as_str() {
@@ -2732,7 +2735,7 @@ fn key_to_keysym(key: &str) -> String {
 // ── libei / portal fallback adapters ───────────────────────────────────────
 //
 // These bridge the wlroots-shaped public input API (output-relative integer
-// coordinates, cua button codes, X-keysym key names) onto the libei worker
+// coordinates, pincer button codes, X-keysym key names) onto the libei worker
 // (`libei` module), which speaks logical device-region floats and evdev
 // codes. They are the recovery path for compositors with no
 // `zwlr_virtual_pointer_v1` (KWin/Plasma, Mutter/GNOME) — see #1982.
@@ -2821,7 +2824,7 @@ fn libei_press_key(_key: &str) -> anyhow::Result<()> {
     unreachable!("libei fallback compiled out (no portal-input feature)")
 }
 #[cfg(feature = "portal-input")]
-fn cua_button_to_libei(button: u8) -> libei::Button {
+fn pincer_button_to_libei(button: u8) -> libei::Button {
     match button {
         2 => libei::Button::Middle,
         3 => libei::Button::Right,
@@ -2846,7 +2849,7 @@ fn libei_wait_keyboard_ready() -> anyhow::Result<()> {
 
 #[cfg(feature = "portal-input")]
 fn libei_click(x: i32, y: i32, count: u32, button: u8) -> anyhow::Result<()> {
-    let btn = cua_button_to_libei(button);
+    let btn = pincer_button_to_libei(button);
     let (w, h) = output_dimensions()?;
     let (px, py) = normalize_click_xy(x, y, w, h);
     libei::move_absolute(px as f64, py as f64)?;
@@ -2907,7 +2910,7 @@ fn libei_drag(
     // `normalize_click_xy`, whose (0,0)→centre convention (for coordinate-free
     // clicks) is wrong here: a drag endpoint is always explicit and (0,0) is a
     // valid top-left corner target.
-    let btn = cua_button_to_libei(button);
+    let btn = pincer_button_to_libei(button);
     let (w, h) = output_dimensions()?;
     let cx = |x: i32| x.clamp(0, (w as i32).saturating_sub(1));
     let cy = |y: i32| y.clamp(0, (h as i32).saturating_sub(1));
@@ -2963,7 +2966,7 @@ fn libei_hotkey(mods: &[String], key: &str) -> anyhow::Result<()> {
     libei::key_sequence(&transitions)
 }
 
-/// Map cua key names to Linux evdev keycodes for the libei `press_key` path
+/// Map pincer key names to Linux evdev keycodes for the libei `press_key` path
 /// (libei emulates raw evdev, not X keysyms). Mirrors [`key_to_keysym`] but
 /// emits `linux/input-event-codes.h` values. Returns `None` for keys with no
 /// known mapping so the caller can fail loudly.
@@ -3045,11 +3048,11 @@ fn key_to_evdev(key: &str) -> Option<u32> {
     Some(code)
 }
 
-// ── Nested cua-compositor injection ────────────────────────────────────────
+// ── Nested pincer-compositor injection ────────────────────────────────────────
 //
-// When cua-driver's nested compositor is `cua-compositor` (our patched wlroots,
-// see nix/cua-driver/compositor/), it exposes a line-protocol control socket at
-// $CUA_INJECT_SOCKET for what stock Wayland forbids: focus-FREE per-surface
+// When pincer's nested compositor is `pincer-compositor` (our patched wlroots,
+// see nix/pincer/compositor/), it exposes a line-protocol control socket at
+// $PINCER_INJECT_SOCKET for what stock Wayland forbids: focus-FREE per-surface
 // keyboard injection and MULTI-cursor pointer injection, routed by stable PID
 // when available and xdg app_id only as a fallback. These helpers speak that
 // protocol.
@@ -3063,10 +3066,10 @@ fn key_to_evdev(key: &str) -> Option<u32> {
 
 /// Version banner exchanged at connect time: the client sends this line and the
 /// compositor must echo it back verbatim to confirm both speak v1.
-const INJECT_PROTO_HELLO: &str = "cua-inject v1";
+const INJECT_PROTO_HELLO: &str = "pincer-inject v1";
 
 /// The exact named keys the nested compositor's `k` command can emit — the
-/// whitelist in `cua_key_named` (cua_compositor_patch.py). Compared
+/// whitelist in `pincer_key_named` (pincer_compositor_patch.py). Compared
 /// case-insensitively, matching the compositor's `strcasecmp`.
 const INJECT_NAMED_KEYS: &[&str] = &[
     "enter",
@@ -3094,14 +3097,14 @@ const INJECT_NAMED_KEYS: &[&str] = &[
     "f12",
 ];
 
-/// The control socket path, when running against the nested cua-compositor.
+/// The control socket path, when running against the nested pincer-compositor.
 pub fn inject_socket_path() -> Option<String> {
-    std::env::var("CUA_INJECT_SOCKET")
+    std::env::var("PINCER_INJECT_SOCKET")
         .ok()
         .filter(|s| !s.is_empty())
 }
 
-/// True when input should be routed through the nested cua-compositor's control
+/// True when input should be routed through the nested pincer-compositor's control
 /// socket (focus-free / multi-cursor) rather than wtype / virtual-pointer.
 pub fn is_inject_mode() -> bool {
     inject_socket_path().is_some()
@@ -3124,7 +3127,7 @@ fn inject_focused_target() -> anyhow::Result<(u32, u64)> {
         .and_then(|target| *target)
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "foreground_unavailable: cua-compositor has no verified foreground target; \
+                "foreground_unavailable: pincer-compositor has no verified foreground target; \
                  call bring_to_front before desktop keyboard input"
             )
         })
@@ -3148,7 +3151,7 @@ fn inject_scroll_desktop(x: i32, y: i32, direction: &str, amount: u32) -> anyhow
         })
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "foreground_unavailable: no cua-compositor window contains desktop point ({x},{y})"
+                "foreground_unavailable: no pincer-compositor window contains desktop point ({x},{y})"
             )
         })?;
     let pid = target.pid.ok_or_else(|| {
@@ -3167,7 +3170,7 @@ fn inject_scroll_desktop(x: i32, y: i32, direction: &str, amount: u32) -> anyhow
 }
 
 /// Reject any character the nested compositor cannot type before it reaches the
-/// wire. The compositor's chartab (`cua_init_keymap`) only covers printable
+/// wire. The compositor's chartab (`pincer_init_keymap`) only covers printable
 /// ASCII (`0x20..=0x7E`) plus newline and tab; anything else — Unicode, other
 /// control bytes — would be silently dropped, so fail loudly instead.
 fn validate_injectable_text(text: &str) -> anyhow::Result<()> {
@@ -3175,7 +3178,7 @@ fn validate_injectable_text(text: &str) -> anyhow::Result<()> {
         let ok = ch == '\n' || ch == '\t' || (ch.is_ascii() && !ch.is_ascii_control());
         if !ok {
             anyhow::bail!(
-                "cua-compositor cannot type {ch:?}: only printable ASCII plus newline and tab \
+                "pincer-compositor cannot type {ch:?}: only printable ASCII plus newline and tab \
                  are supported in the v1 injection protocol"
             );
         }
@@ -3184,7 +3187,7 @@ fn validate_injectable_text(text: &str) -> anyhow::Result<()> {
 }
 
 /// Reject any key name outside the compositor's named-key whitelist before
-/// sending. Mirrors `cua_key_named`; unsupported names must fail here rather
+/// sending. Mirrors `pincer_key_named`; unsupported names must fail here rather
 /// than being silently ignored by the compositor.
 fn validate_injectable_key(key: &str) -> anyhow::Result<()> {
     let normalized = key.trim().to_ascii_lowercase();
@@ -3192,7 +3195,7 @@ fn validate_injectable_key(key: &str) -> anyhow::Result<()> {
         Ok(())
     } else {
         anyhow::bail!(
-            "cua-compositor does not support key {key:?}; supported keys: {}",
+            "pincer-compositor does not support key {key:?}; supported keys: {}",
             INJECT_NAMED_KEYS.join(", ")
         );
     }
@@ -3201,10 +3204,10 @@ fn validate_injectable_key(key: &str) -> anyhow::Result<()> {
 fn validate_injectable_hotkey(keys: &[String]) -> anyhow::Result<(String, String)> {
     let (key, modifiers) = keys
         .split_last()
-        .ok_or_else(|| anyhow::anyhow!("cua-compositor hotkey requires a non-modifier key"))?;
+        .ok_or_else(|| anyhow::anyhow!("pincer-compositor hotkey requires a non-modifier key"))?;
     let key = key.trim().to_ascii_lowercase();
     if !(key.len() == 1 && key.is_ascii()) && !INJECT_NAMED_KEYS.contains(&key.as_str()) {
-        anyhow::bail!("cua-compositor does not support hotkey key {key:?}");
+        anyhow::bail!("pincer-compositor does not support hotkey key {key:?}");
     }
     let mut normalized = Vec::with_capacity(modifiers.len());
     for modifier in modifiers {
@@ -3214,12 +3217,12 @@ fn validate_injectable_hotkey(keys: &[String]) -> anyhow::Result<(String, String
             "shift" => "shift",
             "alt" | "option" => "alt",
             "meta" | "super" | "win" | "cmd" => "meta",
-            _ => anyhow::bail!("cua-compositor does not support modifier {modifier:?}"),
+            _ => anyhow::bail!("pincer-compositor does not support modifier {modifier:?}"),
         };
         normalized.push(canonical);
     }
     if normalized.is_empty() {
-        anyhow::bail!("cua-compositor hotkey requires at least one modifier");
+        anyhow::bail!("pincer-compositor hotkey requires at least one modifier");
     }
     Ok((normalized.join(","), key))
 }
@@ -3232,7 +3235,7 @@ fn parse_inject_hello(line: &str) -> anyhow::Result<()> {
         Ok(())
     } else if let Some(reason) = trimmed.strip_prefix("err") {
         anyhow::bail!(
-            "cua-compositor rejected the v1 handshake:{}",
+            "pincer-compositor rejected the v1 handshake:{}",
             if reason.trim().is_empty() {
                 String::new()
             } else {
@@ -3241,7 +3244,7 @@ fn parse_inject_hello(line: &str) -> anyhow::Result<()> {
         )
     } else {
         anyhow::bail!(
-            "cua-compositor protocol mismatch: expected {INJECT_PROTO_HELLO:?}, got {trimmed:?}"
+            "pincer-compositor protocol mismatch: expected {INJECT_PROTO_HELLO:?}, got {trimmed:?}"
         )
     }
 }
@@ -3255,11 +3258,11 @@ fn parse_inject_reply(line: &str) -> anyhow::Result<()> {
     } else if let Some(reason) = trimmed.strip_prefix("err") {
         let reason = reason.trim();
         if reason.is_empty() {
-            anyhow::bail!("cua-compositor rejected the command");
+            anyhow::bail!("pincer-compositor rejected the command");
         }
-        anyhow::bail!("cua-compositor rejected the command: {reason}")
+        anyhow::bail!("pincer-compositor rejected the command: {reason}")
     } else {
-        anyhow::bail!("unexpected cua-compositor response: {trimmed:?}")
+        anyhow::bail!("unexpected pincer-compositor response: {trimmed:?}")
     }
 }
 
@@ -3272,25 +3275,26 @@ fn read_inject_line(reader: &mut impl std::io::BufRead) -> anyhow::Result<String
             e.kind(),
             std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
         ) {
-            anyhow::anyhow!("cua-compositor did not respond within the timeout")
+            anyhow::anyhow!("pincer-compositor did not respond within the timeout")
         } else {
-            anyhow::anyhow!("cua-compositor read failed: {e}")
+            anyhow::anyhow!("pincer-compositor read failed: {e}")
         }
     })?;
     if n == 0 {
-        anyhow::bail!("cua-compositor closed the connection before responding");
+        anyhow::bail!("pincer-compositor closed the connection before responding");
     }
     Ok(line)
 }
 
-/// Connect to the nested cua-compositor control socket, perform the v1
+/// Connect to the nested pincer-compositor control socket, perform the v1
 /// handshake, then send each command line and require exactly one
 /// acknowledgement per command. Fails on protocol mismatch, timeout, EOF, or a
 /// compositor error line — the earlier fire-and-forget path hid all of these.
 fn inject_exchange(lines: &[String]) -> anyhow::Result<Vec<String>> {
     use std::io::{BufReader, Write};
     use std::os::unix::net::UnixStream;
-    let path = inject_socket_path().ok_or_else(|| anyhow::anyhow!("CUA_INJECT_SOCKET not set"))?;
+    let path =
+        inject_socket_path().ok_or_else(|| anyhow::anyhow!("PINCER_INJECT_SOCKET not set"))?;
     // The nested compositor may still be starting; retry the connect briefly.
     let mut stream = None;
     for _ in 0..60 {
@@ -3339,10 +3343,10 @@ fn parse_inject_geometry(line: &str) -> anyhow::Result<((i32, i32), (i32, i32))>
         ));
     }
     if let Some(reason) = line.trim().strip_prefix("err") {
-        anyhow::bail!("cua-compositor geometry query failed: {}", reason.trim());
+        anyhow::bail!("pincer-compositor geometry query failed: {}", reason.trim());
     }
     anyhow::bail!(
-        "unexpected cua-compositor geometry response: {:?}",
+        "unexpected pincer-compositor geometry response: {:?}",
         line.trim()
     )
 }
@@ -3373,7 +3377,7 @@ fn inject_window_origin(pid: u32) -> Option<(i32, i32)> {
 
 /// Resolve a window_id to its xdg app_id via the stable identity registry that
 /// [`list_windows`] populates (falling back to sway IPC / AT-SPI through
-/// [`identity_for`]) — the nested cua-compositor injection protocol addresses
+/// [`identity_for`]) — the nested pincer-compositor injection protocol addresses
 /// windows by app_id. Returns `None` when no identity is registered or the
 /// resolved app_id is empty, so callers can surface a clear error.
 pub fn app_id_for_window(window_id: u64) -> Option<String> {
@@ -3400,7 +3404,7 @@ fn to_hex(s: &str) -> String {
     s.bytes().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Map a cua/X11 mouse-button number to its evdev (wl_pointer) button code.
+/// Map a pincer/X11 mouse-button number to its evdev (wl_pointer) button code.
 fn evdev_button(x_button: u32) -> u32 {
     match x_button {
         3 => 0x111, // BTN_RIGHT
@@ -3409,10 +3413,10 @@ fn evdev_button(x_button: u32) -> u32 {
     }
 }
 
-/// Sentinel error when a window_id has no registered cua-compositor identity.
+/// Sentinel error when a window_id has no registered pincer-compositor identity.
 fn no_app_id(window_id: u64) -> anyhow::Error {
     anyhow::anyhow!(
-        "no known cua-compositor app_id for window {window_id}; call list_windows first so its \
+        "no known pincer-compositor app_id for window {window_id}; call list_windows first so its \
          Wayland identity is registered"
     )
 }
@@ -3430,7 +3434,7 @@ fn inject_target_for_window_with_pid(
     target_pid: Option<u32>,
 ) -> anyhow::Result<String> {
     if let Some(pid) = target_pid {
-        anyhow::ensure!(pid > 0, "cua-compositor target pid must be positive");
+        anyhow::ensure!(pid > 0, "pincer-compositor target pid must be positive");
         // Electron/Chromium may create the xdg_toplevel from a renderer child
         // rather than the public tool target. The compositor verifies the
         // wl_client owner is this process or one of its descendants.
@@ -3508,14 +3512,14 @@ pub fn inject_scroll(
         "down" | "page" => (0, 15.0),
         "left" => (1, -15.0),
         "right" => (1, 15.0),
-        _ => anyhow::bail!("unsupported cua-compositor scroll direction {direction:?}"),
+        _ => anyhow::bail!("unsupported pincer-compositor scroll direction {direction:?}"),
     };
     let mut lines = vec![format!("m {app} 0 {x:.1} {y:.1}")];
     lines.extend((0..amount.max(1)).map(|_| format!("a {app} 0 {axis} {value:.1}")));
     inject_send(&lines)
 }
 
-/// Focus-free click into the window's surface via the nested cua-compositor.
+/// Focus-free click into the window's surface via the nested pincer-compositor.
 /// Coordinates are window-local, matching the rest of the inject protocol.
 pub fn inject_click(
     target_pid: u32,
@@ -4139,9 +4143,9 @@ mod tests {
 
     #[test]
     fn native_enrichment_matches_plain_atspi_title() {
-        let mut native = window(42, None, "CUA Fixture [cua-fixture]");
-        native.app_name = "cua-fixture".into();
-        let mut accessible = window(123 << 16, Some(123), "CUA Fixture");
+        let mut native = window(42, None, "PINCER Fixture [pincer-fixture]");
+        native.app_name = "pincer-fixture".into();
+        let mut accessible = window(123 << 16, Some(123), "PINCER Fixture");
         accessible.x = 20;
         accessible.y = 30;
         accessible.width = 800;
@@ -4163,8 +4167,8 @@ mod tests {
 
     #[test]
     fn native_title_match_recovers_pid_without_replacing_native_id() {
-        let native = vec![window(77, None, "CuaTestHarness")];
-        let mut accessible = window(123 << 16, Some(123), "CuaTestHarness");
+        let native = vec![window(77, None, "PincerTestHarness")];
+        let mut accessible = window(123 << 16, Some(123), "PincerTestHarness");
         accessible.x = 20;
         accessible.y = 30;
         accessible.width = 800;
@@ -4185,14 +4189,14 @@ mod tests {
 
     #[test]
     fn nested_enrichment_adopts_stable_atspi_id() {
-        let native = vec![window(77, None, "CuaTestHarness")];
-        let accessible = window(123 << 16, Some(123), "CuaTestHarness");
+        let native = vec![window(77, None, "PincerTestHarness")];
+        let accessible = window(123 << 16, Some(123), "PincerTestHarness");
         let enriched = enrich_native_windows(native, vec![accessible], true);
         assert_eq!(enriched[0].xid, 123 << 16);
         assert_eq!(enriched[0].pid, Some(123));
         assert_eq!(
             identity_for(enriched[0].xid).unwrap().title,
-            "CuaTestHarness"
+            "PincerTestHarness"
         );
     }
 
@@ -4478,9 +4482,9 @@ mod tests {
 
     #[test]
     fn hello_reply_parses_exact_banner_and_rejects_mismatch() {
-        parse_inject_hello("cua-inject v1\n").expect("verbatim banner is accepted");
-        parse_inject_hello("  cua-inject v1  ").expect("surrounding whitespace is tolerated");
-        assert!(parse_inject_hello("cua-inject v2").is_err());
+        parse_inject_hello("pincer-inject v1\n").expect("verbatim banner is accepted");
+        parse_inject_hello("  pincer-inject v1  ").expect("surrounding whitespace is tolerated");
+        assert!(parse_inject_hello("pincer-inject v2").is_err());
         assert!(parse_inject_hello("err unsupported-version").is_err());
         assert!(parse_inject_hello("garbage").is_err());
     }

@@ -7,7 +7,7 @@ import { parseArgs } from './run_native.js';
 import { chooseS1Service, S1ServiceError, s1ServiceUrl, validateDecision } from './s1_service.js';
 
 const REQUEST = {
-  schema: 'cua.jev_choice_request_v2',
+  schema: 'pincer.jev_choice_request_v2',
   goal: 'Set the counter to 3.',
   capture_id: 'cap-1',
   regions: [],
@@ -21,7 +21,7 @@ const REQUEST = {
 
 function decision(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    schema: 'cua.decision_choice_v1',
+    schema: 'pincer.decision_choice_v1',
     kind: 'selected',
     capture_id: 'cap-1',
     selected_id: 'ax:button:increment',
@@ -76,7 +76,7 @@ test('validateDecision accepts selected, reobserve, and abstain', () => {
 
 test('validateDecision rejects malformed decisions', () => {
   const bad: unknown[] = [
-    decision({ schema: 'cua.decision_choice_v0' }),
+    decision({ schema: 'pincer.decision_choice_v0' }),
     decision({ kind: 'act' }),
     decision({ capture_id: 'cap-2' }),
     decision({ kind: 'error', selected_id: null, reason: 'model_error' }),

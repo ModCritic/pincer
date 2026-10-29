@@ -83,7 +83,7 @@ class TraceTest(unittest.TestCase):
         peer = Mock()
         peer.recv.return_value = b'{"ok":true,"protocol":3}'
         with patch('primary_trace.socket.socket', return_value=peer):
-            connection = Trace('/synthetic/cua-input-v3.sock')
+            connection = Trace('/synthetic/pincer-input-v3.sock')
             self.assertEqual(connection.hello['protocol'], 3)
             peer.sendall.assert_called_once_with(b'HELLO')
             connection.close()

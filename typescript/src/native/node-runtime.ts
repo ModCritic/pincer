@@ -28,12 +28,12 @@ const FfiType = {
 }
 
 const sdkLibrary = resolveLibPath({
-  crateName: "cua_driver_sdk",
+  crateName: "pincer_sdk",
   callerUrl: import.meta.url,
-  npmPackageBase: "@trycua/cua-driver-",
+  npmPackageBase: "pincer-driver-",
   tripleStyle: "node",
 })
-const runtimePath = join(dirname(sdkLibrary), "cua_driver_node_runtime.node")
+const runtimePath = join(dirname(sdkLibrary), "pincer_node_runtime.node")
 const require = createRequire(import.meta.url)
 const { UniffiNativeModule } = require(runtimePath) as {
   UniffiNativeModule: unknown

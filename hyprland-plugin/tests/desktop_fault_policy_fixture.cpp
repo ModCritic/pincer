@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-using namespace cua::hyprland;
+using namespace pincer::hyprland;
 using Clock = InputGrant::Clock;
 struct Window {};
 struct Surface { int client() const { return 1; } };

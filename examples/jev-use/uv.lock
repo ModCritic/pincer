@@ -229,7 +229,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cua-driver-jev-use-example"
+name = "pincer-jev-use-example"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

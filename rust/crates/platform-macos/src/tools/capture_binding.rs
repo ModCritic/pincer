@@ -3,7 +3,7 @@
 //! The common runtime owns registry and session generations plus atomic action
 //! admission. Keep its facade calls here so signature changes stay isolated.
 
-use cua_driver_core::{
+use pincer_core::{
     capture_runtime::{
         CaptureActionRequest, CaptureIdParseError, CapturePublication, CaptureService,
         CaptureTarget, EncodedScreenshotDimensions, NativeActionDimensions,

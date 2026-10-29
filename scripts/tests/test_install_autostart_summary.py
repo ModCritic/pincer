@@ -18,7 +18,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 INSTALLERS = [
     pytest.param(
         SCRIPTS / "install-local.ps1",
-        "Auto-start: 'cua-driver-local-serve' is registered at RunLevel=Highest.",
+        "Auto-start: 'pincer-local-serve' is registered at RunLevel=Highest.",
         id="install-local.ps1",
     ),
 ]
@@ -67,13 +67,13 @@ def test_registration_outcome_is_only_recorded_after_a_successful_call(
     ]
     assert len(successes) == 1, f"expected one success assignment, found {len(successes)}"
 
-    # Only the statement directly after a returning Register-CuaDriverAutostart
+    # Only the statement directly after a returning Register-PincerAutostart
     # call may flip the flag; anything else would re-introduce a summary that
     # does not depend on the outcome.
     previous = lines[successes[0] - 1].strip()
-    assert previous.startswith("Register-CuaDriverAutostart"), (
+    assert previous.startswith("Register-PincerAutostart"), (
         f"{installer.name} sets $AutoStartRegistered after {previous!r}; it must be set "
-        "only after Register-CuaDriverAutostart returns without throwing"
+        "only after Register-PincerAutostart returns without throwing"
     )
 
 

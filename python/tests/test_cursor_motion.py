@@ -1,7 +1,7 @@
-"""Cua Cursor Motion through the generated Python bindings.
+"""Pincer Cursor Motion through the generated Python bindings.
 
 Replays the golden trajectories that the Rust crate and the TypeScript port
-share (rust/crates/cua-cursor-motion/fixtures/golden.json)
+share (rust/crates/pincer-cursor-motion/fixtures/golden.json)
 through `plan_cursor_move` / `plan_cursor_spec` in the staged native library.
 """
 
@@ -17,20 +17,20 @@ from pathlib import Path
 
 def _library_name() -> str:
     if os.name == "nt":
-        return "cua_driver_sdk.dll"
+        return "pincer_sdk.dll"
     if platform.system() == "Darwin":
-        return "libcua_driver_sdk.dylib"
-    return "libcua_driver_sdk.so"
+        return "libpincer_sdk.dylib"
+    return "libpincer_sdk.so"
 
 
 ROOT = Path(__file__).parents[1]
-LIBRARY = ROOT / "src" / "cua_driver" / _library_name()
-GOLDEN = ROOT.parent / "rust/crates/cua-cursor-motion/fixtures/golden.json"
+LIBRARY = ROOT / "src" / "pincer_driver" / _library_name()
+GOLDEN = ROOT.parent / "rust/crates/pincer-cursor-motion/fixtures/golden.json"
 # The fixture rounds to 1e-9; the bindings run the same Rust code.
 TOL = 1e-8
 FRAME_FRACTIONS = (0.2, 0.5, 0.8, 1.0)
 
-if os.environ.get("CUA_DRIVER_REQUIRE_UNIFFI") == "1" and not LIBRARY.exists():
+if os.environ.get("PINCER_REQUIRE_UNIFFI") == "1" and not LIBRARY.exists():
     raise RuntimeError(f"required staged UniFFI library is missing: {LIBRARY}")
 
 
@@ -38,8 +38,8 @@ if os.environ.get("CUA_DRIVER_REQUIRE_UNIFFI") == "1" and not LIBRARY.exists():
 class CursorMotionGoldenTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        from cua_driver import _native as n
-        from cua_driver import _native_contract as c
+        from pincer_driver import _native as n
+        from pincer_driver import _native_contract as c
 
         cls.n = n
         cls.c = c

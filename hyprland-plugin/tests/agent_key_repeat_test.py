@@ -221,7 +221,7 @@ class AgentKeyRepeatTest(unittest.TestCase):
                                  r'        send\(c, kDelivered\);')
         compiler = shlex.split(os.environ.get('CXX', '')) or [
             shutil.which('clang++-18') or shutil.which('clang++') or 'c++']
-        with tempfile.TemporaryDirectory(prefix='cua-agent-key-repeat-') as directory:
+        with tempfile.TemporaryDirectory(prefix='pincer-agent-key-repeat-') as directory:
             cpp, binary = Path(directory) / 'fixture.cpp', Path(directory) / 'fixture'
             cpp.write_text(production_fixture(source))
             build = subprocess.run([*compiler, '-std=c++20', '-Wall', '-Wextra', '-Wpedantic', '-Werror',

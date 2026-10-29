@@ -276,7 +276,7 @@ class PolicyCacheTests(unittest.TestCase):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
                 root = Path(directory)
                 candidate = policy_cache_plan()
-                args = harness_args(root, candidate, trace_socket=root / 'cua-input-v3.sock')
+                args = harness_args(root, candidate, trace_socket=root / 'pincer-input-v3.sock')
                 calls, events, held = [], [START], [True]
                 agent = Mock(process=Mock(pid=101, poll=Mock(return_value=None)))
                 observer = Mock()
@@ -542,7 +542,7 @@ class CapacityTests(unittest.TestCase):
                     candidate['app_profile'] = app_profile
                     for i, spec in enumerate(candidate['agents']):
                         spec.update(app='inkscape', document=str(root.resolve() / f'lane-{i}.svg'))
-                args = harness_args(root, candidate, trace_socket=root / 'cua-input-v3.sock')
+                args = harness_args(root, candidate, trace_socket=root / 'pincer-input-v3.sock')
                 calls, events, held = [], [START], [True]
                 agents = [Mock(process=Mock(pid=101 + i, poll=Mock(return_value=None))) for i in range(3)]
                 observer = Mock()
@@ -1242,7 +1242,7 @@ class MovingPrimaryTests(unittest.TestCase):
                     'foreground': {'pid': 10, 'window_id': 100}, 'agents': [spec],
                     'phases': [{'agent': 0, 'tool': 'click', 'arguments': {'x': 10, 'y': 20},
                                 'expect': {'kind': 'refused', 'reason': 'permission_denied'}}]},
-                    trace_socket=root / 'cua-input-v3.sock')
+                    trace_socket=root / 'pincer-input-v3.sock')
                 log, action_calls, held = [], [], [True]
 
                 def append_motion(point):

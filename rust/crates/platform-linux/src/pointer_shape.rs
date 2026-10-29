@@ -14,8 +14,8 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use cua_driver_core::cursor_shape::SystemCursorShape;
-use cua_driver_core::pointer_shape::{
+use pincer_core::cursor_shape::SystemCursorShape;
+use pincer_core::pointer_shape::{
     edge_resize_shape, BackendNames, HitTest, PointerShapeBackend, ScreenRect,
 };
 use x11rb::connection::Connection;
@@ -446,27 +446,27 @@ pub fn install() -> bool {
             return false;
         };
         drop(conn);
-        cua_driver_core::cursor_shape::set_cursor_shape_probe(|| {
-            match cua_driver_core::pointer_shape::pointer_shape_backend() {
+        pincer_core::cursor_shape::set_cursor_shape_probe(|| {
+            match pincer_core::pointer_shape::pointer_shape_backend() {
                 Some(b) => b.system_shape(),
                 None => SystemCursorShape::Unknown,
             }
         });
     }
-    cua_driver_core::pointer_shape::set_pointer_shape_backend(LinuxPointerShape::new(session))
+    pincer_core::pointer_shape::set_pointer_shape_backend(LinuxPointerShape::new(session))
 }
 
 #[cfg(test)]
 mod tests {
     //! Live checks against a real X server with an AT-SPI session. Opt-in:
     //! they move the X pointer of `$DISPLAY`, so they run only inside a
-    //! throwaway container display (`CUA_POINTER_SHAPE_LIVE=1`), never on a
+    //! throwaway container display (`PINCER_POINTER_SHAPE_LIVE=1`), never on a
     //! developer desktop. Fixture layout comes from env vars the harness
-    //! sets: `CUA_PS_ENTRY`, `CUA_PS_BUTTON`, `CUA_PS_TERMINAL` as `x,y`.
+    //! sets: `PINCER_PS_ENTRY`, `PINCER_PS_BUTTON`, `PINCER_PS_TERMINAL` as `x,y`.
     use super::*;
 
     fn live() -> bool {
-        std::env::var("CUA_POINTER_SHAPE_LIVE").as_deref() == Ok("1")
+        std::env::var("PINCER_POINTER_SHAPE_LIVE").as_deref() == Ok("1")
     }
 
     fn point(var: &str) -> (f64, f64) {
@@ -476,16 +476,16 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs a throwaway X display with fixtures; set CUA_POINTER_SHAPE_LIVE=1"]
+    #[ignore = "needs a throwaway X display with fixtures; set PINCER_POINTER_SHAPE_LIVE=1"]
     fn live_x11_hit_test_system_shape_and_probe() {
         if !live() {
             return;
         }
         let backend = LinuxPointerShape::new(Session::X11);
         assert_eq!(backend.names().system, "xfixes");
-        let (ex, ey) = point("CUA_PS_ENTRY");
-        let (bx, by) = point("CUA_PS_BUTTON");
-        let (tx, ty) = point("CUA_PS_TERMINAL");
+        let (ex, ey) = point("PINCER_PS_ENTRY");
+        let (bx, by) = point("PINCER_PS_BUTTON");
+        let (tx, ty) = point("PINCER_PS_TERMINAL");
 
         let started = Instant::now();
         let entry = backend.hit_test(ex, ey).expect("hit-test over the entry");
@@ -517,10 +517,10 @@ mod tests {
         let home = (7.0, 7.0);
         assert!(backend.warp_pointer(home.0, home.1));
         assert_eq!(backend.pointer_position(), Some(home));
-        let out = cua_driver_core::pointer_shape::probe_by_warp(
+        let out = pincer_core::pointer_shape::probe_by_warp(
             &backend,
             (tx, ty),
-            cua_driver_core::pointer_shape::ProbeConfig {
+            pincer_core::pointer_shape::ProbeConfig {
                 dwell: Duration::from_millis(80),
                 ..Default::default()
             },
@@ -529,13 +529,13 @@ mod tests {
         eprintln!("probe over the terminal: {out:?}");
         assert_eq!(
             out,
-            cua_driver_core::pointer_shape::ProbeOutcome::Shape(SystemCursorShape::Text)
+            pincer_core::pointer_shape::ProbeOutcome::Shape(SystemCursorShape::Text)
         );
         assert_eq!(backend.pointer_position(), Some(home), "restored exactly");
-        let out = cua_driver_core::pointer_shape::probe_by_warp(
+        let out = pincer_core::pointer_shape::probe_by_warp(
             &backend,
             (bx, by),
-            cua_driver_core::pointer_shape::ProbeConfig {
+            pincer_core::pointer_shape::ProbeConfig {
                 dwell: Duration::from_millis(80),
                 ..Default::default()
             },
@@ -543,16 +543,16 @@ mod tests {
         );
         eprintln!("probe over the button: {out:?}");
         assert_eq!(backend.pointer_position(), Some(home), "restored exactly");
-        if let Ok(xterm) = std::env::var("CUA_PS_XTERM") {
+        if let Ok(xterm) = std::env::var("PINCER_PS_XTERM") {
             let (xx, xy) = xterm
                 .split_once(',')
                 .map(|(a, b)| (a.parse().unwrap(), b.parse().unwrap()))
                 .unwrap();
             let started = Instant::now();
-            let out = cua_driver_core::pointer_shape::probe_by_warp(
+            let out = pincer_core::pointer_shape::probe_by_warp(
                 &backend,
                 (xx, xy),
-                cua_driver_core::pointer_shape::ProbeConfig::default(),
+                pincer_core::pointer_shape::ProbeConfig::default(),
                 &|| true,
             );
             eprintln!(
@@ -561,7 +561,7 @@ mod tests {
             );
             assert_eq!(
                 out,
-                cua_driver_core::pointer_shape::ProbeOutcome::Shape(SystemCursorShape::Text)
+                pincer_core::pointer_shape::ProbeOutcome::Shape(SystemCursorShape::Text)
             );
             assert_eq!(backend.pointer_position(), Some(home), "restored exactly");
             eprintln!(

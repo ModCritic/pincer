@@ -15,8 +15,8 @@ import subprocess
 import tarfile
 
 
-PACKAGE = "cua-hyprland-plugin"
-MODULE = "usr/lib/cua/hyprland/cua-hyprland-plugin.so"
+PACKAGE = "pincer-hyprland-plugin"
+MODULE = "usr/lib/pincer/hyprland/pincer-hyprland-plugin.so"
 SOURCE = f"usr/share/{PACKAGE}/SOURCE-PROVENANCE.json"
 BUILD = f"usr/share/{PACKAGE}/BUILD-PROVENANCE.json"
 LICENSE = f"usr/share/licenses/{PACKAGE}/LICENSE"
@@ -46,7 +46,7 @@ def run(command, *, cwd=None, env=None, check=True):
 def verify_kit(kit, revision, driver_version):
     require(re.fullmatch(r"[0-9a-f]{40}", revision), "requires a full source commit SHA")
     require(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", driver_version), "requires a stable Driver version")
-    stem = f"cua-hyprland-plugin-{driver_version}-{revision}"
+    stem = f"pincer-hyprland-plugin-{driver_version}-{revision}"
     expected = {"PKGBUILD", "README.md", "SOURCE-PROVENANCE.json", "lifecycle.py", f"{stem}.tar.gz"}
     checksums = {}
     for line in (kit / "SHA256SUMS").read_text().splitlines():
@@ -252,7 +252,7 @@ def main():
         build.mkdir()
         for name in (*checksums, "SHA256SUMS"):
             (build / name).write_bytes((kit / name).read_bytes())
-        env = {**os.environ, "LC_ALL": "C", "CUA_RELEASE_CXX": str(args.cxx),
+        env = {**os.environ, "LC_ALL": "C", "PINCER_RELEASE_CXX": str(args.cxx),
                "PKGDEST": str(build), "SRCDEST": str(build), "BUILDDIR": str(build)}
         config = work / "makepkg.conf"
         config.write_text(Path("/etc/makepkg.conf").read_text() + "\n" +

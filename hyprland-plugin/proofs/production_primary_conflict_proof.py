@@ -136,7 +136,7 @@ class ExactDesktop:
             window = matches[0]
             assert int(window['address'], 16) == target['window_id'] and window.get('xwayland') is False
             if name == 'target':
-                assert f'cua-smoke-{spec["app"]}' in window.get('title', '')
+                assert f'pincer-smoke-{spec["app"]}' in window.get('title', '')
                 assert window_bounds(window) == spec['bounds'], 'target geometry changed'
         return windows
 
@@ -154,11 +154,11 @@ class ExactDesktop:
 
     def raw_status(self):
         self.guard()
-        return json.loads(_hypr(self.instance, '-j', 'cua:status'))
+        return json.loads(_hypr(self.instance, '-j', 'pincer:status'))
 
     def trace(self, path):
         self.guard()
-        assert path.name in ('cua-input-v3.sock', 'cua-input-v3-2.sock')
+        assert path.name in ('pincer-input-v3.sock', 'pincer-input-v3-2.sock')
         expected = Path(os.environ['XDG_RUNTIME_DIR']) / 'hypr' / self.instance / path.name
         assert path.is_absolute() and path == expected and path.resolve(strict=True) == path
         info = path.lstat()

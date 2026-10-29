@@ -11,12 +11,12 @@ const triple =
       : `linux-${process.arch}-${process.report.getReport().header.glibcVersionRuntime ? 'gnu' : 'musl'}`;
 const library =
   process.platform === 'darwin'
-    ? 'libcua_driver_sdk.dylib'
+    ? 'libpincer_sdk.dylib'
     : process.platform === 'win32'
-      ? 'cua_driver_sdk.dll'
-      : 'libcua_driver_sdk.so';
+      ? 'pincer_sdk.dll'
+      : 'libpincer_sdk.so';
 const nativeAvailable = existsSync(
-  fileURLToPath(new URL(`../node_modules/@trycua/cua-driver-${triple}/${library}`, import.meta.url))
+  fileURLToPath(new URL(`../node_modules/pincer-driver-${triple}/${library}`, import.meta.url))
 );
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -66,7 +66,7 @@ function fixture({ sse = false } = {}) {
         responseHeaders.push({ name: 'Mcp-Session-Id', value: session });
         result = {
           protocolVersion: '2025-06-18',
-          capabilities: { experimental: { 'ai.cua.driver.envelopes': { version: 1 } } },
+          capabilities: { experimental: { 'ai.pincer.driver.envelopes': { version: 1 } } },
         };
       } else {
         const session = headers['mcp-session-id'];
@@ -128,12 +128,12 @@ for (const sse of [false, true]) {
     `Fleet returns the actual typed Rust Driver (${sse ? 'SSE' : 'JSON'})`,
     { skip: !nativeAvailable },
     async () => {
-      const { CuaDriver } = await import('@trycua/cua-driver');
-      const { connectFleetDriver } = await import('@trycua/cua-driver/fleet');
+      const { Pincer } = await import('pincer-driver');
+      const { connectFleetDriver } = await import('pincer-driver/fleet');
       const f = fixture({ sse });
       const connection = await connectFleetDriver(f);
       try {
-        assert.ok(connection.driver instanceof CuaDriver);
+        assert.ok(connection.driver instanceof Pincer);
         f.sandbox.name = 'different-guest';
         f.sandbox.services.length = 0;
         const result = await connection.driver.getScreenSize({});
@@ -157,7 +157,7 @@ test(
   'Fleet rejects unadvertised service and pre-aborted connections before requests',
   { skip: !nativeAvailable },
   async () => {
-    const { connectFleetDriver } = await import('@trycua/cua-driver/fleet');
+    const { connectFleetDriver } = await import('pincer-driver/fleet');
     const f = fixture();
     await assert.rejects(connectFleetDriver({ ...f, service: 'missing' }), /does not advertise/);
     await assert.rejects(connectFleetDriver({ ...f, signal: AbortSignal.abort() }), /aborted/);
@@ -169,7 +169,7 @@ test(
   'Fleet callback errors exclude sensitive diagnostics',
   { skip: !nativeAvailable },
   async () => {
-    const { connectFleetDriver } = await import('@trycua/cua-driver/fleet');
+    const { connectFleetDriver } = await import('pincer-driver/fleet');
     const f = fixture();
     f.client.intercept = () => {
       throw new Error('secret-token-private-response');
@@ -189,7 +189,7 @@ test(
   'Fleet rejects oversized responses without exposing their contents',
   { skip: !nativeAvailable },
   async () => {
-    const { connectFleetDriver } = await import('@trycua/cua-driver/fleet');
+    const { connectFleetDriver } = await import('pincer-driver/fleet');
     const secret = 'private-response-fragment';
     const body = new Uint8Array(16 * 1024 * 1024 + 1);
     body.set(encoder.encode(secret));
@@ -220,7 +220,7 @@ test(
   'Fleet accepts a response exactly at the configured limit',
   { skip: !nativeAvailable },
   async () => {
-    const { connectFleetDriver } = await import('@trycua/cua-driver/fleet');
+    const { connectFleetDriver } = await import('pincer-driver/fleet');
     const f = fixture();
     f.client.nextResponseBytes = 16 * 1024 * 1024;
     const connection = await connectFleetDriver(f);
@@ -233,7 +233,7 @@ test(
   'aborting a Fleet connection lets Rust cancel and drain before closing',
   { skip: !nativeAvailable, timeout: 10_000 },
   async () => {
-    const { connectFleetDriver } = await import('@trycua/cua-driver/fleet');
+    const { connectFleetDriver } = await import('pincer-driver/fleet');
     const f = fixture();
     const controller = new AbortController();
     const connection = await connectFleetDriver({ ...f, signal: controller.signal });
@@ -269,7 +269,7 @@ test(
   'aborting during receiver open cannot return a live late Driver',
   { skip: !nativeAvailable, timeout: 10_000 },
   async () => {
-    const { connectFleetDriver } = await import('@trycua/cua-driver/fleet');
+    const { connectFleetDriver } = await import('pincer-driver/fleet');
     const f = fixture();
     const controller = new AbortController();
     let started;

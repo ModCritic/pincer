@@ -13,7 +13,7 @@
 //!   text fields that expose a settable AXValue).
 
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
@@ -48,7 +48,7 @@ fn def() -> &'static ToolDef {
         name: "set_value".into(),
         description: "Set an element's value by `element_token`. A popup button / select dropdown: selects the menu item whose title or value matches `value` (case-insensitive). Safari `<select>` is set through the DOM; AppKit and Chromium popups list items only while open, so the menu is opened, the item pressed and the menu closed again (in the background the user's front window keeps key focus). An unknown value lists the options. Any other element: writes AXValue (sliders, steppers, date pickers, native text fields).\n\
             \n\
-            A Finder file name cell (list or icon view, not being edited) is renamed through Finder's scripting interface with Finder left in the background, and the new name is read back from disk; the value is the full new name with its extension. macOS asks the user once to allow Cua Driver to control Finder. Finder's Get Info `Name` field is refused with `file_name_needs_rename`. For free-form text in web inputs use `type_text_chars`: WebKit ignores AXValue writes.".into(),
+            A Finder file name cell (list or icon view, not being edited) is renamed through Finder's scripting interface with Finder left in the background, and the new name is read back from disk; the value is the full new name with its extension. macOS asks the user once to allow Pincer to control Finder. Finder's Get Info `Name` field is refused with `file_name_needs_rename`. For free-form text in web inputs use `type_text_chars`: WebKit ignores AXValue writes.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "required": ["value"],
@@ -59,7 +59,7 @@ fn def() -> &'static ToolDef {
                     "type": "integer",
                     "description": "Window ID. Omit with element_token."
                 },
-                "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                "element_token": pincer_core::tool_schema::element_token_schema(),
                 "value": {
                     "type": "string",
                     "description": "New value, coerced to the element's type."
@@ -81,7 +81,7 @@ impl Tool for SetValueTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let pid = match super::target_pid(&self.state, &args) {
             Ok(v) => v,
             Err(e) => return e,
@@ -93,12 +93,12 @@ impl Tool for SetValueTool {
 
         let (element_index, window_id, element_guard) =
             match self.state.snapshots.resolve(pid, &args) {
-                Ok(cua_driver_core::element_token::ResolvedElement::None) => {
+                Ok(pincer_core::element_token::ResolvedElement::None) => {
                     return ToolResult::error(
                         "set_value requires element_token to address the target element.",
                     )
                 }
-                Ok(cua_driver_core::element_token::ResolvedElement::Element {
+                Ok(pincer_core::element_token::ResolvedElement::Element {
                     window_id,
                     element_index,
                     element,
@@ -119,7 +119,7 @@ impl Tool for SetValueTool {
             pid,
             window_id,
             Some(element_ptr),
-            cua_driver_core::background_input::BackgroundAction::AxSemantic,
+            pincer_core::background_input::BackgroundAction::AxSemantic,
         )
         .await
         {
@@ -322,8 +322,8 @@ enum NameTarget {
 }
 
 /// A rename read back from disk: the new name is listed, the old one gone.
-fn rename_record() -> cua_driver_core::action_record::ActionExecutionRecord {
-    use cua_driver_core::action_record::{
+fn rename_record() -> pincer_core::action_record::ActionExecutionRecord {
+    use pincer_core::action_record::{
         ActionEffect, ActionEvidence, ActionExecutionRecord, ActionTransport, ActualDelivery,
         EvidenceKind, RequestedDelivery,
     };

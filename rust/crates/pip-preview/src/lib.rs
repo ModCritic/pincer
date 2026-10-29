@@ -2,7 +2,7 @@
 //! picture-in-picture agent preview window.
 //!
 //! The PiP window is an opt-in, always-on-top floating window that
-//! shows what the cua-driver agent just did: a post-action screenshot
+//! shows what the pincer agent just did: a post-action screenshot
 //! of the target window plus a one-line label summarising the tool
 //! call. It mirrors the architecture used by `cursor-overlay` (shared
 //! config/types here, platform-specific renderer in each `platform-*`
@@ -13,7 +13,7 @@
 //! a clear "not yet implemented" error so the rest of the daemon
 //! continues without a PiP window.
 
-/// Canonical `~/.cua-driver/config.json` path matching what the per-platform
+/// Canonical `~/.pincer/config.json` path matching what the per-platform
 /// `set_config` tools write to. Resolves `$HOME` first (Unix/macOS) and falls
 /// back to `%USERPROFILE%` (Windows, where `HOME` is usually unset). Returns
 /// `None` when neither is set (sandboxed CI).
@@ -22,16 +22,16 @@ pub fn default_config_path() -> Option<std::path::PathBuf> {
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(|h| {
             std::path::PathBuf::from(h)
-                .join(".cua-driver")
+                .join(".pincer")
                 .join("config.json")
         })
 }
 
-/// Read a single key from `~/.cua-driver/config.json` as a raw JSON value,
+/// Read a single key from `~/.pincer/config.json` as a raw JSON value,
 /// returning `None` when the file is missing/malformed or the key is absent.
 /// Used by the per-platform `load_driver_config` helpers to rehydrate the
 /// in-memory `DriverConfig` at process startup so `set_config` writes survive
-/// across stateless `cua-driver call` invocations.
+/// across stateless `pincer call` invocations.
 pub fn read_config_value(key: &str) -> Option<serde_json::Value> {
     let path = default_config_path()?;
     let text = std::fs::read_to_string(&path).ok()?;
@@ -39,7 +39,7 @@ pub fn read_config_value(key: &str) -> Option<serde_json::Value> {
     json.get(key).cloned()
 }
 
-/// Merge a single `key`/`value` into `~/.cua-driver/config.json`,
+/// Merge a single `key`/`value` into `~/.pincer/config.json`,
 /// preserving any other keys that are already there. Used by the
 /// per-platform `set_config` tools to persist `experimental_pip` /
 /// `experimental_pip_geometry` so the next daemon restart picks them up.
@@ -149,7 +149,7 @@ pub struct PipConfig {
     pub enabled: bool,
     pub geometry: PipGeometry,
     /// Window title — kept here so the "experimental" label stays in
-    /// one place. Defaults to "cua-driver — PiP preview (experimental)".
+    /// one place. Defaults to "pincer — PiP preview (experimental)".
     pub title: String,
 }
 
@@ -158,7 +158,7 @@ impl Default for PipConfig {
         Self {
             enabled: false,
             geometry: PipGeometry::default(),
-            title: "cua-driver — PiP preview (experimental)".to_owned(),
+            title: "pincer — PiP preview (experimental)".to_owned(),
         }
     }
 }
@@ -199,12 +199,12 @@ impl PipConfig {
 
     /// Resolve the config from (in order of precedence, low → high):
     ///
-    ///   defaults  →  `~/.cua-driver/config.json` keys
+    ///   defaults  →  `~/.pincer/config.json` keys
     ///                  (`experimental_pip` bool, `experimental_pip_geometry` string)
     ///              →  CLI flags
     ///
     /// Lets users persist `--experimental-pip` across daemon restarts by
-    /// editing `~/.cua-driver/config.json` once, instead of re-running
+    /// editing `~/.pincer/config.json` once, instead of re-running
     /// `claude mcp add` with the flag baked into the args list.
     /// Malformed or missing file falls back to the next layer silently.
     pub fn from_args_and_file(config_path: &std::path::Path) -> Self {

@@ -39,10 +39,10 @@ const SCROLL_PHASE_FIELD: u32 = 99;
 const SCROLL_MOMENTUM_PHASE_FIELD: u32 = 123;
 
 // The event, batch, receipt and error types are the cross-platform contract
-// in `cua_driver_core::interactive_input`; this module is the macOS native
+// in `pincer_core::interactive_input`; this module is the macOS native
 // session behind it.
-use cua_driver_core::interactive_input::extract_integral;
-pub use cua_driver_core::interactive_input::{
+use pincer_core::interactive_input::extract_integral;
+pub use pincer_core::interactive_input::{
     GesturePhase, InteractiveDeliveryMode, InteractiveInputBatch, InteractiveInputError,
     InteractiveInputEvent, InteractiveInputReceipt, KeyState, Modifier, PointerButton,
     PointerPhase,
@@ -111,7 +111,7 @@ impl InteractiveInputSession {
         let (sender, receiver) = mpsc::sync_channel(capacity);
         let (ready_tx, ready_rx) = mpsc::channel();
         let worker = thread::Builder::new()
-            .name(format!("cua-input-{}-{}", config.pid, config.window_id))
+            .name(format!("pincer-input-{}-{}", config.pid, config.window_id))
             .spawn(move || run_worker(config, receiver, ready_tx))
             .map_err(|e| InteractiveInputError::Native(e.to_string()))?;
 
@@ -210,7 +210,7 @@ fn target_window_bounds(config: &InteractiveInputConfig) -> Result<crate::window
 }
 
 fn validate_batch(batch: &InteractiveInputBatch) -> Result<()> {
-    cua_driver_core::interactive_input::validate_batch(batch).map(|_| ())
+    pincer_core::interactive_input::validate_batch(batch).map(|_| ())
 }
 
 fn run_worker(

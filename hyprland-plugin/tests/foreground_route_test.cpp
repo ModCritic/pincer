@@ -4,7 +4,7 @@
 #include <memory>
 #include <vector>
 
-using namespace cua::hyprland;
+using namespace pincer::hyprland;
 void check(bool value) { if (!value) std::abort(); }
 int main() {
     constexpr std::array labels{
@@ -95,8 +95,8 @@ int main() {
     ForegroundSeatBindings bindings;
     bindings.observe("wl_surface", false);
     bindings.observe("wl_keyboard", false);
-    bindings.observe("wl_seat", true); // Cua-Agent
-    bindings.observe("wl_seat", true); // Cua-Agent-2
+    bindings.observe("wl_seat", true); // Pincer-Agent
+    bindings.observe("wl_seat", true); // Pincer-Agent-2
     check(!bindings.unique());
     bindings.observe("wl_seat", false); // Primary binding
     check(bindings.unique());

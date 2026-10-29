@@ -9,7 +9,7 @@ import pytest
 
 HELPER_DIR = Path(__file__).resolve().parents[2] / "wayland-helper"
 INSTALL = HELPER_DIR / "install.sh"
-BUNDLED_VERSION = json.loads((HELPER_DIR / "winrects@cua/metadata.json").read_text())["version"]
+BUNDLED_VERSION = json.loads((HELPER_DIR / "winrects@pincer/metadata.json").read_text())["version"]
 
 
 def _run(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -32,13 +32,13 @@ def _run(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _installed(tmp_path: Path) -> Path:
-    return tmp_path / "home/.local/share/gnome-shell/extensions/winrects@cua"
+    return tmp_path / "home/.local/share/gnome-shell/extensions/winrects@pincer"
 
 
 def _preinstall(tmp_path: Path, version: int) -> None:
     dest = _installed(tmp_path)
     dest.mkdir(parents=True)
-    (dest / "metadata.json").write_text(f'{{"uuid": "winrects@cua", "version": {version}}}\n')
+    (dest / "metadata.json").write_text(f'{{"uuid": "winrects@pincer", "version": {version}}}\n')
     (dest / "extension.js").write_text(f"// helper v{version}\n")
 
 
@@ -55,7 +55,7 @@ def test_older_or_same_helper_is_replaced(tmp_path: Path, delta: int) -> None:
     result = _run(tmp_path)
     assert result.returncode == 0, result.stdout
     assert (_installed(tmp_path) / "extension.js").read_text() == (
-        HELPER_DIR / "winrects@cua/extension.js"
+        HELPER_DIR / "winrects@pincer/extension.js"
     ).read_text()
 
 
@@ -64,7 +64,7 @@ def test_newer_helper_from_another_app_is_kept(tmp_path: Path) -> None:
     _preinstall(tmp_path, newer)
     result = _run(tmp_path)
     assert result.returncode == 0, result.stdout
-    assert f"Keeping the installed winrects@cua v{newer}" in result.stdout
+    assert f"Keeping the installed winrects@pincer v{newer}" in result.stdout
     assert (_installed(tmp_path) / "extension.js").read_text() == f"// helper v{newer}\n"
 
     forced = _run(tmp_path, "--force")

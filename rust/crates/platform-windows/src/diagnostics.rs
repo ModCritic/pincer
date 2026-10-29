@@ -1,4 +1,4 @@
-//! Windows-specific environment probes used by `cua-driver doctor`.
+//! Windows-specific environment probes used by `pincer doctor`.
 //!
 //! These are read-only checks against the process environment + Win32 APIs.
 //! They never block, never touch the network, and never mutate state — they
@@ -318,7 +318,7 @@ pub fn is_degraded_ui_automation_error(err: &str) -> bool {
         || err.starts_with("UI Automation is busy with an earlier timed-out provider call;")
 }
 
-// ── Non-Windows stubs so the cua-driver crate can call into us
+// ── Non-Windows stubs so the pincer crate can call into us
 // unconditionally during compilation on other targets. These never run —
 // they exist purely to keep the type-checker happy on macOS / Linux.
 

@@ -1,7 +1,7 @@
 {
   "help_lines": [
     "cross-platform computer-use automation driver",
-    "Usage: cua-driver [SUBCOMMAND] [OPTIONS]",
+    "Usage: pincer [SUBCOMMAND] [OPTIONS]",
     "Subcommands: mcp, list-tools, describe, call, serve, stop, revoke, status, config, telemetry, recording, doctor, diagnose, permissions, autostart, skills, manifest"
   ],
   "manifest": {

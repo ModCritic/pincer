@@ -17,7 +17,7 @@ macOS:   scripts/ci/macos/run-rust-e2e.sh
 
 Those runners live in upstream's monorepo-level `scripts/ci/` and are not part
 of this repository, so the runner steps below describe upstream's process.
-The `cua-e2e-report` binary and the typed records it validates are part of
+The `pincer-e2e-report` binary and the typed records it validates are part of
 this repository.
 
 Upstream's runners may set a private lane value to fan that matrix into
@@ -37,7 +37,7 @@ Each runner follows the same sequence:
 4. Abort before behavioral cells if the desktop, permissions, fixture, capture,
    or video lifecycle is unavailable.
 5. Run the selected Rust integration targets.
-6. Validate declarations, results, and evidence with `cua-e2e-report`.
+6. Validate declarations, results, and evidence with `pincer-e2e-report`.
 7. Upload or retrieve the report, logs, and recordings.
 
 The preflight prevents a single TCC or desktop-session problem from appearing
@@ -48,7 +48,7 @@ as the same failure on every behavioral cell.
 Each OS lane writes:
 
 ```text
-artifacts/cua-driver/<platform>/
+artifacts/pincer/<platform>/
 |-- environment.jsonl
 |-- cases.jsonl
 |-- results.jsonl
@@ -77,7 +77,7 @@ every declared cell. In canonical mode, the reporter rejects duplicates,
 missing results, undeclared results, contradictory statuses, forbidden skips,
 an under-sized unfiltered shared catalog, missing required videos, and missing
 or invalid expected turn evidence. Canonical runners set
-`CUA_E2E_FORBID_SKIPS=1` and `CUA_E2E_EXPECTED_MIN_CELLS` (80 on
+`PINCER_E2E_FORBID_SKIPS=1` and `PINCER_E2E_EXPECTED_MIN_CELLS` (80 on
 Windows/Linux, 120 on macOS). Explicit diagnostic filters omit only the
 minimum-count policy; a filter matching zero cells still fails in Rust. An `evidence.json`
 classification normally makes capture failure auditable without making it
@@ -120,7 +120,7 @@ The preflight emits exactly one record:
 
 ```json
 {
-  "schema": "cua-e2e-environment/v2",
+  "schema": "pincer-e2e-environment/v2",
   "platform": "macos",
   "display_server": "quartz",
   "source_sha": "0123456789abcdef0123456789abcdef01234567",
@@ -136,12 +136,12 @@ successful typed summary.
 
 ## Case And Result Contract
 
-A case declaration uses `cua-e2e-case/v2`. A result flattens the same contract
-fields into `cua-e2e-result/v2` and adds the observation:
+A case declaration uses `pincer-e2e-case/v2`. A result flattens the same contract
+fields into `pincer-e2e-result/v2` and adds the observation:
 
 ```json
 {
-  "schema": "cua-e2e-result/v2",
+  "schema": "pincer-e2e-result/v2",
   "cell_id": "windows-tauri-left-click-ax-background",
   "platform": "windows",
   "display_server": "win32",
@@ -194,7 +194,7 @@ An honest refusal does not satisfy a case whose contract requires delivery.
 
 ## Summary Ownership
 
-`cua-e2e-report` is the only behavioral Markdown renderer. Shell and
+`pincer-e2e-report` is the only behavioral Markdown renderer. Shell and
 PowerShell runners must not parse `test ... ok` output or create `host=cargo`
 and `host=lane` rows. Cargo logs remain available for unit-test annotations and
 lane diagnostics, outside the behavioral population.

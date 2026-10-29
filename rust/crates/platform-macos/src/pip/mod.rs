@@ -9,7 +9,7 @@
 //! Mirrors `cursor/overlay.rs`:
 //!
 //! - The MCP/tokio server runs on a background thread.
-//! - AppKit MUST run on the main thread, which `cua-driver/src/main.rs`
+//! - AppKit MUST run on the main thread, which `pincer/src/main.rs`
 //!   parks in `NSApplication.run()` for the cursor overlay.
 //! - `push_frame()` is called from arbitrary tokio tasks. It packages
 //!   the frame into a heap-allocated `Box` and posts the actual UI
@@ -190,7 +190,7 @@ unsafe extern "C" fn shutdown_cb(_ctx: *mut c_void) {
 
 // ── AppKit main loop helper for Serve mode ───────────────────────────────
 
-/// Park the main thread in `NSApplication.run()`. Used by `cua-driver
+/// Park the main thread in `NSApplication.run()`. Used by `pincer
 /// serve --experimental-pip` so the dispatch_async_f → main queue
 /// path PiP frames go through can be drained. Mirrors the cursor
 /// overlay's `run_appkit` startup (Accessory activation policy →

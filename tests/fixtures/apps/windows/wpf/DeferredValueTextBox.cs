@@ -4,7 +4,7 @@ using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 
-namespace CuaTestHarness.Wpf;
+namespace PincerTestHarness.Wpf;
 
 /// <summary>
 /// Deterministic fixture for UIA providers that accept SetValue synchronously

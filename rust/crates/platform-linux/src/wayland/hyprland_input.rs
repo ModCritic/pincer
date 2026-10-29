@@ -134,7 +134,7 @@ pub(crate) fn scroll_actions(
     point: Option<(f64, f64)>,
     direction: &str,
     amount: usize,
-    by: cua_driver_contract::ScrollBy,
+    by: pincer_contract::ScrollBy,
 ) -> Result<Vec<Action>> {
     ensure!(
         (1..=MAX_SCROLL_AMOUNT).contains(&amount),
@@ -145,8 +145,8 @@ pub(crate) fn scroll_actions(
         "unsupported scroll direction"
     );
     let mut remaining = match by {
-        cua_driver_contract::ScrollBy::Line => amount,
-        cua_driver_contract::ScrollBy::Page => amount * PAGE_WHEEL_DETENTS,
+        pincer_contract::ScrollBy::Line => amount,
+        pincer_contract::ScrollBy::Page => amount * PAGE_WHEEL_DETENTS,
     };
     let mut actions = Vec::new();
     while remaining > 0 {
@@ -272,7 +272,7 @@ enum InputProtocol {
 }
 
 fn protocol() -> InputProtocol {
-    if std::env::var("CUA_DRIVER_EXPERIMENTAL_HYPRLAND_INPUT").as_deref() == Ok("1") {
+    if std::env::var("PINCER_EXPERIMENTAL_HYPRLAND_INPUT").as_deref() == Ok("1") {
         InputProtocol::Experiment
     } else {
         InputProtocol::Production
@@ -289,10 +289,10 @@ impl InputProtocol {
 
     fn socket_name(self, lane: usize) -> Result<&'static str> {
         Ok(match (self, lane) {
-            (Self::Production, 0) => "cua-input-v3.sock",
-            (Self::Production, 1) => "cua-input-v3-2.sock",
-            (Self::Experiment, 0) => "cua-input-test.sock",
-            (Self::Experiment, 1) => "cua-input-test-2.sock",
+            (Self::Production, 0) => "pincer-input-v3.sock",
+            (Self::Production, 1) => "pincer-input-v3-2.sock",
+            (Self::Experiment, 0) => "pincer-input-test.sock",
+            (Self::Experiment, 1) => "pincer-input-test-2.sock",
             _ => bail!("invalid isolated input lane"),
         })
     }
@@ -404,7 +404,7 @@ fn wait(
     loop {
         cancellation.check()?;
         ensure!(
-            !cua_driver_core::session::is_session_ending(owner),
+            !pincer_core::session::is_session_ending(owner),
             "Hyprland input session ending; dispatch effect is unknown"
         );
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -431,7 +431,7 @@ fn wait(
         }
         cancellation.check()?;
         ensure!(
-            !cua_driver_core::session::is_session_ending(owner),
+            !pincer_core::session::is_session_ending(owner),
             "Hyprland input session ending; dispatch effect is unknown"
         );
         ensure!(
@@ -1477,7 +1477,7 @@ mod tests {
 
     #[test]
     fn scroll_line_keeps_ten_units_per_detent_in_each_direction() {
-        use cua_driver_contract::ScrollBy::Line;
+        use pincer_contract::ScrollBy::Line;
         for (direction, axis, sign) in [
             ("up", 0, -1),
             ("down", 0, 1),
@@ -1496,7 +1496,7 @@ mod tests {
 
     #[test]
     fn scroll_page_is_three_detents_per_page_in_each_direction() {
-        use cua_driver_contract::ScrollBy::Page;
+        use pincer_contract::ScrollBy::Page;
         for (direction, sign) in [("up", -1), ("down", 1), ("left", -1), ("right", 1)] {
             let actions = scroll_actions(Some((5.0, 6.0)), direction, 2, Page).unwrap();
             assert_eq!(scroll_values(&actions), vec![(60 * sign).to_string()]);
@@ -1505,7 +1505,7 @@ mod tests {
 
     #[test]
     fn scroll_page_beyond_one_packet_is_decomposed_without_loss() {
-        use cua_driver_contract::ScrollBy::{Line, Page};
+        use pincer_contract::ScrollBy::{Line, Page};
         // Maximum public amount: 50 lines fit one packet; 50 pages = 150
         // detents = 100 + 50, never clamped.
         assert_eq!(
@@ -1527,7 +1527,7 @@ mod tests {
 
     #[test]
     fn scroll_rejects_invalid_amount_and_direction_before_any_packet() {
-        use cua_driver_contract::ScrollBy::{Line, Page};
+        use pincer_contract::ScrollBy::{Line, Page};
         for by in [Line, Page] {
             assert!(scroll_actions(None, "down", 0, by).is_err());
             assert!(scroll_actions(None, "down", 51, by).is_err());
@@ -1545,8 +1545,7 @@ mod tests {
 
     #[test]
     fn multi_packet_scroll_reports_packets_and_interruption_honestly() {
-        let actions =
-            scroll_actions(None, "down", 50, cua_driver_contract::ScrollBy::Page).unwrap();
+        let actions = scroll_actions(None, "down", 50, pincer_contract::ScrollBy::Page).unwrap();
         let mut calls = 0;
         let result = execute_text_actions(actions, DeliveryRoute::Foreground, |_| {
             calls += 1;
@@ -1557,8 +1556,7 @@ mod tests {
         assert_eq!(result["delivery"]["delivered_count"], 2);
         assert_eq!(result["route"], "primary_foreground");
 
-        let actions =
-            scroll_actions(None, "down", 50, cua_driver_contract::ScrollBy::Page).unwrap();
+        let actions = scroll_actions(None, "down", 50, pincer_contract::ScrollBy::Page).unwrap();
         let mut calls = 0;
         let result = execute_text_actions(actions, DeliveryRoute::Background, |_| {
             calls += 1;
@@ -2308,16 +2306,16 @@ mod tests {
         ));
         cleanup_session("input-pool-test-b");
         cleanup_session("input-pool-test-c");
-        let runtime = session_client("__cua_runtime_test:pending").unwrap();
-        let other = session_client("__cua_runtime_other:pending").unwrap();
-        cleanup_runtime("__cua_runtime_test:");
+        let runtime = session_client("__pincer_runtime_test:pending").unwrap();
+        let other = session_client("__pincer_runtime_other:pending").unwrap();
+        cleanup_runtime("__pincer_runtime_test:");
         assert!(Arc::ptr_eq(
             &other,
-            &session_client("__cua_runtime_other:pending").unwrap()
+            &session_client("__pincer_runtime_other:pending").unwrap()
         ));
         let reused = session_client("input-pool-test-reused").unwrap();
         assert!(!Arc::ptr_eq(&reused, &runtime));
-        cleanup_session("__cua_runtime_other:pending");
+        cleanup_session("__pincer_runtime_other:pending");
         cleanup_session("input-pool-test-reused");
     }
 
@@ -3380,7 +3378,7 @@ mod tests {
 
     #[test]
     fn pending_termination_interrupts_receive_before_cleanup_barrier() {
-        use cua_driver_core::session::{self, SessionClientKind, SessionTransport};
+        use pincer_core::session::{self, SessionClientKind, SessionTransport};
         let owner = "input-cancellation-owner";
         let sid = "input-cancellation-runtime-id";
         let guard = session::begin_session_dispatch(
@@ -3427,7 +3425,7 @@ mod tests {
     fn terminated_session_never_sends_even_when_socket_is_ready() {
         let (mut client, peer) = test_connection();
         client.owner = "input-terminated-runtime-id".into();
-        cua_driver_core::session::end_session(&client.owner);
+        pincer_core::session::end_session(&client.owner);
         assert!(client
             .request("HELLO")
             .unwrap_err()

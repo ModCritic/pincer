@@ -5,7 +5,7 @@
 //! tracing-subscriber logs).
 //!
 //! Usage:
-//!   CUA_DRIVER_RS_ENABLE_WAYLAND=1 \
+//!   PINCER_ENABLE_WAYLAND=1 \
 //!   WAYLAND_DISPLAY=wayland-0 \
 //!   cargo run --example screenshot_cascade --release
 
@@ -21,10 +21,10 @@ fn main() {
 
     eprintln!("== platform-linux screenshot cascade smoke ==");
     eprintln!(
-        "  WAYLAND_DISPLAY={:?}  DISPLAY={:?}  CUA_DRIVER_RS_ENABLE_WAYLAND={:?}",
+        "  WAYLAND_DISPLAY={:?}  DISPLAY={:?}  PINCER_ENABLE_WAYLAND={:?}",
         std::env::var("WAYLAND_DISPLAY").ok(),
         std::env::var("DISPLAY").ok(),
-        std::env::var("CUA_DRIVER_RS_ENABLE_WAYLAND").ok(),
+        std::env::var("PINCER_ENABLE_WAYLAND").ok(),
     );
 
     let started = std::time::Instant::now();
@@ -37,8 +37,8 @@ fn main() {
                 &bytes[..bytes.len().min(8)]
             );
             // Write the PNG so we can also visually check it.
-            let path = std::env::var("CUA_SMOKE_OUT")
-                .unwrap_or_else(|_| "/tmp/cua-screenshot.png".to_string());
+            let path = std::env::var("PINCER_SMOKE_OUT")
+                .unwrap_or_else(|_| "/tmp/pincer-screenshot.png".to_string());
             if let Ok(mut f) = std::fs::File::create(&path) {
                 let _ = f.write_all(&bytes);
                 eprintln!("  wrote {}", path);

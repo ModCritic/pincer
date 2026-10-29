@@ -1,5 +1,5 @@
 {
-  "name": "cua-driver-eve-example",
+  "name": "pincer-eve-example",
   "private": true,
   "type": "module",
   "engines": {
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@trycua/cua-driver": "0.30.2",
+    "pincer-driver": "file:../../typescript",
     "ai": "7.0.118",
     "eve": "0.69.0",
     "zod": "4.1.12"

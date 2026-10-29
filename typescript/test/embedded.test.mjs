@@ -7,10 +7,10 @@ import { fileURLToPath } from "node:url"
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 const libraryName =
   process.platform === "darwin"
-    ? "libcua_driver_sdk.dylib"
+    ? "libpincer_sdk.dylib"
     : process.platform === "win32"
-      ? "cua_driver_sdk.dll"
-      : "libcua_driver_sdk.so"
+      ? "pincer_sdk.dll"
+      : "libpincer_sdk.so"
 const nodeTriple =
   process.platform === "darwin"
     ? `darwin-${process.arch}`
@@ -19,8 +19,8 @@ const nodeTriple =
       : `linux-${process.arch}-${process.report.getReport().header.glibcVersionRuntime ? "gnu" : "musl"}`
 const library = path.resolve(
   testDirectory,
-  "../node_modules/@trycua",
-  `cua-driver-${nodeTriple}`,
+  "../node_modules",
+  `pincer-driver-${nodeTriple}`,
   libraryName,
 )
 
@@ -28,15 +28,15 @@ test(
   "embedded subpath is the same generated Rust host as the SDK root",
   { skip: !existsSync(library) },
   async () => {
-    const root = await import("@trycua/cua-driver")
-    const embedded = await import("@trycua/cua-driver/embedded")
+    const root = await import("pincer-driver")
+    const embedded = await import("pincer-driver/embedded")
 
-    assert.equal(embedded.EmbeddedCuaDriverHost, root.EmbeddedCuaDriverHost)
+    assert.equal(embedded.EmbeddedPincerHost, root.EmbeddedPincerHost)
     assert.equal(embedded.EmbeddedDriverHostOptions, root.EmbeddedDriverHostOptions)
     assert.equal(embedded.EmbeddedPermissionMode, root.EmbeddedPermissionMode)
 
     const requiredOptions = {
-      binaryPath: "/example/cua-driver",
+      binaryPath: "/example/pincer",
       hostBundleId: "com.example.host",
       approveSessionPolicy: false,
       dangerouslyBypassApprovals: false,
@@ -56,21 +56,21 @@ test(
     )
 
     assert.throws(
-      () => new embedded.EmbeddedCuaDriverHost("", "com.example.host"),
+      () => new embedded.EmbeddedPincerHost("", "com.example.host"),
       error => error?.inner?.reason === "binary_path must not be empty",
     )
 
     assert.throws(
       () =>
-        embedded.EmbeddedCuaDriverHost.withOptions(
+        embedded.EmbeddedPincerHost.withOptions(
           embedded.EmbeddedDriverHostOptions.new({
-            binaryPath: "/example/cua-driver",
+            binaryPath: "/example/pincer",
             hostBundleId: "com.example.host",
             approveSessionPolicy: false,
             dangerouslyBypassApprovals: false,
             environment: [
               embedded.EmbeddedEnvironmentVariable.new({
-                name: "CUA_DRIVER_PERMISSION_MODE",
+                name: "PINCER_PERMISSION_MODE",
                 value: "unrestricted",
               }),
             ],

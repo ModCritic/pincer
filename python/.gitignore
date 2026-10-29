@@ -9,10 +9,10 @@ __pycache__/
 # Staged binaries and libraries (downloads/ held archives from the removed
 # release download path)
 downloads/
-src/cua_driver/bin/
-src/cua_driver/*.dylib
-src/cua_driver/*.so
-src/cua_driver/*.dll
+src/pincer_driver/bin/
+src/pincer_driver/*.dylib
+src/pincer_driver/*.so
+src/pincer_driver/*.dll
 
 # Virtual environments
 venv/

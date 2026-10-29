@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
@@ -28,7 +28,7 @@ fn def() -> &'static ToolDef {
             system UI agents are filtered out. Installed apps resolve their \
             running/pid state against all live processes by bundle identifier, \
             so an installed app whose process runs as an accessory \
-            (LSUIElement / menu-bar apps, e.g. Cua Driver itself) still reports \
+            (LSUIElement / menu-bar apps, e.g. Pincer itself) still reports \
             its live pid. Installed apps come from scanning /Applications, \
             /Applications/Utilities, ~/Applications, /System/Applications, and \
             /System/Applications/Utilities.\n\n\
@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(record["bundle_id"], "org.example.App");
         assert_eq!(record["launch_path"], "/Applications/Example.app");
         assert!(record.get("last_used").is_none());
-        let typed: cua_driver_contract::ListAppsOutput =
+        let typed: pincer_contract::ListAppsOutput =
             serde_json::from_value(serde_json::json!({ "apps": [record] })).unwrap();
         assert_eq!(typed.apps[0].bundle_id.as_deref(), Some("org.example.App"));
         assert_eq!(typed.apps[0].last_used, None);

@@ -1,0 +1,76 @@
+language = "C"
+include_guard = "PINCER_ABI_H"
+cpp_compat = true
+documentation = true
+usize_is_size_t = true
+style = "type"
+autogen_warning = "/* Generated from pincer-sdk/src/abi.rs by pincer-abi-header. Do not edit. */"
+header = "/* SPDX-License-Identifier: MIT */"
+after_includes = """
+#if defined(_WIN32)
+#if defined(PINCER_ABI_BUILD)
+#define PINCER_API __declspec(dllexport)
+#else
+#define PINCER_API __declspec(dllimport)
+#endif
+#else
+#define PINCER_API __attribute__((visibility(\"default\")))
+#endif
+"""
+
+[parse]
+parse_deps = false
+
+[export]
+include = [
+  "PINCER_ABI_MAJOR",
+  "PINCER_ABI_MINOR",
+  "PINCER_ABI_PATCH",
+  "PincerAbiVersion",
+  "PincerStatus",
+  "PincerBuffer",
+  "PincerHandle",
+  "PincerSessionHandle",
+  "PincerOperation",
+  "PincerCompletionV1",
+  "pincer_abi_version_v1",
+  "pincer_abi_is_compatible_v1",
+  "pincer_buffer_free_v1",
+  "pincer_create_v1",
+  "pincer_destroy_v1",
+  "pincer_is_available_v1",
+  "pincer_metadata_json_v1",
+  "pincer_list_tools_json_v1",
+  "pincer_invoke_v1",
+  "pincer_session_create_v1",
+  "pincer_session_destroy_v1",
+  "pincer_session_invoke_v1",
+  "pincer_shutdown_v1",
+  "pincer_operation_cancel_v1",
+  "pincer_operation_release_v1",
+]
+exclude = [
+  "Handle",
+  "Session",
+  "Operation",
+  "buffer_free",
+  "create",
+  "destroy",
+  "is_available",
+  "metadata_json",
+  "list_tools_json",
+  "invoke",
+  "session_create",
+  "session_destroy",
+  "session_invoke",
+  "shutdown",
+  "operation_cancel",
+  "operation_release",
+]
+
+[enum]
+rename_variants = "ScreamingSnakeCase"
+prefix_with_name = true
+
+[fn]
+prefix = "PINCER_API"

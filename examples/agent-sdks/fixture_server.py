@@ -1,4 +1,4 @@
-"""Serve a deterministic desktop fixture for Cua Driver examples.
+"""Serve a deterministic desktop fixture for Pincer examples.
 
 The browser page has one autofocus input. Submitting it records the value on a
 loopback-only endpoint so examples can verify the GUI action independently of
@@ -20,7 +20,7 @@ from urllib.parse import parse_qs
 PAGE = """<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Cua Driver action fixture</title>
+<title>Pincer action fixture</title>
 <style>
   body { font: 20px system-ui; display: grid; min-height: 90vh; place-items: center; }
   main { width: min(640px, 85vw); text-align: center; }
@@ -29,7 +29,7 @@ PAGE = """<!doctype html>
   output { display: block; margin-top: 20px; font-family: monospace; }
 </style>
 <main>
-  <h1>Cua Driver action fixture</h1>
+  <h1>Pincer action fixture</h1>
   <p>Keep this window focused. The input below has autofocus.</p>
   <form method="post" action="/submit">
     <input name="value" autofocus required aria-label="verification value">
@@ -44,7 +44,7 @@ PAGE = """<!doctype html>
 def submitted_page(value: str) -> bytes:
     safe = html.escape(value)
     return f"""<!doctype html>
-<html lang="en"><meta charset="utf-8"><title>Cua Driver verified</title>
+<html lang="en"><meta charset="utf-8"><title>Pincer verified</title>
 <style>body {{ font: 24px system-ui; display:grid; min-height:90vh; place-items:center; }}</style>
 <main><h1>Action received</h1><output>status=submitted:{safe}</output></main>
 </html>""".encode()

@@ -8,8 +8,8 @@
 //! recent zoom crop context, same as click/double_click.
 
 use async_trait::async_trait;
-use cua_driver_contract::{ClickButton, DragInput};
-use cua_driver_core::{
+use pincer_contract::{ClickButton, DragInput};
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
     tool_args::parse_typed_projection,
@@ -51,7 +51,7 @@ const BACKGROUND_DRAG_UNAVAILABLE: &str = "Background drag is unavailable on mac
      that the step needs the window in front.";
 
 fn background_drag_refusal() -> ToolResult {
-    cua_driver_core::delivery::background_unavailable_result(
+    pincer_core::delivery::background_unavailable_result(
         BACKGROUND_DRAG_UNAVAILABLE,
         "background_unavailable",
         "macOS has no background drag route; drag moves the physical pointer",
@@ -126,7 +126,7 @@ fn def() -> &'static ToolDef {
                     "description": "When true, coordinates are in the last zoom image for this pid; driver maps back to window coordinates."
                 },
                 "scope": { "type": "string", "enum": ["window", "desktop"], "default": "window", "description": "Use desktop with no pid/window_id for native get_desktop_state screenshot coordinates." },
-                "delivery_mode": cua_driver_core::tool_schema::delivery_mode_schema_with(DELIVERY_MODE_DESCRIPTION)
+                "delivery_mode": pincer_core::tool_schema::delivery_mode_schema_with(DELIVERY_MODE_DESCRIPTION)
             },
             "additionalProperties": false
         }),
@@ -144,7 +144,7 @@ impl Tool for DragTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let cursor_key = super::cursor_tools::resolve_cursor_key(&args);
         if args.opt_str("scope").as_deref() == Some("desktop")
             && args.get("pid").is_none()
@@ -510,7 +510,7 @@ mod tests {
             assert_eq!(structured["escalation"]["recommended"], "foreground");
             assert_eq!(
                 structured["suggestion"],
-                cua_driver_core::delivery::FOREGROUND_RETRY_SUGGESTION
+                pincer_core::delivery::FOREGROUND_RETRY_SUGGESTION
             );
         }
     }

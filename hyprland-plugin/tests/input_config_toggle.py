@@ -8,8 +8,8 @@ import json
 from pathlib import Path
 import subprocess
 
-ENABLED = "hl.config({plugin = {cua = {enabled = true}}})\n"
-DISABLED = "hl.config({plugin = {cua = {enabled = false}}})\n"
+ENABLED = "hl.config({plugin = {pincer = {enabled = true}}})\n"
+DISABLED = "hl.config({plugin = {pincer = {enabled = false}}})\n"
 
 
 class InputConfigToggle:
@@ -28,7 +28,7 @@ class InputConfigToggle:
         output = subprocess.check_output(["hyprctl", "reload"], text=True, timeout=5)
         if output.strip() != "ok":
             raise RuntimeError("config reload did not acknowledge toggle")
-        status = json.loads(subprocess.check_output(["hyprctl", "-j", "cua:status"], timeout=5))
+        status = json.loads(subprocess.check_output(["hyprctl", "-j", "pincer:status"], timeout=5))
         if status.get("configured") is not enabled or status.get("experiment", {}).get("transport_ready") is not enabled:
             raise RuntimeError("plugin did not observe the sourced toggle file")
 

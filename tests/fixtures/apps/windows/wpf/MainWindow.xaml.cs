@@ -10,7 +10,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 
-namespace CuaTestHarness.Wpf;
+namespace PincerTestHarness.Wpf;
 
 public partial class MainWindow : Window
 {
@@ -31,7 +31,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         _manifest = ScenariosManifest.Load();
-        _fixtureStatePath = Environment.GetEnvironmentVariable("CUA_E2E_FIXTURE_STATE_PATH");
+        _fixtureStatePath = Environment.GetEnvironmentVariable("PINCER_E2E_FIXTURE_STATE_PATH");
         InitializeComponent();
 
         Title = _manifest.Wpf.MainWindow.Title;
@@ -57,7 +57,7 @@ public partial class MainWindow : Window
 
         // Hook WM_VSCROLL on the main HWND and route it into ScrollTall.
         // WPF's input system is purely routed-event based; it does not
-        // translate WM_VSCROLL into a ScrollViewer scroll. cua-driver's
+        // translate WM_VSCROLL into a ScrollViewer scroll. pincer's
         // `scroll` tool delivers SB_LINEDOWN/SB_PAGEDOWN via
         // PostMessage(WM_VSCROLL), so without this hook the scroll never
         // takes effect on a WPF host. The hook lets us assert the

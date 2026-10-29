@@ -9,7 +9,7 @@ from retirement_evidence import active_experiment, bound_seats, replacement_refu
 
 
 def active():
-    return {"name": "cua-hyprland-plugin", "state": "input_experiment", "configured": True, "abi": {"match": True},
+    return {"name": "pincer-hyprland-plugin", "state": "input_experiment", "configured": True, "abi": {"match": True},
             "transport": {"ready": True}, "experiment": {"transport_ready": True,
             "test_only": True, "protocol": 0,
             "seat_lifetime": "compositor", "upgrade": "desktop_restart", "lanes": [
@@ -18,7 +18,7 @@ def active():
 
 
 def refusal():
-    return {"name": "cua-hyprland-plugin", "configured": True, "state": "discovery_only",
+    return {"name": "pincer-hyprland-plugin", "configured": True, "state": "discovery_only",
             "compositor_epoch": 0, "abi": {"match": True}, "capabilities": {"enabled": []},
             "transport": {"ready": False, "last_error":
                 "input seat lifetime unavailable; restart the desktop before loading a replacement plugin"}}
@@ -26,10 +26,10 @@ def refusal():
 
 BOUND = '''[100] -> wl_registry#2.bind(41, "wl_seat", 7, new id [unknown]#10)
 [101] wl_seat#10.capabilities(3)
-[102] wl_seat#10.name("Cua-Test-Agent")
+[102] wl_seat#10.name("Pincer-Test-Agent")
 [103] -> wl_registry#2.bind(42, "wl_seat", 7, new id wl_seat#11)
 [104] wl_seat#11.capabilities(3)
-[105] wl_seat#11.name("Cua-Test-Agent-2")
+[105] wl_seat#11.name("Pincer-Test-Agent-2")
 '''
 RETIRED = '''[200] wl_seat#10.capabilities(0)
 [201] wl_registry#2.global_remove(41)
@@ -92,15 +92,15 @@ class RetirementEvidenceTest(unittest.TestCase):
         for delimiter in ("#", "@"):
             with self.subTest(delimiter=delimiter):
                 seats = bound_seats(BOUND.replace("#", delimiter))
-                self.assertEqual(seats, {"Cua-Test-Agent": (10, 41), "Cua-Test-Agent-2": (11, 42)})
+                self.assertEqual(seats, {"Pincer-Test-Agent": (10, 41), "Pincer-Test-Agent-2": (11, 42)})
                 self.assertEqual(retired_seats(seats, RETIRED.replace("#", delimiter)),
                                  {"retired_seats": 2, "capabilities_zero": True, "globals_removed": True})
 
     def test_absent_unbound_ambiguous_or_disabled_initial_seats_fail(self):
-        for wire in ("", BOUND.replace('"Cua-Test-Agent-2"', '"primary"'),
+        for wire in ("", BOUND.replace('"Pincer-Test-Agent-2"', '"primary"'),
                      BOUND.replace('new id wl_seat#11', 'new id wl_seat#12'),
                      BOUND.replace("capabilities(3)", "capabilities(0)"),
-                     BOUND + 'wl_seat#13.name("Cua-Test-Agent")\n'):
+                     BOUND + 'wl_seat#13.name("Pincer-Test-Agent")\n'):
             with self.subTest(wire=wire), self.assertRaises(AssertionError):
                 bound_seats(wire)
 
@@ -111,8 +111,8 @@ class RetirementEvidenceTest(unittest.TestCase):
                 retired_seats(bound_seats(BOUND), "".join(lines[:index] + lines[index + 1:]))
 
     def test_empty_or_duplicate_bindings_cannot_pass_retirement(self):
-        for seats in ({}, {"Cua-Test-Agent": (10, 41)},
-                      {"Cua-Test-Agent": (10, 41), "Cua-Test-Agent-2": (10, 41)}):
+        for seats in ({}, {"Pincer-Test-Agent": (10, 41)},
+                      {"Pincer-Test-Agent": (10, 41), "Pincer-Test-Agent-2": (10, 41)}):
             with self.subTest(seats=seats), self.assertRaises(AssertionError):
                 retired_seats(seats, RETIRED)
 

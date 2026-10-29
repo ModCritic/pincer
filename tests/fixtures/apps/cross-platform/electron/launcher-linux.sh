@@ -3,4 +3,4 @@
 unset LD_LIBRARY_PATH NIX_LD NIX_LD_LIBRARY_PATH
 export ACCESSIBILITY_ENABLED=1
 export NO_AT_BRIDGE=0
-exec "$(dirname "$0")/CuaTestHarness.Electron.bin" "$@"
+exec "$(dirname "$0")/PincerTestHarness.Electron.bin" "$@"

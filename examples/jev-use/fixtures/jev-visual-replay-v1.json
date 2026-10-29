@@ -1,10 +1,10 @@
 {
-  "schema": "cua.jev_use_visual_replay_v1",
-  "description": "Visual-path fixture (--visual-fixture: Submit is a presentational element with no button ref). Snapshots are real get_browser_state semantic_v2 results and visual_regions is a real parse_visual_regions result, captured on Linux X11 with released Cua Driver 0.30.1 and cua-perception 0.2.1. recorded_live_runs are the step choices TypeSafe Jev made in live visual-fixture runs: *_pre_4255 before the filled-form-state change (all verified) and *_post_4255_regression after it (Jev reobserved at step 1 every time). pre_fix_step1 is the exact state and candidate criteria the runner sent Jev at step 1 in those regressed runs.",
+  "schema": "pincer.jev_use_visual_replay_v1",
+  "description": "Visual-path fixture (--visual-fixture: Submit is a presentational element with no button ref). Snapshots are real get_browser_state semantic_v2 results and visual_regions is a real parse_visual_regions result, captured on Linux X11 with released Pincer 0.30.1 and pincer-perception 0.2.1. recorded_live_runs are the step choices TypeSafe Jev made in live visual-fixture runs: *_pre_4255 before the filled-form-state change (all verified) and *_post_4255_regression after it (Jev reobserved at step 1 every time). pre_fix_step1 is the exact state and candidate criteria the runner sent Jev at step 1 in those regressed runs.",
   "token": "jev-guide-live",
   "snapshots": {
     "before_typing": {
-      "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
       "page": {
         "title": "about:blank",
         "url": "http://127.0.0.1:41605/"
@@ -51,7 +51,7 @@
       "target_id": "bt-aeb40534-c16c-4da9-9567-aee3d2d4958a"
     },
     "after_typing": {
-      "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": jev-guide-live [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"jev-guide-live\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": jev-guide-live [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"jev-guide-live\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
       "page": {
         "title": "about:blank",
         "url": "http://127.0.0.1:41605/"
@@ -132,7 +132,7 @@
     },
     "parser": {
       "backend": "onnx_runtime_cpu",
-      "extension_id": "cua-perception",
+      "extension_id": "pincer-perception",
       "extension_version": "0.2.1",
       "model_id": "omniparser-v2-ppocrv5-en",
       "model_manifest_sha256": "59f5197c98d0bbe20668993771a19fa495624027e69ef87a75c6606986a60b13",
@@ -232,7 +232,7 @@
         "id": "text-28",
         "interactive": false,
         "kind": "text",
-        "text": "Cua"
+        "text": "Pincer"
       },
       {
         "bounds": {
@@ -313,7 +313,7 @@
         "text": "Submit"
       }
     ],
-    "schema": "cua.visual_regions_v1",
+    "schema": "pincer.visual_regions_v1",
     "timing": {
       "duration_ms": 3893
     }
@@ -330,7 +330,7 @@
           "verification_field": "empty",
           "submit_button": "not_in_page_structure"
         },
-        "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+        "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
         "visual": null
       },
       "history": []

@@ -1,4 +1,4 @@
-//! macOS adapter for [`cua_driver_core::cursor_shape`].
+//! macOS adapter for [`pincer_core::cursor_shape`].
 //!
 //! Thin by design: the vocabulary, the dispatch and the "unsupported" story
 //! live in the common crate. All this file does is read AppKit's current
@@ -22,10 +22,10 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use cua_driver_core::cursor_shape::{ResizeAxis, SystemCursorShape};
 use objc2::rc::Retained;
 use objc2_app_kit::{NSCursor, NSImage};
 use objc2_foundation::NSData;
+use pincer_core::cursor_shape::{ResizeAxis, SystemCursorShape};
 
 /// A cursor's identity: hot spot rounded to whole pixels plus a hash of its
 /// image bytes. Two cursors with the same fingerprint are the same cursor.
@@ -255,7 +255,7 @@ fn custom_shape(cursor: &NSCursor) -> Option<SystemCursorShape> {
 
 /// Install this adapter as the process-wide probe.
 pub fn install() {
-    cua_driver_core::cursor_shape::set_cursor_shape_probe(current_shape);
+    pincer_core::cursor_shape::set_cursor_shape_probe(current_shape);
 }
 
 #[cfg(test)]

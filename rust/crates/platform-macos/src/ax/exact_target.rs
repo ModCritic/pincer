@@ -1,6 +1,6 @@
 //! Fresh exact-target acquisition for background input decisions.
 //!
-//! Gathers the facts [`cua_driver_core::background_input`] needs about one
+//! Gathers the facts [`pincer_core::background_input`] needs about one
 //! requested `(pid, CGWindowID)` immediately before a background mutation:
 //! WindowServer ownership, fresh `AXWindows` membership (mapped through
 //! `_AXUIElementGetWindow`), minimized/hidden state, competing same-pid AX
@@ -8,7 +8,7 @@
 //! bounded and fail closed — an unreadable fact never unlocks a route.
 
 use core_foundation::base::{CFRelease, CFTypeRef};
-use cua_driver_core::background_input::{
+use pincer_core::background_input::{
     BackgroundTargetFacts, ElementAncestry, WindowServerOwnership,
 };
 

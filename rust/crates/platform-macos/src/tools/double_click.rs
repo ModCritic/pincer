@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
@@ -18,11 +18,11 @@ pub struct DoubleClickTool {
 
 fn background_action_for_element(
     has_ax_open: bool,
-) -> cua_driver_core::background_input::BackgroundAction {
+) -> pincer_core::background_input::BackgroundAction {
     if has_ax_open {
-        cua_driver_core::background_input::BackgroundAction::AxSemantic
+        pincer_core::background_input::BackgroundAction::AxSemantic
     } else {
-        cua_driver_core::background_input::BackgroundAction::WindowPointer
+        pincer_core::background_input::BackgroundAction::WindowPointer
     }
 }
 
@@ -53,8 +53,8 @@ fn def() -> &'static ToolDef {
                 "x":             { "type": "number",  "description": "Screen X coordinate (pixel path)." },
                 "y":             { "type": "number",  "description": "Screen Y coordinate (pixel path)." },
                 "window_id":     { "type": "integer", "description": "CGWindowID. Omit when element_token is supplied (the token carries it)." },
-                "element_token": cua_driver_core::tool_schema::element_token_schema(),
-                "delivery_mode": cua_driver_core::tool_schema::delivery_mode_schema()
+                "element_token": pincer_core::tool_schema::element_token_schema(),
+                "delivery_mode": pincer_core::tool_schema::delivery_mode_schema()
             },
             "additionalProperties": false
         }),
@@ -72,7 +72,7 @@ impl Tool for DoubleClickTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let pid = match super::target_pid(&self.state, &args) {
             Ok(v) => v,
             Err(e) => return e,
@@ -271,11 +271,11 @@ mod tests {
     fn background_element_route_does_not_guess_across_actuator_classes() {
         assert_eq!(
             background_action_for_element(true),
-            cua_driver_core::background_input::BackgroundAction::AxSemantic
+            pincer_core::background_input::BackgroundAction::AxSemantic
         );
         assert_eq!(
             background_action_for_element(false),
-            cua_driver_core::background_input::BackgroundAction::WindowPointer
+            pincer_core::background_input::BackgroundAction::WindowPointer
         );
     }
 }

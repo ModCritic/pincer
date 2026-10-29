@@ -4,7 +4,7 @@
 //!   `INDENT- [N] AXRole "Title" [value="..." actions=[...]]`
 //!   `INDENT- AXStaticText = "value"`  (non-indexed)
 //!
-//! Rules (from cua-driver reference):
+//! Rules (from pincer reference):
 //! - An element is addressable (gets an index) when it has ≥1 action name or
 //!   exposes a writable AXValue control surface.
 //! - Non-actionable leaf nodes with a value are rendered as `AXRole = "value"`.
@@ -15,7 +15,7 @@ use super::bindings::*;
 use super::launch::{is_still_launching, LaunchStep, LaunchWait};
 use super::window_scope::{decide_window_scope, ScopeDecision, TopLevelCandidate, WindowScope};
 use core_foundation::base::{CFEqual, CFRelease, CFRetain, CFTypeRef};
-use cua_driver_core::walk_budget::{WalkBudget, WalkOutcome};
+use pincer_core::walk_budget::{WalkBudget, WalkOutcome};
 use std::time::Instant;
 
 /// Default maximum depth for AX tree walks. Deep menus and complex web views
@@ -140,7 +140,7 @@ pub struct TreeWalkResult {
     pub nodes: Vec<AXNode>,
     /// True when the walk was cut short by its node or time budget.
     pub truncated: bool,
-    /// Why and where the walk stopped (see [`cua_driver_core::walk_budget`]).
+    /// Why and where the walk stopped (see [`pincer_core::walk_budget`]).
     pub walk: WalkOutcome,
     /// Whether the requested `window_id` actually resolved to an AX surface,
     /// and if not, why. `None` when no `window_id` was requested.

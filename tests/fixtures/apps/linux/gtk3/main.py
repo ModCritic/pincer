@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-# CuaTestHarness.Gtk3 — Linux GTK3 test-harness app.
+# PincerTestHarness.Gtk3 — Linux GTK3 test-harness app.
 #
 # The Linux analogue of the AppKit/SwiftUI (macOS) and WPF/WinUI3 (Windows)
-# harness apps: a controlled, scenario-driven GUI whose elements cua-driver
+# harness apps: a controlled, scenario-driven GUI whose elements pincer
 # drives + asserts against. Brought to CONTROL PARITY with the WPF harness so
 # the 8-action matrix (click, double-click, right-click, drag, scroll,
 # set_value, type, press-key) can be exercised identically on Linux.
 #
-# Toolkit note: GTK3 exposes accessibility via ATK → AT-SPI. cua-driver's Linux
+# Toolkit note: GTK3 exposes accessibility via ATK → AT-SPI. pincer's Linux
 # get_window_state renders each element as `[idx] <role> "<name>"` — there is NO
 # `id=` field like Windows (UIA AutomationId) / macOS (AX identifier). So the
 # CONTRACT here is the **AT-SPI accessible name**: each actionable control sets
@@ -38,7 +38,7 @@ def section(box, title):
 
 class HarnessWindow(Gtk.Window):
     def __init__(self):
-        super().__init__(title="CuaTestHarness GTK3")
+        super().__init__(title="PincerTestHarness GTK3")
         # Keep the nested scroll viewport visible on the canonical 1024x768
         # desktop; the outer scroller still exposes controls below it.
         self.set_default_size(560, 720)
@@ -308,9 +308,9 @@ class HarnessWindow(Gtk.Window):
         self.popover_status.set_text("popover_open=True")
 
 
-TASK_STATE_ENV = "CUA_GTK3_TASK_STATE"
-TASK_STATE_SCHEMA = "cua.gtk3_task_state_v1"
-TASK_DENSITY_ENV = "CUA_GTK3_TASK_DENSITY"
+TASK_STATE_ENV = "PINCER_GTK3_TASK_STATE"
+TASK_STATE_SCHEMA = "pincer.gtk3_task_state_v1"
+TASK_DENSITY_ENV = "PINCER_GTK3_TASK_DENSITY"
 
 # Opt-in distractor controls for measuring jev-use accuracy at larger
 # candidate sets (#4312). The labels are benign (no risky-action phrase) and
@@ -352,20 +352,20 @@ def task_density():
 
 class TaskWindow(Gtk.Window):
     """Opt-in jev-use task window (RFC #4268), shown instead of HarnessWindow
-    when CUA_GTK3_TASK_STATE=<path> is set.
+    when PINCER_GTK3_TASK_STATE=<path> is set.
 
     It carries the same labeled controls as the AppKit and WPF task modes
     (Increment, Reset, I agree, Small/Medium/Large, Note, Save note, Exit) in a
-    small window where every control is on screen. CUA_GTK3_TASK_DENSITY=12 or
+    small window where every control is on screen. PINCER_GTK3_TASK_DENSITY=12 or
     24 also adds benign distractor controls before them (#4312). Accessible names are the
     visible labels here, not the aid-style names of HarnessWindow, so candidate
     IDs match across platforms. Every change atomically rewrites an app-owned
     JSON state file; the jev-use task oracle reads that file and never depends
-    on Cua Driver output. Ordinary launches never create this window.
+    on Pincer output. Ordinary launches never create this window.
     """
 
     def __init__(self, state_path, density=None):
-        super().__init__(title="CuaTestHarness GTK3 Tasks")
+        super().__init__(title="PincerTestHarness GTK3 Tasks")
         self.set_default_size(480, 320)
         self.state_path = state_path
         self.density = density

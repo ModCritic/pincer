@@ -166,7 +166,7 @@ mod tests {
     const RECTS: &str = r#"[{"id":3,"pid":41,"title":"Tomorrow's \"plan\" C:\\ 1\n2 飞书","x":0,"y":0,"w":10,"h":10},{"id":7,"pid":42,"title":"Target","x":14,"y":12,"w":800,"h":600}]"#;
 
     struct Helper;
-    #[zbus::interface(name = "org.cua.WinRects")]
+    #[zbus::interface(name = "org.pincer.WinRects")]
     impl Helper {
         fn get_version(&self) -> u32 {
             10
@@ -250,9 +250,9 @@ mod tests {
         assert!(!address.trim().is_empty(), "dbus-daemon printed no address");
         let service = zbus::connection::Builder::address(address.trim())
             .unwrap()
-            .name("org.cua.WinRects")
+            .name("org.pincer.WinRects")
             .unwrap()
-            .serve_at("/org/cua/WinRects", Helper)
+            .serve_at("/org/pincer/WinRects", Helper)
             .unwrap()
             .build()
             .await
@@ -267,9 +267,9 @@ mod tests {
             async move {
                 invoke(
                     &client,
-                    "org.cua.WinRects",
-                    "/org/cua/WinRects",
-                    &format!("org.cua.WinRects.{method}"),
+                    "org.pincer.WinRects",
+                    "/org/pincer/WinRects",
+                    &format!("org.pincer.WinRects.{method}"),
                     &args,
                 )
                 .await

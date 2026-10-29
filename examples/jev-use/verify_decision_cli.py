@@ -20,7 +20,7 @@ def main() -> None:
         "--fixture",
         choices=("positive", "negative", "native"),
         default="positive",
-        help="native uses the cua.jev_choice_request_v2 fixture",
+        help="native uses the pincer.jev_choice_request_v2 fixture",
     )
     parser.add_argument(
         "--screenshot",
@@ -68,7 +68,7 @@ def main() -> None:
         "probabilities",
         "reason",
     }
-    if set(response) != expected_keys or response["schema"] != "cua.decision_choice_v1":
+    if set(response) != expected_keys or response["schema"] != "pincer.decision_choice_v1":
         raise RuntimeError("decision model returned an unsupported response")
     if response["capture_id"] != request["capture_id"]:
         raise RuntimeError("decision model returned a different capture")

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# cua-driver local/debug installer — Rust backend only.
+# pincer local/debug installer — Rust backend only.
 #
 # This script is for developers working on the checked-out tree. It builds
-# cua-driver from rust/ and installs it as `cua-driver-local`,
-# separate from any released `cua-driver` installation.
+# pincer from rust/ and installs it as `pincer-local`,
+# separate from any released `pincer` installation.
 #
 # Flags (forwarded verbatim to the Rust helper):
 #   --release              build the release configuration (default: debug)

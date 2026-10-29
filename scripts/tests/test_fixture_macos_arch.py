@@ -29,7 +29,7 @@ def _write_executable(path: Path, body: str) -> None:
 )
 @pytest.mark.parametrize("arch", ["x86_64", "arm64"])
 def test_fixture_build_targets_host_arch(tmp_path: Path, arch: str) -> None:
-    driver_root = tmp_path / "cua-driver"
+    driver_root = tmp_path / "pincer"
     script = driver_root / "tests/fixtures/build/macos.sh"
     script.parent.mkdir(parents=True)
     shutil.copy2(BUILD_SCRIPT, script)

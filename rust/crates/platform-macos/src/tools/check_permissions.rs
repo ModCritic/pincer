@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{ProtectedResourceOwnership, Tool, ToolDef},
 };
@@ -41,10 +41,10 @@ pub async fn request_from_launchservices_host(probe_direct_capture: bool) -> Too
 }
 
 fn driver_bundle_id_for_executable(executable: &str) -> Option<&'static str> {
-    if executable.contains("/CuaDriverLocal.app/Contents/MacOS/") {
-        Some("com.trycua.driver.local")
-    } else if executable.contains("/CuaDriver.app/Contents/MacOS/") {
-        Some("com.trycua.driver")
+    if executable.contains("/PincerLocal.app/Contents/MacOS/") {
+        Some("io.github.modcritic.pincer.local")
+    } else if executable.contains("/Pincer.app/Contents/MacOS/") {
+        Some("io.github.modcritic.pincer")
     } else {
         None
     }
@@ -68,8 +68,8 @@ fn direct_capture_evidence_store_for_identity(
     }
     let bundle_id = driver_bundle_id_for_executable(executable)?;
     let state_directory = match bundle_id {
-        "com.trycua.driver.local" => ".cua-driver-local",
-        "com.trycua.driver" => ".cua-driver",
+        "io.github.modcritic.pincer.local" => ".pincer-local",
+        "io.github.modcritic.pincer" => ".pincer",
         _ => return None,
     };
     Some(DirectCaptureEvidenceStore::new(
@@ -168,7 +168,7 @@ fn should_probe_direct_capture(
 }
 
 fn should_prompt_permissions(requested: bool, host_owns_permission_ux: bool) -> bool {
-    requested && !cua_driver_core::embedded_mode() && !host_owns_permission_ux
+    requested && !pincer_core::embedded_mode() && !host_owns_permission_ux
 }
 
 fn resolve_direct_capture_verification(
@@ -216,10 +216,10 @@ fn resolve_direct_capture_verification(
 /// macOS attributes Accessibility / Screen-Recording to the *responsible
 /// process* (the LaunchServices launching app), not the executable path.
 /// So `check_permissions` answered by the daemon reflects:
-///   - the **CuaDriver daemon** (`com.trycua.driver`) when this process is
+///   - the **Pincer daemon** (`io.github.modcritic.pincer`) when this process is
 ///     its own responsible process — the real driver status.
 ///   - the **embedding host** otherwise. That is intentional only when the
-///     host directly spawned `cua-driver serve --embedded`.
+///     host directly spawned `pincer serve --embedded`.
 fn permission_source(
     host_owns_permission_ux: bool,
     configured_host_bundle_id: Option<&str>,
@@ -227,22 +227,22 @@ fn permission_source(
     let pid = unsafe { libc::getpid() };
     let ppid = unsafe { libc::getppid() };
     let exe = current_executable();
-    let disclaimed = std::env::var_os(cua_driver_core::RESPONSIBILITY_DISCLAIMED_ENV).is_some();
+    let disclaimed = std::env::var_os(pincer_core::RESPONSIBILITY_DISCLAIMED_ENV).is_some();
     // Embedded mode: the driver is a child in a host app's responsibility
     // chain, so the probes already answer for the host's TCC identity.
     // This branch only ever downgrades attribution (host, never
     // driver-daemon), so the caller-controlled env var can't spoof an
     // elevated identity. `host_bundle_id` is advisory, not a trust signal.
-    if host_owns_permission_ux || cua_driver_core::embedded_mode() {
+    if host_owns_permission_ux || pincer_core::embedded_mode() {
         let host_bundle_id = configured_host_bundle_id
             .map(str::to_owned)
-            .or_else(|| std::env::var(cua_driver_core::HOST_BUNDLE_ID_ENV).ok())
+            .or_else(|| std::env::var(pincer_core::HOST_BUNDLE_ID_ENV).ok())
             .unwrap_or_default();
         return serde_json::json!({
             "attribution": "host",
             "host_bundle_id": host_bundle_id,
-            "embedded": cua_driver_core::embedded_mode(),
-            "direct_runtime": host_owns_permission_ux && !cua_driver_core::embedded_mode(),
+            "embedded": pincer_core::embedded_mode(),
+            "direct_runtime": host_owns_permission_ux && !pincer_core::embedded_mode(),
             "pid": pid,
             "responsible_ppid": ppid,
             "executable": exe,
@@ -255,7 +255,7 @@ fn permission_source(
         });
     }
     // The trustworthy, non-spoofable signal is the executable path: a caller
-    // can't run from inside the code-signed `CuaDriver.app` bundle without
+    // can't run from inside the code-signed `Pincer.app` bundle without
     // controlling that install. The disclaim env var is caller-controlled, so
     // it is treated only as a corroborating signal that explains why a
     // bundle-resident daemon has `ppid != 1` (it re-exec'd itself with
@@ -270,7 +270,7 @@ fn permission_source(
         (
             "driver-daemon",
             format!(
-                "These booleans reflect the CuaDriver daemon's own TCC identity \
+                "These booleans reflect the Pincer daemon's own TCC identity \
                  ({}) because this process is its own responsible process.",
                 driver_bundle_id.expect("driver daemon must have a bundle id")
             ),
@@ -279,10 +279,10 @@ fn permission_source(
         (
             "caller",
             "These booleans reflect the TCC identity of the app that launched \
-             this process (e.g. your terminal/IDE), NOT an installed CuaDriver \
+             this process (e.g. your terminal/IDE), NOT an installed Pincer \
              app bundle. A standalone check can read `true` here while the \
              driver's bundle has no grant. To grant for the driver, run \
-             `cua-driver permissions grant`."
+             `pincer permissions grant`."
                 .to_owned(),
         )
     };
@@ -317,7 +317,7 @@ fn def() -> &'static ToolDef {
             timeout/probe failure when applicable), `direct_capture_verification` (validated \
             source, UTC time, and bundle identity from an explicit grant probe), and `source` \
             (which TCC identity the \
-            booleans reflect: the CuaDriver daemon vs the launching terminal/IDE). \
+            booleans reflect: the Pincer daemon vs the launching terminal/IDE). \
             macOS attributes grants to the responsible process, so a standalone call \
             from a terminal reports the terminal's grants, not the driver's. The \
             prompt-capable ScreenCaptureKit probe never runs when `prompt` is false. \
@@ -370,7 +370,7 @@ impl Tool for CheckPermissionsTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         // Public calls default to read-only inspection. Only the
         // LaunchServices-hosted setup route passes prompt=true.
         // Embedded mode hard-disables prompting regardless of the arg (the
@@ -462,7 +462,7 @@ impl Tool for CheckPermissionsTool {
         {
             summary.push_str(
                 "\nℹ️  Direct ScreenCaptureKit readiness was not probed because this is a \
-                 staged or read-only check. Run `cua-driver permissions grant` to request \
+                 staged or read-only check. Run `pincer permissions grant` to request \
                  and verify direct capture explicitly.",
             );
         }
@@ -477,8 +477,8 @@ impl Tool for CheckPermissionsTool {
         }
         if is_caller {
             summary.push_str(
-                "\nℹ️  Status reflects the launching app's TCC identity, not the CuaDriver \
-                 daemon (com.trycua.driver). See `source` for details.",
+                "\nℹ️  Status reflects the launching app's TCC identity, not the Pincer \
+                 daemon (io.github.modcritic.pincer). See `source` for details.",
             );
         }
 
@@ -528,7 +528,7 @@ mod tests {
 
     fn release_evidence_store(home: &Path) -> DirectCaptureEvidenceStore {
         direct_capture_evidence_store_for_identity(
-            "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
+            "/Applications/Pincer.app/Contents/MacOS/pincer",
             home,
             Some("driver-daemon"),
         )
@@ -538,30 +538,30 @@ mod tests {
     #[test]
     fn recognizes_release_and_local_driver_bundles() {
         assert_eq!(
-            driver_bundle_id_for_executable(
-                "/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
-            ),
-            Some("com.trycua.driver")
+            driver_bundle_id_for_executable("/Applications/Pincer.app/Contents/MacOS/pincer"),
+            Some("io.github.modcritic.pincer")
         );
         assert_eq!(
             driver_bundle_id_for_executable(
-                "/Applications/CuaDriverLocal.app/Contents/MacOS/cua-driver-local"
+                "/Applications/PincerLocal.app/Contents/MacOS/pincer-local"
             ),
-            Some("com.trycua.driver.local")
+            Some("io.github.modcritic.pincer.local")
         );
         assert_eq!(
-            driver_bundle_id_for_executable("/Users/test/.local/bin/cua-driver-local"),
+            driver_bundle_id_for_executable("/Users/test/.local/bin/pincer-local"),
             None
         );
     }
 
     #[test]
     fn evidence_store_is_scoped_to_the_current_driver_identity() {
-        let home =
-            std::env::temp_dir().join(format!("cua-direct-capture-test-{}", uuid::Uuid::new_v4()));
+        let home = std::env::temp_dir().join(format!(
+            "pincer-direct-capture-test-{}",
+            uuid::Uuid::new_v4()
+        ));
         let release = release_evidence_store(&home);
         let local = direct_capture_evidence_store_for_identity(
-            "/Applications/CuaDriverLocal.app/Contents/MacOS/cua-driver-local",
+            "/Applications/PincerLocal.app/Contents/MacOS/pincer-local",
             &home,
             Some("driver-daemon"),
         )
@@ -571,14 +571,14 @@ mod tests {
         assert!(release.load().is_some());
         assert!(local.load().is_none());
         assert!(direct_capture_evidence_store_for_identity(
-            "/usr/local/bin/cua-driver",
+            "/usr/local/bin/pincer",
             &home,
             Some("driver-daemon"),
         )
         .is_none());
         for attribution in [Some("caller"), Some("host"), None] {
             assert!(direct_capture_evidence_store_for_identity(
-                "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
+                "/Applications/Pincer.app/Contents/MacOS/pincer",
                 &home,
                 attribution,
             )
@@ -589,8 +589,10 @@ mod tests {
 
     #[test]
     fn explicit_probe_resolves_one_evidence_transition() {
-        let home =
-            std::env::temp_dir().join(format!("cua-direct-capture-test-{}", uuid::Uuid::new_v4()));
+        let home = std::env::temp_dir().join(format!(
+            "pincer-direct-capture-test-{}",
+            uuid::Uuid::new_v4()
+        ));
         let store = release_evidence_store(&home);
 
         assert!(resolve_direct_capture_verification(
@@ -623,11 +625,13 @@ mod tests {
     fn failed_record_and_clear_returns_only_error() {
         use std::os::unix::fs::PermissionsExt as _;
 
-        let home =
-            std::env::temp_dir().join(format!("cua-direct-capture-test-{}", uuid::Uuid::new_v4()));
+        let home = std::env::temp_dir().join(format!(
+            "pincer-direct-capture-test-{}",
+            uuid::Uuid::new_v4()
+        ));
         let store = release_evidence_store(&home);
         store.record_now().expect("record prior evidence");
-        let state_directory = home.join(".cua-driver");
+        let state_directory = home.join(".pincer");
         std::fs::set_permissions(&state_directory, std::fs::Permissions::from_mode(0o500))
             .expect("make evidence directory read-only");
 
@@ -657,22 +661,22 @@ mod tests {
     #[test]
     fn direct_host_runtime_cannot_raise_permission_prompts() {
         let _guard = env_lock();
-        let original = swap_env(cua_driver_core::EMBEDDED_ENV, None);
+        let original = swap_env(pincer_core::EMBEDDED_ENV, None);
         assert!(
             should_prompt_permissions(true, false),
-            "standalone Cua-owned runtime retains its explicit prompt path"
+            "standalone Pincer-owned runtime retains its explicit prompt path"
         );
         assert!(
             !should_prompt_permissions(true, true),
             "direct host-owned runtime must force read-only permission checks"
         );
-        restore_env(cua_driver_core::EMBEDDED_ENV, original);
+        restore_env(pincer_core::EMBEDDED_ENV, original);
     }
 
     #[test]
     fn direct_runtime_reports_host_attribution() {
         let _guard = env_lock();
-        let original = swap_env(cua_driver_core::EMBEDDED_ENV, None);
+        let original = swap_env(pincer_core::EMBEDDED_ENV, None);
         let source = permission_source(true, None);
         assert_eq!(
             source.get("attribution").and_then(|value| value.as_str()),
@@ -684,19 +688,16 @@ mod tests {
                 .and_then(serde_json::Value::as_bool),
             Some(true)
         );
-        restore_env(cua_driver_core::EMBEDDED_ENV, original);
+        restore_env(pincer_core::EMBEDDED_ENV, original);
     }
 
     #[test]
     fn immutable_runtime_host_label_wins_over_process_environment() {
         let _guard = env_lock();
-        let original_host = swap_env(
-            cua_driver_core::HOST_BUNDLE_ID_ENV,
-            Some("com.example.stale"),
-        );
+        let original_host = swap_env(pincer_core::HOST_BUNDLE_ID_ENV, Some("com.example.stale"));
         let source = permission_source(true, Some("com.example.runtime"));
         assert_eq!(source["host_bundle_id"], "com.example.runtime");
-        restore_env(cua_driver_core::HOST_BUNDLE_ID_ENV, original_host);
+        restore_env(pincer_core::HOST_BUNDLE_ID_ENV, original_host);
     }
 
     #[test]
@@ -742,12 +743,12 @@ mod tests {
         // The disclaim env var is caller-controlled, so on its own it must not
         // make `check_permissions` claim the booleans reflect the daemon's TCC
         // identity. Daemon attribution additionally requires the binary to live
-        // inside the code-signed `CuaDriver.app` bundle — the test runner does
+        // inside the code-signed `Pincer.app` bundle — the test runner does
         // not, so even with the env var present we must fail closed to "caller".
         let _guard = env_lock();
-        let name = cua_driver_core::RESPONSIBILITY_DISCLAIMED_ENV;
+        let name = pincer_core::RESPONSIBILITY_DISCLAIMED_ENV;
         let original = swap_env(name, Some("1"));
-        let embedded = swap_env(cua_driver_core::EMBEDDED_ENV, None);
+        let embedded = swap_env(pincer_core::EMBEDDED_ENV, None);
 
         let source = permission_source(false, None);
         assert_eq!(
@@ -756,18 +757,15 @@ mod tests {
             "env-var presence alone must not yield daemon attribution"
         );
 
-        restore_env(cua_driver_core::EMBEDDED_ENV, embedded);
+        restore_env(pincer_core::EMBEDDED_ENV, embedded);
         restore_env(name, original);
     }
 
     #[test]
     fn embedded_mode_reports_host_attribution() {
         let _guard = env_lock();
-        let embedded = swap_env(cua_driver_core::EMBEDDED_ENV, Some("1"));
-        let host = swap_env(
-            cua_driver_core::HOST_BUNDLE_ID_ENV,
-            Some("com.example.host"),
-        );
+        let embedded = swap_env(pincer_core::EMBEDDED_ENV, Some("1"));
+        let host = swap_env(pincer_core::HOST_BUNDLE_ID_ENV, Some("com.example.host"));
 
         let source = permission_source(false, None);
         assert_eq!(
@@ -780,8 +778,8 @@ mod tests {
         );
         assert_eq!(source.get("embedded").and_then(|v| v.as_bool()), Some(true));
 
-        restore_env(cua_driver_core::HOST_BUNDLE_ID_ENV, host);
-        restore_env(cua_driver_core::EMBEDDED_ENV, embedded);
+        restore_env(pincer_core::HOST_BUNDLE_ID_ENV, host);
+        restore_env(pincer_core::EMBEDDED_ENV, embedded);
     }
 
     #[test]
@@ -789,8 +787,8 @@ mod tests {
         // Both caller-controlled env vars together must still not produce
         // "driver-daemon" — embedded mode may only DOWNGRADE attribution.
         let _guard = env_lock();
-        let embedded = swap_env(cua_driver_core::EMBEDDED_ENV, Some("1"));
-        let disclaim = swap_env(cua_driver_core::RESPONSIBILITY_DISCLAIMED_ENV, Some("1"));
+        let embedded = swap_env(pincer_core::EMBEDDED_ENV, Some("1"));
+        let disclaim = swap_env(pincer_core::RESPONSIBILITY_DISCLAIMED_ENV, Some("1"));
 
         let source = permission_source(false, None);
         assert_eq!(
@@ -798,20 +796,20 @@ mod tests {
             Some("host"),
         );
 
-        restore_env(cua_driver_core::RESPONSIBILITY_DISCLAIMED_ENV, disclaim);
-        restore_env(cua_driver_core::EMBEDDED_ENV, embedded);
+        restore_env(pincer_core::RESPONSIBILITY_DISCLAIMED_ENV, disclaim);
+        restore_env(pincer_core::EMBEDDED_ENV, embedded);
     }
 
     #[test]
     fn embedded_env_requires_exact_value_one() {
         let _guard = env_lock();
-        let embedded = swap_env(cua_driver_core::EMBEDDED_ENV, Some("true"));
+        let embedded = swap_env(pincer_core::EMBEDDED_ENV, Some("true"));
         let source = permission_source(false, None);
         assert_ne!(
             source.get("attribution").and_then(|v| v.as_str()),
             Some("host"),
-            "only CUA_DRIVER_EMBEDDED=1 may enable embedded mode"
+            "only PINCER_EMBEDDED=1 may enable embedded mode"
         );
-        restore_env(cua_driver_core::EMBEDDED_ENV, embedded);
+        restore_env(pincer_core::EMBEDDED_ENV, embedded);
     }
 }

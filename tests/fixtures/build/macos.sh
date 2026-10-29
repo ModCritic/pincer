@@ -34,7 +34,7 @@ done
 archive_existing() {
     local target="$1"
     [[ -e "$target" ]] || return 0
-    local archive_root="${TMPDIR:-/tmp}/cua-driver-fixture-build-archive"
+    local archive_root="${TMPDIR:-/tmp}/pincer-fixture-build-archive"
     local stamp
     stamp="$(date +%Y%m%d-%H%M%S)-$$"
     mkdir -p "$archive_root"
@@ -79,7 +79,7 @@ build_app() {
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key><string>$name</string>
-    <key>CFBundleIdentifier</key><string>com.trycua.harness.$(echo "$stage_subdir" | sed 's/harness-//')</string>
+    <key>CFBundleIdentifier</key><string>io.github.modcritic.pincer.harness.$(echo "$stage_subdir" | sed 's/harness-//')</string>
     <key>CFBundleName</key><string>$name</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0.0</string>
@@ -95,28 +95,28 @@ EOF
 }
 
 if [[ -z "$ONLY" || "$ONLY" == "appkit" ]] && [[ "$SKIP" != "appkit" ]]; then
-    build_app "CuaTestHarness.AppKit" \
+    build_app "PincerTestHarness.AppKit" \
         "$HARNESS_DIR/apps/macos/appkit" \
         "" \
         "harness-appkit"
 fi
 
 if [[ -z "$ONLY" || "$ONLY" == "swiftui" ]] && [[ "$SKIP" != "swiftui" ]]; then
-    build_app "CuaTestHarness.SwiftUI" \
+    build_app "PincerTestHarness.SwiftUI" \
         "$HARNESS_DIR/apps/macos/swiftui" \
         "" \
         "harness-swiftui"
 fi
 
 if [[ -z "$ONLY" || "$ONLY" == "wkwebview" ]] && [[ "$SKIP" != "wkwebview" ]]; then
-    build_app "CuaTestHarness.WKWebView" \
+    build_app "PincerTestHarness.WKWebView" \
         "$HARNESS_DIR/apps/macos/wkwebview" \
         "-framework WebKit" \
         "harness-wkwebview"
     # Bundle the SHARED web DOM (same index.html the Windows WebView2 and the
     # Electron harnesses load) into the app's Resources so the WKWebView is
     # self-contained and reuses the canonical content rather than duplicating it.
-    WK_RES="$STAGE_DIR/harness-wkwebview/CuaTestHarness.WKWebView.app/Contents/Resources/web"
+    WK_RES="$STAGE_DIR/harness-wkwebview/PincerTestHarness.WKWebView.app/Contents/Resources/web"
     mkdir -p "$WK_RES"
     cp "$HARNESS_DIR/shared/web/index.html" "$WK_RES/index.html"
     echo "    → bundled shared/web/index.html into Resources/web/"

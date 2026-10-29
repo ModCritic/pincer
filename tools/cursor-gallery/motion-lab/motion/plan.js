@@ -9,7 +9,7 @@ import { sampleTimed } from './generators.js';
 import { idles } from './behaviors.js';
 import { center, inside } from './scenes.js';
 
-// The Cua arrow artwork points up-left at rest; the tip angle in screen space.
+// The Pincer arrow artwork points up-left at rest; the tip angle in screen space.
 export const TIP_ANGLE = -0.75 * Math.PI;
 
 export function resolveParams(candidate, overrides = {}) {
@@ -266,7 +266,7 @@ function applyCarryLag(points, { omega = 18, zeta = 0.7 } = {}) {
 
 // Heading channel `rot` (radians added to the artwork's rest pose).
 //   fixed   - classic OS pointer, never rotates
-//   tangent - today's Cua glide: the tip leads along the velocity
+//   tangent - today's Pincer glide: the tip leads along the velocity
 //   bank    - tangent plus a lean into turns, rights itself on arrival
 //   lean    - tilts with horizontal velocity (cartoon), no full rotation
 function applyHeading(points, mode, { gain = 1, maxBank = 0.35 } = {}) {

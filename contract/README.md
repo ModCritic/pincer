@@ -1,16 +1,16 @@
-# Experimental cua-driver SDK contract
+# Experimental Pincer SDK contract
 
-This directory contains the checked-in, generated portable cua-driver SDK
+This directory contains the checked-in, generated portable pincer SDK
 contract. The Rust crate at
-`rust/crates/cua-driver-contract` is the source of truth. It generates this
+`rust/crates/pincer-contract` is the source of truth. It generates this
 manifest and exports the request/result records consumed by the live daemon and
 the UniFFI SDK. Python and TypeScript bindings are generated from the compiled
 Rust library by `scripts/generate-uniffi-bindings.mjs`.
 
 Execution, platform integration, policy, and permission handling remain in
-Rust. `CuaDriver.create()` owns that runtime in the importing process;
+Rust. `Pincer.create()` owns that runtime in the importing process;
 `connect()` uses an existing daemon through the shared Rust socket client.
-Agents independently use the public `cua-driver mcp`
+Agents independently use the public `pincer mcp`
 surface through their runtime's existing MCP client.
 
 ## Scope and compatibility
@@ -72,7 +72,7 @@ The checked-observation slice is also shared by MCP and both generated SDKs:
 - A bounded poll can require consecutive stable samples. `unknown` never
   implies success.
 - `include_screenshot=true` adds final image content for a multimodal agent
-  harness to interpret. Cua Driver does not OCR or assign task meaning to it.
+  harness to interpret. Pincer does not OCR or assign task meaning to it.
 
 Session contracts are marked `canonical_runtime`: the same typed Rust input,
 output, and metadata declaration builds the live MCP tool. The preferred action
@@ -109,7 +109,7 @@ Compatibility is tracked separately at each boundary:
 | Field | Current | Meaning |
 | --- | --- | --- |
 | `contract_version` | `0.8.0` | Generated manifest and typed SDK shape |
-| `tools_list_schema_version` | `1` | cua-driver `tools/list` extension shape |
+| `tools_list_schema_version` | `1` | pincer `tools/list` extension shape |
 | `capability_version` | `1` | Additive capability-token vocabulary |
 | `mcp_protocol_version` | `2025-06-18` | Legacy `initialize.params.protocolVersion` and loopback HTTP compatibility version; modern stdio negotiation is endpoint-owned |
 
@@ -123,11 +123,11 @@ generate or maintain separate MCP transports.
 From `rust/`:
 
 ```bash
-cargo run -p cua-driver-contract --bin cua-contract-gen -- all
-cargo run -p cua-driver-contract --bin cua-contract-gen -- all --check
-cargo test -p cua-driver-contract
-cargo test -p cua-driver-core --test contract_parity
-cargo test -p cua-driver --test schema_consistency_test \
+cargo run -p pincer-contract --bin pincer-contract-gen -- all
+cargo run -p pincer-contract --bin pincer-contract-gen -- all --check
+cargo test -p pincer-contract
+cargo test -p pincer-core --test contract_parity
+cargo test -p pincer --test schema_consistency_test \
   portable_desktop_contracts_are_accepted_by_active_backend
 ```
 

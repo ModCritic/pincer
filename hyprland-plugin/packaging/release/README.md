@@ -94,11 +94,11 @@ The package version follows the Driver release version; the plugin's
 CMake version is recorded separately.
 
 For component release assets, add `--release-assets`. This mode requires the
-exact `cua-driver-rs-vDRIVER_VERSION` tag to resolve to `COMMIT_SHA` and emits
+exact `pincer-vDRIVER_VERSION` tag to resolve to `COMMIT_SHA` and emits
 only two uniquely named archives:
 
-- `cua-hyprland-plugin-DRIVER_VERSION-COMMIT_SHA.tar.gz`: pinned source.
-- `cua-hyprland-plugin-DRIVER_VERSION-COMMIT_SHA-build-kit.tar.gz`: `PKGBUILD`,
+- `pincer-hyprland-plugin-DRIVER_VERSION-COMMIT_SHA.tar.gz`: pinned source.
+- `pincer-hyprland-plugin-DRIVER_VERSION-COMMIT_SHA-build-kit.tar.gz`: `PKGBUILD`,
   `SOURCE-PROVENANCE.json`, operator `README.md`, `lifecycle.py`, and `SHA256SUMS`.
 
 The kit's `SHA256SUMS` remains inside its archive to avoid colliding with
@@ -124,7 +124,7 @@ and run `makepkg` as an ordinary user. `makepkg` can download the pinned source
 tarball itself; no Git checkout is needed.
 
 If the compiler is staged outside `/usr/bin/g++`, select its absolute executable
-path with `CUA_RELEASE_CXX` when invoking `makepkg`. The recipe does not download
+path with `PINCER_RELEASE_CXX` when invoking `makepkg`. The recipe does not download
 or install a compiler, configure a runtime search path, or replace a compositor.
 The compiler and compositor must use the matching shared C++ runtime in the
 target environment. The recipe records the compiler executable, compiler
@@ -132,7 +132,7 @@ runtime, compositor, and module hashes as build provenance.
 It also checks that `ldd` resolves the compositor and built module to the same
 runtime bytes as the compiler. A custom compiler does not waive this check.
 
-The build enables `CUA_HYPRLAND_INPUT=ON`, disables experimental signed input and
+The build enables `PINCER_HYPRLAND_INPUT=ON`, disables experimental signed input and
 input tracing, and runs the bundled CTest suite. Packaging also runs tests, so
 `--nocheck` cannot produce an unchecked package. The package contains only the
 module, license, and source/build provenance. It has no install hooks, autoload,

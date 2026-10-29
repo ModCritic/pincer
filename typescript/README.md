@@ -1,16 +1,16 @@
-# cua-driver TypeScript SDK
+# Pincer TypeScript SDK
 
-Rust-backed TypeScript/Node SDK for Cua Driver client applications.
+Rust-backed TypeScript/Node SDK for Pincer client applications.
 
 ## Product boundary
 
 The package root exposes the native SDK:
 
 ```ts
-import { CuaDriver } from "@trycua/cua-driver"
+import { Pincer } from "pincer-driver"
 ```
 
-`EmbeddedCuaDriverHost` is exported from both the package root and the
+`EmbeddedPincerHost` is exported from both the package root and the
 organizational `/embedded` entrypoint; they are the same generated Rust object.
 The `/electron` entrypoint is a thin compatibility naming layer over the same
 generated macOS permission functions. The package does not contain a TypeScript
@@ -21,27 +21,27 @@ for prerequisites, ownership, and release limits. Agents already have
 runtime-neutral MCP clients and should configure the executable directly:
 
 ```text
-cua-driver mcp
+pincer mcp
 ```
 
-The removed pre-release MCP facade used `CuaDriver.stdio()`, `*Args`
+The removed pre-release MCP facade used `Pincer.stdio()`, `*Args`
 interfaces, and a TypeScript stdio transport. Application code imports the
-typed Rust-backed SDK shown below; agent code supplies `cua-driver mcp` to its
+typed Rust-backed SDK shown below; agent code supplies `pincer mcp` to its
 agent SDK.
 
 ## SDK example
 
 ```ts
 import {
-  CuaDriver,
+  Pincer,
   CursorReducedMotion,
   EndSessionInput,
   GetDesktopStateInput,
   SetAgentCursorThemeInput,
   StartSessionInput,
-} from "@trycua/cua-driver"
+} from "pincer-driver"
 
-const driver = CuaDriver.create(undefined) // same process; no daemon
+const driver = Pincer.create(undefined) // same process; no daemon
 await driver.startSession(
   StartSessionInput.new({
     session: "demo",
@@ -52,7 +52,7 @@ try {
   await driver.setAgentCursorTheme(
     SetAgentCursorThemeInput.new({
       session: "demo",
-      themeId: "cua.default",
+      themeId: "pincer.default",
       reducedMotion: CursorReducedMotion.Auto,
     }),
   )
@@ -118,11 +118,11 @@ for discovery, token selection, verification, and shutdown.
 `standard` is promptless for normal automation. An application that needs to
 authorize attachment to an existing logged-in Chromium profile can construct a
 configured runtime with
-`CuaDriver.createConfiguredWithAuthorizationHost(options, host)`. Implement
+`Pincer.createConfiguredWithAuthorizationHost(options, host)`. Implement
 the `DriverAuthorizationHost` interface in trusted application code and return
 the request's exact digest with `Allow`, `Deny`, or `Cancel`.
 
-`CuaDriver.createConfiguredWithActivityObserver(options, observer)` emits
+`Pincer.createConfiguredWithActivityObserver(options, observer)` emits
 content-free action, refusal, grant, and session events. The observer cannot
 change authorization or tool results. Use
 `createConfiguredWithHostIntegrations` when the application needs both.
@@ -130,7 +130,7 @@ change authorization or tool results. Use
 See upstream's [SDK reference](https://cua.ai/docs/cua-driver/guides/use-the-sdk#constructors)
 for complete examples and the callback trust rules.
 
-`CuaDriver.connect(socketPath)` remains available while existing applications
+`Pincer.connect(socketPath)` remains available while existing applications
 migrate. It exposes the same methods over the installed daemon, but it does not
 provide a second SDK contract.
 
@@ -142,20 +142,20 @@ await `shutdown()` first.
 ## Daemon-backed MCP hosts
 
 A signed desktop application that must also expose MCP to an external agent can
-bundle `cua-driver`, start it as a direct child, and connect both application
+bundle `pincer`, start it as a direct child, and connect both application
 code and its agent runtime to the same private daemon:
 
 ```ts
-import { CuaDriver, EmbeddedCuaDriverHost } from "@trycua/cua-driver"
+import { Pincer, EmbeddedPincerHost } from "pincer-driver"
 
-const embedded = new EmbeddedCuaDriverHost(
-  "/path/inside/YourApp.app/Contents/Resources/cua-driver",
+const embedded = new EmbeddedPincerHost(
+  "/path/inside/YourApp.app/Contents/Resources/pincer",
   "com.example.your-app",
 )
 
 try {
   const connection = await embedded.start()
-  const driver = CuaDriver.connect(connection.socketPath)
+  const driver = Pincer.connect(connection.socketPath)
   try {
     // Application calls use driver; an agent runtime uses connection.mcp.
   } finally {
@@ -183,7 +183,7 @@ import {
   hasRequiredMacOSPermissions,
   openMacOSScreenRecordingSettings,
   requestMacOSPermissions,
-} from "@trycua/cua-driver/electron"
+} from "pincer-driver/electron"
 
 const permissions = requestMacOSPermissions()
 if (!hasRequiredMacOSPermissions(permissions) && !permissions.screenRecording) {
@@ -205,7 +205,7 @@ Rust host also closes a parent-liveness pipe on normal destruction so the daemon
 cannot remain orphaned after a host crash.
 
 The npm package installs one optional native package selected for the current
-OS and CPU. It does not bundle the `cua-driver` executable: ship that executable
+OS and CPU. It does not bundle the `pincer` executable: ship that executable
 outside ASAR, preserve its executable bit, and sign it before signing and
 notarizing the enclosing app.
 
@@ -213,7 +213,7 @@ Windows native packages statically link the Microsoft C runtime, so importing
 the SDK on a clean x64 or ARM64 Windows installation does not require a separate
 Visual C++ Redistributable installation.
 
-Each native package also carries Cua's copy-mode build of the pinned
+Each native package also carries Pincer's copy-mode build of the pinned
 `@ubjs/node` N-API runtime. Upstream `0.31.0-3` returns Rust-owned memory through
 external ArrayBuffers, which Electron 20 and newer intentionally reject because
 of V8's memory cage. The copy-mode runtime keeps the generated UniFFI API and

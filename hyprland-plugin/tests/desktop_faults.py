@@ -1,6 +1,6 @@
 """External adversaries for a selected disposable Hyprland VM, never agent input.
 
-Native agent actions belong to Cua Driver. Run a separate fault-only episode to
+Native agent actions belong to Pincer. Run a separate fault-only episode to
 measure legitimate lock/DPMS primary-seat changes. No control claims that those
 changes are uninterrupted-user behavior. Lock-client failure can leave Wayland
 locked by design: discard the disposable guest if graceful recovery fails.

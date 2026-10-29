@@ -1,4 +1,4 @@
-"""Role table and cua.jev_choice_request_v2 contract tests (RFC #4268)."""
+"""Role table and pincer.jev_choice_request_v2 contract tests (RFC #4268)."""
 
 from __future__ import annotations
 
@@ -145,7 +145,7 @@ class RoleTableTest(unittest.TestCase):
 class V2ContractTest(unittest.TestCase):
     def test_v2_request_validates_with_sources_and_elements(self) -> None:
         validated = validate_request(v2_request())
-        self.assertEqual(validated["schema"], "cua.jev_choice_request_v2")
+        self.assertEqual(validated["schema"], "pincer.jev_choice_request_v2")
         self.assertEqual(validated["snapshot_id"], "s0000002a")
         self.assertEqual(len(validated["elements"]), 3)
         self.assertEqual(validated["candidates"][0]["source"], "ax")
@@ -182,7 +182,7 @@ class V2ContractTest(unittest.TestCase):
             "unknown state": lambda r: r["elements"][0].__setitem__("state", "hidden"),
             "too many elements": lambda r: r.__setitem__("elements", r["elements"] * 22),
             "missing required": lambda r: r.pop("regions"),
-            "unknown schema": lambda r: r.__setitem__("schema", "cua.jev_choice_request_v3"),
+            "unknown schema": lambda r: r.__setitem__("schema", "pincer.jev_choice_request_v3"),
         }
         for name, mutate in mutations.items():
             request = copy.deepcopy(v2_request())
@@ -208,7 +208,7 @@ class V2ContractTest(unittest.TestCase):
             check=True,
         )
         response = json.loads(result.stdout)
-        self.assertEqual(response["schema"], "cua.jev_choice_v1")
+        self.assertEqual(response["schema"], "pincer.jev_choice_v1")
         self.assertEqual(response["selected_id"], "ax:button:increment")
 
     def test_decision_cli_answers_v2_with_decision_choice_v1(self) -> None:
@@ -221,7 +221,7 @@ class V2ContractTest(unittest.TestCase):
             check=True,
         )
         response = json.loads(result.stdout)
-        self.assertEqual(response["schema"], "cua.decision_choice_v1")
+        self.assertEqual(response["schema"], "pincer.decision_choice_v1")
         self.assertEqual(response["kind"], "selected")
         self.assertEqual(response["selected_id"], "ax:button:increment")
 

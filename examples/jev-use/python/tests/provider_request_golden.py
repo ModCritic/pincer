@@ -227,7 +227,7 @@ def payloads(build: Build, choose: Choose) -> dict[str, Any]:
             )
     return deduplicate(
         {
-            "schema": "cua.jev_use_provider_request_golden_v1",
+            "schema": "pincer.jev_use_provider_request_golden_v1",
             "language": "python",
             "runs": runs,
             "single_requests": single_requests(build, choose),

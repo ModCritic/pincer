@@ -9,7 +9,7 @@ void check(bool condition) { if (!condition) std::abort(); }
 }
 
 int main() {
-    using cua::hyprland::DragGeometry;
+    using pincer::hyprland::DragGeometry;
     std::array<int, 4> cached{10, 10, 640, 480};
     std::uint64_t revision = 2;
     const auto refresh = [&](const std::array<int, 4>& actual) {

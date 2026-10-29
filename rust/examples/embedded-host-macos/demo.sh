@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build + run the one-grant embedding demo on a freshly reset TCC state.
 # MANUAL — needs a real Mac with a user at the keyboard; TCC prompts cannot
-# be granted from CI. See ../../Skills/cua-driver/EMBEDDING.md for the pass
+# be granted from CI. See ../../Skills/pincer/EMBEDDING.md for the pass
 # criteria.
 #
 #   ./demo.sh                      # ad-hoc signature (fine for local demos)
@@ -10,9 +10,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP=ExampleAgentHarness.app
-BUNDLE_ID=${BUNDLE_ID:-com.trycua.example-agent-harness}
+BUNDLE_ID=${BUNDLE_ID:-io.github.modcritic.pincer.example-agent-harness}
 SIGN_IDENTITY=${SIGN_IDENTITY:--}   # "-" = ad-hoc
-LOG=/tmp/cua-embedded-demo.log
+LOG=/tmp/pincer-embedded-demo.log
 
 # Rebuilding re-signs the bundle; a new (ad-hoc) signature can orphan an
 # existing TCC grant row, so keep the same build across the grant + re-run
@@ -55,12 +55,12 @@ fi
 echo "3/4 launching the host — grant BOTH prompts, then re-run with"
 echo "    SKIP_RESET=1 ./demo.sh   (TCC answers are cached per process)."
 echo "    (open(1) is correct HERE: the HOST must be its own responsible"
-echo "     process; it then spawns cua-driver directly as its child.)"
+echo "     process; it then spawns pincer directly as its child.)"
 # `open` does not forward shell env; route a custom driver path through
 # launchd so the app can see it.
-if [ -n "${CUA_DRIVER_PATH:-}" ]; then
-    launchctl setenv CUA_DRIVER_PATH "$CUA_DRIVER_PATH"
-    trap 'launchctl unsetenv CUA_DRIVER_PATH' EXIT
+if [ -n "${PINCER_PATH:-}" ]; then
+    launchctl setenv PINCER_PATH "$PINCER_PATH"
+    trap 'launchctl unsetenv PINCER_PATH' EXIT
 fi
 rm -f "$LOG"
 open "$APP"
@@ -68,7 +68,7 @@ open "$APP"
 echo "4/4 following $LOG — expect attribution 'host', a screenshot,"
 echo "    Finder window state, a visible agent-cursor glide, and"
 echo "    'DEMO COMPLETE: PASS'. Then verify System Settings → Privacy &"
-echo "    Security lists ONLY ExampleAgentHarness (no CuaDriver)."
+echo "    Security lists ONLY ExampleAgentHarness (no Pincer)."
 # Portable wait (stock macOS has no timeout(1)).
 for _ in $(seq 1 120); do
     grep -q "DEMO COMPLETE\|grant the missing item(s)" "$LOG" 2>/dev/null && break

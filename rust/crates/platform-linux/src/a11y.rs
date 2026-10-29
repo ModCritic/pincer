@@ -20,7 +20,7 @@
 //! screen-reader setting and can enter a high-frequency settings write loop when
 //! they disagree. Cinnamon therefore receives no advertisement by default.
 //! Other desktops retain the Chromium signal for compatibility, and a caller
-//! can choose either policy explicitly with `CUA_DRIVER_RS_A11Y_ADVERTISE_MODE`.
+//! can choose either policy explicitly with `PINCER_A11Y_ADVERTISE_MODE`.
 //!
 //! Everything here is best-effort. A session without an accessibility bus (some
 //! headless or minimal setups) just yields an error we log and ignore; enabling
@@ -59,10 +59,8 @@ pub fn ensure_chromium_accessibility_enabled() {
     static ADVERTISED: Once = Once::new();
     ADVERTISED.call_once(|| {
         let mode = advertise_mode_from(
-            std::env::var_os("CUA_DRIVER_RS_DISABLE_A11Y_ADVERTISE").is_some(),
-            std::env::var("CUA_DRIVER_RS_A11Y_ADVERTISE_MODE")
-                .ok()
-                .as_deref(),
+            std::env::var_os("PINCER_DISABLE_A11Y_ADVERTISE").is_some(),
+            std::env::var("PINCER_A11Y_ADVERTISE_MODE").ok().as_deref(),
             std::env::var("XDG_CURRENT_DESKTOP")
                 .or_else(|_| std::env::var("XDG_SESSION_DESKTOP"))
                 .or_else(|_| std::env::var("DESKTOP_SESSION"))
@@ -90,7 +88,7 @@ fn advertise_accessibility_to_session(mode: AdvertiseMode) -> anyhow::Result<()>
     // Run the one-shot bus work on a dedicated OS thread that owns a small
     // runtime of its own, then join it — no nesting, torn down once it returns.
     std::thread::Builder::new()
-        .name("cua-a11y-advertise".into())
+        .name("pincer-a11y-advertise".into())
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -147,7 +145,7 @@ fn advertise_mode_from(
         Some(other) => {
             tracing::warn!(
                 mode = other,
-                "unknown CUA_DRIVER_RS_A11Y_ADVERTISE_MODE; using desktop default"
+                "unknown PINCER_A11Y_ADVERTISE_MODE; using desktop default"
             );
             desktop_default_mode(desktop)
         }

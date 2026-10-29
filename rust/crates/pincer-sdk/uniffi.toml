@@ -1,0 +1,5 @@
+[bindings.python]
+cdylib_name = "pincer_sdk"
+
+[bindings.python.external_packages]
+pincer_contract = "pincer_driver._native_contract"

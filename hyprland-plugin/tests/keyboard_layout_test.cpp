@@ -1,5 +1,5 @@
 // Adapted from tests/keyboard_layout_test.cpp in omacom/omarchy-pkgs#473
-// (pkgbuilds/cua-hyprland-plugin/independent-keymaps.patch), by Spencer Bull.
+// (pkgbuilds/pincer-hyprland-plugin/independent-keymaps.patch), by Spencer Bull.
 // Copyright (c) David Heinemeier Hansson. Used under the MIT License, whose
 // permission notice is the same as this repository's LICENSE.md.
 #include "keymap_equivalence.hpp"
@@ -10,7 +10,7 @@
 #include <memory>
 #include <string>
 
-using namespace cua::hyprland;
+using namespace pincer::hyprland;
 namespace {
 void check(bool condition, const char* message) {
     if (!condition) { std::cerr << "FAILED: " << message << '\n'; std::exit(1); }
@@ -33,7 +33,7 @@ int main() {
     Map agent{context ? xkb_keymap_new_from_names(context.get(), &agent_names, XKB_KEYMAP_COMPILE_NO_FLAGS) : nullptr,
         xkb_keymap_unref};
     if (!agent) {
-        if (std::getenv("CUA_HYPRLAND_REQUIRE_XKBCOMMON")) check(false, "XKB data unavailable");
+        if (std::getenv("PINCER_HYPRLAND_REQUIRE_XKBCOMMON")) check(false, "XKB data unavailable");
         std::puts("SKIP: XKB data unavailable");
         return 77;
     }

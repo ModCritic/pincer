@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# cua-driver-rs local/debug installer (macOS + Linux). Builds from the
+# pincer local/debug installer (macOS + Linux). Builds from the
 # current source tree into a durable, separate local-product namespace.
 #
 # Private helper — invoked by install-local.sh (the multi-backend
@@ -16,7 +16,7 @@
 #   --bin-dir <path>
 #                install the visible symlink to <path> instead of
 #                ~/.local/bin. Takes precedence over
-#                CUA_DRIVER_LOCAL_INSTALL_DIR; must be absolute.
+#                PINCER_LOCAL_INSTALL_DIR; must be absolute.
 #
 # This script is for the developer loop (rapid edit/build/test on a
 # Linux or macOS host). Comments below that mention install.sh or
@@ -25,14 +25,14 @@
 #
 # Linux layout produced (matches install.sh):
 #
-#   ${CUA_DRIVER_LOCAL_HOME:-$HOME/.cua-driver-local}/packages/
-#       releases/<version>-local-<config>-<target>/cua-driver-local
-#       current/cua-driver-local
-#   ${CUA_DRIVER_LOCAL_INSTALL_DIR:-$HOME/.local/bin}/cua-driver-local
+#   ${PINCER_LOCAL_HOME:-$HOME/.pincer-local}/packages/
+#       releases/<version>-local-<config>-<target>/pincer-local
+#       current/pincer-local
+#   ${PINCER_LOCAL_INSTALL_DIR:-$HOME/.local/bin}/pincer-local
 #
 # macOS layout produced:
-#   /Applications/CuaDriverLocal.app/Contents/MacOS/cua-driver-local
-#   $HOME/.local/bin/cua-driver-local -> .../CuaDriverLocal.app/Contents/MacOS/cua-driver-local
+#   /Applications/PincerLocal.app/Contents/MacOS/pincer-local
+#   $HOME/.local/bin/pincer-local -> .../PincerLocal.app/Contents/MacOS/pincer-local
 #
 # The version string carries `-local-debug` / `-local-release` so it
 # never collides with a real release dir and is trivial to GC.
@@ -48,21 +48,21 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../rust" && pwd)"
 # derive HEAD from the checkout that is actually being built. Keep dirty local
 # developer builds honest instead of claiming byte-for-byte provenance from
 # the clean commit.
-if [ -z "${CUA_DRIVER_SOURCE_SHA:-}" ]; then
+if [ -z "${PINCER_SOURCE_SHA:-}" ]; then
     if ! command -v git >/dev/null 2>&1; then
-        echo "error: git is required to determine CUA_DRIVER_SOURCE_SHA; set it explicitly for a source snapshot" >&2
+        echo "error: git is required to determine PINCER_SOURCE_SHA; set it explicitly for a source snapshot" >&2
         exit 1
     fi
-    CUA_DRIVER_SOURCE_SHA="$(git -C "$REPO_ROOT" rev-parse --verify 'HEAD^{commit}' 2>/dev/null || true)"
-    if ! printf '%s' "$CUA_DRIVER_SOURCE_SHA" | grep -Eq '^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$'; then
-        echo "error: could not determine an exact Git commit for $REPO_ROOT; set CUA_DRIVER_SOURCE_SHA explicitly" >&2
+    PINCER_SOURCE_SHA="$(git -C "$REPO_ROOT" rev-parse --verify 'HEAD^{commit}' 2>/dev/null || true)"
+    if ! printf '%s' "$PINCER_SOURCE_SHA" | grep -Eq '^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$'; then
+        echo "error: could not determine an exact Git commit for $REPO_ROOT; set PINCER_SOURCE_SHA explicitly" >&2
         exit 1
     fi
     if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=normal 2>/dev/null)" ]; then
-        CUA_DRIVER_SOURCE_SHA="${CUA_DRIVER_SOURCE_SHA}-dirty"
+        PINCER_SOURCE_SHA="${PINCER_SOURCE_SHA}-dirty"
     fi
 fi
-export CUA_DRIVER_SOURCE_SHA
+export PINCER_SOURCE_SHA
 
 BOLD=$(tput bold 2>/dev/null || true)
 NORMAL=$(tput sgr0 2>/dev/null || true)
@@ -83,15 +83,15 @@ BUILD_CONFIG="debug"
 INSTALL_AUTOSTART=false
 # Empty means "not passed" — the env var / default applies instead (see BIN_DIR below).
 BIN_DIR_OVERRIDE=""
-case "${CUA_DRIVER_REQUIRE_STABLE_SIGNING:-0}" in
-    0|false|no|"") CUA_DRIVER_REQUIRE_STABLE_SIGNING=0 ;;
-    1|true|yes) CUA_DRIVER_REQUIRE_STABLE_SIGNING=1 ;;
+case "${PINCER_REQUIRE_STABLE_SIGNING:-0}" in
+    0|false|no|"") PINCER_REQUIRE_STABLE_SIGNING=0 ;;
+    1|true|yes) PINCER_REQUIRE_STABLE_SIGNING=1 ;;
     *)
-        echo "${RED}Error: CUA_DRIVER_REQUIRE_STABLE_SIGNING must be 0 or 1.${NORMAL}" >&2
+        echo "${RED}Error: PINCER_REQUIRE_STABLE_SIGNING must be 0 or 1.${NORMAL}" >&2
         exit 2
         ;;
 esac
-export CUA_DRIVER_REQUIRE_STABLE_SIGNING
+export PINCER_REQUIRE_STABLE_SIGNING
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -102,8 +102,8 @@ while [ "$#" -gt 0 ]; do
             INSTALL_AUTOSTART=true
             ;;
         --require-stable-signing)
-            CUA_DRIVER_REQUIRE_STABLE_SIGNING=1
-            export CUA_DRIVER_REQUIRE_STABLE_SIGNING
+            PINCER_REQUIRE_STABLE_SIGNING=1
+            export PINCER_REQUIRE_STABLE_SIGNING
             ;;
         --bin-dir)
             if [ "$#" -lt 2 ]; then
@@ -117,7 +117,7 @@ while [ "$#" -gt 0 ]; do
             BIN_DIR_OVERRIDE="${1#*=}"
             ;;
         --help|-h)
-            echo "${BOLD}${BLUE}cua-driver-rs local installer${NORMAL}"
+            echo "${BOLD}${BLUE}pincer local installer${NORMAL}"
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
@@ -126,13 +126,13 @@ while [ "$#" -gt 0 ]; do
             echo "                  macOS: LaunchAgent under ~/Library/LaunchAgents"
             echo "                  Linux: systemd --user unit"
             echo "                On macOS this also fixes TCC: a launchd-started daemon"
-            echo "                is attributed to com.trycua.driver.local (not your terminal),"
+            echo "                is attributed to io.github.modcritic.pincer.local (not your terminal),"
             echo "                so you grant Accessibility + Screen Recording once and"
-            echo "                every cua-driver-local call/mcp routes through it correctly."
+            echo "                every pincer-local call/mcp routes through it correctly."
             echo "  --bin-dir <path>"
-            echo "                Install the visible cua-driver-local symlink to <path>"
+            echo "                Install the visible pincer-local symlink to <path>"
             echo "                instead of ~/.local/bin. Must be an absolute path; takes"
-            echo "                precedence over CUA_DRIVER_LOCAL_INSTALL_DIR."
+            echo "                precedence over PINCER_LOCAL_INSTALL_DIR."
             echo "  --require-stable-signing"
             echo "                On macOS, stop before replacing the installed app unless"
             echo "                a certificate-backed identity is available. Recommended"
@@ -162,8 +162,8 @@ case "$OS" in
     *)      echo "${RED}Unsupported OS: $OS${NORMAL}"; exit 1 ;;
 esac
 
-HOME_DIR="${CUA_DRIVER_LOCAL_HOME:-$HOME/.cua-driver-local}"
-BIN_DIR="${BIN_DIR_OVERRIDE:-${CUA_DRIVER_LOCAL_INSTALL_DIR:-$HOME/.local/bin}}"
+HOME_DIR="${PINCER_LOCAL_HOME:-$HOME/.pincer-local}"
+BIN_DIR="${BIN_DIR_OVERRIDE:-${PINCER_LOCAL_INSTALL_DIR:-$HOME/.local/bin}}"
 # The symlink is created after this script cds into the Cargo workspace, so a
 # relative path would silently land inside rust/ — and uninstall-local.sh
 # rejects relative values outright, leaving it unremovable. Fail loudly instead.
@@ -171,7 +171,7 @@ case "$BIN_DIR" in
     /*) ;;
     *)
         echo "${RED}Error: bin dir must be an absolute path (got: $BIN_DIR).${NORMAL}" >&2
-        echo "Set it via --bin-dir /abs/path or CUA_DRIVER_LOCAL_INSTALL_DIR=/abs/path." >&2
+        echo "Set it via --bin-dir /abs/path or PINCER_LOCAL_INSTALL_DIR=/abs/path." >&2
         exit 2
         ;;
 esac
@@ -181,12 +181,12 @@ CURRENT_LINK="$HOME_DIR/packages/current"
 VERSION_TAG="0.0.0-local-$BUILD_CONFIG"
 VERSIONED_DIR="$RELEASES_DIR/$VERSION_TAG-$TARGET_TRIPLE"
 
-echo "${BOLD}${BLUE}cua-driver-rs local installer${NORMAL}"
+echo "${BOLD}${BLUE}pincer local installer${NORMAL}"
 echo "  source:  ${BOLD}$REPO_ROOT${NORMAL}"
-echo "  sha:     ${BOLD}$CUA_DRIVER_SOURCE_SHA${NORMAL}"
+echo "  sha:     ${BOLD}$PINCER_SOURCE_SHA${NORMAL}"
 echo "  config:  ${BOLD}$BUILD_CONFIG${NORMAL}"
 echo "  target:  ${BOLD}$TARGET_TRIPLE${NORMAL}"
-echo "  bin:     ${BOLD}$BIN_DIR/cua-driver-local${NORMAL}"
+echo "  bin:     ${BOLD}$BIN_DIR/pincer-local${NORMAL}"
 echo "  current: ${BOLD}$CURRENT_LINK${NORMAL}"
 echo ""
 
@@ -229,16 +229,16 @@ case "$BUILD_TARGET_DIR" in
 esac
 export CARGO_TARGET_DIR="$BUILD_TARGET_DIR"
 
-echo "${BOLD}Building cua-driver ($BUILD_CONFIG)...${NORMAL}"
+echo "${BOLD}Building pincer ($BUILD_CONFIG)...${NORMAL}"
 cd "$REPO_ROOT"
 if [ "$BUILD_CONFIG" = "release" ]; then
-    cargo build --release -p cua-driver -p cursor-theme-cli
+    cargo build --release -p pincer -p cursor-theme-cli
 else
-    cargo build -p cua-driver -p cursor-theme-cli
+    cargo build -p pincer -p cursor-theme-cli
 fi
 
-BUILT_BINARY="$BUILD_TARGET_DIR/$BUILD_CONFIG/cua-driver"
-BUILT_THEME_BINARY="$BUILD_TARGET_DIR/$BUILD_CONFIG/cua-cursor-theme"
+BUILT_BINARY="$BUILD_TARGET_DIR/$BUILD_CONFIG/pincer"
+BUILT_THEME_BINARY="$BUILD_TARGET_DIR/$BUILD_CONFIG/pincer-cursor-theme"
 if [ ! -x "$BUILT_BINARY" ]; then
     echo "${RED}Error: build produced no binary at $BUILT_BINARY${NORMAL}"
     exit 1
@@ -258,12 +258,12 @@ mkdir -p "$VERSIONED_DIR"
 # destination.
 #
 # A plain `cp` opens the destination with O_TRUNC and writes in place. When a
-# previous cua-driver-local is still running out of that exact path — the
+# previous pincer-local is still running out of that exact path — the
 # common case, since the version tag is stable per config, so every rebuild
 # targets the same file — Linux refuses the open with ETXTBSY and the install
 # dies mid-stage:
 #
-#   cp: cannot create regular file '.../cua-driver-local': Text file busy
+#   cp: cannot create regular file '.../pincer-local': Text file busy
 #
 # The daemon stop further below cannot prevent this: it runs after the swap,
 # and a manually launched `serve` is not always reachable by it anyway.
@@ -279,8 +279,8 @@ stage_binary() {
     chmod +x "$stage_tmp"
     mv -f "$stage_tmp" "$stage_dest"
 }
-stage_binary "$BUILT_BINARY" "$VERSIONED_DIR/cua-driver-local"
-stage_binary "$BUILT_THEME_BINARY" "$VERSIONED_DIR/cua-cursor-theme"
+stage_binary "$BUILT_BINARY" "$VERSIONED_DIR/pincer-local"
+stage_binary "$BUILT_THEME_BINARY" "$VERSIONED_DIR/pincer-cursor-theme"
 
 # Re-sign with a fresh ad-hoc signature.
 #
@@ -295,9 +295,9 @@ stage_binary "$BUILT_THEME_BINARY" "$VERSIONED_DIR/cua-cursor-theme"
 # accepts. Cheap (~50ms on a 40MB binary). macOS-only — no-op on Linux.
 if [ "$OS" = "Darwin" ]; then
     if command -v codesign >/dev/null 2>&1; then
-        codesign --force --sign - "$VERSIONED_DIR/cua-driver-local" 2>/dev/null \
+        codesign --force --sign - "$VERSIONED_DIR/pincer-local" 2>/dev/null \
             || echo "${YELLOW}warning: codesign --force --sign - failed; first run may fail with SIGKILL on macOS 26+${NORMAL}" >&2
-        codesign --force --sign - "$VERSIONED_DIR/cua-cursor-theme" 2>/dev/null \
+        codesign --force --sign - "$VERSIONED_DIR/pincer-cursor-theme" 2>/dev/null \
             || echo "${YELLOW}warning: cursor-theme sidecar signing failed${NORMAL}" >&2
     fi
 fi
@@ -305,9 +305,9 @@ fi
 # Skill pack — stage from the repo so the `current` symlink below
 # transparently exposes it to agents. Mirrors what install.sh does
 # from a release tarball.
-SOURCE_SKILLS="$REPO_ROOT/Skills/cua-driver"
+SOURCE_SKILLS="$REPO_ROOT/Skills/pincer"
 if [ -d "$SOURCE_SKILLS" ]; then
-    STAGED_SKILLS="$VERSIONED_DIR/Skills/cua-driver"
+    STAGED_SKILLS="$VERSIONED_DIR/Skills/pincer"
     rm -rf "$STAGED_SKILLS"
     mkdir -p "$(dirname "$STAGED_SKILLS")"
     cp -R "$SOURCE_SKILLS" "$STAGED_SKILLS"
@@ -325,22 +325,22 @@ helper_metadata_version() {
 # cross-platform mismatch.
 if [ "$OS" = "Linux" ]; then
     SOURCE_WAYLAND_HELPER="$REPO_ROOT/../wayland-helper"
-    if [ -d "$SOURCE_WAYLAND_HELPER/winrects@cua" ]; then
+    if [ -d "$SOURCE_WAYLAND_HELPER/winrects@pincer" ]; then
         STAGED_WAYLAND_HELPER="$VERSIONED_DIR/wayland-helper"
         mkdir -p "$STAGED_WAYLAND_HELPER"
         cp -R "$SOURCE_WAYLAND_HELPER/." "$STAGED_WAYLAND_HELPER/"
 
-        INSTALLED_WAYLAND_HELPER="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/winrects@cua"
+        INSTALLED_WAYLAND_HELPER="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/winrects@pincer"
         if [ -d "$INSTALLED_WAYLAND_HELPER" ]; then
             # The helper's API is additive and shared with other apps that
             # bundle it, so never replace a newer installed helper.
-            BUNDLED_HELPER_VERSION=$(helper_metadata_version "$SOURCE_WAYLAND_HELPER/winrects@cua/metadata.json")
+            BUNDLED_HELPER_VERSION=$(helper_metadata_version "$SOURCE_WAYLAND_HELPER/winrects@pincer/metadata.json")
             INSTALLED_HELPER_VERSION=$(helper_metadata_version "$INSTALLED_WAYLAND_HELPER/metadata.json")
             if [ "${INSTALLED_HELPER_VERSION:-0}" -gt "${BUNDLED_HELPER_VERSION:-0}" ]; then
                 echo "kept installed GNOME helper v$INSTALLED_HELPER_VERSION (newer than bundled v${BUNDLED_HELPER_VERSION:-?})"
             else
-                cp "$SOURCE_WAYLAND_HELPER/winrects@cua/metadata.json" \
-                    "$SOURCE_WAYLAND_HELPER/winrects@cua/extension.js" \
+                cp "$SOURCE_WAYLAND_HELPER/winrects@pincer/metadata.json" \
+                    "$SOURCE_WAYLAND_HELPER/winrects@pincer/extension.js" \
                     "$INSTALLED_WAYLAND_HELPER/"
                 echo "${GREEN}updated installed GNOME helper; reload the GNOME session to activate it${NORMAL}"
             fi
@@ -377,32 +377,32 @@ echo ""
 # shellcheck source=_local-signing.sh
 . "$SCRIPT_DIR/_local-signing.sh"
 
-# --- macOS: wrap the binary in CuaDriverLocal.app for a stable TCC identity ---
+# --- macOS: wrap the binary in PincerLocal.app for a stable TCC identity ---
 #
 # TCC keys Accessibility / Screen-Recording grants on the bundle
-# identifier (com.trycua.driver.local), not the bare executable path. A loose
+# identifier (io.github.modcritic.pincer.local), not the bare executable path. A loose
 # binary gets grants attributed to its ad-hoc cdhash, which changes on
 # every rebuild — so permissions silently reset and never appear cleanly
 # under System Settings. Mirror the production path (install.sh) + the CD
 # bundle-assembly step: drop the freshly built binary into the checked-in
-# CuaDriverBundle skeleton, install the bundle to /Applications, and point
+# PincerBundle skeleton, install the bundle to /Applications, and point
 # the visible bin at the binary INSIDE the bundle. Linux/Windows have no
 # .app concept and keep the bare-binary symlink below.
-APP_DEST="/Applications/CuaDriverLocal.app"
+APP_DEST="/Applications/PincerLocal.app"
 if [ "$OS" = "Darwin" ]; then
-    SKELETON="$REPO_ROOT/scripts/CuaDriverBundle"
+    SKELETON="$REPO_ROOT/scripts/PincerBundle"
     if [ ! -d "$SKELETON/Contents" ]; then
         echo "${RED}Error: bundle skeleton missing at $SKELETON${NORMAL}" >&2
         exit 1
     fi
-    APP_STAGE="$VERSIONED_DIR/CuaDriverLocal.app"
+    APP_STAGE="$VERSIONED_DIR/PincerLocal.app"
     rm -rf "$APP_STAGE"
     mkdir -p "$APP_STAGE/Contents/MacOS"
     cp -R "$SKELETON/Contents/." "$APP_STAGE/Contents/"
-    cp "$VERSIONED_DIR/cua-driver-local" "$APP_STAGE/Contents/MacOS/cua-driver-local"
-    cp "$VERSIONED_DIR/cua-cursor-theme" "$APP_STAGE/Contents/MacOS/cua-cursor-theme"
-    chmod +x "$APP_STAGE/Contents/MacOS/cua-driver-local"
-    chmod +x "$APP_STAGE/Contents/MacOS/cua-cursor-theme"
+    cp "$VERSIONED_DIR/pincer-local" "$APP_STAGE/Contents/MacOS/pincer-local"
+    cp "$VERSIONED_DIR/pincer-cursor-theme" "$APP_STAGE/Contents/MacOS/pincer-cursor-theme"
+    chmod +x "$APP_STAGE/Contents/MacOS/pincer-local"
+    chmod +x "$APP_STAGE/Contents/MacOS/pincer-cursor-theme"
     rm -f "$APP_STAGE/Contents/MacOS/.gitkeep"
     PREVIOUS_REQUIREMENT=""
     if [ -d "$APP_DEST" ] && command -v codesign >/dev/null 2>&1; then
@@ -414,13 +414,13 @@ if [ "$OS" = "Darwin" ]; then
             "$APP_STAGE/Contents/Info.plist" 2>/dev/null || true
         plutil -replace CFBundleVersion -string "$VERSION_TAG" \
             "$APP_STAGE/Contents/Info.plist" 2>/dev/null || true
-        plutil -replace CFBundleExecutable -string "cua-driver-local" \
+        plutil -replace CFBundleExecutable -string "pincer-local" \
             "$APP_STAGE/Contents/Info.plist"
-        plutil -replace CFBundleIdentifier -string "com.trycua.driver.local" \
+        plutil -replace CFBundleIdentifier -string "io.github.modcritic.pincer.local" \
             "$APP_STAGE/Contents/Info.plist"
-        plutil -replace CFBundleName -string "Cua Driver Local" \
+        plutil -replace CFBundleName -string "Pincer Local" \
             "$APP_STAGE/Contents/Info.plist"
-        plutil -replace CFBundleDisplayName -string "Cua Driver Local" \
+        plutil -replace CFBundleDisplayName -string "Pincer Local" \
             "$APP_STAGE/Contents/Info.plist"
     fi
     # Sign the staged bundle before touching the live installation. Required on
@@ -433,13 +433,13 @@ if [ "$OS" = "Darwin" ]; then
             exit 1
         fi
         if ! codesign --verify --deep --strict "$APP_STAGE" 2>/dev/null; then
-            echo "${RED}Error: staged CuaDriverLocal.app failed signature verification; live installation was not changed.${NORMAL}" >&2
+            echo "${RED}Error: staged PincerLocal.app failed signature verification; live installation was not changed.${NORMAL}" >&2
             exit 1
         fi
         STAGED_REQUIREMENT="$(designated_requirement "$APP_STAGE")"
         STAGED_SIGNING_CLASS="$(classify_designated_requirement "$STAGED_REQUIREMENT")"
     else
-        echo "${RED}Error: codesign is required to install CuaDriverLocal.app safely.${NORMAL}" >&2
+        echo "${RED}Error: codesign is required to install PincerLocal.app safely.${NORMAL}" >&2
         exit 1
     fi
 
@@ -469,7 +469,7 @@ if [ "$OS" = "Darwin" ]; then
         if [ -d "$APP_BACKUP" ]; then
             mv "$APP_BACKUP" "$APP_DEST"
         fi
-        echo "${RED}Error: installed CuaDriverLocal.app did not preserve its verified signing identity; restored the previous bundle.${NORMAL}" >&2
+        echo "${RED}Error: installed PincerLocal.app did not preserve its verified signing identity; restored the previous bundle.${NORMAL}" >&2
         exit 1
     fi
     echo "${GREEN}installed $APP_DEST${NORMAL}"
@@ -482,8 +482,8 @@ if [ "$OS" = "Darwin" ]; then
     # --- Force LaunchServices registration of the freshly-copied bundle ----
     #
     # `ditto` drops the bundle on disk, but LaunchServices registers the new
-    # com.trycua.driver.local identity ASYNCHRONOUSLY (seconds later). Until it
-    # does, `open -n -g -a CuaDriverLocal` (what `permissions grant` / MCP use to
+    # io.github.modcritic.pincer.local identity ASYNCHRONOUSLY (seconds later). Until it
+    # does, `open -n -g -a PincerLocal` (what `permissions grant` / MCP use to
     # launch the daemon) fails with -1728. A synchronous `lsregister -f` closes
     # that race so both the reset and the first launch resolve the bundle id.
     LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
@@ -496,21 +496,21 @@ fi
 # --- Visible-bin symlink ------------------------------------------------
 #
 # On macOS point at the binary INSIDE the installed bundle so the process
-# that actually runs carries the com.trycua.driver.local identity (TCC keys
+# that actually runs carries the io.github.modcritic.pincer.local identity (TCC keys
 # grants on it). On Linux/Windows point at the versioned-store binary.
 mkdir -p "$BIN_DIR"
 if [ "$OS" = "Darwin" ]; then
-    BIN_TARGET="$APP_DEST/Contents/MacOS/cua-driver-local"
+    BIN_TARGET="$APP_DEST/Contents/MacOS/pincer-local"
 else
-    BIN_TARGET="$CURRENT_LINK/cua-driver-local"
+    BIN_TARGET="$CURRENT_LINK/pincer-local"
 fi
-ln -sf "$BIN_TARGET" "$BIN_DIR/cua-driver-local"
-echo "${GREEN}$BIN_DIR/cua-driver-local -> $BIN_TARGET${NORMAL}"
+ln -sf "$BIN_TARGET" "$BIN_DIR/pincer-local"
+echo "${GREEN}$BIN_DIR/pincer-local -> $BIN_TARGET${NORMAL}"
 echo ""
 
-INSTALLED_BIN="$BIN_DIR/cua-driver-local"
+INSTALLED_BIN="$BIN_DIR/pincer-local"
 
-# --- Stop any pre-swap cua-driver daemons ------------------------------
+# --- Stop any pre-swap pincer daemons ------------------------------
 #
 # Mirror of install-local.ps1's daemon kill — the new binary is now
 # under packages/current/, but any LaunchAgent / systemd user unit /
@@ -519,17 +519,17 @@ INSTALLED_BIN="$BIN_DIR/cua-driver-local"
 # fails the install. Survivors (rare on Unix — `pkill` reaches all
 # user-owned procs without elevation) get a yellow hint.
 #
-# NOTE: do not use `pkill -x cua-driver-local`. `-x` compares against the
+# NOTE: do not use `pkill -x pincer-local`. `-x` compares against the
 # kernel's truncated process name — 15 chars on Linux (`comm`) — and
-# `cua-driver-local` is 16, so on Linux it silently matched nothing and
+# `pincer-local` is 16, so on Linux it silently matched nothing and
 # every pre-swap daemon survived the install. Match argv[0] instead, and
 # anchor it: an unanchored `-f` pattern also matches the launcher shells
 # whose script *text* contains the daemon path, killing the surrounding
 # session rather than the daemon.
 if [ "$OS" = "Darwin" ]; then
-    launchctl unload "$HOME/Library/LaunchAgents/com.trycua.cua-driver-local.plist" 2>/dev/null || true
+    launchctl unload "$HOME/Library/LaunchAgents/io.github.modcritic.pincer-local.plist" 2>/dev/null || true
 elif [ "$OS" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
-    systemctl --user stop cua-driver-local.service >/dev/null 2>&1 || true
+    systemctl --user stop pincer-local.service >/dev/null 2>&1 || true
 fi
 for _daemon_bin in "$INSTALLED_BIN" "$BIN_TARGET"; do
     [ -n "$_daemon_bin" ] || continue
@@ -549,15 +549,15 @@ if [ "$OS" = "Darwin" ]; then
 fi
 
 # Agent skill pack symlinks: NOT auto-created. Run
-# `cua-driver skills install --local` to symlink agent dirs to the
-# staged copy at $VERSIONED_DIR/Skills/cua-driver above.
+# `pincer skills install --local` to symlink agent dirs to the
+# staged copy at $VERSIONED_DIR/Skills/pincer above.
 echo ""
 
 # --- Autostart (optional) ----------------------------------------------
 
 if [ "$INSTALL_AUTOSTART" = true ]; then
     if [ "$OS" = "Darwin" ]; then
-        PLIST_PATH="$HOME/Library/LaunchAgents/com.trycua.cua-driver-local.plist"
+        PLIST_PATH="$HOME/Library/LaunchAgents/io.github.modcritic.pincer-local.plist"
         echo "${BOLD}Writing LaunchAgent → $PLIST_PATH${NORMAL}"
         mkdir -p "$(dirname "$PLIST_PATH")"
         cat >"$PLIST_PATH" <<EOF
@@ -565,7 +565,7 @@ if [ "$INSTALL_AUTOSTART" = true ]; then
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.trycua.cua-driver-local</string>
+  <key>Label</key><string>io.github.modcritic.pincer-local</string>
   <key>ProgramArguments</key>
   <array>
     <string>$INSTALLED_BIN</string>
@@ -582,12 +582,12 @@ EOF
         launchctl load "$PLIST_PATH"
         echo "${GREEN}Loaded.${NORMAL} Manage with launchctl load / unload \"$PLIST_PATH\"."
     elif [ "$OS" = "Linux" ]; then
-        UNIT_PATH="$HOME/.config/systemd/user/cua-driver-local.service"
+        UNIT_PATH="$HOME/.config/systemd/user/pincer-local.service"
         echo "${BOLD}Writing systemd user unit → $UNIT_PATH${NORMAL}"
         mkdir -p "$(dirname "$UNIT_PATH")"
         cat >"$UNIT_PATH" <<EOF
 [Unit]
-Description=cua-driver-local serve daemon
+Description=pincer-local serve daemon
 After=graphical-session.target
 
 [Service]
@@ -599,8 +599,8 @@ RestartSec=2
 WantedBy=default.target
 EOF
         systemctl --user daemon-reload
-        systemctl --user enable --now cua-driver-local.service
-        echo "${GREEN}Enabled.${NORMAL} Manage with systemctl --user {start|stop|status} cua-driver-local."
+        systemctl --user enable --now pincer-local.service
+        echo "${GREEN}Enabled.${NORMAL} Manage with systemctl --user {start|stop|status} pincer-local."
     fi
     echo ""
 fi
@@ -626,16 +626,16 @@ else
 fi
 
 # The local/release identity split deliberately stopped source installs from
-# creating or repairing the published `cua-driver` name. Make the resulting
+# creating or repairing the published `pincer` name. Make the resulting
 # migration state explicit when only the local product is present: otherwise
 # an existing MCP client can keep launching a now-missing release path even
 # though this install completed successfully. Do not create a compatibility
 # symlink here; that would collapse the separate product identities again.
-RELEASE_BIN="$BIN_DIR/cua-driver"
+RELEASE_BIN="$BIN_DIR/pincer"
 if [ ! -e "$RELEASE_BIN" ]; then
     echo ""
-    echo "${YELLOW}Migration note: the published cua-driver CLI is not installed at $RELEASE_BIN.${NORMAL}" >&2
-    echo "  Existing MCP clients configured for 'cua-driver' will not use this local build." >&2
+    echo "${YELLOW}Migration note: the published pincer CLI is not installed at $RELEASE_BIN.${NORMAL}" >&2
+    echo "  Existing MCP clients configured for 'pincer' will not use this local build." >&2
     echo "  To configure Codex for the local build, run:" >&2
     echo "    $INSTALLED_BIN mcp-config --client codex" >&2
     echo "  For other MCP clients, see https://github.com/ModCritic/pincer#connect-an-agent" >&2
@@ -646,9 +646,9 @@ if [ "$INSTALL_AUTOSTART" != true ]; then
     echo ""
     if [ "$OS" = "Darwin" ]; then
         echo "Auto-start (recommended on macOS): re-run with --autostart to register a LaunchAgent."
-        echo "  A launchd-started daemon is attributed to com.trycua.driver.local (not your terminal),"
-        echo "  so permission prompts say \"Cua Driver Local\" and grants stick — grant Accessibility +"
-        echo "  Screen Recording once and every cua-driver-local call/mcp routes through it correctly."
+        echo "  A launchd-started daemon is attributed to io.github.modcritic.pincer.local (not your terminal),"
+        echo "  so permission prompts say \"Pincer Local\" and grants stick — grant Accessibility +"
+        echo "  Screen Recording once and every pincer-local call/mcp routes through it correctly."
         echo "  (Without it, a prompt raised from a terminal attributes to the terminal instead.)"
     else
         echo "Auto-start (optional): re-run with --autostart to register a systemd user unit."

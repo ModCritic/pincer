@@ -23,7 +23,7 @@ use std::sync::{mpsc, Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use cua_driver_core::single_flight::SingleFlight;
+use pincer_core::single_flight::SingleFlight;
 
 use anyhow::{bail, Context};
 use windows::core::{Interface, BSTR};
@@ -105,7 +105,7 @@ where
     let cancelled = permit.timeout_flag();
     let worker_cancelled = permit.timeout_flag();
     let spawn = thread::Builder::new()
-        .name(format!("cua-uia-{stage}"))
+        .name(format!("pincer-uia-{stage}"))
         .spawn(move || {
             let _permit = permit;
             let result = f(worker_cancelled);
@@ -267,7 +267,7 @@ fn enumerate_top_level_windows_unbounded() -> Vec<WindowInfo> {
     }
 }
 
-/// Exercise the real desktop enumeration call shape for `cua-driver doctor`
+/// Exercise the real desktop enumeration call shape for `pincer doctor`
 /// without allowing health checks to bypass the process-wide single-flight
 /// bound used by window and interaction tools.
 pub(crate) fn probe_desktop_availability() -> Result<(), String> {

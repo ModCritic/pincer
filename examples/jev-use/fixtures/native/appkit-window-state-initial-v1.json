@@ -1,12 +1,12 @@
 {
  "_fixture": {
-  "source": "CuaTestHarness.AppKit with CUA_APPKIT_TASK_STATE set, observed by cua-driver 0.28.2 get_window_state (macOS 26)",
-  "sanitized": "Screenshot bytes and tree_markdown removed. The system Apple menu's machine-specific items (recent items, account names) were removed; two generic items remain. capture_id was added because Cua Driver 0.30 and later return it with the screenshot."
+  "source": "PincerTestHarness.AppKit with PINCER_APPKIT_TASK_STATE set, observed by pincer 0.28.2 get_window_state (macOS 26)",
+  "sanitized": "Screenshot bytes and tree_markdown removed. The system Apple menu's machine-specific items (recent items, account names) were removed; two generic items remain. capture_id was added because Pincer 0.30 and later return it with the screenshot."
  },
  "pid": 20535,
  "window_id": 71364,
- "app_name": "CuaTestHarness.AppKit",
- "window_title": "CuaTestHarness AppKit",
+ "app_name": "PincerTestHarness.AppKit",
+ "window_title": "PincerTestHarness AppKit",
  "snapshot_id": "s00000086",
  "element_count": 103,
  "total_element_count": 103,
@@ -36,7 +36,7 @@
     "x": 610.0,
     "y": 48.0
    },
-   "label": "CuaTestHarness AppKit",
+   "label": "PincerTestHarness AppKit",
    "role": "AXWindow"
   },
   {
@@ -586,7 +586,7 @@
     "x": 44.0,
     "y": 0.0
    },
-   "label": "CuaTestHarness.AppKit",
+   "label": "PincerTestHarness.AppKit",
    "parent_index": 28,
    "role": "AXMenuBarItem",
    "selected": false
@@ -790,7 +790,7 @@
    "element_index": 102,
    "element_token": "s00000086:102",
    "enabled": true,
-   "label": "CuaTestHarness AppKit",
+   "label": "PincerTestHarness AppKit",
    "parent_index": 93,
    "role": "AXMenuItem",
    "selected": false

@@ -46,7 +46,7 @@ def validate_plan(plan):
     spec = plan['agents'][0]
     assert spec['app'] == ('inkscape' if profile == 'inkscape-only' else 'calc') and spec.get('profile', PROFILE) == PROFILE
     assert isinstance(spec['name'], str) and spec['name']
-    document_name = 'cua-smoke-inkscape.svg' if profile == 'inkscape-only' else 'cua-smoke-calc.ods'
+    document_name = 'pincer-smoke-inkscape.svg' if profile == 'inkscape-only' else 'pincer-smoke-calc.ods'
     assert Path(spec['document']).name == document_name, 'only the synthetic document is allowed'
     if profile == 'inkscape-only':
         assert 'pointer_stage' not in spec and 'drag' not in spec, 'idle stages are fixed, fresh scroll_down then scroll_up'
@@ -287,7 +287,7 @@ def run(args):
         plan = json.loads(args.plan.read_text())
         save('plan.json', plan)
         validate_plan(plan)
-        assert args.trace_socket.name in ('cua-input-v3.sock', 'cua-input-v3-2.sock')
+        assert args.trace_socket.name in ('pincer-input-v3.sock', 'pincer-input-v3-2.sock')
         origin = provenance(args, plan)
         for name in ('production_idle_reconnect_proof.py', 'production_idle_reconnect_proof_test.py', 'proof_fixtures.py',
                      'production_cancel_proof.py'):

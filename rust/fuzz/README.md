@@ -1,14 +1,14 @@
 # Tool-call boundary fuzzing
 
 Coverage-guided fuzz targets for the transport-free MCP tool-call boundary in
-`cua-driver-core`: JSON-RPC request parsing, reserved-argument stripping,
+`pincer-core`: JSON-RPC request parsing, reserved-argument stripping,
 argument normalisation, authorization, typed contract input parsing, and
 `ToolRegistry` dispatch against stub tools. No platform adapter, display, or
 input device is touched.
 
-The target bodies live in `cua_driver_testkit::boundary_fuzz`; the files under
+The target bodies live in `pincer_testkit::boundary_fuzz`; the files under
 `fuzz_targets/` are one-line libFuzzer wrappers. The same bodies run as bounded
-smoke tests in `cargo test -p cua-driver-testkit`, so this directory is only
+smoke tests in `cargo test -p pincer-testkit`, so this directory is only
 needed for real fuzzing.
 
 The workspace pins a stable toolchain. `cargo fuzz` needs nightly only for
@@ -30,7 +30,7 @@ run by the smoke test. Omitting the directories makes `cargo fuzz` write into
 `fuzz/corpus/<target>` directly; delete the generated entries before
 committing if you do that.
 
-Keep the `CUA_DRIVER_*` policy and permission-mode environment variables unset
+Keep the `PINCER_*` policy and permission-mode environment variables unset
 while fuzzing so the process-default authorization path stays reproducible.
 
 A crash lands in `artifacts/<target>/`. Reproduce it with

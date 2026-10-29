@@ -1,6 +1,6 @@
 //! macOS adapters for encrypted Computer History.
 
-use cua_driver_core::history::{
+use pincer_core::history::{
     ApplicationIdentity, ApplicationIdentityProvider, HistoryError, HistoryHealthCategory,
     HistoryKey, KeyProvider,
 };
@@ -33,11 +33,13 @@ impl MacosKeychainKeyProvider {
         if !valid {
             return Err(HistoryError::new(HistoryHealthCategory::KeyUnavailable));
         }
-        Ok(format!("com.trycua.{namespace}.computer-history.v1"))
+        Ok(format!(
+            "io.github.modcritic.pincer.{namespace}.computer-history.v1"
+        ))
     }
 
     fn uses_data_protection(namespace: &str) -> bool {
-        namespace == "cua-driver"
+        namespace == "pincer"
     }
 
     fn lookup_options(service: &str, data_protection: bool) -> PasswordOptions {
@@ -62,8 +64,8 @@ impl MacosKeychainKeyProvider {
             .map_err(map_keychain_error)?;
             options.set_access_control(access);
         }
-        options.set_label("Cua Driver Computer History encryption key");
-        options.set_description("Device-local key for encrypted Cua Driver Computer History");
+        options.set_label("Pincer Computer History encryption key");
+        options.set_description("Device-local key for encrypted Pincer Computer History");
         Ok(options)
     }
 }
@@ -201,20 +203,20 @@ mod tests {
     #[test]
     fn keychain_namespace_is_strict_and_separated() {
         assert_ne!(
-            MacosKeychainKeyProvider::service("cua-driver").unwrap(),
-            MacosKeychainKeyProvider::service("cua-driver-local").unwrap()
+            MacosKeychainKeyProvider::service("pincer").unwrap(),
+            MacosKeychainKeyProvider::service("pincer-local").unwrap()
         );
         assert!(MacosKeychainKeyProvider::service("../escape").is_err());
-        assert!(MacosKeychainKeyProvider::uses_data_protection("cua-driver"));
+        assert!(MacosKeychainKeyProvider::uses_data_protection("pincer"));
         assert!(!MacosKeychainKeyProvider::uses_data_protection(
-            "cua-driver-local"
+            "pincer-local"
         ));
     }
 
     #[test]
     #[ignore = "mutates one uniquely named login-Keychain item; run in macOS release qualification"]
     fn local_keychain_key_lifecycle_is_destroyable() {
-        let namespace = format!("cua-driver-local-test-{}", uuid::Uuid::new_v4().simple());
+        let namespace = format!("pincer-local-test-{}", uuid::Uuid::new_v4().simple());
         let provider = MacosKeychainKeyProvider;
         let created = provider.load_or_create(&namespace).unwrap();
         assert_eq!(created.bytes.len(), 32);

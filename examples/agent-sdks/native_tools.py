@@ -1,4 +1,4 @@
-"""Narrow agent-tool adapter over the same-process Cua Driver Python SDK."""
+"""Narrow agent-tool adapter over the same-process Pincer Python SDK."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
-from cua_driver import (
+from pincer_driver import (
     ActionTarget,
     ActionResult,
     ClickButton,
     ClickInput,
     ClickPosition,
-    CuaDriver,
+    Pincer,
     GetDesktopStateInput,
     InputDeliveryMode,
     PressKeyInput,
@@ -28,7 +28,7 @@ class NativeDesktopTools:
     """Own one in-process runtime with one implicit lifecycle session."""
 
     def __init__(self, timeout: float = 30.0) -> None:
-        self.driver = CuaDriver.create()
+        self.driver = Pincer.create()
         self.timeout = timeout
 
     async def close(self) -> None:

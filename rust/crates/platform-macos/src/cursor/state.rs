@@ -72,7 +72,7 @@ impl CursorRegistry {
         // and any explicit non-session cursor_id are never in ENDED_SESSIONS, so
         // they pass through unchanged. Return the live entry if one survives,
         // else a transient default so callers get a sane value without a write.
-        if cua_driver_core::session::is_session_ended(cursor_id) {
+        if pincer_core::session::is_session_ended(cursor_id) {
             return inner
                 .get(cursor_id)
                 .cloned()
@@ -107,8 +107,7 @@ impl CursorRegistry {
         // Write-boundary resurrection guard (see get_or_create): no-op for an
         // ended session id so a post-session_end set_config can't resurrect the
         // cursor metadata. "default" / non-session ids are never ended.
-        if config.cursor_id.is_empty()
-            || cua_driver_core::session::is_session_ended(&config.cursor_id)
+        if config.cursor_id.is_empty() || pincer_core::session::is_session_ended(&config.cursor_id)
         {
             return;
         }
@@ -126,7 +125,7 @@ impl CursorRegistry {
         // Write-boundary resurrection guard (see get_or_create): no-op for an
         // ended session id so an in-flight move after session_end can't
         // re-create the cleared cursor. "default" / non-session ids never ended.
-        if cursor_id.is_empty() || cua_driver_core::session::is_session_ended(cursor_id) {
+        if cursor_id.is_empty() || pincer_core::session::is_session_ended(cursor_id) {
             return;
         }
         let mut inner = self.inner.lock().unwrap();
@@ -168,31 +167,29 @@ impl CursorRegistry {
     fn emit_cursor_event(&self, cursor_id: &str, x: f64, y: f64, pressed: bool) {
         // Cheapest check first. `CursorHookEvent` owns its id, so building one
         // costs a heap allocation on every commanded move — and almost every
-        // cua-driver consumer (the daemon, the CLI, every SDK caller that is not
+        // pincer consumer (the daemon, the CLI, every SDK caller that is not
         // a remote-desktop host) never registers a hook, so that allocation
         // would be pure waste for them. This is what `cursor_hook_enabled` is
         // for, and it is the same order the `pip_hook` idiom uses.
-        if !cua_driver_core::cursor_hook::cursor_hook_enabled() {
+        if !pincer_core::cursor_hook::cursor_hook_enabled() {
             return;
         }
-        if cursor_id.is_empty() || cua_driver_core::session::is_session_ended(cursor_id) {
+        if cursor_id.is_empty() || pincer_core::session::is_session_ended(cursor_id) {
             return;
         }
-        cua_driver_core::cursor_hook::push_cursor_event(
-            cua_driver_core::cursor_hook::CursorHookEvent {
-                cursor_id: cursor_id.to_owned(),
-                x,
-                y,
-                pressed,
-            },
-        );
+        pincer_core::cursor_hook::push_cursor_event(pincer_core::cursor_hook::CursorHookEvent {
+            cursor_id: cursor_id.to_owned(),
+            x,
+            y,
+            pressed,
+        });
     }
 
     pub fn set_enabled(&self, cursor_id: &str, enabled: bool) {
         // Write-boundary resurrection guard (see get_or_create): no-op for an
         // ended session id so a post-session_end enable/disable can't resurrect
         // the cleared cursor. "default" / non-session ids are never ended.
-        if cursor_id.is_empty() || cua_driver_core::session::is_session_ended(cursor_id) {
+        if cursor_id.is_empty() || pincer_core::session::is_session_ended(cursor_id) {
             return;
         }
         let mut inner = self.inner.lock().unwrap();
@@ -233,7 +230,7 @@ impl Default for CursorRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cua_driver_core::session::fire_session_end;
+    use pincer_core::session::fire_session_end;
 
     // Each test uses a unique session id so the process-global ENDED_SESSIONS
     // set never collides across tests running in the same process.
@@ -247,7 +244,7 @@ mod tests {
         let reg = CursorRegistry::new();
         let sid = "wb-cursor-ended-A1B2C3";
         fire_session_end(sid);
-        assert!(cua_driver_core::session::is_session_ended(sid));
+        assert!(pincer_core::session::is_session_ended(sid));
 
         reg.set_enabled(sid, true);
         reg.update_position(sid, 10.0, 20.0);
@@ -273,7 +270,7 @@ mod tests {
     fn default_cursor_unaffected_by_guard() {
         // "default" is seeded and is never tombstoned — its mutators still work.
         let reg = CursorRegistry::new();
-        assert!(!cua_driver_core::session::is_session_ended("default"));
+        assert!(!pincer_core::session::is_session_ended("default"));
         reg.set_enabled("default", false);
         reg.update_position("default", 1.0, 2.0);
         let s = reg.get("default").expect("default cursor always present");
@@ -287,7 +284,7 @@ mod tests {
         // ENDED_SESSIONS, so the plain is_session_ended check leaves it working.
         let reg = CursorRegistry::new();
         let cid = "wb-explicit-user-cursor-XYZ";
-        assert!(!cua_driver_core::session::is_session_ended(cid));
+        assert!(!pincer_core::session::is_session_ended(cid));
         reg.set_enabled(cid, true);
         reg.update_position(cid, 5.0, 6.0);
         let s = reg.get(cid).expect("explicit cursor_id must materialise");
@@ -300,7 +297,7 @@ mod tests {
         // A live (not-ended) session id writes normally.
         let reg = CursorRegistry::new();
         let sid = "wb-cursor-live-LMNOP";
-        assert!(!cua_driver_core::session::is_session_ended(sid));
+        assert!(!pincer_core::session::is_session_ended(sid));
         reg.set_enabled(sid, true);
         reg.update_position(sid, 7.0, 8.0);
         let s = reg.get(sid).expect("live session cursor must exist");

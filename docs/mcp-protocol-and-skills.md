@@ -1,10 +1,10 @@
 # MCP protocol and skills
 
-The Rust `cua-driver mcp` endpoint supports modern MCP `2026-07-28` over stdio
+The Rust `pincer mcp` endpoint supports modern MCP `2026-07-28` over stdio
 and retains the legacy `initialize` flow with version `2025-06-18`. Direct and
 daemon-backed stdio use the same protocol and skill catalog.
 
-This implementation shipped in Cua Driver 0.28.0 through PR #3609. MCP uses
+This implementation shipped in Pincer 0.28.0 through PR #3609. MCP uses
 date-based protocol revisions: `2026-07-28` is the modern revision implemented
 here. The JSON-RPC `2.0` envelope and MCP SDK 2.x package versions are separate
 version numbers, so “MCP 2.0” is not a precise protocol revision name.
@@ -15,7 +15,7 @@ Keep the existing MCP server command:
 
 ```json
 {
-  "command": "cua-driver",
+  "command": "pincer",
   "args": ["mcp"]
 }
 ```
@@ -55,7 +55,7 @@ retrying an action.
 ## Read the bundled skill
 
 Use `skills/list` to discover the catalog. Use `skills/get` with
-`uri: "skill://cua-driver/SKILL.md"` to retrieve the skill entry, including its
+`uri: "skill://pincer/SKILL.md"` to retrieve the skill entry, including its
 full frontmatter and resource manifest. The entry lists every bundled file,
 with a `sha256:` digest and byte size.
 
@@ -67,7 +67,7 @@ Use `resources/read` to fetch a listed URI. For example, a modern request is:
   "id": 2,
   "method": "resources/read",
   "params": {
-    "uri": "skill://cua-driver/SKILL.md",
+    "uri": "skill://pincer/SKILL.md",
     "_meta": {
       "io.modelcontextprotocol/protocolVersion": "2026-07-28",
       "io.modelcontextprotocol/clientCapabilities": {
@@ -91,7 +91,7 @@ may support tools and resource reads without supporting native skill loading.
 
 ## Verified client behavior
 
-A clean macOS VM test with the released Cua Driver 0.28.0 established these
+A clean macOS VM test with the released Pincer 0.28.0 established these
 client boundaries:
 
 - Codex 0.154.0 discovered and read the embedded skill through its MCP resource

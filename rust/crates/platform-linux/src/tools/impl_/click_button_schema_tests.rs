@@ -1,5 +1,5 @@
 use super::{chromium_background_must_refuse, maps_indicate_gtk, ClickTool};
-use cua_driver_core::tool::Tool;
+use pincer_core::tool::Tool;
 
 /// Surface 5: schema must advertise the three canonical button values and
 /// describe the back-compat default. Linux already routed button=middle/right

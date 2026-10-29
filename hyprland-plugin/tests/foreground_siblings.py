@@ -23,7 +23,7 @@ class Actor:
         self.name = name
         self.journal = (directory / (name + ".jsonl")).open("x", buffering=1)
         self.state = {"clicks": 0, "keys": "", "held": False, "motion": 0}
-        self.window = Gtk.Window(title="Cua Foreground " + name)
+        self.window = Gtk.Window(title="Pincer Foreground " + name)
         self.window.set_default_size(600, 500)
         self.canvas = Gtk.DrawingArea()
         self.canvas.set_can_focus(True)

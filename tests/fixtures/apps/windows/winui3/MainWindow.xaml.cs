@@ -8,14 +8,14 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 
-namespace CuaTestHarness.WinUI3;
+namespace PincerTestHarness.WinUI3;
 
 public sealed partial class MainWindow : Window
 {
     private int _counter;
     private int _clickCount;
     private DateTime _lastClickTime = DateTime.MinValue;
-    private readonly string? _fixtureStatePath = Environment.GetEnvironmentVariable("CUA_E2E_FIXTURE_STATE_PATH");
+    private readonly string? _fixtureStatePath = Environment.GetEnvironmentVariable("PINCER_E2E_FIXTURE_STATE_PATH");
     private DispatcherQueueTimer? _fixtureStateTimer;
 
     // Keep a strong reference to the subclass delegate so the GC doesn't
@@ -25,7 +25,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Title = "CuaTestHarness WinUI3";
+        Title = "PincerTestHarness WinUI3";
         InstallScrollMessageHook();
         if (!string.IsNullOrWhiteSpace(_fixtureStatePath))
         {

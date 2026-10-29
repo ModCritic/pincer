@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Build the cua-driver wheel from a local Rust build.
+"""Build the pincer wheel from a local Rust build.
 
 This script:
 1. Picks the wheel's platform tag from the host and the built binary: the
    host's glibc version and the binary's architecture on Linux, and the
    binary's architecture on macOS and Windows. --plat-name overrides it.
-2. Copies a locally built cua-driver binary into src/cua_driver/bin/ and the
-   cua-driver-sdk UniFFI library into src/cua_driver/
+2. Copies a locally built pincer binary into src/pincer_driver/bin/ and the
+   pincer-sdk UniFFI library into src/pincer_driver/
 3. Builds the wheel with hatchling
 
 It never downloads anything. Build the Rust artifacts first, from rust/:
 
-    cargo build --release -p cua-driver -p cua-driver-sdk
+    cargo build --release -p pincer -p pincer-sdk
 
-On Windows, add `-p cua-driver-uia` to also bundle the UIAccess worker.
+On Windows, add `-p pincer-uia` to also bundle the UIAccess worker.
 
 Usage:
     python build_wheel.py [--target-dir DIR] [--binary PATH]
@@ -30,7 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-CARGO_BUILD_HINT = "cargo build --release -p cua-driver -p cua-driver-sdk"
+CARGO_BUILD_HINT = "cargo build --release -p pincer -p pincer-sdk"
 
 
 # Keep this aligned with MACOSX_DEPLOYMENT_TARGET in rust/.cargo/config.toml,
@@ -164,7 +164,7 @@ def select_platform_tag(
     """Pick the platform tag: --plat-name, else the binary's, else the host's."""
     if plat_name:
         return normalize_plat_name(plat_name)
-    require_file(binary, "cua-driver binary")
+    require_file(binary, "pincer binary")
     arch = get_binary_arch(binary)
     if arch is None:
         arch = get_host_arch()
@@ -180,11 +180,11 @@ def get_wheel_tag(platform_tag: str) -> str:
 def get_binary_names(platform_name: str) -> tuple[str, str]:
     """Return the file names of the CLI binary and the UniFFI library."""
     if platform_name == "darwin":
-        return "cua-driver", "libcua_driver_sdk.dylib"
+        return "pincer", "libpincer_sdk.dylib"
     if platform_name == "linux":
-        return "cua-driver", "libcua_driver_sdk.so"
+        return "pincer", "libpincer_sdk.so"
     if platform_name == "windows":
-        return "cua-driver.exe", "cua_driver_sdk.dll"
+        return "pincer.exe", "pincer_sdk.dll"
     raise ValueError(f"Unknown platform: {platform_name}")
 
 
@@ -221,15 +221,15 @@ def stage_artifacts(
         List of staged paths
     """
     binary_name, library_name = get_binary_names(platform_name)
-    require_file(binary, "cua-driver binary")
-    require_file(native_library, "cua-driver-sdk library")
+    require_file(binary, "pincer binary")
+    require_file(native_library, "pincer-sdk library")
 
     bin_dir = package_dir / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
 
     sources = [(binary, bin_dir / binary_name)]
     if platform_name == "windows":
-        uia_worker = binary.parent / "cua-driver-uia.exe"
+        uia_worker = binary.parent / "pincer-uia.exe"
         if uia_worker.is_file():
             sources.append((uia_worker, bin_dir / uia_worker.name))
         else:
@@ -260,7 +260,7 @@ def build_wheel(package_dir: Path, wheel_tag: str) -> None:
     print("\nBuilding wheel...")
 
     env = os.environ.copy()
-    env["CUA_DRIVER_WHEEL_TAG"] = wheel_tag
+    env["PINCER_WHEEL_TAG"] = wheel_tag
 
     platform_tag = wheel_tag.split("-")[-1]
     if platform_tag.startswith("win_"):
@@ -278,7 +278,7 @@ def build_wheel(package_dir: Path, wheel_tag: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Build the cua-driver Python wheel from a local Rust build"
+        description="Build the pincer Python wheel from a local Rust build"
     )
     parser.add_argument(
         "--target-dir",
@@ -289,13 +289,13 @@ def main():
     parser.add_argument(
         "--binary",
         type=Path,
-        help="Path to the cua-driver binary (default: <target-dir>/release/cua-driver)",
+        help="Path to the pincer binary (default: <target-dir>/release/pincer)",
     )
     parser.add_argument(
         "--native-library",
         type=Path,
-        help="Path to the cua-driver-sdk UniFFI library "
-        "(default: <target-dir>/release/libcua_driver_sdk.so, .dylib, or cua_driver_sdk.dll)",
+        help="Path to the pincer-sdk UniFFI library "
+        "(default: <target-dir>/release/libpincer_sdk.so, .dylib, or pincer_sdk.dll)",
     )
     parser.add_argument(
         "--plat-name",
@@ -306,7 +306,7 @@ def main():
 
     # Determine paths
     script_dir = Path(__file__).parent
-    package_dir = script_dir / "src" / "cua_driver"
+    package_dir = script_dir / "src" / "pincer_driver"
     platform_name = get_host_platform()
     binary_name, library_name = get_binary_names(platform_name)
     release_dir = (args.target_dir or get_default_target_dir(script_dir)) / "release"

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
@@ -45,7 +45,7 @@ fn def() -> &'static ToolDef {
             "properties": {
                 "session": { "type": "string", "description": "For multi-call work, prefer a short public session label and repeat it on every call that accepts it. Omit it to use the authenticated transport's implicit lifecycle session." },
                 "pid": { "type": "integer", "description": "Target process ID. Optional with element_token (the token carries the pid)." },
-                "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                "element_token": pincer_core::tool_schema::element_token_schema(),
                 "window_id": {
                     "type": "integer",
                     "description": "CGWindowID. Omit when element_token is supplied (the token carries it)."
@@ -63,7 +63,7 @@ fn def() -> &'static ToolDef {
                     "items": { "type": "string" },
                     "description": "Modifier keys held during the right-click: cmd/shift/option/ctrl. Pixel path only."
                 },
-                "delivery_mode": cua_driver_core::tool_schema::delivery_mode_schema()
+                "delivery_mode": pincer_core::tool_schema::delivery_mode_schema()
             },
             "additionalProperties": false
         }),
@@ -81,7 +81,7 @@ impl Tool for RightClickTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let pid = match super::target_pid(&self.state, &args) {
             Ok(v) => v,
             Err(e) => return e,
@@ -131,7 +131,7 @@ impl Tool for RightClickTool {
                 pid,
                 wid,
                 Some(element_ptr),
-                cua_driver_core::background_input::BackgroundAction::AxSemantic,
+                pincer_core::background_input::BackgroundAction::AxSemantic,
             )
             .await
             {
@@ -197,7 +197,7 @@ impl Tool for RightClickTool {
                     pid,
                     wid,
                     None,
-                    cua_driver_core::background_input::BackgroundAction::WindowPointer,
+                    pincer_core::background_input::BackgroundAction::WindowPointer,
                 )
                 .await
                 {

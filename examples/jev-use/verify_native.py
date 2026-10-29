@@ -6,14 +6,14 @@ accessibility tree and proves the visual-region fallback (it needs a Driver
 that provides parse_visual_regions, which this fork's Driver does not). The canvas publishes its state to a loopback
 journal that this script serves; each published state is written to the task
 state file unchanged except for the schema name. For every task and language this script launches a fresh harness in
-task mode with its own state file (``CUA_<HARNESS>_TASK_STATE``), runs the
+task mode with its own state file (``PINCER_<HARNESS>_TASK_STATE``), runs the
 native runner against that exact process, then reads the harness state file
 itself and checks it against the task's expected end state. The runners' own
 outcome events are not the oracle. Evidence (redacted JSONL logs plus
 ``summary.json``) goes to a new ``--output-dir``. ``--capture-dir`` also
 records sanitized ``get_window_state`` fixtures before and after each run.
 ``--density 12`` or ``24`` launches the AppKit, WPF, WinUI3, or GTK3 harness with
-``CUA_<HARNESS>_TASK_DENSITY`` set, which adds benign distractor controls
+``PINCER_<HARNESS>_TASK_DENSITY`` set, which adds benign distractor controls
 before the task controls; the harness confirms the density in its state file
 (#4312). ``measure_native.py`` turns the runner logs into an accuracy table.
 
@@ -61,28 +61,28 @@ class Harness(NamedTuple):
 # does not trust the code it verifies.
 HARNESSES = {
     "appkit": Harness(
-        TEST_APPS / "harness-appkit/CuaTestHarness.AppKit.app", "Contents/MacOS/CuaTestHarness.AppKit",
-        "CuaTestHarness AppKit", "cua.appkit_task_state_v1", "CUA_APPKIT_TASK_STATE",
-        density_env="CUA_APPKIT_TASK_DENSITY",
+        TEST_APPS / "harness-appkit/PincerTestHarness.AppKit.app", "Contents/MacOS/PincerTestHarness.AppKit",
+        "PincerTestHarness AppKit", "pincer.appkit_task_state_v1", "PINCER_APPKIT_TASK_STATE",
+        density_env="PINCER_APPKIT_TASK_DENSITY",
     ),
     "wpf": Harness(
-        TEST_APPS / "harness-wpf/CuaTestHarness.Wpf.exe", "",
-        "CuaTestHarness WPF Tasks", "cua.wpf_task_state_v1", "CUA_WPF_TASK_STATE",
-        density_env="CUA_WPF_TASK_DENSITY",
+        TEST_APPS / "harness-wpf/PincerTestHarness.Wpf.exe", "",
+        "PincerTestHarness WPF Tasks", "pincer.wpf_task_state_v1", "PINCER_WPF_TASK_STATE",
+        density_env="PINCER_WPF_TASK_DENSITY",
     ),
     "winui3": Harness(
-        TEST_APPS / "harness-winui3/CuaTestHarness.WinUI3.exe", "",
-        "CuaTestHarness WinUI3 Tasks", "cua.winui3_task_state_v1", "CUA_WINUI3_TASK_STATE",
-        density_env="CUA_WINUI3_TASK_DENSITY",
+        TEST_APPS / "harness-winui3/PincerTestHarness.WinUI3.exe", "",
+        "PincerTestHarness WinUI3 Tasks", "pincer.winui3_task_state_v1", "PINCER_WINUI3_TASK_STATE",
+        density_env="PINCER_WINUI3_TASK_DENSITY",
     ),
     "gtk3": Harness(
-        TEST_APPS / "harness-gtk3/CuaTestHarness.Gtk3", "",
-        "CuaTestHarness GTK3 Tasks", "cua.gtk3_task_state_v1", "CUA_GTK3_TASK_STATE",
-        density_env="CUA_GTK3_TASK_DENSITY",
+        TEST_APPS / "harness-gtk3/PincerTestHarness.Gtk3", "",
+        "PincerTestHarness GTK3 Tasks", "pincer.gtk3_task_state_v1", "PINCER_GTK3_TASK_STATE",
+        density_env="PINCER_GTK3_TASK_DENSITY",
     ),
     "canvas": Harness(
         REPO / "tests/fixtures/apps/cross-platform/visual-only-canvas/main.py", "",
-        "Cua Visual-Only Canvas Fixture", "cua.visual_canvas_task_state_v1", "CUA_CANVAS_TASK_STATE",
+        "Pincer Visual-Only Canvas Fixture", "pincer.visual_canvas_task_state_v1", "PINCER_CANVAS_TASK_STATE",
         journal=True, max_depth=1,
     ),
 }
@@ -117,9 +117,9 @@ def canvas_python() -> str:
 
     A virtual environment's launcher on Windows starts the real interpreter as
     a child, so the fixture's published ``pid`` would not match the launched
-    process; the base interpreter avoids that. ``CUA_CANVAS_PYTHON`` overrides.
+    process; the base interpreter avoids that. ``PINCER_CANVAS_PYTHON`` overrides.
     """
-    return os.environ.get("CUA_CANVAS_PYTHON") or getattr(sys, "_base_executable", "") or sys.executable
+    return os.environ.get("PINCER_CANVAS_PYTHON") or getattr(sys, "_base_executable", "") or sys.executable
 
 
 def start_journal(harness: Harness, state: Path) -> tuple[str, Callable[[], None]]:
@@ -231,7 +231,7 @@ def capture(harness_name: str, pid: int, output: Path, label: str) -> None:
     completed = subprocess.run(
         [sys.executable, "python/capture_window_state.py", "--pid", str(pid),
          "--title", harness.window_title, "--output", str(output),
-         "--source", f"CuaTestHarness {harness_name} task mode ({label}), observed by get_window_state",
+         "--source", f"PincerTestHarness {harness_name} task mode ({label}), observed by get_window_state",
          *(["--max-depth", str(harness.max_depth)] if harness.max_depth is not None else [])],
         cwd=BASE, check=False, timeout=120,
     )
@@ -306,7 +306,7 @@ def main() -> None:
     parser.add_argument("--live", action="store_true", help="also verify live Jev; needs a TypeSafe key")
     parser.add_argument(
         "--s1", action="store_true",
-        help="also verify Cua-S1 through the loopback decision service named by CUA_S1_DECISION_URL",
+        help="also verify Cua-S1 through the loopback decision service named by PINCER_S1_DECISION_URL",
     )
     parser.add_argument("--task", action="append", choices=sorted(EXPECTED), help="limit to task kinds")
     parser.add_argument("--capture-dir", type=Path, help="also record sanitized window-state fixtures")

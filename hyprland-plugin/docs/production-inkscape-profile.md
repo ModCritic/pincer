@@ -117,7 +117,7 @@ python3 "$(pwd)/primary_observer_fixture.py" \
 ```
 
 The fixture owns its `WAYLAND_DEBUG=client` capture, enforces the Wayland
-backend, and maps `Cua Isolated Input Foreground`. Bind the plan's exact
+backend, and maps `Pincer Isolated Input Foreground`. Bind the plan's exact
 foreground PID and native window ID to this process using fresh snapshots.
 Use the existing independently built `primary_grab` helper to hold its left
 button, as the real-app runner normally does. Add these arguments to the

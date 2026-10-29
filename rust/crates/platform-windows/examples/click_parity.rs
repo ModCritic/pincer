@@ -18,7 +18,7 @@ fn main() {
     let mut pipe = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
-        .open(r"\\.\pipe\cua-driver")
+        .open(r"\\.\pipe\pincer")
         .expect("open pipe — start daemon first");
 
     fn req(p: &mut std::fs::File, json: &str) -> String {
@@ -60,7 +60,7 @@ fn main() {
     // (moved after list_windows)
 
     // 2. Pixel click — pick the first window we can find belonging to our own
-    //    daemon (cua-driver.exe doesn't have one, so use the foreground app).
+    //    daemon (pincer.exe doesn't have one, so use the foreground app).
     //    Use list_windows to get a real pid + hwnd, then click on it.
     let lw = req(
         &mut pipe,
@@ -91,7 +91,7 @@ fn main() {
                     .pointer("/app_name")
                     .and_then(|s| s.as_str())
                     .unwrap_or("");
-                !name.contains("cua-driver")
+                !name.contains("pincer")
                     && !name.contains("parsecd")
                     && !name.contains("examples")
                     && !name.contains("dwm")

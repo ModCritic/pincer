@@ -1,5 +1,5 @@
 //! Pure mapping tables for the Linux pointer-shape backend
-//! ([`cua_driver_core::pointer_shape`]): AT-SPI roles and X cursor names to
+//! ([`pincer_core::pointer_shape`]): AT-SPI roles and X cursor names to
 //! [`SystemCursorShape`]. No OS calls, so the tables compile and are tested
 //! on every host.
 //!
@@ -30,7 +30,7 @@
 //!   GNOME and KDE expose no window geometry to clients, so no hit-test runs
 //!   there and every cursor is the arrow.
 
-use cua_driver_core::cursor_shape::{ResizeAxis, SystemCursorShape};
+use pincer_core::cursor_shape::{ResizeAxis, SystemCursorShape};
 
 /// One node on the path from a top-level frame down to the deepest
 /// accessible under the point.
@@ -186,7 +186,7 @@ pub fn shape_for_xcursor_name(name: &str) -> SystemCursorShape {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cua_driver_core::cursor_shape::ResizeAxis::*;
+    use pincer_core::cursor_shape::ResizeAxis::*;
     use SystemCursorShape::*;
 
     fn s(role: &str) -> RoleSample {

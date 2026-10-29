@@ -5,25 +5,25 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 
-namespace CuaTestHarness.Wpf;
+namespace PincerTestHarness.Wpf;
 
 /// <summary>
 /// Opt-in jev-use task window (RFC #4268), shown instead of the main window
-/// when CUA_WPF_TASK_STATE=&lt;path&gt; is set. It carries the same labeled
+/// when PINCER_WPF_TASK_STATE=&lt;path&gt; is set. It carries the same labeled
 /// controls as the AppKit harness task mode (Increment, Reset, I agree,
 /// Small/Medium/Large, Note, Save note, Exit) in a small window where every
 /// control is on screen, and atomically rewrites an app-owned JSON state file
 /// on every change. The jev-use task oracle reads that file; it never depends
-/// on Cua Driver output. Ordinary launches never create this window.
-/// CUA_WPF_TASK_DENSITY=12 or 24 (task mode only) also adds benign distractor
+/// on Pincer output. Ordinary launches never create this window.
+/// PINCER_WPF_TASK_DENSITY=12 or 24 (task mode only) also adds benign distractor
 /// controls in a panel before the task controls, for measuring jev-use
 /// accuracy at larger candidate sets (#4312).
 /// </summary>
 public sealed class TaskWindow : Window
 {
-    public const string StateEnv = "CUA_WPF_TASK_STATE";
-    private const string StateSchema = "cua.wpf_task_state_v1";
-    public const string DensityEnv = "CUA_WPF_TASK_DENSITY";
+    public const string StateEnv = "PINCER_WPF_TASK_STATE";
+    private const string StateSchema = "pincer.wpf_task_state_v1";
+    public const string DensityEnv = "PINCER_WPF_TASK_DENSITY";
 
     // Opt-in distractor controls (#4312). The labels are benign (no
     // risky-action phrase) and match the AppKit, GTK3, and WinUI3 harnesses,
@@ -84,7 +84,7 @@ public sealed class TaskWindow : Window
     {
         _statePath = statePath;
         _density = density;
-        Title = "CuaTestHarness WPF Tasks";
+        Title = "PincerTestHarness WPF Tasks";
         AutomationProperties.SetAutomationId(this, "wnd-tasks");
         // The distractor panel widens the window; every control stays on screen.
         Width = density is null ? 480 : 1000;

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Cua AI, Inc.
 
-// CuaTestHarness.SwiftUI — deterministic SwiftUI host app for the
-// cua-driver-rs test harness. Mirrors the role of CuaTestHarness.WinUI3
+// PincerTestHarness.SwiftUI — deterministic SwiftUI host app for the
+// pincer test harness. Mirrors the role of PincerTestHarness.WinUI3
 // (modern WinUI3 ≈ macOS SwiftUI).
 //
 // Single-file Swift, compiled with swiftc against SwiftUI + AppKit.
@@ -21,13 +21,13 @@
 //   exit           — Button terminates the app
 //
 // AX identifiers via `.accessibilityIdentifier(_:)`. Window title is
-// "CuaTestHarness SwiftUI".
+// "PincerTestHarness SwiftUI".
 
 import SwiftUI
 import AppKit
 
 // MARK: - Constants (must match ../scenarios/scenarios.json `swiftui`)
-let kWindowTitle = "CuaTestHarness SwiftUI"
+let kWindowTitle = "PincerTestHarness SwiftUI"
 let kIncrementButtonAID = "btn-increment"
 let kCounterLabelAID = "lbl-counter"
 let kResetButtonAID = "btn-reset"
@@ -57,7 +57,7 @@ let kExitButtonAID = "btn-exit"
 // MARK: - App entry
 
 @main
-struct CuaSwiftUIHarnessApp: App {
+struct PincerSwiftUIHarnessApp: App {
     init() {
         // Make sure the window can be foregrounded normally.
         DispatchQueue.main.async {

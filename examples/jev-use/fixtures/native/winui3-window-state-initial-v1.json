@@ -1,9 +1,9 @@
 {
  "_fixture": {
   "sanitized": "Recorded by verify_native.py --capture-dir. Screenshot bytes, tree_markdown, local file paths, and Driver guidance notes removed.",
-  "source": "CuaTestHarness task window (initial), observed by get_window_state: Windows WinUI3 harness (CUA_WINUI3_TASK_STATE), released Cua Driver 0.30.4 from the canonical install.ps1 on an Azure Windows VM (interactive RDP session)"
+  "source": "PincerTestHarness task window (initial), observed by get_window_state: Windows WinUI3 harness (PINCER_WINUI3_TASK_STATE), released Pincer 0.30.4 from the canonical install.ps1 on an Azure Windows VM (interactive RDP session)"
  },
- "app_name": "CuaTestHarness.WinUI3.exe",
+ "app_name": "PincerTestHarness.WinUI3.exe",
  "capture_id": "capture_d6104b2fcbc4479395ee622c870c5d9a_0000000000000000",
  "element_count": 15,
  "elements": [
@@ -256,7 +256,7 @@
     "x": 724,
     "y": 319
    },
-   "label": "CuaTestHarness WinUI3 Tasks",
+   "label": "PincerTestHarness WinUI3 Tasks",
    "role": "TitleBar",
    "screenshot_frame": {
     "h": 28,
@@ -264,7 +264,7 @@
     "x": 16,
     "y": 2
    },
-   "value": "CuaTestHarness WinUI3 Tasks"
+   "value": "PincerTestHarness WinUI3 Tasks"
   },
   {
    "actions": [
@@ -384,5 +384,5 @@
   "y": 316
  },
  "window_id": 131716,
- "window_title": "CuaTestHarness WinUI3 Tasks"
+ "window_title": "PincerTestHarness WinUI3 Tasks"
 }

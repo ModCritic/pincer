@@ -2,7 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
 
-namespace CuaTestHarness.Wpf;
+namespace PincerTestHarness.Wpf;
 
 internal sealed class NativeButtonHost : HwndHost
 {

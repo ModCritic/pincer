@@ -1,11 +1,11 @@
 {
  "version": 1,
- "description": "Single source of truth for the cua-driver Windows test harness. Consumed by both the C# host apps (at startup, to set window titles / AutomationIds) and by Rust integration tests (to assert expected tree shape without hardcoding strings).",
+ "description": "Single source of truth for the pincer Windows test harness. Consumed by both the C# host apps (at startup, to set window titles / AutomationIds) and by Rust integration tests (to assert expected tree shape without hardcoding strings).",
  "wpf": {
-  "process_name": "CuaTestHarness.Wpf",
-  "exe_relative_path": "test-apps/harness-wpf/CuaTestHarness.Wpf.exe",
+  "process_name": "PincerTestHarness.Wpf",
+  "exe_relative_path": "test-apps/harness-wpf/PincerTestHarness.Wpf.exe",
   "main_window": {
-   "title": "CuaTestHarness WPF",
+   "title": "PincerTestHarness WPF",
    "automation_id": "wnd-main",
    "expected_class_prefix": "HwndWrapper"
   },
@@ -175,11 +175,11 @@
   ]
  },
  "webview": {
-  "process_name": "CuaTestHarness.WebView",
-  "exe_relative_path": "test-apps/harness-webview/CuaTestHarness.WebView.exe",
+  "process_name": "PincerTestHarness.WebView",
+  "exe_relative_path": "test-apps/harness-webview/PincerTestHarness.WebView.exe",
   "default_cdp_port": 9222,
   "main_window": {
-   "title": "CuaTestHarness WebView",
+   "title": "PincerTestHarness WebView",
    "automation_id": "wnd-main"
   },
   "description": "WPF host with Microsoft.Edge.WebView2 control. Loads shared/web/index.html. Exposes Chromium DevTools Protocol at default_cdp_port for tests that use it.",
@@ -213,19 +213,19 @@
   ]
  },
  "electron": {
-  "process_name": "CuaTestHarness.Electron",
-  "exe_relative_path": "test-apps/harness-electron/CuaTestHarness.Electron.exe",
+  "process_name": "PincerTestHarness.Electron",
+  "exe_relative_path": "test-apps/harness-electron/PincerTestHarness.Electron.exe",
   "default_cdp_port": 9223,
   "main_window": {
-   "title": "CuaTestHarness Electron"
+   "title": "PincerTestHarness Electron"
   },
   "description": "Electron host loading the same shared/web/index.html as the WebView harness. Exposes CDP at default_cdp_port via --remote-debugging-port."
  },
  "winui3": {
-  "process_name": "CuaTestHarness.WinUI3",
-  "exe_relative_path": "test-apps/harness-winui3/CuaTestHarness.WinUI3.exe",
+  "process_name": "PincerTestHarness.WinUI3",
+  "exe_relative_path": "test-apps/harness-winui3/PincerTestHarness.WinUI3.exe",
   "main_window": {
-   "title": "CuaTestHarness WinUI3",
+   "title": "PincerTestHarness WinUI3",
    "automation_id": "wnd-main",
    "expected_class_prefix": "WinUIDesktopWin32WindowClass"
   },
@@ -304,12 +304,12 @@
   ]
  },
  "appkit": {
-  "process_name": "CuaTestHarness.AppKit",
-  "app_bundle_relative_path": "test-apps/harness-appkit/CuaTestHarness.AppKit.app",
-  "exe_relative_path": "test-apps/harness-appkit/CuaTestHarness.AppKit.app/Contents/MacOS/CuaTestHarness.AppKit",
-  "bundle_id": "com.trycua.harness.appkit",
+  "process_name": "PincerTestHarness.AppKit",
+  "app_bundle_relative_path": "test-apps/harness-appkit/PincerTestHarness.AppKit.app",
+  "exe_relative_path": "test-apps/harness-appkit/PincerTestHarness.AppKit.app/Contents/MacOS/PincerTestHarness.AppKit",
+  "bundle_id": "io.github.modcritic.pincer.harness.appkit",
   "main_window": {
-   "title": "CuaTestHarness AppKit",
+   "title": "PincerTestHarness AppKit",
    "ax_identifier": "wnd-main"
   },
   "scenarios": [
@@ -373,7 +373,7 @@
    {
     "id": "erroring_toggles",
     "kind": "toggle",
-    "description": "Opt-in (CUA_APPKIT_ERRORING_TOGGLES=1): two NSButton checkboxes whose accessibility press raises, so AppKit answers AXPress with an AX error. The first toggles before raising (as Finder's toolbar view switcher does), the second changes nothing. Tests that click reports the first as performed and keeps the error for the second (#3835). acts_then_errors= errors_only= label.",
+    "description": "Opt-in (PINCER_APPKIT_ERRORING_TOGGLES=1): two NSButton checkboxes whose accessibility press raises, so AppKit answers AXPress with an AX error. The first toggles before raising (as Finder's toolbar view switcher does), the second changes nothing. Tests that click reports the first as performed and keeps the error for the second (#3835). acts_then_errors= errors_only= label.",
     "controls": {
      "acts_then_errors_aid": "chk-acts-then-errors",
      "errors_only_aid": "chk-errors-only",
@@ -428,12 +428,12 @@
   ]
  },
  "swiftui": {
-  "process_name": "CuaTestHarness.SwiftUI",
-  "app_bundle_relative_path": "test-apps/harness-swiftui/CuaTestHarness.SwiftUI.app",
-  "exe_relative_path": "test-apps/harness-swiftui/CuaTestHarness.SwiftUI.app/Contents/MacOS/CuaTestHarness.SwiftUI",
-  "bundle_id": "com.trycua.harness.swiftui",
+  "process_name": "PincerTestHarness.SwiftUI",
+  "app_bundle_relative_path": "test-apps/harness-swiftui/PincerTestHarness.SwiftUI.app",
+  "exe_relative_path": "test-apps/harness-swiftui/PincerTestHarness.SwiftUI.app/Contents/MacOS/PincerTestHarness.SwiftUI",
+  "bundle_id": "io.github.modcritic.pincer.harness.swiftui",
   "main_window": {
-   "title": "CuaTestHarness SwiftUI"
+   "title": "PincerTestHarness SwiftUI"
   },
   "scenarios": [
    {
@@ -529,10 +529,10 @@
   ]
  },
  "gtk3": {
-  "process_name": "CuaTestHarness.Gtk3",
-  "exe_relative_path": "test-apps/harness-gtk3/CuaTestHarness.Gtk3",
+  "process_name": "PincerTestHarness.Gtk3",
+  "exe_relative_path": "test-apps/harness-gtk3/PincerTestHarness.Gtk3",
   "main_window": {
-   "title": "CuaTestHarness GTK3"
+   "title": "PincerTestHarness GTK3"
   },
   "id_contract": "atspi_accessible_name",
   "id_contract_note": "Linux AT-SPI exposes element NAME (rendered as `[idx] role \"name\"`), not an AutomationId/AX-id. Each actionable control sets its accessible NAME to the aid below; marker labels carry their marker text. Tests match on name via ax::element_index_containing, not ax::has_id.",
@@ -590,7 +590,7 @@
    {
     "id": "slider",
     "kind": "range_value",
-    "description": "Horizontal GtkScale. slider_value= label. NOTE: GtkScale role not surfaced by cua-driver Linux get_window_state \u2014 drive via pixel coords.",
+    "description": "Horizontal GtkScale. slider_value= label. NOTE: GtkScale role not surfaced by pincer Linux get_window_state \u2014 drive via pixel coords.",
     "controls": {
      "slider_aid": "sld-value",
      "status_label_text": "slider_value="

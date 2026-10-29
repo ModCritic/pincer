@@ -2,15 +2,15 @@
 #
 # macOS local-development signing helpers for _install-local-rust.sh.
 # This file has no top-level side effects so its policy can be exercised by
-# focused shell tests without building or installing cua-driver.
+# focused shell tests without building or installing pincer.
 
-CUA_LOCAL_SIGN_CN="CuaDriver Local Signing (cua-driver-rs)"
+PINCER_LOCAL_SIGN_CN="Pincer Local Signing (pincer)"
 
 local_signing_keychain() {
-    if [ -n "${CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN:-}" ]; then
-        printf '%s' "$CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN"
-    elif [ -f "$HOME/Library/Keychains/cua-driver-signing.keychain-db" ]; then
-        printf '%s' "$HOME/Library/Keychains/cua-driver-signing.keychain-db"
+    if [ -n "${PINCER_LOCAL_SIGNING_KEYCHAIN:-}" ]; then
+        printf '%s' "$PINCER_LOCAL_SIGNING_KEYCHAIN"
+    elif [ -f "$HOME/Library/Keychains/pincer-signing.keychain-db" ]; then
+        printf '%s' "$HOME/Library/Keychains/pincer-signing.keychain-db"
     elif [ -f "$HOME/Library/Keychains/login.keychain-db" ]; then
         printf '%s' "$HOME/Library/Keychains/login.keychain-db"
     else
@@ -20,11 +20,11 @@ local_signing_keychain() {
 
 print_local_signing_bootstrap() {
     echo "Create and unlock a dedicated development signing keychain, then rerun:" >&2
-    echo "  SIGNING_KEYCHAIN=\"\$HOME/Library/Keychains/cua-driver-signing.keychain-db\"" >&2
+    echo "  SIGNING_KEYCHAIN=\"\$HOME/Library/Keychains/pincer-signing.keychain-db\"" >&2
     echo "  security create-keychain \"\$SIGNING_KEYCHAIN\"  # first time only; prompts for a password" >&2
     echo "  security set-keychain-settings \"\$SIGNING_KEYCHAIN\"" >&2
     echo "  security unlock-keychain \"\$SIGNING_KEYCHAIN\"" >&2
-    echo "  export CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN=\"\$SIGNING_KEYCHAIN\"" >&2
+    echo "  export PINCER_LOCAL_SIGNING_KEYCHAIN=\"\$SIGNING_KEYCHAIN\"" >&2
     echo "  bash scripts/install-local.sh --require-stable-signing" >&2
     echo "If the certificate is newly created, authorize its private key for codesign as described in:" >&2
     echo "  scripts/README.md#stable-macos-local-signing" >&2
@@ -39,20 +39,20 @@ ensure_local_signing_identity() {
     kc="$(local_signing_keychain)"
     [ -f "$kc" ] || { printf -- '-'; return; }
     local identity
-    if [ -n "${CUA_DRIVER_LOCAL_SIGNING_IDENTITY:-}" ]; then
-        case "$CUA_DRIVER_LOCAL_SIGNING_IDENTITY" in
+    if [ -n "${PINCER_LOCAL_SIGNING_IDENTITY:-}" ]; then
+        case "$PINCER_LOCAL_SIGNING_IDENTITY" in
             *[!0-9A-Fa-f]*|'') printf -- '-'; return ;;
         esac
-        [ "${#CUA_DRIVER_LOCAL_SIGNING_IDENTITY}" -eq 40 ] \
+        [ "${#PINCER_LOCAL_SIGNING_IDENTITY}" -eq 40 ] \
             || { printf -- '-'; return; }
         identity="$(security find-identity -p codesigning "$kc" 2>/dev/null \
-            | awk -v wanted="$CUA_DRIVER_LOCAL_SIGNING_IDENTITY" \
+            | awk -v wanted="$PINCER_LOCAL_SIGNING_IDENTITY" \
                 '{ for (field = 1; field <= NF; field++) if (toupper($field) == toupper(wanted)) { print $field; exit } }')"
         [ -n "$identity" ] && printf '%s' "$identity" || printf -- '-'
         return
     fi
     identity="$(security find-identity -p codesigning "$kc" 2>/dev/null \
-        | awk -v cn="$CUA_LOCAL_SIGN_CN" 'index($0, "\"" cn "\"") { print $2; exit }')"
+        | awk -v cn="$PINCER_LOCAL_SIGN_CN" 'index($0, "\"" cn "\"") { print $2; exit }')"
     if [ -n "$identity" ]; then
         printf '%s' "$identity"
         return
@@ -61,17 +61,17 @@ ensure_local_signing_identity() {
     local tmp
     tmp="$(mktemp -d)" || { printf -- '-'; return; }
     printf '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=%s\n[ext]\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n' \
-        "$CUA_LOCAL_SIGN_CN" > "$tmp/req.cnf"
-    local pw="cua-local-$$"
+        "$PINCER_LOCAL_SIGN_CN" > "$tmp/req.cnf"
+    local pw="pincer-local-$$"
     if openssl req -x509 -newkey rsa:2048 -keyout "$tmp/key.pem" -out "$tmp/cert.pem" \
             -days 3650 -nodes -config "$tmp/req.cnf" >/dev/null 2>&1 \
        && { openssl pkcs12 -export -legacy -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
-                -out "$tmp/id.p12" -passout pass:"$pw" -name "$CUA_LOCAL_SIGN_CN" >/dev/null 2>&1 \
+                -out "$tmp/id.p12" -passout pass:"$pw" -name "$PINCER_LOCAL_SIGN_CN" >/dev/null 2>&1 \
             || openssl pkcs12 -export -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
-                -out "$tmp/id.p12" -passout pass:"$pw" -name "$CUA_LOCAL_SIGN_CN" >/dev/null 2>&1; } \
+                -out "$tmp/id.p12" -passout pass:"$pw" -name "$PINCER_LOCAL_SIGN_CN" >/dev/null 2>&1; } \
        && security import "$tmp/id.p12" -k "$kc" -P "$pw" -A -T /usr/bin/codesign >/dev/null 2>&1; then
         identity="$(security find-identity -p codesigning "$kc" 2>/dev/null \
-            | awk -v cn="$CUA_LOCAL_SIGN_CN" 'index($0, "\"" cn "\"") { print $2; exit }')"
+            | awk -v cn="$PINCER_LOCAL_SIGN_CN" 'index($0, "\"" cn "\"") { print $2; exit }')"
         rm -rf "$tmp"
         if [ -n "$identity" ]; then
             printf '%s' "$identity"
@@ -89,10 +89,10 @@ codesign_bounded() {
     local timeout_seconds="$1"
     shift
     local kc=""
-    if [ -n "${CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN:-}" ]; then
-        kc="$CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN"
-    elif [ -f "$HOME/Library/Keychains/cua-driver-signing.keychain-db" ]; then
-        kc="$HOME/Library/Keychains/cua-driver-signing.keychain-db"
+    if [ -n "${PINCER_LOCAL_SIGNING_KEYCHAIN:-}" ]; then
+        kc="$PINCER_LOCAL_SIGNING_KEYCHAIN"
+    elif [ -f "$HOME/Library/Keychains/pincer-signing.keychain-db" ]; then
+        kc="$HOME/Library/Keychains/pincer-signing.keychain-db"
     fi
     if [ -n "$kc" ]; then
         set -- --keychain "$kc" "$@"
@@ -139,13 +139,13 @@ ad_hoc_requirement_changed() {
         && [ "$(classify_designated_requirement "$installed_requirement")" = "ad-hoc" ]
 }
 
-# Reset only the two TCC services used by Cua Driver Local, and only when an
+# Reset only the two TCC services used by Pincer Local, and only when an
 # actual ad-hoc cdhash transition was observed. The caller must register the
 # newly installed bundle with LaunchServices before invoking this function.
 reset_local_tcc_after_ad_hoc_change() {
     local previous_requirement="$1"
     local installed_requirement="$2"
-    local bundle_id="com.trycua.driver.local"
+    local bundle_id="io.github.modcritic.pincer.local"
     local service failed_services=""
 
     ad_hoc_requirement_changed "$previous_requirement" "$installed_requirement" || return 0
@@ -169,7 +169,7 @@ reset_local_tcc_after_ad_hoc_change() {
     fi
 
     echo "${YELLOW}The ad-hoc cdhash changed; cleared stale Accessibility and Screen Recording rows for $bundle_id.${NORMAL}" >&2
-    echo "Re-grant them to the new app with: cua-driver-local permissions grant" >&2
+    echo "Re-grant them to the new app with: pincer-local permissions grant" >&2
 }
 
 # Signs a staged local app without touching the live installation. Strict mode
@@ -192,7 +192,7 @@ sign_staged_local_app() {
         echo "${YELLOW}warning: the requested stable identity produced a non-certificate designated requirement${NORMAL}" >&2
     fi
 
-    if [ "${CUA_DRIVER_REQUIRE_STABLE_SIGNING:-0}" = "1" ]; then
+    if [ "${PINCER_REQUIRE_STABLE_SIGNING:-0}" = "1" ]; then
         clean_partial_bundle_signature "$app_stage"
         echo "${RED}Error: stable macOS signing is required, but no usable certificate-backed identity was available.${NORMAL}" >&2
         echo "The live installation was not changed." >&2
@@ -213,7 +213,7 @@ sign_staged_local_app() {
     clean_partial_bundle_signature "$app_stage"
     if ! codesign_bounded 20 --force --deep --sign - "$app_stage" 2>/dev/null; then
         clean_partial_bundle_signature "$app_stage"
-        echo "${RED}Error: codesign of staged CuaDriverLocal.app failed; live installation was not changed.${NORMAL}" >&2
+        echo "${RED}Error: codesign of staged PincerLocal.app failed; live installation was not changed.${NORMAL}" >&2
         return 1
     fi
     requirement="$(designated_requirement "$app_stage")"
@@ -221,7 +221,7 @@ sign_staged_local_app() {
         echo "${RED}Error: could not verify the staged app's ad-hoc designated requirement; live installation was not changed.${NORMAL}" >&2
         return 1
     fi
-    echo "${YELLOW}WARNING: CuaDriverLocal.app was signed ad-hoc (designated requirement uses cdhash).${NORMAL}" >&2
+    echo "${YELLOW}WARNING: PincerLocal.app was signed ad-hoc (designated requirement uses cdhash).${NORMAL}" >&2
     echo "${YELLOW}Accessibility and Screen Recording grants WILL become invalid on the next rebuild.${NORMAL}" >&2
     print_local_signing_bootstrap
 }

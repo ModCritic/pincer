@@ -1,10 +1,10 @@
-"""Environment for the Cua Driver process started over MCP stdio.
+"""Environment for the Pincer process started over MCP stdio.
 
 The MCP SDK's stdio transport passes only a small default allowlist (HOME,
 PATH, USER, ...) on POSIX. On Linux that drops the desktop session, so the
 Driver cannot reach the display or session bus and the isolated browser exits
 before exposing DevTools. Forward the SDK defaults plus the desktop-session and
-Cua Driver variables only; provider credentials such as TYPESAFE_API_KEY stay
+Pincer variables only; provider credentials such as TYPESAFE_API_KEY stay
 in the agent process.
 """
 
@@ -25,7 +25,7 @@ DESKTOP_SESSION_VARS = (
     "XDG_SESSION_TYPE",
     "XDG_CURRENT_DESKTOP",
 )
-DRIVER_VAR_PREFIX = "CUA_DRIVER_"
+DRIVER_VAR_PREFIX = "PINCER_"
 
 
 def driver_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:

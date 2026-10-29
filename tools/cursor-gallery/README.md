@@ -1,6 +1,6 @@
 # Cursor gallery
 
-Maintainer preview for the production `cua.default` renderer. Generated media
+Maintainer preview for the production `pincer.default` renderer. Generated media
 is built from `cursor-overlay` and is intentionally not committed.
 
 From the repository root:
@@ -45,5 +45,5 @@ plain ES modules (no build) and does not need the renderer assets:
 - `capture/record.mjs` drives a headless Chrome (`?capture=1` freezes the clock)
   to take exact screenshots and frame sequences for video.
 
-The cursor is drawn in the scene with the `cua.default` body path. The lab
+The cursor is drawn in the scene with the `pincer.default` body path. The lab
 never moves or restyles the real system pointer.

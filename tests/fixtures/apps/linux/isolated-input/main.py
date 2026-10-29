@@ -28,7 +28,7 @@ def record(kind, **values):
     journal.write(json.dumps({"kind": kind, "time": time.monotonic_ns(), **values}) + "\n")
 
 
-window = Gtk.Window(title="Cua Isolated Input " + args.actor)
+window = Gtk.Window(title="Pincer Isolated Input " + args.actor)
 window.set_default_size(600, 500)
 canvas = Gtk.DrawingArea()
 canvas.set_can_focus(True)

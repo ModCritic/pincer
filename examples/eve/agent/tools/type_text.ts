@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { toModelContent, typeText } from '../lib/desktop.js';
 
 export default defineTool({
-  description: 'Type text into the focused desktop control through Cua Driver, then re-observe.',
+  description: 'Type text into the focused desktop control through Pincer, then re-observe.',
   inputSchema: z.object({ text: z.string().min(1) }),
   // Show the length, not the text: typed values can be private.
   label: { start: ({ text }) => `Type ${text.length} characters` },

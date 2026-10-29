@@ -12,7 +12,7 @@
 //! refuses with the shared `background_unavailable` contract instead of
 //! reporting an unverifiable success.
 
-use cua_driver_core::protocol::ToolResult;
+use pincer_core::protocol::ToolResult;
 
 use crate::input::pointer_toolkit::PointerReadingToolkit;
 
@@ -82,10 +82,10 @@ pub(crate) fn pointer_reading_background_refusal(
 ) -> ToolResult {
     let name = toolkit.name();
     let why = toolkit.why();
-    cua_driver_core::delivery::background_unavailable_result(
+    pincer_core::delivery::background_unavailable_result(
         format!(
             "Background pixel click is not available for pid {pid}: its {name} toolkit \
-             {why}. Retry this action with delivery_mode:\"foreground\"; Cua \
+             {why}. Retry this action with delivery_mode:\"foreground\"; Pincer \
              Driver will activate the window, move the pointer to the target, and click."
         ),
         "background_unavailable",

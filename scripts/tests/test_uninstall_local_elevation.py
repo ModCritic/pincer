@@ -1,7 +1,7 @@
 """Elevation contract for the Windows local uninstaller.
 
-`install-local.ps1` registers the `cua-driver-local-serve` autostart task
-through `cua-driver-local autostart enable`, which self-elevates via
+`install-local.ps1` registers the `pincer-local-serve` autostart task
+through `pincer-local autostart enable`, which self-elevates via
 ShellExecute 'runas' and registers the task at RunLevel=Highest. A
 non-elevated process can therefore neither delete the task nor stop the High-IL
 daemon it spawned, so `uninstall-local.ps1` re-execs itself elevated instead of
@@ -80,9 +80,9 @@ def _sandbox_env(tmp_path: Path) -> dict[str, str]:
             "USERPROFILE": str(home),
             "LOCALAPPDATA": str(local_app_data),
             "APPDATA": str(roaming),
-            "CUA_DRIVER_LOCAL_HOME": str(home / ".cua-driver-local"),
-            "CUA_DRIVER_LOCAL_INSTALL_DIR": str(
-                local_app_data / "Programs/Cua/cua-driver-local/bin"
+            "PINCER_LOCAL_HOME": str(home / ".pincer-local"),
+            "PINCER_LOCAL_INSTALL_DIR": str(
+                local_app_data / "Programs/Pincer/pincer-local/bin"
             ),
         }
     )
@@ -280,8 +280,8 @@ def test_declined_uac_changes_nothing_and_reports_an_actionable_message(tmp_path
         "    throw [System.InvalidOperationException]::new("
         "'The operation was canceled by the user.')",
     )
-    home = Path(_sandbox_env(tmp_path)["CUA_DRIVER_LOCAL_HOME"])
-    marker = home / "packages/current/cua-driver-local.exe"
+    home = Path(_sandbox_env(tmp_path)["PINCER_LOCAL_HOME"])
+    marker = home / "packages/current/pincer-local.exe"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text("local\n", encoding="utf-8")
 
@@ -355,7 +355,7 @@ def test_validate_only_does_not_elevate(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "task=cua-driver-local-serve" in result.stdout
+    assert "task=pincer-local-serve" in result.stdout
     assert "UAC" not in result.stdout
 
 
@@ -367,21 +367,21 @@ def _skip_when_a_real_local_install_is_present() -> None:
     ask for elevation, which must not happen from a test run.
     """
     query = subprocess.run(
-        ["schtasks.exe", "/Query", "/TN", "cua-driver-local-serve"],
+        ["schtasks.exe", "/Query", "/TN", "pincer-local-serve"],
         capture_output=True,
         text=True,
         check=False,
     )
     if query.returncode == 0:
-        pytest.skip("a real cua-driver-local-serve task is registered on this machine")
+        pytest.skip("a real pincer-local-serve task is registered on this machine")
     listing = subprocess.run(
-        ["tasklist.exe", "/FI", "IMAGENAME eq cua-driver-local.exe"],
+        ["tasklist.exe", "/FI", "IMAGENAME eq pincer-local.exe"],
         capture_output=True,
         text=True,
         check=False,
     )
-    if "cua-driver-local.exe" in listing.stdout:
-        pytest.skip("a real cua-driver-local daemon is running on this machine")
+    if "pincer-local.exe" in listing.stdout:
+        pytest.skip("a real pincer-local daemon is running on this machine")
 
 
 @requires_windows_powershell
@@ -399,4 +399,4 @@ def test_uninstall_runs_unelevated_when_nothing_needs_admin(tmp_path: Path) -> N
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "triggering UAC prompt" not in result.stdout
-    assert "cua-driver-local uninstalled" in result.stdout
+    assert "pincer-local uninstalled" in result.stdout

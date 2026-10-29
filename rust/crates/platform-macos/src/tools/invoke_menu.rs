@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use core_foundation::base::{CFRelease, CFTypeRef};
-use cua_driver_contract::InvokeMenuInput;
-use cua_driver_core::{
+use pincer_contract::InvokeMenuInput;
+use pincer_core::{
     action_record::{
         ActionEffect, ActionEvidence, ActionExecutionRecord, ActionTransport, ActualDelivery,
         EvidenceKind, RequestedDelivery,
@@ -39,8 +39,7 @@ static DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
 fn def() -> &'static ToolDef {
     DEF.get_or_init(|| {
-        let contract =
-            cua_driver_contract::tool_contract("invoke_menu").expect("invoke_menu contract");
+        let contract = pincer_contract::tool_contract("invoke_menu").expect("invoke_menu contract");
         ToolDef {
             name: contract.name,
             description: contract.description,
@@ -851,7 +850,7 @@ impl Tool for InvokeMenuTool {
         let mut args = args;
         super::default_window_for_pid(&mut args);
         let input: InvokeMenuInput =
-            match cua_driver_core::tool_args::parse_typed_input("invoke_menu", args) {
+            match pincer_core::tool_args::parse_typed_input("invoke_menu", args) {
                 Ok(input) => input,
                 Err(result) => return result,
             };

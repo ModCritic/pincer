@@ -14,22 +14,22 @@ function Log($msg) {
 
 Log "sandbox-runner.ps1 starting"
 
-# -- set env so binary_path() resolves cua-driver.exe correctly -------------
-$repoRoot = "C:\cua-driver"
+# -- set env so binary_path() resolves pincer.exe correctly -------------
+$repoRoot = "C:\pincer"
 $rustRoot = Join-Path $repoRoot "rust"
 $targetDeps = Join-Path $rustRoot "target\debug\deps"
 
-$env:CARGO_MANIFEST_DIR = Join-Path $rustRoot "crates\cua-driver"
+$env:CARGO_MANIFEST_DIR = Join-Path $rustRoot "crates\pincer"
 Log "CARGO_MANIFEST_DIR = $env:CARGO_MANIFEST_DIR"
 
-$driverExe = Join-Path $rustRoot "target\debug\cua-driver.exe"
+$driverExe = Join-Path $rustRoot "target\debug\pincer.exe"
 if (-not (Test-Path $driverExe)) {
     Log "ERROR: $driverExe not found"
     "1"    | Out-File $exitFile -Encoding utf8 -NoNewline
     "done" | Out-File $doneFile -Encoding utf8 -NoNewline
     exit 1
 }
-Log "cua-driver   : $driverExe"
+Log "pincer   : $driverExe"
 
 # -- find test binaries -------------------------------------------------------
 # Run the protocol test first, followed by the typed interactive harnesses.
@@ -44,11 +44,11 @@ $testSuites = @(
 
 # -- stage harness binaries to %TEMP% (same Zone-3 ShellExecute workaround) --
 $harnessRoots = @(
-    @{ Src = (Join-Path $rustRoot "test-apps\harness-wpf");      EnvVar = "HARNESS_WPF_EXE";      Exe = "CuaTestHarness.Wpf.exe" },
-    @{ Src = (Join-Path $rustRoot "test-apps\harness-winui3");   EnvVar = "HARNESS_WINUI3_EXE";   Exe = "CuaTestHarness.WinUI3.exe" },
-    @{ Src = (Join-Path $rustRoot "test-apps\harness-webview");  EnvVar = "HARNESS_WEBVIEW_EXE";  Exe = "CuaTestHarness.WebView.exe" },
-    @{ Src = (Join-Path $rustRoot "test-apps\harness-electron"); EnvVar = "HARNESS_ELECTRON_EXE"; Exe = "CuaTestHarness.Electron.exe" },
-    @{ Src = (Join-Path $rustRoot "test-apps\harness-tauri");    EnvVar = "HARNESS_TAURI_EXE";    Exe = "CuaTestHarness.Tauri.exe" }
+    @{ Src = (Join-Path $rustRoot "test-apps\harness-wpf");      EnvVar = "HARNESS_WPF_EXE";      Exe = "PincerTestHarness.Wpf.exe" },
+    @{ Src = (Join-Path $rustRoot "test-apps\harness-winui3");   EnvVar = "HARNESS_WINUI3_EXE";   Exe = "PincerTestHarness.WinUI3.exe" },
+    @{ Src = (Join-Path $rustRoot "test-apps\harness-webview");  EnvVar = "HARNESS_WEBVIEW_EXE";  Exe = "PincerTestHarness.WebView.exe" },
+    @{ Src = (Join-Path $rustRoot "test-apps\harness-electron"); EnvVar = "HARNESS_ELECTRON_EXE"; Exe = "PincerTestHarness.Electron.exe" },
+    @{ Src = (Join-Path $rustRoot "test-apps\harness-tauri");    EnvVar = "HARNESS_TAURI_EXE";    Exe = "PincerTestHarness.Tauri.exe" }
 )
 foreach ($h in $harnessRoots) {
     if (-not (Test-Path $h.Src)) {

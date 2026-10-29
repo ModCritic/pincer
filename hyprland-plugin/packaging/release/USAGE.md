@@ -1,6 +1,6 @@
 # Install the pinned Hyprland plugin
 
-This source distribution builds the Cua production input candidate without a
+This source distribution builds the Pincer production input candidate without a
 source checkout. Use the exact Driver component release named by
 `release_tag` in `SOURCE-PROVENANCE.json`. The Arch package version follows that
 Driver release; the plugin's CMake version is recorded as `plugin_version`.
@@ -20,8 +20,8 @@ compiler does not satisfy this contract. Arrange the pinned dependencies in the
 target environment before building; the recipe does not install a toolchain or
 alter runtime search paths.
 
-Download the `cua-hyprland-plugin-DRIVER_VERSION-COMMIT_SHA.tar.gz` source archive
-and matching `cua-hyprland-plugin-DRIVER_VERSION-COMMIT_SHA-build-kit.tar.gz` from
+Download the `pincer-hyprland-plugin-DRIVER_VERSION-COMMIT_SHA.tar.gz` source archive
+and matching `pincer-hyprland-plugin-DRIVER_VERSION-COMMIT_SHA-build-kit.tar.gz` from
 the same exact component release. The filenames contain the release version
 and full source commit SHA. Verify both archives against that release's
 published checksums before extracting the build kit into a dedicated empty
@@ -35,7 +35,7 @@ sha256sum -c SHA256SUMS
 ```
 
 Run `makepkg` as an ordinary user in that directory. It uses `/usr/bin/g++` by
-default. If your matching compiler is staged elsewhere, set `CUA_RELEASE_CXX`
+default. If your matching compiler is staged elsewhere, set `PINCER_RELEASE_CXX`
 to its absolute executable path before invoking `makepkg`. The verifier checks
 its identity, an emitted compiler probe, the compositor, and the shared runtime.
 The recipe builds and tests the plugin with production input enabled,
@@ -51,9 +51,9 @@ sudo pacman -U "$package_file"
 ```
 
 Installation writes the module to
-`/usr/lib/cua/hyprland/cua-hyprland-plugin.so`, its license under
-`/usr/share/licenses/cua-hyprland-plugin/`, and source/build provenance under
-`/usr/share/cua-hyprland-plugin/`. It has no install hooks, automatic loading, or
+`/usr/lib/pincer/hyprland/pincer-hyprland-plugin.so`, its license under
+`/usr/share/licenses/pincer-hyprland-plugin/`, and source/build provenance under
+`/usr/share/pincer-hyprland-plugin/`. It has no install hooks, automatic loading, or
 configuration changes. Keep the package file and its provenance for rollback.
 
 ## Qualify package lifecycle in a disposable environment
@@ -111,8 +111,8 @@ Start a fresh Hyprland session with the pinned compositor. Load the module
 explicitly and inspect its status:
 
 ```sh
-hyprctl plugin load /usr/lib/cua/hyprland/cua-hyprland-plugin.so
-hyprctl -j cua:status
+hyprctl plugin load /usr/lib/pincer/hyprland/pincer-hyprland-plugin.so
+hyprctl -j pincer:status
 ```
 
 The local input transport is disabled by default. Enabling it grants trusted
@@ -120,21 +120,21 @@ local desktop input capability; Driver continues to enforce its own permission
 policy on individual calls. In Omarchy's Lua configuration, add:
 
 ```lua
-hl.config({plugin = {cua = {enabled = true}}})
+hl.config({plugin = {pincer = {enabled = true}}})
 ```
 
 For a legacy Hyprland configuration, add:
 
 ```text
-plugin:cua:enabled = true
+plugin:pincer:enabled = true
 ```
 
 After editing the configuration, run `hyprctl reload`, then inspect
-`hyprctl -j cua:status` again. A runtime keyword or Lua evaluation without a
+`hyprctl -j pincer:status` again. A runtime keyword or Lua evaluation without a
 configuration reload does not reconcile the input sockets. Check the status's
 protocol, capabilities, socket paths, and compositor identity. A loaded module
 alone does not prove input availability. Start the matching Driver with
-`CUA_DRIVER_RS_ENABLE_WAYLAND=1`; its production input protocol is v3 by default.
+`PINCER_ENABLE_WAYLAND=1`; its production input protocol is v3 by default.
 
 The input path checks exact native application packages: `libreoffice-fresh
 26.2.5-3` for Calc and `inkscape 1.4.4-6`. Each background input lane publishes
@@ -169,6 +169,6 @@ are unavailable, leave the plugin inactive and use Driver without this plugin.
 To disable input, remove the enabling setting or set it to false and run
 `hyprctl reload`. To remove the package, remove any operator-added plugin load
 or enable settings, exit the desktop session, and run
-`sudo pacman -R cua-hyprland-plugin` from a text console. Start a fresh session
+`sudo pacman -R pincer-hyprland-plugin` from a text console. Start a fresh session
 afterward. Unloading, upgrading, or removing a file in a running compositor does
 not substitute for restarting that compositor.

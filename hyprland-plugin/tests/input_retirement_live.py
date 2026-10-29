@@ -42,7 +42,7 @@ def ctl(*arguments):
 
 
 def status():
-    value = json.loads(ctl("-j", "cua:status"))
+    value = json.loads(ctl("-j", "pincer:status"))
     if not isinstance(value, dict):
         raise AssertionError("plugin status is not an object")
     return value
@@ -122,7 +122,7 @@ def preflight(args):
     service_environment = dict(item.split(b"=", 1) for item in
         Path(f"/proc/{args.driver_service_pid}/environ").read_bytes().split(b"\0") if b"=" in item)
     if (service_environment.get(b"HYPRLAND_INSTANCE_SIGNATURE") != instance.encode()
-            or service_environment.get(b"CUA_DRIVER_EXPERIMENTAL_HYPRLAND_INPUT") != b"1"):
+            or service_environment.get(b"PINCER_EXPERIMENTAL_HYPRLAND_INPUT") != b"1"):
         raise ValueError("Driver service must enable input in this exact compositor instance")
     identities = {args.compositor_pid: compositor, args.driver_service_pid: service}
     seats = {}
@@ -137,11 +137,11 @@ def preflight(args):
         if heartbeat["held"] or not 0 <= time.monotonic_ns() - heartbeat["time"] <= 2_000_000_000:
             raise ValueError("fixture must have a fresh idle heartbeat")
         seats[actor] = bound_seats(getattr(args, actor + "_wire").read_text())
-    marker = expected / "cua-input-seat-lifetime"
+    marker = expected / "pincer-input-seat-lifetime"
     metadata = marker.lstat()
     if not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o700 or metadata.st_uid != os.getuid():
         raise ValueError("missing private seat-lifetime marker")
-    paths = [expected / name for name in ("cua-input-test.sock", "cua-input-test-2.sock")]
+    paths = [expected / name for name in ("pincer-input-test.sock", "pincer-input-test-2.sock")]
     discovery = Path(initial["transport"]["socket"])
     if discovery.parent != expected:
         raise ValueError("discovery socket belongs to another instance")
@@ -158,7 +158,7 @@ def run(args):
     grab = executor = None
     loaded = args.module
     unload_attempted = False
-    marker = args.input_directory / "cua-input-seat-lifetime"
+    marker = args.input_directory / "pincer-input-seat-lifetime"
 
     def snapshot(client, actor):
         response = client.tool("get_window_state", {**plan[actor], "max_elements": 80})

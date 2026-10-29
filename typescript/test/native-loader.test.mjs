@@ -9,10 +9,10 @@ import { fileURLToPath } from "node:url"
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 const libraryName =
   process.platform === "darwin"
-    ? "libcua_driver_sdk.dylib"
+    ? "libpincer_sdk.dylib"
     : process.platform === "win32"
-      ? "cua_driver_sdk.dll"
-      : "libcua_driver_sdk.so"
+      ? "pincer_sdk.dll"
+      : "libpincer_sdk.so"
 const nodeTriple =
   process.platform === "darwin"
     ? `darwin-${process.arch}`
@@ -21,12 +21,12 @@ const nodeTriple =
       : `linux-${process.arch}-${process.report.getReport().header.glibcVersionRuntime ? "gnu" : "musl"}`
 const library = path.resolve(
   testDirectory,
-  "../node_modules/@trycua",
-  `cua-driver-${nodeTriple}`,
+  "../node_modules",
+  `pincer-driver-${nodeTriple}`,
   libraryName,
 )
 
-if (process.env.CUA_DRIVER_REQUIRE_UNIFFI === "1" && !existsSync(library)) {
+if (process.env.PINCER_REQUIRE_UNIFFI === "1" && !existsSync(library)) {
   throw new Error(`required staged UniFFI library is missing: ${library}`)
 }
 
@@ -34,8 +34,8 @@ test(
   "embedded host supplies the private socket to the Rust SDK",
   { skip: process.platform === "win32" || !existsSync(library), timeout: 10_000 },
   async () => {
-    const directory = mkdtempSync(path.join(os.tmpdir(), "cua-driver-embedded-sdk-"))
-    const binaryPath = path.join(directory, "fake cua-driver")
+    const directory = mkdtempSync(path.join(os.tmpdir(), "pincer-embedded-sdk-"))
+    const binaryPath = path.join(directory, "fake pincer")
     writeFileSync(
       binaryPath,
       `#!/usr/bin/env node
@@ -71,13 +71,13 @@ process.stdin.on("end", () => server.close(() => process.exit(0)));
     )
     chmodSync(binaryPath, 0o755)
 
-    const { EmbeddedCuaDriverHost } = await import("@trycua/cua-driver/embedded")
-    const embedded = new EmbeddedCuaDriverHost(binaryPath, "com.example.t3")
+    const { EmbeddedPincerHost } = await import("pincer-driver/embedded")
+    const embedded = new EmbeddedPincerHost(binaryPath, "com.example.t3")
 
     try {
       const connection = await embedded.start()
-      const sdk = await import("@trycua/cua-driver")
-      const driver = sdk.CuaDriver.connect(connection.socketPath)
+      const sdk = await import("pincer-driver")
+      const driver = sdk.Pincer.connect(connection.socketPath)
       assert.equal(driver.socketPath(), connection.socketPath)
       assert.deepEqual(JSON.parse(await driver.listToolsJson()), {
         tools: [{ name: "embedded_fixture" }],
@@ -94,7 +94,7 @@ test(
   "generated Node SDK bindings call the Rust daemon interface",
   { skip: process.platform === "win32" || !existsSync(library), timeout: 10_000 },
   async () => {
-    const directory = mkdtempSync(path.join(os.tmpdir(), "cua-driver-node-ffi-"))
+    const directory = mkdtempSync(path.join(os.tmpdir(), "pincer-node-ffi-"))
     const socketPath = path.join(directory, "driver.sock")
     const fixture = spawn(
       process.execPath,
@@ -122,7 +122,7 @@ test(
     try {
       await readyPromise
       assert.equal(existsSync(socketPath), true)
-      const sdk = await import("@trycua/cua-driver")
+      const sdk = await import("pincer-driver")
       const {
         ActionEffect,
         ActionRoute,
@@ -131,7 +131,7 @@ test(
         InputDeliveryMode,
         ClickButton,
         ClickInput,
-        CuaDriver,
+        Pincer,
         StatePredicate,
         VerificationStatus,
         VerifyStateInput,
@@ -139,14 +139,14 @@ test(
       } = sdk
       assert.equal("StdioMcpTransport" in sdk, false)
       await assert.rejects(
-        import("@trycua/cua-driver/sdk"),
+        import("pincer-driver/sdk"),
         error => error?.code === "ERR_PACKAGE_PATH_NOT_EXPORTED",
       )
       await assert.rejects(
-        import("@trycua/cua-driver/native"),
+        import("pincer-driver/native"),
         error => error?.code === "ERR_PACKAGE_PATH_NOT_EXPORTED",
       )
-      const driver = CuaDriver.connect(socketPath)
+      const driver = Pincer.connect(socketPath)
       const expectedMethods = [
         "startSession",
         "getSession",
@@ -306,8 +306,8 @@ test(
   "generated Node SDK can own the runtime in process",
   { skip: !existsSync(library), timeout: 10_000 },
   async () => {
-    const { CuaDriver, DriverExecutionMode } = await import("@trycua/cua-driver")
-    const driver = CuaDriver.create(undefined)
+    const { Pincer, DriverExecutionMode } = await import("pincer-driver")
+    const driver = Pincer.create(undefined)
     try {
       assert.equal(driver.executionMode(), DriverExecutionMode.Embedded)
       assert.equal(driver.socketPath(), "")

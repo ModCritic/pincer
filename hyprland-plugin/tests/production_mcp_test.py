@@ -12,14 +12,14 @@ from production_mcp import DirectMCP, assert_distinct_runtimes, profile_environm
 
 class RuntimeTests(unittest.TestCase):
     def test_profiles_keep_managed_policy_and_remove_inherited_approval(self):
-        inherited = {'CUA_DRIVER_PERMISSION_MODE': 'unrestricted',
-                     'CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS': '1',
-                     'CUA_DRIVER_SESSION_POLICY_FILE': 'old-manifest',
-                     'CUA_DRIVER_CAPABILITY_MANIFEST_APPROVED': '1',
-                     'CUA_DRIVER_MANAGED_POLICY_FILE': 'managed.yaml'}
+        inherited = {'PINCER_PERMISSION_MODE': 'unrestricted',
+                     'PINCER_DANGEROUSLY_BYPASS_APPROVALS': '1',
+                     'PINCER_SESSION_POLICY_FILE': 'old-manifest',
+                     'PINCER_CAPABILITY_MANIFEST_APPROVED': '1',
+                     'PINCER_MANAGED_POLICY_FILE': 'managed.yaml'}
         env = profile_environment({'mode': 'standard'}, inherited)
-        self.assertEqual(env, {'CUA_DRIVER_PERMISSION_MODE': 'standard',
-                               'CUA_DRIVER_MANAGED_POLICY_FILE': 'managed.yaml'})
+        self.assertEqual(env, {'PINCER_PERMISSION_MODE': 'standard',
+                               'PINCER_MANAGED_POLICY_FILE': 'managed.yaml'})
 
     def test_profile_matrix_uses_normal_environment_contract(self):
         with tempfile.NamedTemporaryFile() as manifest:
@@ -27,8 +27,8 @@ class RuntimeTests(unittest.TestCase):
                 profile = {'mode': mode, 'manifest': manifest.name, 'approve_manifest': True,
                            'acknowledge_unrestricted': True}
                 env = profile_environment(profile, {})
-                self.assertEqual(env['CUA_DRIVER_PERMISSION_MODE'], mode)
-                self.assertEqual(env['CUA_DRIVER_CAPABILITY_MANIFEST_APPROVED'], '1')
+                self.assertEqual(env['PINCER_PERMISSION_MODE'], mode)
+                self.assertEqual(env['PINCER_CAPABILITY_MANIFEST_APPROVED'], '1')
             for mode in ('standard', 'unrestricted'):
                 profile_environment({'mode': mode, 'acknowledge_unrestricted': True}, {})
         for profile in ({'mode': 'bounded'}, {'mode': 'unrestricted'},
@@ -86,8 +86,8 @@ class RuntimeTests(unittest.TestCase):
             mcp.close()
             self.assertEqual(spawn.call_args.args[0], [
                 '/synthetic/driver', 'mcp', '--direct'])
-            self.assertEqual(spawn.call_args.kwargs['env']['CUA_DRIVER_PERMISSION_MODE'], 'unrestricted')
-            self.assertEqual(spawn.call_args.kwargs['env']['CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS'], '1')
+            self.assertEqual(spawn.call_args.kwargs['env']['PINCER_PERMISSION_MODE'], 'unrestricted')
+            self.assertEqual(spawn.call_args.kwargs['env']['PINCER_DANGEROUSLY_BYPASS_APPROVALS'], '1')
 
 
 if __name__ == '__main__':

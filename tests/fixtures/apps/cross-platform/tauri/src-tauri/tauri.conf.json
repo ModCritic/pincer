@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "CuaTestHarness.Tauri",
+  "productName": "PincerTestHarness.Tauri",
   "version": "1.0.0",
-  "identifier": "com.trycua.harness.tauri",
+  "identifier": "io.github.modcritic.pincer.harness.tauri",
   "build": {
     "beforeBuildCommand": "",
     "beforeDevCommand": "",

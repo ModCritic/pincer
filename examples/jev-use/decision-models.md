@@ -2,7 +2,7 @@
 
 The optional Python `choose_decision.py` interface lets an application choose
 between TypeSafe Jev and a local Cua-S1-4B model without giving either model
-control of Cua Driver. It is an example-local integration, not a new Driver,
+control of Pincer. It is an example-local integration, not a new Driver,
 MCP, or cross-language contract. The existing Python and TypeScript `jev-use`
 runners remain unchanged.
 
@@ -46,11 +46,11 @@ point to the corresponding window or desktop Driver action with the same
 once; the caller must not map the returned point again or reuse it against
 another target.
 
-The input is the existing `cua.jev_choice_request_v1` request accepted by
+The input is the existing `pincer.jev_choice_request_v1` request accepted by
 `choose_action.py`. The output is a separate
-`cua.decision_choice_v1` response with `kind`, `capture_id`, `selected_id`, `model`,
+`pincer.decision_choice_v1` response with `kind`, `capture_id`, `selected_id`, `model`,
 `confidence`, `probabilities`, and `reason`. This output is not a drop-in
-replacement for the older `cua.jev_choice_v1` response; callers must handle
+replacement for the older `pincer.jev_choice_v1` response; callers must handle
 all four outcome kinds and match `capture_id` to the current observation.
 Tied top scores are non-actionable errors. For a `selected` outcome, callers
 should also apply their own minimum score and margin before dispatching an
@@ -118,13 +118,13 @@ hosts cannot run this path.
 
 ```bash
 S1_DEVICE=cpu S1_DTYPE=float16 \
-  /path/to/trycua-cua/libs/cua-s1/python/.venv/bin/python \
+  /path/to/trycua-pincer/libs/cua-s1/python/.venv/bin/python \
   python/choose_decision.py --model s1 \
   < fixtures/jev-choice-request-v1.json
 ```
 
 On Apple silicon, use `S1_DEVICE=mps` with the default `float16` or with
-`bfloat16`. `cua_s1` loads `mps` weights sequentially, because Transformers'
+`bfloat16`. `pincer_s1` loads `mps` weights sequentially, because Transformers'
 concurrent loader crashed or hung with `mps` and `float16` (#4198).
 
 The S1 text adapter renders OmniParser regions, including confidence and

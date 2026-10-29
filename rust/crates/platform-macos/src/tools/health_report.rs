@@ -6,11 +6,11 @@
 //! call, not duplicate health logic.
 //!
 //! Schema contract + filter / rollup logic lives in
-//! `cua_driver_core::health_report`. This file owns the platform
+//! `pincer_core::health_report`. This file owns the platform
 //! probes only.
 
 use async_trait::async_trait;
-use cua_driver_core::health_report::{
+use pincer_core::health_report::{
     CheckData, CheckEntry, HealthCheckProvider, NAME_AX_CAPABILITY, NAME_BINARY_VERSION,
     NAME_BUNDLE_IDENTITY, NAME_PLATFORM_SUPPORTED, NAME_SCREEN_CAPTURE_CAPABILITY,
     NAME_SESSION_ACTIVE, NAME_TCC_ACCESSIBILITY, NAME_TCC_SCREEN_RECORDING,
@@ -34,7 +34,7 @@ pub const MACOS_CHECK_NAMES: &[&str] = &[
 /// The canonical bundle identifier whose TCC grants matter for the
 /// daemon. The `bundle_identity` check passes when the running process
 /// reports this id.
-pub const CANONICAL_BUNDLE_ID: &str = "com.trycua.driver";
+pub const CANONICAL_BUNDLE_ID: &str = "io.github.modcritic.pincer";
 
 pub struct MacosHealthProvider;
 
@@ -94,10 +94,10 @@ pub(crate) fn check_bundle_identity() -> CheckEntry {
         .and_then(|p| p.to_str().map(str::to_owned))
         .unwrap_or_default();
 
-    if cua_driver_core::embedded_mode() {
+    if pincer_core::embedded_mode() {
         let parent_process_id = unsafe { libc::getppid() } as u32;
         let observed_host_bundle_id = application_bundle_identifier_for_pid(parent_process_id);
-        let configured_host_bundle_id = std::env::var(cua_driver_core::HOST_BUNDLE_ID_ENV)
+        let configured_host_bundle_id = std::env::var(pincer_core::HOST_BUNDLE_ID_ENV)
             .ok()
             .filter(|id| !id.trim().is_empty());
         return check_embedded_bundle_identity(
@@ -130,9 +130,9 @@ fn standalone_bundle_identity(bid: Option<String>, exe: String) -> CheckEntry {
         Some(other) => format!("Bundle is {other}, not {CANONICAL_BUNDLE_ID}."),
     };
     let hint = "This bundle check does not identify the app or executable macOS attributes \
-                this process's permission request to. For standalone CuaDriver, start the \
-                daemon inside CuaDriver.app with `open -n -g -a CuaDriver --args serve` and \
-                connect via `cua-driver mcp`. For an embedded or linked driver, use the \
+                this process's permission request to. For standalone Pincer, start the \
+                daemon inside Pincer.app with `open -n -g -a Pincer --args serve` and \
+                connect via `pincer mcp`. For an embedded or linked driver, use the \
                 host's launch and permission setup instead.";
 
     CheckEntry::fail(NAME_BUNDLE_IDENTITY, message, hint).with_data(data)
@@ -160,7 +160,7 @@ fn check_embedded_bundle_identity(
         return CheckEntry::fail(
             NAME_BUNDLE_IDENTITY,
             "Embedded mode is set, but the parent process is not an identifiable macOS application.",
-            "Spawn `cua-driver serve --embedded` directly from the signed host app process. Do not launch it through a shell, gateway, `open`, or NSWorkspace.",
+            "Spawn `pincer serve --embedded` directly from the signed host app process. Do not launch it through a shell, gateway, `open`, or NSWorkspace.",
         )
         .with_data(data);
     };
@@ -172,7 +172,7 @@ fn check_embedded_bundle_identity(
                 format!(
                     "Observed host bundle is {observed}, but the configured host bundle is {configured}."
                 ),
-                "Spawn the embedded daemon directly from the configured host application, or correct CUA_DRIVER_HOST_BUNDLE_ID.",
+                "Spawn the embedded daemon directly from the configured host application, or correct PINCER_HOST_BUNDLE_ID.",
             )
             .with_data(data);
         }
@@ -205,8 +205,8 @@ fn accessibility_check(granted: bool, bundle_identifier: Option<String>) -> Chec
         "Accessibility is NOT granted for this process.",
         "Grant Accessibility to the app or executable macOS attributes this process's \
          permission request to in System Settings → Privacy & Security → Accessibility. \
-         For standalone CuaDriver, use CuaDriver.app. For an embedded or linked driver, \
-         follow the host's permission setup; a grant to a separate CuaDriver.app does not \
+         For standalone Pincer, use Pincer.app. For an embedded or linked driver, \
+         follow the host's permission setup; a grant to a separate Pincer.app does not \
          verify this process's access.",
     )
     .with_data(data)
@@ -230,8 +230,8 @@ fn screen_recording_check(granted: bool, bundle_identifier: Option<String>) -> C
         "Screen Recording is NOT granted for this process.",
         "Grant Screen Recording to the app or executable macOS attributes this process's \
          permission request to in System Settings → Privacy & Security → Screen Recording. \
-         For standalone CuaDriver, use CuaDriver.app. For an embedded or linked driver, \
-         follow the host's permission setup; a grant to a separate CuaDriver.app does not \
+         For standalone Pincer, use Pincer.app. For an embedded or linked driver, \
+         follow the host's permission setup; a grant to a separate Pincer.app does not \
          verify this process's access.",
     )
     .with_data(data)
@@ -262,7 +262,7 @@ fn check_screen_capture_capability() -> CheckEntry {
     // flow for the app or executable macOS attributes the request to.
     CheckEntry::skip(
         NAME_SCREEN_CAPTURE_CAPABILITY,
-        "Direct ScreenCaptureKit readiness was not probed because health_report is read-only. For standalone CuaDriver, use `cua-driver permissions grant` to request and verify it explicitly. For an embedded or linked driver, use the host's permission flow for the app or executable macOS attributes this process's permission request to; the standalone command does not verify the host's capture readiness.",
+        "Direct ScreenCaptureKit readiness was not probed because health_report is read-only. For standalone Pincer, use `pincer permissions grant` to request and verify it explicitly. For an embedded or linked driver, use the host's permission flow for the app or executable macOS attributes this process's permission request to; the standalone command does not verify the host's capture readiness.",
     )
 }
 
@@ -301,7 +301,7 @@ fn bundle_identifier(bundle: &core_foundation::bundle::CFBundle) -> Option<Strin
 
 /// Read the running process's `CFBundleIdentifier` via CoreFoundation.
 /// Returns `None` when the process has no associated bundle (e.g.
-/// running the bare binary outside `CuaDriver.app`).
+/// running the bare binary outside `Pincer.app`).
 fn current_bundle_identifier() -> Option<String> {
     use core_foundation::base::TCFType;
     use core_foundation::bundle::{CFBundle, CFBundleGetMainBundle};
@@ -367,8 +367,8 @@ fn arch_label() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cua_driver_core::health_report::{CheckStatus, HealthReportTool};
-    use cua_driver_core::tool::Tool;
+    use pincer_core::health_report::{CheckStatus, HealthReportTool};
+    use pincer_core::tool::Tool;
     use std::sync::Arc;
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -420,7 +420,7 @@ mod tests {
                 );
                 let hint = denied.hint.unwrap();
                 if !hint.contains("app or executable macOS attributes")
-                    || !hint.contains("For standalone CuaDriver")
+                    || !hint.contains("For standalone Pincer")
                 {
                     wrong_hints.push(format!("{} {bid:?}: {hint}", denied.name));
                 }
@@ -444,7 +444,7 @@ mod tests {
             let entry = standalone_bundle_identity(bid.clone(), "/tmp/host".to_owned());
             assert_eq!(entry.status, CheckStatus::Fail);
             let hint = entry.hint.unwrap();
-            if !hint.contains("For standalone CuaDriver")
+            if !hint.contains("For standalone Pincer")
                 || !hint.contains("does not identify")
                 || hint.contains("TCC grants will be attributed to")
             {
@@ -476,7 +476,7 @@ mod tests {
             .unwrap();
         assert_eq!(check["status"], "skip");
         let message = check["message"].as_str().unwrap();
-        assert!(message.contains("For standalone CuaDriver"), "{message}");
+        assert!(message.contains("For standalone Pincer"), "{message}");
         assert!(message.contains("does not verify"), "{message}");
     }
 
@@ -490,10 +490,10 @@ mod tests {
     #[test]
     fn bundle_identity_in_test_host_fails_with_full_shape() {
         let _guard = env_lock();
-        let embedded = swap_env(cua_driver_core::EMBEDDED_ENV, None);
+        let embedded = swap_env(pincer_core::EMBEDDED_ENV, None);
 
-        // The Rust test binary runs outside CuaDriver.app, so its
-        // bundle id is either absent or not com.trycua.driver. Either
+        // The Rust test binary runs outside Pincer.app, so its
+        // bundle id is either absent or not io.github.modcritic.pincer. Either
         // way the documented fail-mode shape applies: message + hint
         // + data + (when bid is present) bundle_identifier surfaced.
         //
@@ -519,7 +519,7 @@ mod tests {
             "executable_path must be set so consumers can identify the wrong binary"
         );
 
-        restore_env(cua_driver_core::EMBEDDED_ENV, embedded);
+        restore_env(pincer_core::EMBEDDED_ENV, embedded);
     }
 
     #[test]
@@ -528,7 +528,7 @@ mod tests {
             Some("com.example.host".to_owned()),
             Some("com.example.host".to_owned()),
             1234,
-            "/usr/local/bin/cua-driver".to_owned(),
+            "/usr/local/bin/pincer".to_owned(),
         );
         assert_eq!(entry.status, CheckStatus::Pass);
         assert!(entry.message.contains("com.example.host"));
@@ -549,7 +549,7 @@ mod tests {
             None,
             Some("com.example.host".to_owned()),
             1234,
-            "/usr/local/bin/cua-driver".to_owned(),
+            "/usr/local/bin/pincer".to_owned(),
         );
         assert_eq!(entry.status, CheckStatus::Fail);
         assert!(entry
@@ -564,7 +564,7 @@ mod tests {
             Some("com.example.gateway".to_owned()),
             Some("com.example.host".to_owned()),
             1234,
-            "/usr/local/bin/cua-driver".to_owned(),
+            "/usr/local/bin/pincer".to_owned(),
         );
         assert_eq!(entry.status, CheckStatus::Fail);
         assert!(entry.message.contains("com.example.gateway"));

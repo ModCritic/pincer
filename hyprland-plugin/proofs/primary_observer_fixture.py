@@ -60,7 +60,7 @@ def main():
     counters = {'clicks': 0, 'keys': '', 'scroll': 0, 'motion': 0, 'held': False}
     buttons, keys, nonces = set(), set(), set()
     sequence, failed = 0, False
-    window = Gtk.Window(title='Cua Isolated Input Foreground')
+    window = Gtk.Window(title='Pincer Isolated Input Foreground')
     window.set_default_size(600, 500)
     canvas = Gtk.DrawingArea()
     canvas.set_can_focus(True)

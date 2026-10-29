@@ -1,7 +1,7 @@
 //! Session-owned agent cursor controls.
 
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
@@ -13,7 +13,7 @@ use super::ToolState;
 /// Resolve the cursor identity from the current session. The removed
 /// `cursor_id` alias is intentionally not accepted by the new contract.
 pub(crate) fn resolve_cursor_key(args: &Value) -> String {
-    use cua_driver_core::tool_args::ArgsExt;
+    use pincer_core::tool_args::ArgsExt;
     for key in ["session", "_session_id"] {
         if let Some(value) = args.opt_str(key) {
             if !value.is_empty() {
@@ -109,7 +109,7 @@ impl Tool for SetAgentCursorEnabledTool {
         if !self.state.cursor_overlay_available {
             return super::cursor_overlay_unavailable();
         }
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let enabled = match args.require_bool("enabled") {
             Ok(value) => value,
             Err(error) => return error,
@@ -231,7 +231,7 @@ impl Tool for SetAgentCursorThemeTool {
         if !self.state.cursor_overlay_available {
             return super::cursor_overlay_unavailable();
         }
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let theme_id = match args.require_str("theme_id") {
             Ok(value) => value,
             Err(error) => return error,
@@ -298,7 +298,7 @@ fn state_def() -> &'static ToolDef {
 }
 
 fn canonical_cursor_def(name: &str) -> ToolDef {
-    let contract = cua_driver_contract::tool_contract(name)
+    let contract = pincer_contract::tool_contract(name)
         .unwrap_or_else(|| panic!("missing canonical cursor contract for {name}"));
     ToolDef::from_contract(&contract)
 }

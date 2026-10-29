@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 enum class InputRoute { unbound, independent, primary_foreground };
 
 struct AgentKeymapConfig {
@@ -157,4 +157,4 @@ struct ForegroundGuard {
     bool can_activate() const { return activation_failure() == ForegroundFailureReason::none; }
     bool can_dispatch(bool needs_pointer = true) const { return dispatch_failure(needs_pointer) == ForegroundFailureReason::none; }
 };
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

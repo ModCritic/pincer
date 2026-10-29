@@ -1,13 +1,13 @@
-//! cursor-overlay — shared types and math for the cua-driver cursor overlay.
+//! cursor-overlay — shared types and math for the pincer cursor overlay.
 //!
 //! Platform renderers (macOS, Windows, Linux) depend on this crate for:
 //! - `CursorConfig` — theme, accessibility, visibility, and motion settings
 //! - `MotionConfig` — glide duration, spring, dwell, idle-hide timings
-//! - `CubicBezier` — Bezier path math (from Cua Driver's Swift `Bezier.swift` /
+//! - `CubicBezier` — Bezier path math (from Pincer's Swift `Bezier.swift` /
 //!   `CursorMotionPath.swift`; arc-length helper after trope-cua, see
 //!   THIRD_PARTY_NOTICES.md)
 //! - `trajectory` — the motion styles, timing and effect geometry, which live
-//!   in the `cua-cursor-motion` crate (shared with the `@trycua/cursor-motion` web package)
+//!   in the `pincer-cursor-motion` crate (shared with the `pincer-cursor-motion` web package)
 //! - `OverlayCommand` — messages sent from MCP tools to the overlay thread
 //! - `SurfaceFit` — keeps each platform's overlay surface fitted to the live
 //!   display geometry, so screen-coordinate cursors stay on the pointer
@@ -26,8 +26,8 @@ pub mod surface_fit;
 pub mod theme;
 pub mod theme_artifact;
 pub mod trajectory;
-/// The `classic` glide's Dubins planner, now in `cua-cursor-motion`.
-pub use cua_cursor_motion::dubins as path_planner;
+/// The `classic` glide's Dubins planner, now in `pincer-cursor-motion`.
+pub use pincer_cursor_motion::dubins as path_planner;
 pub mod z_order;
 
 pub use badge_glyphs::{BadgeChip, BadgeGlyph};
@@ -325,7 +325,7 @@ impl Default for CursorRegistry {
 /// precedence: explicit `cursor_id` arg > injected `_session_id` > `"default"`.
 /// The render side treats it as an opaque insertion-ordered map key; the
 /// `"default"` key is special-cased (never removed) so the anonymous /
-/// one-shot `cua-driver call` path is backward compatible.
+/// one-shot `pincer call` path is backward compatible.
 pub type CursorKey = String;
 
 /// A render command tagged with the cursor it targets. Wrapping the key
@@ -419,7 +419,7 @@ pub enum OverlayCommand {
 // pointer point, `POINTER_ANCHOR_OFFSET` points from the anchor opposite the
 // heading, so a cursor anchored by `anchor_for_pointer` draws its tip on the
 // requested coordinate at every heading and backing scale.
-pub use cua_cursor_motion::{anchor_for_pointer, pointer_for_anchor, POINTER_ANCHOR_OFFSET};
+pub use pincer_cursor_motion::{anchor_for_pointer, pointer_for_anchor, POINTER_ANCHOR_OFFSET};
 
 /// Cursor key for a named session's keyboard and text feedback: the explicit
 /// `session` label, else the trusted lifecycle `_session_id`. Anonymous calls

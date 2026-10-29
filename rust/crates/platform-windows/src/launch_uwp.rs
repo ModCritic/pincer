@@ -37,7 +37,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
-use cua_driver_core::single_flight::SingleFlight;
+use pincer_core::single_flight::SingleFlight;
 
 use windows::core::{Interface, GUID, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::HWND;
@@ -79,7 +79,7 @@ const PKEY_APP_USER_MODEL_ID: PROPERTYKEY = PROPERTYKEY {
 ///
 /// **Background-launch invariant** — the AppX runtime's default activation
 /// brings the newly-activated app to the foreground (same as a Start Menu
-/// click). cua-driver's contract is the opposite: launched apps must not
+/// click). pincer's contract is the opposite: launched apps must not
 /// steal focus from whatever the human is doing. We snapshot the pre-call
 /// foreground window with `GetForegroundWindow` and restore it after
 /// activation returns. This matches macOS's `NSWorkspace.openApplication`

@@ -11,11 +11,11 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use core_foundation::base::{CFRelease, CFTypeRef};
 use core_graphics::display::CGDisplay;
-use cua_driver_core::{
+use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
-use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
 use serde_json::{json, Value};
 
 use crate::ax::bindings::{

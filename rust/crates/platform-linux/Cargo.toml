@@ -13,8 +13,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
 futures-util = "0.3"
-cua-driver-core = { path = "../cua-driver-core" }
-cua-driver-contract = { path = "../cua-driver-contract" }
+pincer-core = { path = "../pincer-core" }
+pincer-contract = { path = "../pincer-contract" }
 cursor-overlay = { path = "../cursor-overlay" }
 pip-preview = { path = "../pip-preview" }
 zeroize = { workspace = true }

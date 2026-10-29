@@ -22,7 +22,7 @@ def plan():
     return {'purpose': 'idle_reconnect', 'package_versions': {},
             'foreground': {'pid': 10, 'window_id': 100}, 'primary_point': [100, 100],
             'agents': [{'app': 'calc', 'name': 'idle-proof', 'target': {'pid': 20, 'window_id': 200},
-                        'bounds': dict(BOUNDS), 'document': '/synthetic/cua-smoke-calc.ods',
+                        'bounds': dict(BOUNDS), 'document': '/synthetic/pincer-smoke-calc.ods',
                         'profile': dict(proof.PROFILE)}]}
 
 
@@ -156,7 +156,7 @@ class ClickTests(unittest.TestCase):
         self.assertEqual(self.snapshot_mock.call_args_list[1].args[0], self.observer)
 
     def test_inkscape_scrolls_require_effects_and_use_scroll_trace_contract(self):
-        self.spec.update(app='inkscape', document='/synthetic/cua-smoke-inkscape.svg')
+        self.spec.update(app='inkscape', document='/synthetic/pincer-smoke-inkscape.svg')
         for stage, changed in (('scroll_down', True), ('scroll_up', True), ('scroll_down', False)):
             with self.subTest(stage=stage, changed=changed):
                 self.snapshot_mock.side_effect = [self.snapshot, self.snapshot]
@@ -260,8 +260,8 @@ class RunnerTests(unittest.TestCase):
         for expires in (True, False):
             with self.subTest(expires=expires), tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
                 args = SimpleNamespace(plan=Mock(), evidence=Path(directory) / 'proof',
-                                       driver=Path('/synthetic/cua-driver'),
-                                       trace_socket=Path('/synthetic/cua-input-v3.sock'))
+                                       driver=Path('/synthetic/pincer'),
+                                       trace_socket=Path('/synthetic/pincer-input-v3.sock'))
                 import json
                 args.plan.read_text.return_value = json.dumps(plan())
                 first_client, observer = client(), client(100)
@@ -297,7 +297,7 @@ class RunnerTests(unittest.TestCase):
                 path = Path(directory) / 'plan.json'
                 path.write_text(text)
                 args = SimpleNamespace(plan=path, evidence=Path(directory) / 'proof',
-                                       trace_socket=Path('/synthetic/cua-input-v3.sock'))
+                                       trace_socket=Path('/synthetic/pincer-input-v3.sock'))
                 spawn = stack.enter_context(patch.object(proof, 'DirectMCP'))
                 status_read = stack.enter_context(patch.object(proof, 'read_input_status'))
                 stack.enter_context(patch('sys.stdout', new_callable=io.StringIO))

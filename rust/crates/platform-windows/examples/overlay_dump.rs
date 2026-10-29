@@ -18,7 +18,7 @@ fn main() {
     let mut pipe = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
-        .open(r"\\.\pipe\cua-driver")
+        .open(r"\\.\pipe\pincer")
         .expect("open pipe");
     fn req(p: &mut std::fs::File, json: &str) {
         p.write_all(format!("{json}\n").as_bytes()).unwrap();
@@ -56,7 +56,7 @@ fn main() {
     std::thread::sleep(Duration::from_millis(1500));
 
     // Find overlay HWND (class name matches what overlay.rs registers).
-    let class_name: Vec<u16> = OsStr::new("Cua.AgentCursorOverlay\0")
+    let class_name: Vec<u16> = OsStr::new("Pincer.AgentCursorOverlay\0")
         .encode_wide()
         .collect();
     let hwnd = unsafe {

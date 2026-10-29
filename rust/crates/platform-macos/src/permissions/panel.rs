@@ -2,7 +2,7 @@
 //! auto-dismiss on all-green.
 //!
 //! Replaces the terminal banner when the daemon is launched from the
-//! bundled `/Applications/CuaDriver.app`. Mirrors the Swift gate at
+//! bundled `/Applications/Pincer.app`. Mirrors the Swift gate at
 //! `libs/cua-driver/Sources/CuaDriverCore/Permissions/PermissionsGate.swift`.
 //!
 //! ## UX
@@ -10,18 +10,18 @@
 //! On first launch with missing grants the panel shows:
 //!
 //! ```text
-//! ┌─ CuaDriver Permissions ─────────────────────┐
-//! │  CuaDriver needs your permission            │
-//! │  Grant both so CuaDriver can …              │
+//! ┌─ Pincer Permissions ─────────────────────┐
+//! │  Pincer needs your permission            │
+//! │  Grant both so Pincer can …              │
 //! │                                             │
 //! │  ✗ Accessibility                            │
-//! │      lets cua-driver read the accessibility │
+//! │      lets pincer read the accessibility │
 //! │      tree of running apps …                 │
 //! │                                             │
 //! │  ✗ Screen Recording                         │
-//! │      lets cua-driver capture per-window …   │
+//! │      lets pincer capture per-window …   │
 //! │                                             │
-//! │  ✅ All set. CuaDriver is ready to use.      │
+//! │  ✅ All set. Pincer is ready to use.      │
 //! │     (hidden until both grants flip green)   │
 //! │                                             │
 //! │  [ Continue anyway ]  [ Open Settings ]     │
@@ -38,7 +38,7 @@
 //! ## Threading
 //!
 //! `show_modal` MUST be called on the main thread. The Serve arm in
-//! `cua-driver/src/main.rs` invokes the gate synchronously before any
+//! `pincer/src/main.rs` invokes the gate synchronously before any
 //! threads spawn or NSApp.run() is called by the cursor overlay, so
 //! the gate already runs on the main thread. `panel_enabled()`
 //! double-checks and falls back to the terminal banner if anything
@@ -96,7 +96,7 @@ pub struct PanelOpts {
 /// **opt-in**: the default behaviour is the terminal banner, and the
 /// panel only appears when:
 ///
-///   * `CUA_DRIVER_RS_PERMISSIONS_PANEL` env var is set to an on
+///   * `PINCER_PERMISSIONS_PANEL` env var is set to an on
 ///     sentinel (`1` / `true` / `yes` / `on`, case-insensitive); AND
 ///   * the process is running on the main thread (a hard requirement
 ///     for AppKit calls); AND
@@ -115,7 +115,7 @@ pub struct PanelOpts {
 /// failure modes, so it's the safer default until we have signals
 /// that the UI is consistently helpful across users.
 pub fn panel_enabled() -> bool {
-    if !env_on("CUA_DRIVER_RS_PERMISSIONS_PANEL") {
+    if !env_on("PINCER_PERMISSIONS_PANEL") {
         return false;
     }
     if MainThreadMarker::new().is_none() {
@@ -268,7 +268,7 @@ unsafe fn show_modal_unsafe(opts: &PanelOpts) -> PanelOutcome {
     // NSFloatingWindowLevel (3) so it stays on top of System Settings
     // when the user navigates over to grant permissions.
     let _: () = msg_send![window, setLevel: 3i64];
-    let title = ns_string("CuaDriver Permissions");
+    let title = ns_string("Pincer Permissions");
     let _: () = msg_send![window, setTitle: title];
 
     let content_view: *mut AnyObject = msg_send![window, contentView];
@@ -499,7 +499,7 @@ extern "C" fn on_poll_tick(
         poll_tick_inner();
     }));
     if let Err(e) = result {
-        eprintln!("[cua-driver] permissions panel poll tick panicked: {e:?}");
+        eprintln!("[pincer] permissions panel poll tick panicked: {e:?}");
         OUTCOME.with(|cell| *cell.borrow_mut() = Some(PanelOutcome::Dismissed));
         stop_modal();
     }
@@ -569,9 +569,9 @@ unsafe fn update_row(row: RowHandles, granted: bool) {
 
 fn heading_for(s: PermissionsStatus) -> &'static str {
     match (s.accessibility, s.screen_recording) {
-        (true, true) => "CuaDriver is ready",
+        (true, true) => "Pincer is ready",
         (true, false) | (false, true) => "One more permission",
-        (false, false) => "CuaDriver needs your permission",
+        (false, false) => "Pincer needs your permission",
     }
 }
 
@@ -584,7 +584,7 @@ fn subheading_for(s: PermissionsStatus) -> &'static str {
         (false, true) =>
             "Screen Recording is granted. Now grant Accessibility in the System Settings window that just opened.",
         (false, false) =>
-            "Grant both so CuaDriver can inspect and drive native apps on your behalf. This window closes on its own once each item turns green.",
+            "Grant both so Pincer can inspect and drive native apps on your behalf. This window closes on its own once each item turns green.",
     }
 }
 
@@ -748,7 +748,7 @@ unsafe fn build_row(
 
 unsafe fn build_ready_strip(origin: NSPoint, width: f64) -> *mut AnyObject {
     let strip = build_label(
-        "✅  All set. CuaDriver is ready to use.",
+        "✅  All set. Pincer is ready to use.",
         12.0,
         /*bold=*/ false,
         origin,
@@ -781,7 +781,7 @@ unsafe fn panel_target_instance() -> *mut AnyObject {
     inst
 }
 
-/// Returns the runtime-registered `CuaDriverPermissionsPanelTarget`
+/// Returns the runtime-registered `PincerPermissionsPanelTarget`
 /// class. Registration happens lazily on the first call and is then
 /// memoised — Objective-C requires that any given runtime class name
 /// is registered exactly once per process.
@@ -792,8 +792,8 @@ fn panel_target_class() -> &'static objc2::runtime::AnyClass {
     static CLASS: OnceLock<&'static objc2::runtime::AnyClass> = OnceLock::new();
     CLASS.get_or_init(|| {
         let superclass = class!(NSObject);
-        let mut builder = ClassBuilder::new("CuaDriverPermissionsPanelTarget", superclass)
-            .expect("CuaDriverPermissionsPanelTarget already registered");
+        let mut builder = ClassBuilder::new("PincerPermissionsPanelTarget", superclass)
+            .expect("PincerPermissionsPanelTarget already registered");
         unsafe {
             builder.add_method(
                 objc2::sel!(openSettings:),
@@ -852,26 +852,26 @@ mod tests {
     fn env_on_recognises_documented_sentinels() {
         let _guard = env_lock();
         for v in &["1", "true", "TRUE", "True", "yes", "YES", "on", "ON"] {
-            std::env::set_var("CUA_DRIVER_RS_PERMISSIONS_PANEL", v);
+            std::env::set_var("PINCER_PERMISSIONS_PANEL", v);
             assert!(
-                env_on("CUA_DRIVER_RS_PERMISSIONS_PANEL"),
+                env_on("PINCER_PERMISSIONS_PANEL"),
                 "value {v:?} must be treated as on",
             );
         }
-        std::env::remove_var("CUA_DRIVER_RS_PERMISSIONS_PANEL");
+        std::env::remove_var("PINCER_PERMISSIONS_PANEL");
     }
 
     #[test]
     fn env_on_ignores_falsy_and_unknown() {
         let _guard = env_lock();
         for v in &["0", "false", "no", "off", "garbage", ""] {
-            std::env::set_var("CUA_DRIVER_RS_PERMISSIONS_PANEL", v);
+            std::env::set_var("PINCER_PERMISSIONS_PANEL", v);
             assert!(
-                !env_on("CUA_DRIVER_RS_PERMISSIONS_PANEL"),
+                !env_on("PINCER_PERMISSIONS_PANEL"),
                 "value {v:?} must not be treated as on",
             );
         }
-        std::env::remove_var("CUA_DRIVER_RS_PERMISSIONS_PANEL");
+        std::env::remove_var("PINCER_PERMISSIONS_PANEL");
     }
 
     #[test]
@@ -879,8 +879,8 @@ mod tests {
         // Opt-in default: with no env var set, the panel does not show
         // and the gate falls back to the terminal banner.
         let _guard = env_lock();
-        std::env::remove_var("CUA_DRIVER_RS_PERMISSIONS_PANEL");
-        assert!(!env_on("CUA_DRIVER_RS_PERMISSIONS_PANEL"));
+        std::env::remove_var("PINCER_PERMISSIONS_PANEL");
+        assert!(!env_on("PINCER_PERMISSIONS_PANEL"));
     }
 
     #[test]
@@ -890,12 +890,12 @@ mod tests {
             accessibility: a,
             screen_recording: sr,
         };
-        assert_eq!(heading_for(st(true, true)), "CuaDriver is ready");
+        assert_eq!(heading_for(st(true, true)), "Pincer is ready");
         assert_eq!(heading_for(st(true, false)), "One more permission");
         assert_eq!(heading_for(st(false, true)), "One more permission");
         assert_eq!(
             heading_for(st(false, false)),
-            "CuaDriver needs your permission"
+            "Pincer needs your permission"
         );
     }
 

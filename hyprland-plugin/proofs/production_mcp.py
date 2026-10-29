@@ -8,9 +8,9 @@ from driver_input_live import MCP
 
 
 PROFILE_ENV = (
-    'CUA_DRIVER_PERMISSION_MODE', 'CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS',
-    'CUA_DRIVER_CAPABILITY_MANIFEST_FILE', 'CUA_DRIVER_CAPABILITY_MANIFEST_APPROVED',
-    'CUA_DRIVER_SESSION_POLICY_FILE', 'CUA_DRIVER_SESSION_POLICY_APPROVED',
+    'PINCER_PERMISSION_MODE', 'PINCER_DANGEROUSLY_BYPASS_APPROVALS',
+    'PINCER_CAPABILITY_MANIFEST_FILE', 'PINCER_CAPABILITY_MANIFEST_APPROVED',
+    'PINCER_SESSION_POLICY_FILE', 'PINCER_SESSION_POLICY_APPROVED',
 )
 
 
@@ -25,13 +25,13 @@ def profile_environment(profile, inherited=None):
     env = dict(os.environ if inherited is None else inherited)
     for name in PROFILE_ENV:
         env.pop(name, None)
-    env['CUA_DRIVER_PERMISSION_MODE'] = mode
+    env['PINCER_PERMISSION_MODE'] = mode
     if mode == 'unrestricted':
-        env['CUA_DRIVER_DANGEROUSLY_BYPASS_APPROVALS'] = '1'
+        env['PINCER_DANGEROUSLY_BYPASS_APPROVALS'] = '1'
     if manifest:
         assert Path(manifest).is_file(), 'manifest does not exist'
-        env['CUA_DRIVER_CAPABILITY_MANIFEST_FILE'] = str(Path(manifest).resolve())
-        env['CUA_DRIVER_CAPABILITY_MANIFEST_APPROVED'] = '1'
+        env['PINCER_CAPABILITY_MANIFEST_FILE'] = str(Path(manifest).resolve())
+        env['PINCER_CAPABILITY_MANIFEST_APPROVED'] = '1'
     return env
 
 
@@ -64,7 +64,7 @@ class DirectMCP(MCP):
         env = profile_environment(profile)
         # Bounded renderer lifecycle messages distinguish a cold runtime from
         # one that created layer surfaces. No input payloads are logged here.
-        env['CUA_OVERLAY_DEBUG'] = '1'
+        env['PINCER_OVERLAY_DEBUG'] = '1'
         self.log = (directory / 'mcp.stderr').open('w')
         self.process = None
         self.counter = 0

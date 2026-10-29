@@ -1,5 +1,5 @@
 {
- "schema": "cua.jev_use_provider_request_golden_v1",
+ "schema": "pincer.jev_use_provider_request_golden_v1",
  "language": "python",
  "runs": {
   "page/windows-page-1-python": [
@@ -1075,14 +1075,14 @@
       "verification_field": "empty",
       "submit_button": "available"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - button \"Submit\" [focusable=true]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - button \"Submit\" [focusable=true]\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": []
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -1103,7 +1103,7 @@
       "verification_field": "contains_required_token",
       "submit_button": "available"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -1116,7 +1116,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form": "Click the form's Submit button. The observed form state reports that the verification field already contains the required token, so the form is ready to submit.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -1137,7 +1137,7 @@
       "verification_field": "contains_required_token",
       "submit_button": "available"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -1155,7 +1155,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form": "Click the form's Submit button. The observed form state reports that the verification field already contains the required token, so the form is ready to submit.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -1176,7 +1176,7 @@
       "verification_field": "contains_required_token",
       "submit_button": "available"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -1199,7 +1199,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form": "Click the form's Submit button. The observed form state reports that the verification field already contains the required token, so the form is ready to submit.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -1220,9 +1220,9 @@
       "verification_field": "empty",
       "submit_button": "available"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - button \"Submit\" [focusable=true]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - button \"Submit\" [focusable=true]\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -1318,7 +1318,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -1420,7 +1420,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -1441,9 +1441,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "available"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -1539,7 +1539,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -1647,7 +1647,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form": "Click the form's Submit button. The observed form state reports that the verification field already contains the required token, so the form is ready to submit.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -1668,9 +1668,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "available"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -1766,7 +1766,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -1879,7 +1879,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form": "Click the form's Submit button. The observed form state reports that the verification field already contains the required token, so the form is ready to submit.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -1900,9 +1900,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "available"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -1998,7 +1998,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -2116,7 +2116,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form": "Click the form's Submit button. The observed form state reports that the verification field already contains the required token, so the form is ready to submit.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -2137,14 +2137,14 @@
       "verification_field": "empty",
       "submit_button": "visual_check_pending"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": []
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -2165,9 +2165,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -2263,7 +2263,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -2371,7 +2371,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form": "Submit the form by clicking the unique validated visual Submit region. The observed form state reports that the verification field already contains the required token.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -2392,9 +2392,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -2490,7 +2490,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -2603,7 +2603,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form-foreground": "Submit the form by clicking the unique validated visual Submit region with foreground delivery, which activates the browser window, because Driver refused background delivery for the previous visual click.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -2624,9 +2624,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -2722,7 +2722,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -2835,7 +2835,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form": "Submit the form by clicking the unique validated visual Submit region. The observed form state reports that the verification field already contains the required token.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -2856,9 +2856,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -2954,7 +2954,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -3072,7 +3072,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form-foreground": "Submit the form by clicking the unique validated visual Submit region with foreground delivery, which activates the browser window, because Driver refused background delivery for the previous visual click.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -3093,9 +3093,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -3191,7 +3191,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -3309,7 +3309,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form": "Submit the form by clicking the unique validated visual Submit region. The observed form state reports that the verification field already contains the required token.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -3330,7 +3330,7 @@
       "verification_field": "empty",
       "submit_button": "visual_check_pending"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -3343,7 +3343,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -3364,7 +3364,7 @@
       "verification_field": "empty",
       "submit_button": "visual_check_pending"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -3382,7 +3382,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -3403,7 +3403,7 @@
       "verification_field": "empty",
       "submit_button": "visual_check_pending"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -3426,7 +3426,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -3447,9 +3447,9 @@
       "verification_field": "empty",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -3545,7 +3545,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -3647,7 +3647,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -3668,9 +3668,9 @@
       "verification_field": "empty",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -3766,7 +3766,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -3874,7 +3874,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -3895,9 +3895,9 @@
       "verification_field": "empty",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -3993,7 +3993,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -4106,7 +4106,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -4127,9 +4127,9 @@
       "verification_field": "empty",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -4225,7 +4225,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -4343,7 +4343,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -4364,14 +4364,14 @@
       "verification_field": "empty",
       "submit_button": "not_in_page_structure"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": []
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -4392,7 +4392,7 @@
       "verification_field": "contains_required_token",
       "submit_button": "not_in_page_structure"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -4405,7 +4405,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
       "abstain": "Stop without acting if none of the proposed actions is safe for the observed state."
@@ -4425,7 +4425,7 @@
       "verification_field": "contains_required_token",
       "submit_button": "not_in_page_structure"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -4443,7 +4443,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
       "abstain": "Stop without acting if none of the proposed actions is safe for the observed state."
@@ -4463,7 +4463,7 @@
       "verification_field": "contains_required_token",
       "submit_button": "not_in_page_structure"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -4481,7 +4481,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
       "abstain": "Stop without acting if none of the proposed actions is safe for the observed state."
@@ -4501,7 +4501,7 @@
       "verification_field": "contains_required_token",
       "submit_button": "not_in_page_structure"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -4524,7 +4524,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
       "abstain": "Stop without acting if none of the proposed actions is safe for the observed state."
@@ -4544,7 +4544,7 @@
       "verification_field": "contains_required_token",
       "submit_button": "not_in_page_structure"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -4567,7 +4567,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
       "abstain": "Stop without acting if none of the proposed actions is safe for the observed state."
@@ -4587,7 +4587,7 @@
       "verification_field": "empty",
       "submit_button": "not_in_page_structure"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -4600,7 +4600,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -4621,7 +4621,7 @@
       "verification_field": "empty",
       "submit_button": "not_in_page_structure"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -4639,7 +4639,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -4660,7 +4660,7 @@
       "verification_field": "empty",
       "submit_button": "not_in_page_structure"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": [
@@ -4683,7 +4683,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -4704,14 +4704,14 @@
       "verification_field": "contains_other_value",
       "submit_button": "available"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - button \"Submit\" [focusable=true]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - button \"Submit\" [focusable=true]\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": []
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -4732,9 +4732,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "available"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -4830,7 +4830,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -4932,7 +4932,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form": "Click the form's Submit button. The observed form state reports that the verification field already contains the required token, so the form is ready to submit.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -4953,14 +4953,14 @@
       "verification_field": "contains_required_token",
       "submit_button": "not_in_page_structure"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": []
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
       "abstain": "Stop without acting if none of the proposed actions is safe for the observed state."
@@ -4980,14 +4980,14 @@
       "verification_field": "contains_required_token",
       "submit_button": "visual_check_pending"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": null
     },
     "history": []
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
       "abstain": "Stop without acting if none of the proposed actions is safe for the observed state."
@@ -5011,7 +5011,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
       "abstain": "Stop without acting if none of the proposed actions is safe for the observed state."
@@ -5031,9 +5031,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -5129,7 +5129,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -5231,7 +5231,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
       "abstain": "Stop without acting if none of the proposed actions is safe for the observed state."
@@ -5251,9 +5251,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "not_found_visually"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -5349,7 +5349,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -5437,7 +5437,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
       "abstain": "Stop without acting if none of the proposed actions is safe for the observed state."
@@ -5457,9 +5457,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "not_found_visually"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -5555,7 +5555,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -5671,7 +5671,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
       "abstain": "Stop without acting if none of the proposed actions is safe for the observed state."
@@ -5691,9 +5691,9 @@
       "verification_field": "contains_required_token",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -5789,7 +5789,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -5891,7 +5891,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "submit-form-foreground": "Submit the form by clicking the unique validated visual Submit region with foreground delivery, which activates the browser window, because Driver refused background delivery for the previous visual click.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",
@@ -5912,9 +5912,9 @@
       "verification_field": "contains_other_value",
       "submit_button": "visual_only"
      },
-     "outline": "- main\n  - heading \"Cua Driver + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
+     "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "cua.visual_regions_v1",
+      "schema": "pincer.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -6010,7 +6010,7 @@
        {
         "id": "text-28",
         "kind": "text",
-        "text": "Cua",
+        "text": "Pincer",
         "label": null,
         "confidence": 0.8023205995559692,
         "interactive": false,
@@ -6112,7 +6112,7 @@
    },
    "questions": {
     "driver_action": {
-     "instructions": "Which complete executable action should Cua Driver run next?",
+     "instructions": "Which complete executable action should Pincer run next?",
      "criteria": {
       "type-verification-value": "Type the required verification token into the verification field, replacing its current contents.",
       "reobserve": "Take no action and obtain a fresh Driver observation, because the current observation is stale or contradicts the reported form state. A Submit control that is visual-only, or whose visual check is still pending, is not a reason to reobserve: the runner parses visual regions for Submit once no page-structure action remains.",

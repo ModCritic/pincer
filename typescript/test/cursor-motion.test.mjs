@@ -1,6 +1,6 @@
-// Cua Cursor Motion through the generated TypeScript bindings: replays the
+// Pincer Cursor Motion through the generated TypeScript bindings: replays the
 // golden trajectories the Rust crate and the standalone web port share
-// (rust/crates/cua-cursor-motion/fixtures/golden.json) through
+// (rust/crates/pincer-cursor-motion/fixtures/golden.json) through
 // planCursorMove / planCursorSpec in the staged native library.
 import assert from "node:assert/strict"
 import { existsSync, readFileSync } from "node:fs"
@@ -11,10 +11,10 @@ import { fileURLToPath } from "node:url"
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 const libraryName =
   process.platform === "darwin"
-    ? "libcua_driver_sdk.dylib"
+    ? "libpincer_sdk.dylib"
     : process.platform === "win32"
-      ? "cua_driver_sdk.dll"
-      : "libcua_driver_sdk.so"
+      ? "pincer_sdk.dll"
+      : "libpincer_sdk.so"
 const nodeTriple =
   process.platform === "darwin"
     ? `darwin-${process.arch}`
@@ -23,18 +23,18 @@ const nodeTriple =
       : `linux-${process.arch}-${process.report.getReport().header.glibcVersionRuntime ? "gnu" : "musl"}`
 const library = path.resolve(
   testDirectory,
-  "../node_modules/@trycua",
-  `cua-driver-${nodeTriple}`,
+  "../node_modules",
+  `pincer-driver-${nodeTriple}`,
   libraryName,
 )
-if (process.env.CUA_DRIVER_REQUIRE_UNIFFI === "1" && !existsSync(library)) {
+if (process.env.PINCER_REQUIRE_UNIFFI === "1" && !existsSync(library)) {
   throw new Error(`required staged UniFFI library is missing: ${library}`)
 }
 const skip = !existsSync(library)
 
 const golden = JSON.parse(
   readFileSync(
-    path.resolve(testDirectory, "../../rust/crates/cua-cursor-motion/fixtures/golden.json"),
+    path.resolve(testDirectory, "../../rust/crates/pincer-cursor-motion/fixtures/golden.json"),
     "utf8",
   ),
 )
@@ -52,7 +52,7 @@ function near(name, got, want) {
 }
 
 async function load() {
-  const m = await import("@trycua/cua-driver")
+  const m = await import("pincer-driver")
   const variant = (enumType, value) => {
     const { type, ...fields } = value
     const ctor = enumType[pascal(type)]

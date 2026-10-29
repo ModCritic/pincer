@@ -28,7 +28,7 @@
 #include <wayland.hpp>
 #include <wayland-server-core.h>
 
-#ifdef CUA_HYPRLAND_TEST_INPUT
+#ifdef PINCER_HYPRLAND_TEST_INPUT
 #include <openssl/evp.h>
 #endif
 #include <sys/random.h>
@@ -55,23 +55,23 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#if defined(CUA_HYPRLAND_INPUT) == defined(CUA_HYPRLAND_TEST_INPUT)
+#if defined(PINCER_HYPRLAND_INPUT) == defined(PINCER_HYPRLAND_TEST_INPUT)
 #error Select exactly one input admission mode
 #endif
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 namespace {
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t kMaxPacket = 2048;
 constexpr std::size_t kMaxClients = 8;
 constexpr std::size_t kMaxResources = 512;
-#ifdef CUA_HYPRLAND_INPUT
+#ifdef PINCER_HYPRLAND_INPUT
 constexpr bool kProduction = true;
 #else
 constexpr bool kProduction = false;
 #endif
 
-#ifdef CUA_HYPRLAND_TEST_INPUT
+#ifdef PINCER_HYPRLAND_TEST_INPUT
 std::uint64_t unix_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::system_clock::now().time_since_epoch()).count();
@@ -95,7 +95,7 @@ std::string nonce() {
         result += std::format("{:02x}", b);
     return result;
 }
-#ifdef CUA_HYPRLAND_TEST_INPUT
+#ifdef PINCER_HYPRLAND_TEST_INPUT
 std::vector<unsigned char> unhex(std::string_view value) {
     if (value.size() % 2)
         throw std::runtime_error("invalid hex");
@@ -239,21 +239,21 @@ struct InputExperiment::Impl {
     std::array<std::uint32_t, 4> foreground_modifiers{};
 
     explicit Impl(const std::string& directory, unsigned index) : lane(index) {
-#ifdef CUA_HYPRLAND_TEST_INPUT
-        public_key = unhex(CUA_HYPRLAND_TEST_OPERATOR_KEY);
+#ifdef PINCER_HYPRLAND_TEST_INPUT
+        public_key = unhex(PINCER_HYPRLAND_TEST_OPERATOR_KEY);
         if (public_key.size() != 32)
             throw std::runtime_error("invalid test operator public key");
 #endif
         path = directory + (kProduction ?
-            (lane == 0 ? "/cua-input-v3.sock" : "/cua-input-v3-2.sock") :
-            (lane == 0 ? "/cua-input-test.sock" : "/cua-input-test-2.sock"));
+            (lane == 0 ? "/pincer-input-v3.sock" : "/pincer-input-v3-2.sock") :
+            (lane == 0 ? "/pincer-input-test.sock" : "/pincer-input-test-2.sock"));
         if (path.size() >= sizeof(sockaddr_un::sun_path))
             throw std::runtime_error("input socket path too long");
         // No private key or input-enabled default exists in this component.
     }
 
     static int create_keymap_file(std::string_view text) {
-        const auto fd = memfd_create("cua-agent-keymap", MFD_CLOEXEC);
+        const auto fd = memfd_create("pincer-agent-keymap", MFD_CLOEXEC);
         std::string payload(text);
         payload.push_back('\0');
         if (fd < 0 || ftruncate(fd, static_cast<off_t>(payload.size())) != 0) {
@@ -482,8 +482,8 @@ struct InputExperiment::Impl {
         seat->wl->setGetKeyboard([&self](CWlSeat* r, std::uint32_t child) { self.add_keyboard(r, child); });
         seat->wl->setGetTouch([&self](CWlSeat* r, std::uint32_t child) { self.add_touch(r, child); });
         if (version >= 2) seat->wl->sendName(kProduction ?
-            (self.lane == 0 ? "Cua-Agent" : "Cua-Agent-2") :
-            (self.lane == 0 ? "Cua-Test-Agent" : "Cua-Test-Agent-2"));
+            (self.lane == 0 ? "Pincer-Agent" : "Pincer-Agent-2") :
+            (self.lane == 0 ? "Pincer-Test-Agent" : "Pincer-Test-Agent-2"));
         seat->wl->sendCapabilities(static_cast<wl_seat_capability>(self.retired ? 0 :
             WL_SEAT_CAPABILITY_POINTER | (self.keyboard_state ? WL_SEAT_CAPABILITY_KEYBOARD : 0)));
         self.seats.push_back(std::move(seat));
@@ -759,7 +759,7 @@ struct InputExperiment::Impl {
         }
         return 0;
     }
-#ifdef CUA_HYPRLAND_TEST_INPUT
+#ifdef PINCER_HYPRLAND_TEST_INPUT
     bool valid_signature(const std::string& message, const std::string& signature) const {
         if (signature.size() != 128) return false;
         const auto bytes = unhex(signature);
@@ -773,7 +773,7 @@ struct InputExperiment::Impl {
         if (f.size() != 6) { send(c, refusal("invalid_grant")); return; }
         const auto deadline = number(f[3]); const auto caps = number(f[4]); const auto now = unix_ms();
         if (deadline <= now || deadline - now > 60000 || caps == 0 || caps > 15) { send(c, refusal("invalid_grant")); return; }
-        const auto message = std::format("CUA_TEST_LEASE_1\n{}\n{}\n{}\n{}\n{}\n", epoch, f[1], f[2], deadline, caps);
+        const auto message = std::format("PINCER_TEST_LEASE_1\n{}\n{}\n{}\n{}\n{}\n", epoch, f[1], f[2], deadline, caps);
         if (!valid_signature(message, f[5])) { send(c, refusal("invalid_grant")); return; }
         const auto found = std::ranges::find_if(clients, [&](auto& peer) {
             return !peer->dead && peer->hello && peer->challenge == f[1] && peer->token == f[2] && !peer->token.empty();
@@ -1124,7 +1124,7 @@ struct InputExperiment::Impl {
             if (after > 32768) { send(c, refusal("invalid_request")); return; }
             send(c, trace->request(command, after)); return;
         }
-#ifdef CUA_HYPRLAND_TEST_INPUT
+#ifdef PINCER_HYPRLAND_TEST_INPUT
         if (command == "APPROVE") { approve(c, f); return; }
 #endif
         if (reservation != &c) { send(c, refusal("lane_not_claimed")); return; }
@@ -1475,7 +1475,7 @@ InputExperiment::InputExperiment(const std::string& directory, void* plugin) {
     SeatLifetime lifetime(directory);
     for (unsigned i = 0; i < lanes_.size(); ++i) lanes_[i] = std::make_unique<Impl>(directory, i);
     for (auto& lane : lanes_) { lane->peers = {lanes_[0].get(), lanes_[1].get()}; lane->start(); }
-#if defined(CUA_HYPRLAND_TEST_INPUT) || defined(CUA_HYPRLAND_INPUT_TRACE)
+#if defined(PINCER_HYPRLAND_TEST_INPUT) || defined(PINCER_HYPRLAND_INPUT_TRACE)
     trace_ = std::make_unique<PrimaryTrace>(plugin, [this](wl_resource* resource) {
         for (unsigned i = 0; i < lanes_.size(); ++i) {
             for (const auto& p : lanes_[i]->pointers) if (p->wl->resource() == resource) return i + 1;
@@ -1527,4 +1527,4 @@ std::string InputExperiment::status_json() const {
         lanes_[0]->seats.size() + lanes_[1]->seats.size(), lanes_[0]->pointers.size() + lanes_[1]->pointers.size(),
         lanes_[0]->keyboards.size() + lanes_[1]->keyboards.size(), lanes_[0]->dispatches + lanes_[1]->dispatches, states);
 }
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

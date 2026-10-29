@@ -1,7 +1,7 @@
-# Cua KWin target helper
+# Pincer KWin target helper
 
 This is an **optional KDE Plasma/KWin Wayland integration**. It is not part of
-the portable `cua-driver` binary and must be built against the user's installed
+the portable `pincer` binary and must be built against the user's installed
 KWin/Qt/KF6 development files. Do not use a helper built for a different KWin
 or Qt ABI.
 
@@ -9,7 +9,7 @@ The helper is intentionally **read-only**. It provides trusted KWin window
 identity and state metadata: stable opaque tokens, PID, geometry,
 active/minimized state, and stacking order. It does not expose window activation
 or input mutation methods. KWin portal/libei input is focus-bound, so focus can
-change between any focus check and compositor-side input processing. Cua
+change between any focus check and compositor-side input processing. Pincer
 therefore refuses raw target-addressed KWin keyboard/pointer actions until a
 target-bound KWin input path exists.
 
@@ -32,7 +32,7 @@ cmake --build build --parallel
 The module is installed in KWin's effect plugin namespace:
 
 ```text
-kwin/effects/plugins/cua_kwin_target_helper.so
+kwin/effects/plugins/pincer_kwin_target_helper.so
 ```
 
 For a user-local installation, use a prefix supported by the local Qt/KWin
@@ -50,10 +50,10 @@ directory and never overwrite an existing file.
 Load/reload through KWin's supported Effects interface where available:
 
 ```bash
-qdbus6 org.kde.KWin /Effects loadEffect cua_kwin_target_helper
+qdbus6 org.kde.KWin /Effects loadEffect pincer_kwin_target_helper
 ```
 
-The helper exposes the Cua-owned service `org.cua.KWinTarget` only while the
+The helper exposes the Pincer-owned service `org.pincer.KWinTarget` only while the
 effect is loaded by the current `kwin_wayland` process. Verify the service
 owner, protocol version, and target snapshots before trusting identity data.
 The exported D-Bus surface is deliberately limited to `GetVersion` and
@@ -65,7 +65,7 @@ Portal/libei events are delivered according to compositor focus when KWin
 processes them. A target focus check immediately before dispatch cannot bind the
 later event to that target, so adding more checks does not remove the race.
 Until a future KWin integration can bind the mutation itself to an exact target,
-Cua fails closed rather than sending raw focus-based input to a requested KWin
+Pincer fails closed rather than sending raw focus-based input to a requested KWin
 window.
 
 ## ABI and rollback
@@ -73,5 +73,5 @@ window.
 The module is compositor/Qt ABI-specific. Rebuild after Plasma/KWin or Qt
 upgrades. To roll back a user-local test installation, unload the effect and
 remove only the exact module installed by that test; do not remove KWin or
-change the desktop session. The portable Cua Driver continues to build without
+change the desktop session. The portable Pincer continues to build without
 this optional helper and without KWin development packages.

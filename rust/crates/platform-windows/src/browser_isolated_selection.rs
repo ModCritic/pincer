@@ -102,12 +102,12 @@ pub(crate) fn decide_isolated_browser(
     IsolatedBrowserDecision::Refuse(match launch_token {
         BrowserLaunchToken::Driver => format!(
             "installed vendor-signed {products} is writable by the current non-elevated token, \
-             so Cua Driver refuses to launch it for an isolated browser; restore the browser \
+             so Pincer refuses to launch it for an isolated browser; restore the browser \
              installation's default permissions so that standard users cannot modify it"
         ),
         BrowserLaunchToken::StandardUser => format!(
             "installed vendor-signed {products} is writable even by the standard-user token that \
-             the elevated Cua Driver uses for isolated browsers, so Cua Driver refuses to launch \
+             the elevated Pincer uses for isolated browsers, so Pincer refuses to launch \
              it; restore the browser installation's default permissions so that standard users \
              cannot modify it"
         ),

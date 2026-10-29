@@ -8,8 +8,8 @@ import { sceneList, scenes } from './motion/scenes.js';
 import { renderFrame } from './render.js';
 
 const LOOP_PAD_MS = 900;
-const PICKS_KEY = 'cua-motion-lab.picks';
-const PARAMS_KEY = 'cua-motion-lab.params';
+const PICKS_KEY = 'pincer-motion-lab.picks';
+const PARAMS_KEY = 'pincer-motion-lab.params';
 
 const params = new URLSearchParams(location.search);
 const capture = params.get('capture') === '1';
@@ -216,7 +216,7 @@ function clipView(view, id) {
         <div class="clip-name">${c.name}</div>
         <div class="clip-look">${c.look}</div>
       </div>
-      <div class="clip-brand"><span class="brand-wordmark">cua</span> <span>Driver · agent cursor</span></div>
+      <div class="clip-brand"><span class="brand-wordmark">pincer</span> <span>Driver · agent cursor</span></div>
     </div>`;
   const canvas = view.querySelector('canvas');
   tiles = [{ c, canvas, g: canvas.getContext('2d'), scene: sceneId }];

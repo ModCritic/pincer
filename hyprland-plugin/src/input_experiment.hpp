@@ -4,7 +4,7 @@
 #include <string>
 #include <array>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 class PrimaryTrace;
 // Shared native seat/lifetime implementation. Build options select production
 // v3 admission or the historical signed experiment; never both.
@@ -26,4 +26,4 @@ class InputExperiment {
     std::unique_ptr<PrimaryTrace> trace_;
     std::unique_ptr<DesktopListeners> desktop_listeners_;
 };
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

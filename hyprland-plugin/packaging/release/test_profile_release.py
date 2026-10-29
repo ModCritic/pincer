@@ -24,16 +24,16 @@ class ProfileTest(unittest.TestCase):
     driver_version = verify.DRIVER_VERSION
 
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="cua-profile-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="pincer-profile-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.tooling_sha = "b" * 40
-        self.files = {"CMakeLists.txt": b"project(cua_hyprland_plugin VERSION 0.1.0 LANGUAGES CXX)\n",
+        self.files = {"CMakeLists.txt": b"project(pincer_hyprland_plugin VERSION 0.1.0 LANGUAGES CXX)\n",
                       "LICENSE.md": b"Synthetic license\n", "verify.py": b"raise SystemExit('historical verifier must never execute')\n",
                       "src/plugin.cpp": b"// synthetic source\n"}
-        self.stem = f"cua-hyprland-plugin-{self.driver_version}-{self.source_revision}"
+        self.stem = f"pincer-hyprland-plugin-{self.driver_version}-{self.source_revision}"
         self.manifest = {"schema": 1, "source_revision": self.source_revision, "driver_version": self.driver_version,
-                         "release_tag": "cua-driver-rs-v" + self.driver_version, "plugin_version": "0.1.0", "architecture": "x86_64",
+                         "release_tag": "pincer-v" + self.driver_version, "plugin_version": "0.1.0", "architecture": "x86_64",
                          "native_certified": False, "cmake_options": verify.OPTIONS, "hyprland_version": "0.56.2",
                          "hyprland_package": "0.56.2-1", "compiler_version": "16.1.1 20260728",
                          "compiler_comment": "GCC: (GNU) 16.1.1 20260728",
@@ -222,7 +222,7 @@ exit "$result"
                 lifecycle.BUILD: verify.json_bytes(build), lifecycle.PROFILE: verify.json_bytes(self.profile),
                 lifecycle.KIT: verify.json_bytes(metadata), lifecycle.VERIFIER: (HERE / "profile_verify.py").read_bytes()}
         names = list(data) + [".PKGINFO", ".BUILDINFO", ".MTREE"]
-        info = f"pkgname = cua-hyprland-plugin\npkgver = {self.driver_version}-2\narch = x86_64\ndepend = hyprland=0.56.2-2\ndepend = gcc-libs=16.2.1-1\ndepend = python>=3.11\ndepend = binutils\n"
+        info = f"pkgname = pincer-hyprland-plugin\npkgver = {self.driver_version}-2\narch = x86_64\ndepend = hyprland=0.56.2-2\ndepend = gcc-libs=16.2.1-1\ndepend = python>=3.11\ndepend = binutils\n"
         with mock.patch.object(lifecycle, "run", side_effect=lambda command: subprocess.CompletedProcess(command, 0, "\n".join(names) if "-tf" in command else info, "")), mock.patch.object(lifecycle.subprocess, "check_output", side_effect=lambda command: data[command[-1]]):
             self.assertEqual(lifecycle.package_payload(self.root / "package", self.manifest, self.profile, metadata), {name: verify.sha256(value) for name, value in data.items()})
             for name in (lifecycle.PROFILE, lifecycle.KIT, lifecycle.VERIFIER):
@@ -293,7 +293,7 @@ exit "$result"
                 installed.remove(root)
             elif operation[0] == "-Q":
                 code = 0 if root in installed else 1
-                output = f"cua-hyprland-plugin {self.driver_version}-2" if code == 0 else ""
+                output = f"pincer-hyprland-plugin {self.driver_version}-2" if code == 0 else ""
             return subprocess.CompletedProcess(command, code, output, "")
 
         with mock.patch.object(lifecycle, "run", side_effect=fake_pacman):
@@ -339,7 +339,7 @@ class Schema2ProfileTest(ProfileTest):
 
     def test_manifest_substitution_refused_even_with_selected_digest(self):
         changes = {"source_revision": "d" * 40, "driver_version": "0.25.0", "release_tag": "cua-driver-rs-v0.25.0",
-                   "schema": 2, "native_certified": True, "cmake_options": {**verify.OPTIONS, "CUA_HYPRLAND_INPUT_TRACE": "ON"},
+                   "schema": 2, "native_certified": True, "cmake_options": {**verify.OPTIONS, "PINCER_HYPRLAND_INPUT_TRACE": "ON"},
                    "plugin_version": "0.2.0", "architecture": "aarch64", "hyprland_version": "0.57.0",
                    "hyprland_package": "0.56.2-2", "compiler_version": "16.2.1 20260810", "compiler_comment": "other"}
         for field, value in changes.items():
@@ -498,14 +498,14 @@ class NativeProfileTest(unittest.TestCase):
         source = self.source()
         build = self.root / "build"
         build.mkdir()
-        (build / "cua-hyprland-plugin.so").write_text("module")
-        expected = dict(verify.OPTIONS, BUILD_TESTING="ON", CUA_HYPRLAND_BUILD_PLUGIN="ON", CMAKE_BUILD_TYPE="Release",
+        (build / "pincer-hyprland-plugin.so").write_text("module")
+        expected = dict(verify.OPTIONS, BUILD_TESTING="ON", PINCER_HYPRLAND_BUILD_PLUGIN="ON", CMAKE_BUILD_TYPE="Release",
                         CMAKE_GENERATOR="Ninja",
                         PKG_CONFIG_EXECUTABLE="/usr/bin/pkgconf", PKG_CONFIG_ARGN="", PKG_CONFIG_USE_CMAKE_PREFIX_PATH="OFF",
                         HYPRLAND_VERSION="0.56.2", HYPRLAND_CFLAGS=";".join(self.pkgconfig["cflags"]),
                         HYPRLAND_INCLUDE_DIRS=";".join(self.pkgconfig["include_dirs"]), HYPRLAND_CFLAGS_OTHER=";".join(self.pkgconfig["cflags_other"]),
                         HYPRLAND_LDFLAGS=";".join(self.pkgconfig["ldflags"]),
-                        CUA_HYPRLAND_EXPECTED_VERSION="0.56.2", CUA_HYPRLAND_TEST_OPERATOR_KEY="",
+                        PINCER_HYPRLAND_EXPECTED_VERSION="0.56.2", PINCER_HYPRLAND_TEST_OPERATOR_KEY="",
                         CMAKE_CXX_COMPILER=str(self.cxx), CMAKE_HOME_DIRECTORY=str(source.resolve()))
         cache = build / "CMakeCache.txt"
         cache.write_text("".join(f"{key}:STRING={value}\n" for key, value in expected.items()))

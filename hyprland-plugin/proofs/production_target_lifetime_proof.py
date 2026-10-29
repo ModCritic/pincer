@@ -7,7 +7,7 @@ case=active_drag and fault={kind:destroy,signal:SIGKILL}. recovery is
 {mode:prepared_distinct_process,agent:<Calc spec>,identity:<exact /proc identity>}
 where its pointer_stage is click_a1 or click_b2 and drag={}. Both Calc specs add
 owned={document:{path,device,inode,uid,sha256},profile:<canonical directory>}.
-Each document is an existing suite cua-smoke-calc.ods in a private directory;
+Each document is an existing suite pincer-smoke-calc.ods in a private directory;
 each profile is that document's sibling calc-profile. Both processes must have
 the suite's exact launch argv. The controller prepares both before this run.
 
@@ -73,13 +73,13 @@ def validate_owned(spec):
     document = owned['document']
     assert set(document) == {'path', 'device', 'inode', 'uid', 'sha256'}
     path = Path(document['path'])
-    assert path.is_absolute() and path.name == ('cua-smoke-inkscape.svg' if spec['app'] == 'inkscape' else 'cua-smoke-calc.ods'), \
+    assert path.is_absolute() and path.name == ('pincer-smoke-inkscape.svg' if spec['app'] == 'inkscape' else 'pincer-smoke-calc.ods'), \
         'owned document must be the synthetic smoke document'
     assert all(type(document[k]) is int and document[k] >= 0 for k in ('device', 'inode', 'uid'))
     assert len(document['sha256']) == 64 and all(c in '0123456789abcdef' for c in document['sha256'])
     if spec['app'] == 'inkscape':
         assert spec['document'] == str(path), 'owned SVG must be the reviewed target document'
-        assert isinstance(spec.get('app_id_tag'), str) and re.fullmatch(r'cua-profile-[A-Za-z0-9-]{1,64}', spec['app_id_tag']), \
+        assert isinstance(spec.get('app_id_tag'), str) and re.fullmatch(r'pincer-profile-[A-Za-z0-9-]{1,64}', spec['app_id_tag']), \
             'reviewed synthetic Inkscape app-id tag required'
     else:
         assert Path(owned['profile']) == path.parent / 'calc-profile'
@@ -212,7 +212,7 @@ class TargetLifetime(ExactDesktop):
 
     def status(self):
         self.guard()
-        status = json.loads(_hypr(self.instance, '-j', 'cua:status'))
+        status = json.loads(_hypr(self.instance, '-j', 'pincer:status'))
         lanes(status)
         return status
 

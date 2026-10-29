@@ -1,4 +1,4 @@
-//! Parity check for `cua-driver status` + `cua-driver stop` CLI subcommands.
+//! Parity check for `pincer status` + `pincer stop` CLI subcommands.
 
 #[cfg(target_os = "windows")]
 use std::process::Command;
@@ -10,7 +10,7 @@ fn main() {
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/debug/cua-driver.exe");
+        .join("target/debug/pincer.exe");
 
     // Assume a daemon is running for these tests.
 
@@ -27,7 +27,7 @@ fn main() {
         "status should print at least 2 lines, got: {stdout:?}"
     );
     assert_eq!(
-        lines[0], "Cua Driver daemon is running",
+        lines[0], "Pincer daemon is running",
         "first line wrong: {:?}",
         lines[0]
     );
@@ -67,7 +67,7 @@ fn main() {
     );
     let stderr3 = String::from_utf8_lossy(&out3.stderr);
     assert!(
-        stderr3.contains("Cua Driver daemon is not running"),
+        stderr3.contains("Pincer daemon is not running"),
         "stderr should say 'not running': {stderr3:?}"
     );
     println!("status-not-running OK");
@@ -81,7 +81,7 @@ fn main() {
     );
     let stderr4 = String::from_utf8_lossy(&out4.stderr);
     assert!(
-        stderr4.contains("Cua Driver daemon is not running"),
+        stderr4.contains("Pincer daemon is not running"),
         "stderr should say 'not running': {stderr4:?}"
     );
     println!("stop-not-running OK");

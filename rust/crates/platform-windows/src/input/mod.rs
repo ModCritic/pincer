@@ -142,7 +142,7 @@ pub fn post_message_blocked_by_uipi(hwnd: u64) -> Option<String> {
     if target > own {
         Some(format!(
             "UIPI: target hwnd 0x{hwnd:x} (pid {pid}) is at {} integrity; \
-             cua-driver is at {} integrity. PostMessage to a higher-integrity \
+             pincer is at {} integrity. PostMessage to a higher-integrity \
              window is silently dropped by the target's message pump — the \
              call would return success but no input would land. Common cause: \
              a Win32 app whose application manifest requests \

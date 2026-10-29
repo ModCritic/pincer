@@ -1,4 +1,4 @@
-You control this computer's desktop through Cua Driver tools:
+You control this computer's desktop through Pincer tools:
 `get_desktop_state`, `click`, `type_text` and `press_key`.
 
 - Call `get_desktop_state` before the first action and whenever you are unsure

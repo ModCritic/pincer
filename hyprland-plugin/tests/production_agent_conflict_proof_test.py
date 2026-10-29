@@ -28,7 +28,7 @@ def plan(stage='scroll_down', recovery='scroll_visible'):
         'processes': {'target': identity(20, '/usr/bin/inkscape'), 'foreground': identity(10)},
         'foreground': {'pid': 10, 'window_id': 100}, 'primary_point': [20, 20], 'package_versions': {},
         'agents': [{'app': 'inkscape', 'name': 'agent-conflict', 'target': {'pid': 20, 'window_id': 200},
-            'document': '/tmp/cua/cua-smoke-inkscape.svg', 'bounds': dict(BOUNDS), 'pointer_stage': stage, 'drag': {}}],
+            'document': '/tmp/pincer/pincer-smoke-inkscape.svg', 'bounds': dict(BOUNDS), 'pointer_stage': stage, 'drag': {}}],
         'refused': {'pointer_stage': proof.OPPOSITE[stage]}, 'recovery': {'pointer_stage': recovery}}
 
 
@@ -61,7 +61,7 @@ class PlanTests(unittest.TestCase):
                 proof.validate_plan({**plan(), **update})
         for key, value in (('pointer_stage', 'move_rectangle'), ('pointer_stage', 'click_rectangle'),
                            ('pointer_stage', 'scroll_visible'), ('drag', {'from_x': 1}), ('app', 'calc'),
-                           ('document', '/tmp/other.svg'), ('document', 'cua-smoke-inkscape.svg')):
+                           ('document', '/tmp/other.svg'), ('document', 'pincer-smoke-inkscape.svg')):
             candidate = plan()
             candidate['agents'][0][key] = value
             with self.subTest(key=key, value=value), self.assertRaises((AssertionError, KeyError)):
@@ -365,7 +365,7 @@ class RunTests(unittest.TestCase):
                 path = directory / 'plan.json'
                 path.write_text(json.dumps(plan()))
                 args = SimpleNamespace(plan=path, evidence=directory / 'evidence', driver=Path('/driver'),
-                    primary_grab=Path('/grab'), trace_socket=Path('/cua-input-v3.sock'), foreground_journal=Path('/journal'))
+                    primary_grab=Path('/grab'), trace_socket=Path('/pincer-input-v3.sock'), foreground_journal=Path('/journal'))
                 observer, owner, refused = client(101), client(102), client(103)
                 recovery = client(103 if failure == 'reused' else 104)
                 for actor in (owner, refused, recovery):

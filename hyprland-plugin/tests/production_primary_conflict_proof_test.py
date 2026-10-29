@@ -100,7 +100,7 @@ class OwnershipTests(unittest.TestCase):
             proof.validate_plan(candidate)
 
     def test_trace_requires_exact_socket_peer_and_unowned_trace(self):
-        path = Path('/run/user/1000/hypr/test_1/cua-input-v3.sock')
+        path = Path('/run/user/1000/hypr/test_1/pincer-input-v3.sock')
         for failure in (None, 'peer', 'protocol', 'active', 'owner', 'alias'):
             desktop = object.__new__(proof.ExactDesktop)
             desktop.instance, desktop.compositor = 'test_1', identity(50, '/usr/bin/Hyprland')
@@ -143,7 +143,7 @@ class OwnershipTests(unittest.TestCase):
                 proof.validate_plan(candidate)
 
     def test_guard_revalidates_boot_pid_and_window_before_control(self):
-        windows = [{'pid': 20, 'address': '0xc8', 'xwayland': False, 'title': 'cua-smoke-calc.ods',
+        windows = [{'pid': 20, 'address': '0xc8', 'xwayland': False, 'title': 'pincer-smoke-calc.ods',
                     'at': [10, 20], 'size': [800, 600]}, {'pid': 10, 'address': '0x64', 'xwayland': False}]
         for failure in (None, 'boot', 'process', 'address', 'geometry', 'native', 'document', 'ambiguous'):
             candidate = plan()
@@ -264,7 +264,7 @@ class RunTests(unittest.TestCase):
                 path = directory / 'plan.json'
                 path.write_text(json.dumps(plan()))
                 args = SimpleNamespace(plan=path, evidence=directory / 'evidence', driver=Path('/driver'),
-                    primary_grab=Path('/grab'), trace_socket=Path('/cua-input-v3.sock'), foreground_journal=Path('/journal'))
+                    primary_grab=Path('/grab'), trace_socket=Path('/pincer-input-v3.sock'), foreground_journal=Path('/journal'))
                 desktop = Mock()
                 desktop.status.return_value = status()
                 desktop.raw_status.return_value = status()

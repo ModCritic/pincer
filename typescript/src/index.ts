@@ -1,38 +1,38 @@
 /**
- * Rust-backed SDK for Cua Driver client applications.
+ * Rust-backed SDK for Pincer client applications.
  *
- * Agents should configure `cua-driver mcp` through their runtime's existing
+ * Agents should configure `pincer mcp` through their runtime's existing
  * MCP client instead of importing a language MCP facade.
  */
 import {
-  CuaDriver as NativeCuaDriver,
-  type CuaDriverLike,
+  Pincer as NativePincer,
+  type PincerLike,
   type DriverOptions,
   SdkClientKind,
-} from "./native/cua_driver_sdk.js"
+} from "./native/pincer_sdk.js"
 import { createDriver } from "./daemon.js"
 
 /**
- * Options for `CuaDriver.create()`. `embedded: true` forces the in-process
- * runtime on macOS, where `create()` otherwise prefers the CuaDriver.app
+ * Options for `Pincer.create()`. `embedded: true` forces the in-process
+ * runtime on macOS, where `create()` otherwise prefers the Pincer.app
  * daemon so the agent cursor overlay and the app's permissions work.
  */
 export type CreateOptions = DriverOptions & { embedded?: boolean }
 
-const CuaDriver = NativeCuaDriver as typeof NativeCuaDriver & {
-  create(options?: CreateOptions): CuaDriverLike
+const Pincer = NativePincer as typeof NativePincer & {
+  create(options?: CreateOptions): PincerLike
 }
-type CuaDriver = NativeCuaDriver
+type Pincer = NativePincer
 
 // The same native library backs Python and TypeScript. The package root tags
 // both the canonical same-process constructor and the temporary daemon
 // compatibility constructor with the importing runtime.
-NativeCuaDriver.create = (options?: CreateOptions) => {
+NativePincer.create = (options?: CreateOptions) => {
   const { embedded, ...driverOptions } = options ?? {}
   return createDriver(
-    () => NativeCuaDriver.connectWithClientKind(undefined, SdkClientKind.Typescript),
+    () => NativePincer.connectWithClientKind(undefined, SdkClientKind.Typescript),
     () =>
-      NativeCuaDriver.createWithClientKind(
+      NativePincer.createWithClientKind(
         options === undefined ? undefined : (driverOptions as DriverOptions),
         SdkClientKind.Typescript,
       ),
@@ -40,32 +40,32 @@ NativeCuaDriver.create = (options?: CreateOptions) => {
     (driverOptions as Partial<DriverOptions>).claudeCodeCompatibility === true,
   )
 }
-NativeCuaDriver.createConfigured = (options) =>
-  NativeCuaDriver.createConfiguredWithClientKind(options, SdkClientKind.Typescript)
-NativeCuaDriver.createConfiguredWithAuthorizationHost = (options, host) =>
-  NativeCuaDriver.createConfiguredWithAuthorizationHostAndClientKind(
+NativePincer.createConfigured = (options) =>
+  NativePincer.createConfiguredWithClientKind(options, SdkClientKind.Typescript)
+NativePincer.createConfiguredWithAuthorizationHost = (options, host) =>
+  NativePincer.createConfiguredWithAuthorizationHostAndClientKind(
     options,
     host,
     SdkClientKind.Typescript,
   )
-NativeCuaDriver.createConfiguredWithActivityObserver = (options, observer) =>
-  NativeCuaDriver.createConfiguredWithActivityObserverAndClientKind(
+NativePincer.createConfiguredWithActivityObserver = (options, observer) =>
+  NativePincer.createConfiguredWithActivityObserverAndClientKind(
     options,
     observer,
     SdkClientKind.Typescript,
   )
-NativeCuaDriver.createConfiguredWithHostIntegrations = (options, host, observer) =>
-  NativeCuaDriver.createConfiguredWithHostIntegrationsAndClientKind(
+NativePincer.createConfiguredWithHostIntegrations = (options, host, observer) =>
+  NativePincer.createConfiguredWithHostIntegrationsAndClientKind(
     options,
     host,
     observer,
     SdkClientKind.Typescript,
   )
-NativeCuaDriver.createPrivateWorker = (options) =>
-  NativeCuaDriver.createPrivateWorkerWithClientKind(options, SdkClientKind.Typescript)
-NativeCuaDriver.connect = (socketPath: string | undefined) =>
-  NativeCuaDriver.connectWithClientKind(socketPath, SdkClientKind.Typescript)
+NativePincer.createPrivateWorker = (options) =>
+  NativePincer.createPrivateWorkerWithClientKind(options, SdkClientKind.Typescript)
+NativePincer.connect = (socketPath: string | undefined) =>
+  NativePincer.connectWithClientKind(socketPath, SdkClientKind.Typescript)
 
 export * from "./native/index.js"
-export { CuaDriver }
+export { Pincer }
 export { default } from "./native/index.js"

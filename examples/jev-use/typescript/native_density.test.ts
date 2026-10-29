@@ -1,7 +1,7 @@
 // Larger candidate sets and relevance capping (#4312). Mirrors
 // python/tests/test_native_density.py; the fixtures are get_window_state
 // results recorded from the AppKit, GTK3, WPF, and WinUI3 harnesses with
-// CUA_<HARNESS>_TASK_DENSITY set.
+// PINCER_<HARNESS>_TASK_DENSITY set.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';

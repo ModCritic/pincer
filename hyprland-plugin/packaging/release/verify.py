@@ -13,7 +13,7 @@ import tempfile
 
 COMPILER_VERSION = "16.1.1 20260728"
 COMPILER_COMMENT = "GCC: (GNU) " + COMPILER_VERSION
-OPTIONS = {"CUA_HYPRLAND_INPUT": "ON", "CUA_HYPRLAND_TEST_INPUT": "OFF", "CUA_HYPRLAND_INPUT_TRACE": "OFF"}
+OPTIONS = {"PINCER_HYPRLAND_INPUT": "ON", "PINCER_HYPRLAND_TEST_INPUT": "OFF", "PINCER_HYPRLAND_INPUT_TRACE": "OFF"}
 
 
 def require(condition, message):
@@ -43,7 +43,7 @@ def verify_source(source, revision, driver_version):
     manifest = json.loads((source / "SOURCE-PROVENANCE.json").read_text())
     expected = {
         "schema": 1, "source_revision": revision, "driver_version": driver_version,
-        "release_tag": f"cua-driver-rs-v{driver_version}",
+        "release_tag": f"pincer-v{driver_version}",
         "hyprland_version": "0.56.2", "hyprland_package": "0.56.2-1",
         "compiler_version": COMPILER_VERSION, "compiler_comment": COMPILER_COMMENT,
         "architecture": "x86_64", "native_certified": False, "cmake_options": OPTIONS,
@@ -59,7 +59,7 @@ def verify_source(source, revision, driver_version):
     for name, checksum in manifest["files"].items():
         require(digest(source / name) == checksum, f"source checksum mismatch: {name}")
     cmake = (source / "CMakeLists.txt").read_text()
-    require(f"project(cua_hyprland_plugin VERSION {manifest['plugin_version']} LANGUAGES CXX)" in cmake, "plugin version mismatch")
+    require(f"project(pincer_hyprland_plugin VERSION {manifest['plugin_version']} LANGUAGES CXX)" in cmake, "plugin version mismatch")
     return manifest
 
 
@@ -76,9 +76,9 @@ def verify_native(cxx):
     entries = [re.sub(r"^\s*\[[^]]+\]\s*", "", line).strip() for line in comments.splitlines()]
     require(COMPILER_COMMENT in entries, "Hyprland compositor compiler mismatch")
     # Check what the selected compiler emits, not only its self-reported version.
-    with tempfile.TemporaryDirectory(prefix="cua-compiler-probe-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="pincer-compiler-probe-") as temporary:
         probe = Path(temporary) / "probe.o"
-        run(str(cxx), "-x", "c++", "-c", "-o", str(probe), "-", input="int cua_compiler_probe;\n")
+        run(str(cxx), "-x", "c++", "-c", "-o", str(probe), "-", input="int pincer_compiler_probe;\n")
         probe_comments = run("readelf", "-p", ".comment", str(probe))
         probe_entries = [re.sub(r"^\s*\[[^]]+\]\s*", "", line).strip() for line in probe_comments.splitlines()]
         require(COMPILER_COMMENT in probe_entries, "compiler probe does not match compositor compiler")
@@ -107,13 +107,13 @@ def verify_build(build, source, cxx, runtime_sha):
         match = re.match(r"([^:#/][^:]*):[^=]+=(.*)", line)
         if match:
             cache[match[1]] = match[2]
-    expected = dict(OPTIONS, BUILD_TESTING="ON", CUA_HYPRLAND_BUILD_PLUGIN="ON",
-                    CUA_HYPRLAND_EXPECTED_VERSION="0.56.2", CMAKE_BUILD_TYPE="Release",
-                    CUA_HYPRLAND_TEST_OPERATOR_KEY="", CMAKE_CXX_COMPILER=str(cxx),
+    expected = dict(OPTIONS, BUILD_TESTING="ON", PINCER_HYPRLAND_BUILD_PLUGIN="ON",
+                    PINCER_HYPRLAND_EXPECTED_VERSION="0.56.2", CMAKE_BUILD_TYPE="Release",
+                    PINCER_HYPRLAND_TEST_OPERATOR_KEY="", CMAKE_CXX_COMPILER=str(cxx),
                     CMAKE_HOME_DIRECTORY=str(source.resolve()))
     for key, value in expected.items():
         require(cache.get(key) == value, f"build configuration mismatch: {key}")
-    module = build / "cua-hyprland-plugin.so"
+    module = build / "pincer-hyprland-plugin.so"
     dynamic = run("readelf", "-d", str(module))
     require("Shared library: [libstdc++.so.6]" in dynamic, "module must use shared libstdc++")
     require("Shared library: [libc++.so" not in dynamic, "module uses incompatible libc++")

@@ -93,7 +93,7 @@ def run(args):
             return data
 
         def status():
-            return json.loads(subprocess.check_output(["hyprctl", "-j", "cua:status"], timeout=2))
+            return json.loads(subprocess.check_output(["hyprctl", "-j", "pincer:status"], timeout=2))
 
         def probe_pending(selection, suffix):
             assert not (args.evidence / ("grant-" + suffix + ".json")).exists(), "grant predates fresh request"
@@ -148,7 +148,7 @@ def run(args):
             grant = receive_grant(pending, "initial")
             lane = pending["lane"]
             assert lane in (0, 1), "unknown experimental lane"
-            input_path = args.input_directory / ("cua-input-test.sock" if lane == 0 else "cua-input-test-2.sock")
+            input_path = args.input_directory / ("pincer-input-test.sock" if lane == 0 else "pincer-input-test-2.sock")
             operator, _ = connect(input_path)
             assert wm()["pid"] == foreground["pid"], "set up the exact foreground actor before approval"
             assert exchange(operator, grant["packet"])["ok"] is True
@@ -169,7 +169,7 @@ def run(args):
         bg_offset = len(journal(args.background_journal))
         fg_offset = len(journal(args.foreground_journal))
         wire_offset = args.foreground_wire.stat().st_size
-        trace = Trace(args.input_directory / "cua-input-test.sock")
+        trace = Trace(args.input_directory / "pincer-input-test.sock")
         trace.exchange("TRACE_START")
         trace_active = True
         future = None

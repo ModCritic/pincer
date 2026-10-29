@@ -11,7 +11,7 @@
 //! agent can't interact with.
 
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     browser::platform::BrowserPlatform,
     protocol::ToolResult,
     tool::{Tool, ToolDef},

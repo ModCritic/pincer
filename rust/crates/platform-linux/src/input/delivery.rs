@@ -1,4 +1,4 @@
-//! Shared delivery-mode logic for cua-driver Linux input tools.
+//! Shared delivery-mode logic for pincer Linux input tools.
 //!
 //! Mirrors macOS `tools::DeliveryMode` and Windows `input::delivery`: each
 //! input tool accepts an optional `delivery_mode` field with exactly two modes
@@ -29,8 +29,8 @@
 
 use serde_json::Value;
 
-/// The shared per-call delivery mode; see [`cua_driver_core::delivery`].
-pub use cua_driver_core::delivery::DeliveryMode;
+/// The shared per-call delivery mode; see [`pincer_core::delivery`].
+pub use pincer_core::delivery::DeliveryMode;
 
 /// JSON-schema fragment for the `delivery_mode` field. Include this in every
 /// input tool's `input_schema.properties.delivery_mode`. Two modes, matching
@@ -40,7 +40,7 @@ pub fn delivery_mode_schema() -> Value {
     // from macOS / Windows, while keeping the Linux-specific Wayland/X11 prose
     // (the gate compares shape only — descriptions may vary per platform). The
     // `default` advertisement is additive on top of the canon shape.
-    let mut v = cua_driver_core::tool_schema::delivery_mode_schema_with(
+    let mut v = pincer_core::tool_schema::delivery_mode_schema_with(
         "Input delivery mode. 'background' (default) never activates or raises \
          the target window. On X11 it uses the session's XInput2 virtual \
          pointer and keyboard (no focus steal). On Wayland it goes through libei + \
@@ -111,12 +111,12 @@ impl BackgroundUnavailable {
 /// Windows silent-drop error so callers branch on `code` identically.
 pub fn background_unavailable_error(
     reason: BackgroundUnavailable,
-) -> cua_driver_core::protocol::ToolResult {
+) -> pincer_core::protocol::ToolResult {
     let detail = reason.detail();
-    cua_driver_core::delivery::background_unavailable_result(
+    pincer_core::delivery::background_unavailable_result(
         format!(
             "Background delivery is not available: {detail}. Retry this action with \
-             delivery_mode:\"foreground\"; Cua Driver will activate the target window, \
+             delivery_mode:\"foreground\"; Pincer will activate the target window, \
              confirm it holds the input focus, and deliver real input to it."
         ),
         reason.code(),
@@ -139,7 +139,7 @@ mod tests {
         assert_eq!(structured["escalation"]["recommended"], "foreground");
         assert_eq!(
             structured["suggestion"],
-            cua_driver_core::delivery::FOREGROUND_RETRY_SUGGESTION
+            pincer_core::delivery::FOREGROUND_RETRY_SUGGESTION
         );
         let detail = structured["detail"].as_str().unwrap();
         assert!(detail.contains("globally focused widget"));
@@ -149,7 +149,7 @@ mod tests {
             .content
             .iter()
             .filter_map(|content| match content {
-                cua_driver_core::protocol::Content::Text { text, .. } => Some(text.as_str()),
+                pincer_core::protocol::Content::Text { text, .. } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>()

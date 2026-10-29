@@ -1,13 +1,13 @@
 """Per-platform role table for native accessibility candidates (RFC #4268).
 
-Cua Driver reports each element's raw platform role: macOS AX names
+Pincer reports each element's raw platform role: macOS AX names
 (``AXButton``), Windows UIA ``control_type_name`` values (``Button``), or Linux
 AT-SPI role names (``push button``). It does not normalize them across
 platforms, so jev-use owns this closed mapping from raw roles to a small set of
 role classes. Unknown roles are excluded, never guessed.
 
 Lookups go through ``normalized_role``, a port of Driver's private
-``normalized_role`` in ``cua-driver-core/src/expectation.rs``: keep ASCII
+``normalized_role`` in ``pincer-core/src/expectation.rs``: keep ASCII
 alphanumerics, lowercase, strip an ``ax`` prefix, and map ``pushbutton`` to
 ``button`` and ``pagetab``/``tabitem`` to ``tab``. Because every table is keyed
 by that normalized form, two raw roles that Driver's ``verify_state`` treats as
@@ -94,7 +94,7 @@ RAW_ROLES: Mapping[Platform, Mapping[RoleClass, tuple[str, ...]]] = {
 
 
 def normalized_role(role: str) -> str:
-    """Port of Driver's ``normalized_role`` (``cua-driver-core/src/expectation.rs``)."""
+    """Port of Driver's ``normalized_role`` (``pincer-core/src/expectation.rs``)."""
     normalized = "".join(
         character.lower()
         for character in role

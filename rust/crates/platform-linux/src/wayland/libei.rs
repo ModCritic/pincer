@@ -21,7 +21,7 @@
 //!
 //! Persistence: ashpd `PersistMode::ExplicitlyRevoked` keeps the user's consent
 //! until they revoke it in desktop settings. The restore token is stored at
-//! `~/.config/cua-driver/libei-persistent.token` and reused across daemon
+//! `~/.config/pincer/libei-persistent.token` and reused across daemon
 //! restarts.
 //!
 //! Coordinates: ei_pointer_absolute uses LOGICAL PIXELS inside an
@@ -171,7 +171,7 @@ fn wait_for_reply(rx: Receiver<anyhow::Result<()>>) -> anyhow::Result<()> {
 
 fn restore_token_path() -> Option<PathBuf> {
     let base = dirs::config_dir()?;
-    Some(base.join("cua-driver").join("libei-persistent.token"))
+    Some(base.join("pincer").join("libei-persistent.token"))
 }
 
 fn read_restore_token() -> Option<String> {
@@ -222,13 +222,13 @@ pub fn ensure_started() -> anyhow::Result<()> {
     TX.get_or_init(|| {
         let (tx, rx) = bounded::<Cmd>(64);
         thread::Builder::new()
-            .name("cua-libei-worker".into())
+            .name("pincer-libei-worker".into())
             .spawn(move || {
                 if let Err(e) = worker(rx) {
-                    tracing::warn!("cua-libei-worker exited with error: {e}");
+                    tracing::warn!("pincer-libei-worker exited with error: {e}");
                 }
             })
-            .expect("spawn cua-libei-worker thread");
+            .expect("spawn pincer-libei-worker thread");
         tx
     });
     Ok(())
@@ -745,7 +745,7 @@ impl EisState {
             Event::Handshake(handshake, ev) => {
                 if let reis::ei::handshake::Event::HandshakeVersion { .. } = ev {
                     handshake.handshake_version(1);
-                    handshake.name("cua-driver");
+                    handshake.name("pincer");
                     handshake.context_type(reis::ei::handshake::ContextType::Sender);
                     // Advertise the interface set + versions that reis 0.7's own
                     // EIS client examples use against real compositors. The

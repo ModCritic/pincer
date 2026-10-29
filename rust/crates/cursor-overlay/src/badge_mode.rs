@@ -3,7 +3,7 @@
 
 //! How much the session badge under an agent cursor shows.
 //!
-//! `cursor.badges` lives in `~/.cua-driver/config.json`
+//! `cursor.badges` lives in `~/.pincer/config.json`
 //! (`{"cursor": {"badges": "minimal"}}`) next to the saved motion defaults.
 //! Unlike the motion defaults it applies live: every cursor reads the
 //! process-wide value on each frame, so a `set_config` write changes cursors
@@ -152,7 +152,7 @@ pub fn set_active(mode: BadgeMode) {
     ACTIVE.store(mode.to_u8(), Ordering::Relaxed);
 }
 
-/// Load `~/.cua-driver/config.json` into the process-wide value.
+/// Load `~/.pincer/config.json` into the process-wide value.
 pub fn load_active() -> BadgeMode {
     let mode = read_saved();
     set_active(mode);
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn saved_mode_persists_beside_motion_defaults_and_clears() {
-        let dir = std::env::temp_dir().join(format!("cua-badge-mode-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pincer-badge-mode-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("config.json");
         crate::motion_defaults::set_key_at(

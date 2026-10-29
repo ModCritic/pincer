@@ -1,5 +1,5 @@
 use super::{focus_by_pixel_click_args, ToolState, ZoomTool};
-use cua_driver_core::tool::Tool;
+use pincer_core::tool::Tool;
 
 #[test]
 fn schema_keeps_pid_optional_for_window_owned_lookup() {

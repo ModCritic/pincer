@@ -36,11 +36,11 @@ function Close-Sandbox {
 $runnerDir     = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $runnersDir    = Split-Path -Parent $runnerDir
 $testsDir      = Split-Path -Parent $runnersDir
-$cuaDriverRoot = Split-Path -Parent $testsDir
-$rustRoot      = Join-Path $cuaDriverRoot "rust"
+$pincerRoot = Split-Path -Parent $testsDir
+$rustRoot      = Join-Path $pincerRoot "rust"
 
-Write-Host "=== cua-driver Windows Sandbox Test Runner ===" -ForegroundColor Cyan
-Write-Host "cua-driver root: $cuaDriverRoot"
+Write-Host "=== pincer Windows Sandbox Test Runner ===" -ForegroundColor Cyan
+Write-Host "pincer root: $pincerRoot"
 Write-Host "Rust workspace : $rustRoot"
 
 # -- Pre-flight: fail fast if a sandbox is already running --------------------
@@ -63,31 +63,31 @@ if ($running) {
 Push-Location $rustRoot
 try {
     Write-Host "`n[BUILD] cargo build..." -ForegroundColor Yellow
-    cargo build -p cua-driver
+    cargo build -p pincer
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 
     Write-Host "`n[BUILD] cargo test --no-run (protocol_handshake_test)..." -ForegroundColor Yellow
-    cargo test -p cua-driver --test protocol_handshake_test --no-run
+    cargo test -p pincer --test protocol_handshake_test --no-run
     if ($LASTEXITCODE -ne 0) { throw "cargo test --no-run (protocol_handshake_test) failed" }
 
     Write-Host "`n[BUILD] cargo test --no-run (harness_wpf_test)..." -ForegroundColor Yellow
-    cargo test -p cua-driver-e2e --test harness_wpf_test --no-run
+    cargo test -p pincer-e2e --test harness_wpf_test --no-run
     if ($LASTEXITCODE -ne 0) { throw "cargo test --no-run (harness_wpf_test) failed" }
 
     Write-Host "`n[BUILD] cargo test --no-run (harness_winui3_test)..." -ForegroundColor Yellow
-    cargo test -p cua-driver-e2e --test harness_winui3_test --no-run
+    cargo test -p pincer-e2e --test harness_winui3_test --no-run
     if ($LASTEXITCODE -ne 0) { throw "cargo test --no-run (harness_winui3_test) failed" }
 
     Write-Host "`n[BUILD] cargo test --no-run (harness_web_test)..." -ForegroundColor Yellow
-    cargo test -p cua-driver-e2e --test harness_web_test --no-run
+    cargo test -p pincer-e2e --test harness_web_test --no-run
     if ($LASTEXITCODE -ne 0) { throw "cargo test --no-run (harness_web_test) failed" }
 
     Write-Host "`n[BUILD] cargo test --no-run (launch_windows_test)..." -ForegroundColor Yellow
-    cargo test -p cua-driver-e2e --test launch_windows_test --no-run
+    cargo test -p pincer-e2e --test launch_windows_test --no-run
     if ($LASTEXITCODE -ne 0) { throw "cargo test --no-run (launch_windows_test) failed" }
 
     Write-Host "`n[BUILD] cargo test --no-run (agent_cursor_windows_test)..." -ForegroundColor Yellow
-    cargo test -p cua-driver-e2e --test agent_cursor_windows_test --no-run
+    cargo test -p pincer-e2e --test agent_cursor_windows_test --no-run
     if ($LASTEXITCODE -ne 0) { throw "cargo test --no-run (agent_cursor_windows_test) failed" }
 
 } finally { Pop-Location }
@@ -98,7 +98,7 @@ try {
 # a dependency isn't available - the smoke tests degrade to "skipped" inside
 # the sandbox rather than failing the whole run.
 if (Get-Command dotnet -ErrorAction SilentlyContinue) {
-    $harnessBuild = Join-Path $cuaDriverRoot "tests\fixtures\build\windows.ps1"
+    $harnessBuild = Join-Path $pincerRoot "tests\fixtures\build\windows.ps1"
     if (Test-Path $harnessBuild) {
         Write-Host "`n[BUILD] test fixtures (dotnet publish)..." -ForegroundColor Yellow
         # build.ps1 sets $ErrorActionPreference=Stop and throws on
@@ -125,7 +125,7 @@ if (-not $protocolBin) { throw "protocol_handshake_test-*.exe not found" }
 Write-Host "protocol_handshake_test: $($protocolBin.Name)"
 
 # -- 2. Prepare shared output folder ------------------------------------------
-$outputDir = "$env:TEMP\cua-sandbox-output"
+$outputDir = "$env:TEMP\pincer-sandbox-output"
 New-Item -ItemType Directory -Force $outputDir | Out-Null
 Get-ChildItem $outputDir -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
 $TestFilter | Out-File "$outputDir\test-filter.txt" -Encoding utf8 -NoNewline
@@ -135,8 +135,8 @@ $wsbContent = @"
 <Configuration>
   <MappedFolders>
     <MappedFolder>
-      <HostFolder>$cuaDriverRoot</HostFolder>
-      <SandboxFolder>C:\cua-driver</SandboxFolder>
+      <HostFolder>$pincerRoot</HostFolder>
+      <SandboxFolder>C:\pincer</SandboxFolder>
       <ReadOnly>true</ReadOnly>
     </MappedFolder>
     <MappedFolder>
@@ -146,11 +146,11 @@ $wsbContent = @"
     </MappedFolder>
   </MappedFolders>
   <LogonCommand>
-    <Command>powershell -ExecutionPolicy Bypass -NonInteractive -File C:\cua-driver\tests\runners\windows-sandbox\sandbox-runner.ps1</Command>
+    <Command>powershell -ExecutionPolicy Bypass -NonInteractive -File C:\pincer\tests\runners\windows-sandbox\sandbox-runner.ps1</Command>
   </LogonCommand>
 </Configuration>
 "@
-$wsbPath = "$env:TEMP\cua-driver-test.wsb"
+$wsbPath = "$env:TEMP\pincer-test.wsb"
 $wsbContent | Out-File $wsbPath -Encoding utf8
 
 Write-Host "`n[SANDBOX] Launching Windows Sandbox..." -ForegroundColor Yellow

@@ -52,7 +52,7 @@ class DesktopFaultPolicyTests(unittest.TestCase):
         self.assertIn('guard_targets();', method(source, 'step'))
         compiler = shlex.split(os.environ.get('CXX', '')) or [
             shutil.which('clang++-18') or shutil.which('clang++') or 'c++']
-        with tempfile.TemporaryDirectory(prefix='cua-desktop-fault-policy-') as directory:
+        with tempfile.TemporaryDirectory(prefix='pincer-desktop-fault-policy-') as directory:
             cpp = Path(directory) / 'policy.cpp'
             binary = Path(directory) / 'policy'
             cpp.write_text(fixture(source))

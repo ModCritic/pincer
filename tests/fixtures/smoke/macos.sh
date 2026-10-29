@@ -1,31 +1,31 @@
 #!/usr/bin/env bash
-# macOS cua-driver per-tool smoke test.
+# macOS pincer per-tool smoke test.
 #
 # Spawns the built AppKit harness app from rust/test-apps/harness-appkit
 # (source lives under tests/fixtures/apps/macos),
-# runs every cua-driver tool against it with sensible JSON args, and reports
+# runs every pincer tool against it with sensible JSON args, and reports
 # PASS / FAIL / SKIP in a sorted table.
 #
 # Mirror of scripts/linux-smoke.sh — same shape, classified the same way.
 # Different from the Rust integration tests in scope: this one hits the
-# CLI (`cua-driver call <tool> <json>`) rather than the MCP stdio loop,
+# CLI (`pincer call <tool> <json>`) rather than the MCP stdio loop,
 # so it covers a different code path (CLI argument parser + tool
 # resolution) and gives a single broad PASS/FAIL across the whole tool
 # surface in ~30 seconds.
 #
 # Prereqs:
 #   - tests/fixtures/build/macos.sh must have been run
-#   - cua-driver binary built (this script uses target/release if present)
-#   - TCC Accessibility permission granted to the cua-driver binary
+#   - pincer binary built (this script uses target/release if present)
+#   - TCC Accessibility permission granted to the pincer binary
 #     (otherwise AX-using tools return empty trees, which scores as PASS
 #     because the call exits cleanly — flagged in output)
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-DRIVER="$ROOT/rust/target/release/cua-driver"
-[[ -x "$DRIVER" ]] || DRIVER="$ROOT/rust/target/debug/cua-driver"
-HARNESS_APP="$ROOT/rust/test-apps/harness-appkit/CuaTestHarness.AppKit.app"
-HARNESS_EXE="$HARNESS_APP/Contents/MacOS/CuaTestHarness.AppKit"
+DRIVER="$ROOT/rust/target/release/pincer"
+[[ -x "$DRIVER" ]] || DRIVER="$ROOT/rust/target/debug/pincer"
+HARNESS_APP="$ROOT/rust/test-apps/harness-appkit/PincerTestHarness.AppKit.app"
+HARNESS_EXE="$HARNESS_APP/Contents/MacOS/PincerTestHarness.AppKit"
 
 # macOS ships bash 3.2 (no associative arrays). Accumulate results as
 # newline-delimited "TOOL|VERDICT|REASON" rows; sort + dedup at the end.
@@ -65,7 +65,7 @@ run_tool() {
 }
 
 echo "============================================================"
-echo "macOS cua-driver smoke test"
+echo "macOS pincer smoke test"
 echo "Driver: $DRIVER"
 echo "Version: $("$DRIVER" --version 2>&1)"
 echo "Harness: $HARNESS_APP"
@@ -73,8 +73,8 @@ echo "Date: $(date)"
 echo "============================================================"
 
 if [[ ! -x "$DRIVER" ]]; then
-    echo "ERROR: cua-driver binary not found at $DRIVER" >&2
-    echo "       Run: cd rust && cargo build --release -p cua-driver" >&2
+    echo "ERROR: pincer binary not found at $DRIVER" >&2
+    echo "       Run: cd rust && cargo build --release -p pincer" >&2
     exit 1
 fi
 
@@ -88,7 +88,7 @@ echo ""
 echo "==> Spawning AppKit harness as victim"
 "$HARNESS_EXE" >/dev/null 2>&1 &
 HARNESS_PID=$!
-trap 'rm -f "$RESULT_LOG"; kill -9 $HARNESS_PID 2>/dev/null; pkill -9 -f CuaTestHarness 2>/dev/null' EXIT
+trap 'rm -f "$RESULT_LOG"; kill -9 $HARNESS_PID 2>/dev/null; pkill -9 -f PincerTestHarness 2>/dev/null' EXIT
 sleep 1.5
 echo "  Harness pid=$HARNESS_PID"
 
@@ -118,7 +118,7 @@ echo ""
 echo "=== group 2: setters ==="
 run_tool set_config '{"max_image_dimension":1024}'
 run_tool set_agent_cursor_enabled "{\"session\":\"$SMOKE_SESSION\",\"enabled\":true}"
-run_tool set_agent_cursor_theme "{\"session\":\"$SMOKE_SESSION\",\"theme_id\":\"cua.default\"}"
+run_tool set_agent_cursor_theme "{\"session\":\"$SMOKE_SESSION\",\"theme_id\":\"pincer.default\"}"
 run_tool set_agent_cursor_motion "{\"session\":\"$SMOKE_SESSION\"}"
 run_tool stop_recording '{}'
 
@@ -186,7 +186,7 @@ record replay_trajectory SKIP "needs a recorded trajectory file"
 echo ""
 echo "==> cleanup"
 kill -9 $HARNESS_PID 2>/dev/null
-pkill -9 -f CuaTestHarness 2>/dev/null
+pkill -9 -f PincerTestHarness 2>/dev/null
 
 echo ""
 echo "============================================================"

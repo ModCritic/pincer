@@ -21,7 +21,7 @@
 // `platform_macos::cursor` only exists on macOS.
 #![cfg(target_os = "macos")]
 
-use cua_driver_core::cursor_hook::{set_cursor_hook_fn, CursorHookEvent};
+use pincer_core::cursor_hook::{set_cursor_hook_fn, CursorHookEvent};
 use platform_macos::cursor::state::CursorRegistry;
 use std::sync::{Arc, Mutex};
 
@@ -82,7 +82,7 @@ fn registry_cursor_hook_honours_the_resurrection_guard() {
     registry.update_position("session-ending", 7.0, 7.0);
     assert_eq!(take().len(), 1, "precondition: the session is live");
 
-    cua_driver_core::session::end_session("session-ending");
+    pincer_core::session::end_session("session-ending");
 
     registry.update_position("session-ending", 8.0, 8.0);
     registry.note_press("session-ending", 8.0, 8.0);

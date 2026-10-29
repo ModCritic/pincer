@@ -13,7 +13,7 @@ from this implementation.
 
 - Keep the authenticated Fleet client and claim alive until Driver closes.
 - Select a service advertised by the claimed sandbox, normally `mcp`.
-- The guest must advertise `ai.cua.driver.envelopes` v1 on MCP protocol
+- The guest must advertise `ai.pincer.driver.envelopes` v1 on MCP protocol
   `2025-06-18`. An ordinary MCP tools endpoint is insufficient.
 - The guest's trusted launcher owns permissions. Connecting does not elevate
   permissions or promise identical capabilities on all operating systems.
@@ -31,7 +31,7 @@ There is no TypeScript Sandbox SDK. Given an authenticated Fleet `client` and
 an application-owned `claim`, use the optional Driver entry point:
 
 ```typescript
-import { connectFleetDriver } from '@trycua/cua-driver/fleet';
+import { connectFleetDriver } from 'pincer-driver/fleet';
 
 try {
   const sandbox = await client.waitClaim(claim);
@@ -51,7 +51,7 @@ try {
 }
 ```
 
-`connection.driver` is the canonical `CuaDriverLike`, not a list of MCP tool
+`connection.driver` is the canonical `PincerLike`, not a list of MCP tool
 wrappers. `connection.sessionName` provides the host-bound public label for
 typed inputs that require a session. It is not a credential or permission grant.
 An optional `signal` requests connection teardown; await `close()` to observe
@@ -64,8 +64,8 @@ The optional module imports Fleet only when constructing the adapter. Given an
 authenticated Python Fleet client and an application-owned claim:
 
 ```python
-from cua_driver import GetScreenSizeInput
-from cua_driver.fleet import open_fleet_mcp_driver_channel
+from pincer_driver import GetScreenSizeInput
+from pincer_driver.fleet import open_fleet_mcp_driver_channel
 
 try:
     sandbox = await client.wait_claim(claim)

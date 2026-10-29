@@ -40,7 +40,7 @@ native qualification. Unknown packages refuse. The plugin separately checks
 the live native surface, geometry, primary/other-agent conflicts, desktop
 availability, and canonical US keymap.
 
-Production [input v3](cua-input-v3.md) has separate endpoints from discovery v2
+Production [input v3](pincer-input-v3.md) has separate endpoints from discovery v2
 and signed experiment 0. Each private connection claims one compositor-owned
 lane. Every admitted action performs a fresh `TARGET` for one exact operation
 and a maximum five-second technical lifetime. Complete dispatch consumes that
@@ -77,7 +77,7 @@ session-lifetime seats; replacing the plugin requires a desktop restart.
 Focused common registry coverage is available from `rust/`:
 
 ```bash
-cargo test -p cua-driver-core background_input_ --lib --locked
+cargo test -p pincer-core background_input_ --lib --locked
 ```
 
 These tests exercise normal promptless modes and manifest allow/deny decisions

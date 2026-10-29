@@ -38,7 +38,7 @@ use crate::{
     BadgeMode, CompiledTheme, CursorAction, CursorConfig, CursorVisualState, DeliveryModifier,
     MotionConfig, OverlayCommand, SessionBadgeInput, TargetModifier,
 };
-use cua_driver_core::agent_cursor::AgentCursorVisibility;
+use pincer_core::agent_cursor::AgentCursorVisibility;
 use std::sync::Arc;
 
 pub const SESSION_BADGE_HOLD_SECS: f64 = 2.0;
@@ -713,7 +713,7 @@ impl RenderStateCore {
         }
         self.tick_minimal_badge(dt);
         // The idle clock and fade curve are the shared agent cursor contract
-        // (`cua_driver_core::agent_cursor`); this only feeds it frame deltas.
+        // (`pincer_core::agent_cursor`); this only feeds it frame deltas.
         let idle_hide_ms = self.motion.idle_hide_ms;
         if idle_hide_ms > 0.0 {
             // An active semantic cue (a keyboard-first press shows the
@@ -1020,9 +1020,9 @@ impl RenderStateCore {
 // ── Motion effects ───────────────────────────────────────────────────────
 //
 // The effect geometry (trail, glow, magnet, ripple, squish) comes from
-// `cua_cursor_motion::effects`; this module only paints it.
+// `pincer_cursor_motion::effects`; this module only paints it.
 
-use cua_cursor_motion::effects::{self, EffectFrame, CLICK_FX_SECS, MAGNET_INFLATE};
+use pincer_cursor_motion::effects::{self, EffectFrame, CLICK_FX_SECS, MAGNET_INFLATE};
 
 /// Effect colour: the session tint lifted toward white.
 fn effect_rgb(tint: [u8; 4]) -> (u8, u8, u8) {
@@ -2281,7 +2281,7 @@ mod backing_scale_tests {
 mod agent_idle_tests {
     use super::*;
     use crate::CursorConfig;
-    use cua_driver_core::agent_cursor::{AGENT_CURSOR_FADE, AGENT_CURSOR_IDLE_TIMEOUT};
+    use pincer_core::agent_cursor::{AGENT_CURSOR_FADE, AGENT_CURSOR_IDLE_TIMEOUT};
 
     fn placed() -> RenderStateCore {
         let mut core = RenderStateCore::new(CursorConfig::default());
@@ -2525,7 +2525,7 @@ mod pointer_anchor_tests {
     }
 }
 
-/// Proof that moving the motion math into the `cua-cursor-motion` crate changed no
+/// Proof that moving the motion math into the `pincer-cursor-motion` crate changed no
 /// behaviour. `tests/fixtures/motion_equivalence.json` was captured from the
 /// driver before the move (origin/main 79a4a4635) by this module's
 /// `capture()`: a SHA-256 over the bits of every sample of 1650 planned
@@ -2943,13 +2943,13 @@ mod motion_equivalence_tests {
     }
 
     /// The motion did not change when its math moved into
-    /// `cua-cursor-motion`. On macOS arm64, where the fixture was captured,
+    /// `pincer-cursor-motion`. On macOS arm64, where the fixture was captured,
     /// every sample is bit-identical (the SHA-256s match). Other platforms'
     /// math libraries round the last bit of `sin`, `exp` and friends
     /// differently, so there the sample counts must match exactly and every
     /// spot sample, timing and per-case sum within 1e-12 relative.
     #[test]
-    fn motion_is_unchanged_from_the_pre_cua_cursor_motion_driver() {
+    fn motion_is_unchanged_from_the_pre_pincer_cursor_motion_driver() {
         let fixture: Value =
             serde_json::from_str(include_str!("../tests/fixtures/motion_equivalence.json"))
                 .expect("fixture json");

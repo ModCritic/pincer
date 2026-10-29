@@ -57,16 +57,16 @@ if [[ "$SKIP" != "gtk3" && "$ONLY" == *",gtk3,"* ]]; then
     mkdir -p "$GTK3_STAGE"
     cp "$GTK3_SRC/main.py" "$GTK3_STAGE/main.py"
 
-    cat > "$GTK3_STAGE/CuaTestHarness.Gtk3" <<'LAUNCHER'
+    cat > "$GTK3_STAGE/PincerTestHarness.Gtk3" <<'LAUNCHER'
 #!/usr/bin/env bash
 # X11 remains the default for the canonical Xvfb lane. A native Wayland lane
 # exports GDK_BACKEND=wayland before launching this repo-owned fixture.
 export GDK_BACKEND="${GDK_BACKEND:-x11}"
 exec python3 "$(dirname "$(readlink -f "$0")")/main.py" "$@"
 LAUNCHER
-    chmod +x "$GTK3_STAGE/CuaTestHarness.Gtk3"
+    chmod +x "$GTK3_STAGE/PincerTestHarness.Gtk3"
 
-    echo "==> Staged GTK3 harness -> $GTK3_STAGE/CuaTestHarness.Gtk3"
+    echo "==> Staged GTK3 harness -> $GTK3_STAGE/PincerTestHarness.Gtk3"
     gtk_probe=(python3 -c "import gi; gi.require_version('Gtk','3.0'); from gi.repository import Gtk")
     if command -v timeout >/dev/null 2>&1; then
         gtk_probe=(timeout 10s "${gtk_probe[@]}")
@@ -83,14 +83,14 @@ if [[ "$SKIP" != "gtk4" && "$ONLY" == *",gtk4,"* ]]; then
     mkdir -p "$GTK4_STAGE"
     cp "$GTK4_SRC/main.py" "$GTK4_STAGE/main.py"
 
-    cat > "$GTK4_STAGE/CuaTestHarness.Gtk4" <<'LAUNCHER'
+    cat > "$GTK4_STAGE/PincerTestHarness.Gtk4" <<'LAUNCHER'
 #!/usr/bin/env bash
 export GDK_BACKEND="${GDK_BACKEND:-x11}"
 exec python3 "$(dirname "$(readlink -f "$0")")/main.py" "$@"
 LAUNCHER
-    chmod +x "$GTK4_STAGE/CuaTestHarness.Gtk4"
+    chmod +x "$GTK4_STAGE/PincerTestHarness.Gtk4"
 
-    echo "==> Staged GTK4 harness -> $GTK4_STAGE/CuaTestHarness.Gtk4"
+    echo "==> Staged GTK4 harness -> $GTK4_STAGE/PincerTestHarness.Gtk4"
     gtk4_probe=(python3 -c "import gi; gi.require_version('Gtk','4.0'); from gi.repository import Gtk")
     if command -v timeout >/dev/null 2>&1; then
         gtk4_probe=(timeout 10s "${gtk4_probe[@]}")

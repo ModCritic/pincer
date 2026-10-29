@@ -1,7 +1,7 @@
 //! Real Windows tool implementations (compiled only on Windows).
 
 use async_trait::async_trait;
-use cua_driver_core::action_record::ActionTransport;
+use pincer_core::action_record::ActionTransport;
 
 /// Pin the agent-cursor overlay above `hwnd` in the z-order, normalising to
 /// the **root** ancestor so the pin lands on the window that actually appears
@@ -218,7 +218,7 @@ fn tool_result_text(result: ToolResult) -> String {
         .content
         .into_iter()
         .find_map(|content| match content {
-            cua_driver_core::protocol::Content::Text { text, .. } => Some(text),
+            pincer_core::protocol::Content::Text { text, .. } => Some(text),
             _ => None,
         })
         .unwrap_or_else(|| "element action was refused".to_owned())
@@ -394,12 +394,12 @@ async fn track_overlay_drag(
     }
     crate::overlay::send_command(key, cursor_overlay::OverlayCommand::SetPressed(false));
 }
-use cua_driver_contract::{
+use pincer_contract::{
     ClickButton, DragInput, GetCursorPositionInput, GetDesktopStateInput, GetScreenSizeInput,
     HotkeyInput, InvokeMenuInput, MoveCursorInput, PressKeyInput, ScrollDirection, ScrollInput,
     TypeTextInput,
 };
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef, ToolRegistry},
     tool_args::{parse_legacy_click_input, parse_typed_input, parse_typed_projection},
@@ -479,7 +479,7 @@ impl Tool for ExactPidWindowTargetGuard {
         &self,
         adapter_id: &str,
         args: &Value,
-    ) -> cua_driver_core::tool::ProtectedResourceOwnership {
+    ) -> pincer_core::tool::ProtectedResourceOwnership {
         self.inner
             .protected_resource_ownership(adapter_id, args)
             .await
@@ -535,7 +535,7 @@ impl Tool for ExactPidWindowTargetGuard {
 
 type PidWindowGuardParts = (
     WindowTargetCandidates,
-    cua_driver_core::window_target::TokenPidResolver,
+    pincer_core::window_target::TokenPidResolver,
 );
 
 fn pid_window_guarded<T: Tool + 'static>(
@@ -552,7 +552,7 @@ fn pid_window_guarded<T: Tool + 'static>(
 
 /// The pid an `element_token` was minted for, so a token-only action (no
 /// `pid`) reaches its tool with the pid the token carries.
-fn token_pid_resolver(state: Arc<ToolState>) -> cua_driver_core::window_target::TokenPidResolver {
+fn token_pid_resolver(state: Arc<ToolState>) -> pincer_core::window_target::TokenPidResolver {
     Arc::new(move |args| state.snapshots.pid_for_token(args))
 }
 
@@ -568,7 +568,7 @@ pub(crate) const NO_CURSOR: &str = "";
 /// then the legacy `cursor_id` alias. A direct platform invocation that has no
 /// lifecycle metadata remains cursor-less.
 pub(crate) fn resolve_cursor_key(args: &Value) -> String {
-    cua_driver_core::tool_args::session_key(args).unwrap_or_else(|| NO_CURSOR.to_owned())
+    pincer_core::tool_args::session_key(args).unwrap_or_else(|| NO_CURSOR.to_owned())
 }
 
 /// Returns `true` when a click/scroll invocation should take the **window-less
@@ -606,9 +606,9 @@ impl Default for DriverConfig {
     }
 }
 
-/// Load `DriverConfig` from `~/.cua-driver/config.json`, falling back to
+/// Load `DriverConfig` from `~/.pincer/config.json`, falling back to
 /// defaults for any missing/malformed keys. Called once at `ToolState`
-/// construction (i.e. on every fresh `cua-driver call` process) so that a
+/// construction (i.e. on every fresh `pincer call` process) so that a
 /// prior `set_config max_image_dimension=...` survives across stateless
 /// one-shot invocations — matching the macOS daemon's startup load. See #2008.
 /// Keys are read one at a time, so unknown keys in the file (such as a
@@ -624,7 +624,7 @@ pub fn load_driver_config() -> DriverConfig {
     cfg
 }
 
-use cua_driver_core::snapshot_store::ZoomContext;
+use pincer_core::snapshot_store::ZoomContext;
 
 pub struct ToolState {
     pub snapshots: Arc<Snapshots>,
@@ -635,7 +635,7 @@ pub struct ToolState {
 
 impl ToolState {
     pub fn new(
-        capture_service: Option<Arc<cua_driver_core::capture_runtime::CaptureService>>,
+        capture_service: Option<Arc<pincer_core::capture_runtime::CaptureService>>,
     ) -> Arc<Self> {
         Arc::new(Self {
             snapshots: Arc::new(Snapshots::new()),
@@ -672,7 +672,7 @@ fn screenshot_scale(
 }
 
 fn capture_admission_refusal(error: anyhow::Error) -> ToolResult {
-    let code = cua_driver_core::capture_runtime::admission_error_code(&error);
+    let code = pincer_core::capture_runtime::admission_error_code(&error);
     ToolResult::error(format!("Capture-bound click refused: {error}")).with_structured(json!({
         "code": code,
         "effect": "refused",
@@ -743,7 +743,7 @@ impl Tool for ListAppsTool {
             use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 
             // Per-step timings logged via `tracing::debug!` (silent at default
-            // log level — enable with `RUST_LOG=cua_driver=debug` when debugging
+            // log level — enable with `RUST_LOG=pincer=debug` when debugging
             // a slow list_apps invocation).
             let t0 = std::time::Instant::now();
             let wins = crate::win32::list_windows_via_win32(None);
@@ -943,7 +943,7 @@ impl Tool for ListWindowsTool {
                 default false). Filter with app or pid: an unfiltered call lists every window.".into(),
             input_schema: json!({"type":"object","properties":{
                 "pid":{"type":"integer","description":"Optional pid filter. When set, only this pid's windows are returned."},
-                "app":{"type":"string","description":cua_driver_core::tool_args::LIST_WINDOWS_APP_FILTER_DESCRIPTION},
+                "app":{"type":"string","description":pincer_core::tool_args::LIST_WINDOWS_APP_FILTER_DESCRIPTION},
                 "on_screen_only":{"type":"boolean","description":"When true, drop windows that aren't currently on-screen. Default false."}
             },"additionalProperties":false}),
             read_only: true, destructive: false, idempotent: true, open_world: false,
@@ -951,7 +951,7 @@ impl Tool for ListWindowsTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let filter_pid = args.opt_u64("pid").map(|v| v as u32);
         let on_screen_only = args.bool_or("on_screen_only", false);
         let (mut windows, pid_to_name) = tokio::task::spawn_blocking(move || {
@@ -969,7 +969,7 @@ impl Tool for ListWindowsTool {
         if let Some(filter) = args.opt_str("app") {
             windows.retain(|w| {
                 let app_name = pid_to_name.get(&w.pid).map(String::as_str).unwrap_or("");
-                cua_driver_core::tool_args::app_filter_matches(&filter, app_name, None)
+                pincer_core::tool_args::app_filter_matches(&filter, app_name, None)
             });
         }
 
@@ -1087,7 +1087,7 @@ impl Tool for ListWindowsTool {
     }
 }
 
-use cua_driver_core::window_target::z_index_from_front_to_back;
+use pincer_core::window_target::z_index_from_front_to_back;
 
 #[cfg(test)]
 mod list_windows_z_index_tests;
@@ -1117,7 +1117,7 @@ fn build_element_entry(
         "depth": n.depth,
     });
     if let Some(snapshot_id) = snapshot_id {
-        entry["element_token"] = json!(cua_driver_core::element_token::token_for(snapshot_id, idx));
+        entry["element_token"] = json!(pincer_core::element_token::token_for(snapshot_id, idx));
     }
     if n.in_web_content {
         entry["in_web_content"] = json!(true);
@@ -1240,8 +1240,8 @@ impl Tool for GetWindowStateTool {
                 This is separate from page JavaScript dialogs, which remain on \
                 browser_dialog.\n\n\
                 Windows requires no special permissions.".into(),
-            input_schema: cua_driver_core::window_state_view::extend_input_schema(json!({"type":"object","required":["pid","window_id"],"properties":{
-                "session": cua_driver_core::tool_schema::session_schema(),
+            input_schema: pincer_core::window_state_view::extend_input_schema(json!({"type":"object","required":["pid","window_id"],"properties":{
+                "session": pincer_core::tool_schema::session_schema(),
                 "pid":{"type":"integer","description":"Process ID from `list_apps`."},
                 "window_id":{"type":"integer","description":"HWND of the target window. Must belong to `pid`. Enumerate via `list_windows` or read from `launch_app`'s `windows` array."},
                 "include_accessibility_tree":{"type":"boolean","description":"Default true — walk the UIA tree and return it (per `tree_format`) alongside the screenshot. Set false to SKIP the UIA walk entirely and return just the screenshot plus window metadata (window_bounds, app_name, window_title) — the capture-only path for a live window preview / picture-in-picture. Mirrors include_screenshot. Setting BOTH include_accessibility_tree:false AND include_screenshot:false is an error (nothing to return)."},
@@ -1250,7 +1250,7 @@ impl Tool for GetWindowStateTool {
                 "query":{"type":"string","description":"Optional case-insensitive substring. Projects both tree_markdown and structured elements to matches plus ancestors while preserving original indices. Compare total_element_count with returned_element_count."},
                 "max_elements":{"type":"integer","minimum":1,"description":"Cap on the total number of UIA nodes walked. Truncates depth-first; markdown and structured elements truncate together. Default 250 (5 000 with full_output:true); the response states when the tree was cut. Raise it to read further into a large window."},
                 "max_depth":{"type":"integer","minimum":1,"description":"Cap on the UIA-tree walk depth. Nodes whose rendered indent would exceed this are omitted. Omit for the default (25). Lower for deep menu / Electron trees."},
-                "timeout_ms": cua_driver_core::tool_schema::timeout_ms_schema(),
+                "timeout_ms": pincer_core::tool_schema::timeout_ms_schema(),
                 "max_image_dimension":{"type":"integer","minimum":0,"description":"Per-call long-edge limit for the returned screenshot, in pixels (aspect ratio preserved). Explicit values override configured behavior; 0 returns native resolution. Omit to preserve the configured default."}
             },"additionalProperties":false})),
             // Swift annotation: idempotent: false (each call is a fresh snapshot).
@@ -1259,7 +1259,7 @@ impl Tool for GetWindowStateTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        let display_only = match cua_driver_core::window_state_view::display_only(&args) {
+        let display_only = match pincer_core::window_state_view::display_only(&args) {
             Ok(display_only) => display_only,
             Err(refusal) => return refusal,
         };
@@ -1319,7 +1319,7 @@ impl Tool for GetWindowStateTool {
         .await
         .ok()
         .flatten();
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         // The canonical per-call value overrides all configured limits,
         // including `0` for native resolution. The legacy field retains its
         // previous cap-folding behavior when the canonical field is omitted.
@@ -1336,7 +1336,7 @@ impl Tool for GetWindowStateTool {
         };
         let max_dim = {
             let cfg = self.state.config.read().unwrap();
-            cua_driver_core::image_utils::ImageDimensionLimits {
+            pincer_core::image_utils::ImageDimensionLimits {
                 configured: cfg.max_image_dimension,
                 max_image_dimension,
             }
@@ -1347,7 +1347,7 @@ impl Tool for GetWindowStateTool {
         // that a grounding screenshot should always be present). The modality is
         // chosen at action time: an element ax action (element_index) or an
         // element px action (x,y).
-        let view = match cua_driver_core::window_state_view::ViewOptions::from_args(&args) {
+        let view = match pincer_core::window_state_view::ViewOptions::from_args(&args) {
             Ok(view) => view,
             Err(refusal) => return refusal,
         };
@@ -1374,7 +1374,7 @@ impl Tool for GetWindowStateTool {
             .and_then(|v| v.as_u64())
             .map(|v| v.max(1) as usize)
             .unwrap_or(crate::uia::DEFAULT_MAX_DEPTH);
-        let timeout_ms = cua_driver_core::tool_schema::resolve_timeout_ms(args.get("timeout_ms"));
+        let timeout_ms = pincer_core::tool_schema::resolve_timeout_ms(args.get("timeout_ms"));
 
         // Always walk the UIA tree. The screenshot is returned by DEFAULT — the
         // grounding frame the agent cross-checks the (sometimes-lying) tree
@@ -1411,7 +1411,7 @@ impl Tool for GetWindowStateTool {
         let tree_result = if do_tree {
             let tree_task = tokio::task::spawn_blocking(move || {
                 let mut budget =
-                    cua_driver_core::walk_budget::WalkBudget::new(timeout_ms, max_elements);
+                    pincer_core::walk_budget::WalkBudget::new(timeout_ms, max_elements);
                 let tree =
                     crate::uia::walk_tree_budgeted(hwnd, q.as_deref(), max_depth, &mut budget);
                 let kind = if tree.nodes.iter().any(|node| node.msaa_role.is_some()) {
@@ -1429,7 +1429,7 @@ impl Tool for GetWindowStateTool {
                 Ok(Err(e)) => return ToolResult::error(format!("UIA walk task panicked: {e}")),
                 Err(_elapsed) => {
                     let class = crate::input::delivery::read_class_name(hwnd);
-                    let walk = cua_driver_core::walk_budget::WalkOutcome::timed_out(
+                    let walk = pincer_core::walk_budget::WalkOutcome::timed_out(
                         timeout_ms,
                         started.elapsed(),
                     );
@@ -1528,7 +1528,7 @@ impl Tool for GetWindowStateTool {
                         header.push('\n');
                     }
                     header.push('\n');
-                    content.push(cua_driver_core::protocol::Content::text(
+                    content.push(pincer_core::protocol::Content::text(
                         header + &tr.tree_markdown,
                     ));
                     structured["element_count"] = json!(count);
@@ -1564,7 +1564,7 @@ impl Tool for GetWindowStateTool {
                         .iter()
                         .filter_map(|n| build_element_entry(n, snapshot_id))
                         .collect();
-                    let elements = cua_driver_core::element_query::project_elements_for_query(
+                    let elements = pincer_core::element_query::project_elements_for_query(
                         elements,
                         query.as_deref(),
                         &tr.tree_markdown,
@@ -1575,7 +1575,7 @@ impl Tool for GetWindowStateTool {
                     let elements = match screenshot_opt.as_ref() {
                         Some((_, _, w, _, native_w, _, _)) if *native_w > 0 => {
                             let (ox, oy) = bitmap_to_screen(hwnd, 0, 0);
-                            cua_driver_core::element_frame::with_screenshot_frames(
+                            pincer_core::element_frame::with_screenshot_frames(
                                 elements,
                                 (f64::from(ox), f64::from(oy)),
                                 f64::from(*w) / f64::from(*native_w),
@@ -1588,9 +1588,8 @@ impl Tool for GetWindowStateTool {
                     structured["elements"] = json!(elements);
                     // Surface 6: snapshot id mirror for debug correlation.
                     if let Some(snapshot_id) = snapshot_id {
-                        structured["snapshot_id"] = json!(
-                            cua_driver_core::element_token::format_snapshot_id(snapshot_id)
-                        );
+                        structured["snapshot_id"] =
+                            json!(pincer_core::element_token::format_snapshot_id(snapshot_id));
                     }
                     structured["_note"] = json!(
                         "Prefer `elements` — `tree_markdown` will continue to work \
@@ -1611,7 +1610,7 @@ impl Tool for GetWindowStateTool {
                         structured["degraded"] = json!(true);
                         structured["degraded_reason"] = json!(
                             "msaa_fallback_partial: the UIA provider was unavailable and \
-                             Cua Driver used a partial MSAA tree. Treat it as discovery \
+                             Pincer used a partial MSAA tree. Treat it as discovery \
                              evidence only; it cannot prove checked state."
                         );
                     } else if let (0, Some(note)) = (count, walk.note()) {
@@ -1667,8 +1666,8 @@ impl Tool for GetWindowStateTool {
                     }
                 }
                 if let Some(id) = refreshed {
-                    let sid = cua_driver_core::element_token::format_snapshot_id(id);
-                    content.push(cua_driver_core::protocol::Content::text(format!(
+                    let sid = pincer_core::element_token::format_snapshot_id(id);
+                    content.push(pincer_core::protocol::Content::text(format!(
                         "Screenshot only: snapshot {sid} keeps its rows, and its element_tokens \
                          ({sid}:N) stay valid."
                     )));
@@ -1678,9 +1677,9 @@ impl Tool for GetWindowStateTool {
                 if !invalidated.is_empty() {
                     let ids: Vec<String> = invalidated
                         .into_iter()
-                        .map(cua_driver_core::element_token::format_snapshot_id)
+                        .map(pincer_core::element_token::format_snapshot_id)
                         .collect();
-                    content.push(cua_driver_core::protocol::Content::text(format!(
+                    content.push(pincer_core::protocol::Content::text(format!(
                         "Invalidated snapshots {}: their element_tokens are stale.",
                         ids.join(", ")
                     )));
@@ -1728,9 +1727,9 @@ impl Tool for GetWindowStateTool {
                     // part when the image went to disk so the response is never
                     // empty on the capture-only path (which has no tree markdown).
                     if let Some(b64) = b64_opt {
-                        content.push(cua_driver_core::protocol::Content::image_png(b64));
+                        content.push(pincer_core::protocol::Content::image_png(b64));
                     } else if let Some(fp) = &file_path {
-                        content.push(cua_driver_core::protocol::Content::text(format!(
+                        content.push(pincer_core::protocol::Content::text(format!(
                             "window_id={hwnd} pid={pid} size={w}x{h} screenshot written to {fp}"
                         )));
                     }
@@ -1754,7 +1753,7 @@ impl Tool for GetWindowStateTool {
                     // (so MCP clients with structured-only parsing can detect
                     // and act on it). Without this the caller saw an empty
                     // response with no clue why and burned turns retrying.
-                    content.push(cua_driver_core::protocol::Content::text(format!(
+                    content.push(pincer_core::protocol::Content::text(format!(
                         "screenshot unavailable: {err}"
                     )));
                     structured["screenshot_error"] = json!(err);
@@ -1774,10 +1773,10 @@ impl Tool for GetWindowStateTool {
                     structured["app_name"] = json!(name);
                 }
 
-                cua_driver_core::window_inspection::mark_browser_chrome_capture_coverage(
+                pincer_core::window_inspection::mark_browser_chrome_capture_coverage(
                     &mut structured,
                     is_standalone_chromium_browser_process(pid).then_some(
-                        cua_driver_core::window_inspection::BrowserChromeCaptureCoverage::NotObservable,
+                        pincer_core::window_inspection::BrowserChromeCaptureCoverage::NotObservable,
                     ),
                 );
 
@@ -1795,15 +1794,15 @@ impl Tool for GetWindowStateTool {
                 }
 
                 if display_only {
-                    cua_driver_core::window_state_view::mark_display_only(&mut structured);
+                    pincer_core::window_state_view::mark_display_only(&mut structured);
                 }
                 if !observation_only {
-                    cua_driver_core::window_state_view::apply(
+                    pincer_core::window_state_view::apply(
                         &view,
-                        &cua_driver_core::window_state_view::ViewContext {
+                        &pincer_core::window_state_view::ViewContext {
                             pid: i64::from(pid),
                             window_id: hwnd,
-                            key: cua_driver_core::window_state_view::ViewKey {
+                            key: pincer_core::window_state_view::ViewKey {
                                 query: query.clone(),
                                 max_elements,
                                 max_depth: args
@@ -2350,11 +2349,9 @@ impl Tool for LaunchAppTool {
             .chain(path_opt.as_deref())
             .chain(name_opt.as_deref())
             .chain(extra_args.iter().map(String::as_str))
-            .any(cua_driver_core::launch_guard::contains_remote_debugging_flag)
+            .any(pincer_core::launch_guard::contains_remote_debugging_flag)
         {
-            return ToolResult::error(
-                cua_driver_core::launch_guard::REMOTE_DEBUGGING_LAUNCH_REFUSAL,
-            );
+            return ToolResult::error(pincer_core::launch_guard::REMOTE_DEBUGGING_LAUNCH_REFUSAL);
         }
 
         // Resolve target — launch_path > path > aumid > name > bundle_id
@@ -3195,7 +3192,7 @@ fn finish_pixel_uia_attempt(
         PointInvokeOutcome::Timeout => "timeout",
         PointInvokeOutcome::Unavailable => "unavailable",
     };
-    Some(cua_driver_core::delivery::background_unavailable_result(
+    Some(pincer_core::delivery::background_unavailable_result(
         format!(
             "UIA pixel click {status} for pid {pid}. No fallback input was sent. \
          The click effect is unknown; inspect the target state before another action. \
@@ -3237,7 +3234,7 @@ fn background_element_click_result(
     transport: ActionTransport,
     failed_calls: Vec<ActionTransport>,
 ) -> ToolResult {
-    use cua_driver_core::action_record::{
+    use pincer_core::action_record::{
         ActionAttempt, ActionEffect, ActionExecutionRecord, ActionFallback, ActualDelivery,
         RequestedDelivery,
     };
@@ -3299,7 +3296,7 @@ impl Tool for ClickTool {
                 the next snapshot of the same window replaces it.\n\n\
                 - `x`, `y` (window-local screenshot pixels, top-left origin of the PNG \
                 returned by `get_window_state`). On `delivery_mode:\"background\"` (the \
-                default), cua-driver FIRST does a UIA hit-test at the resolved \
+                default), pincer FIRST does a UIA hit-test at the resolved \
                 screen position: if the deepest invokable element under that point exposes \
                 `InvokePattern`, it's invoked through the accessibility channel — same \
                 background-safe path as the `element_token` mode, no foreground swap, no \
@@ -3330,17 +3327,17 @@ impl Tool for ClickTool {
                 supported yet.".into(),
             input_schema: json!({
                 "type":"object","properties":{
-                    "session": cua_driver_core::tool_schema::session_schema(),
+                    "session": pincer_core::tool_schema::session_schema(),
                     "pid":{"type":"integer","description":"Target process ID for window scope. Optional with element_token (the token carries the pid). Omit with scope=desktop for screen-absolute coordinates from get_desktop_state."},
                     "window_id":{"type":"integer","description":"HWND of the target window. Omit when element_token is supplied (the token carries it)."},
-                    "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                    "element_token": pincer_core::tool_schema::element_token_schema(),
                     "action":{"type":"string","description":"Accessibility action for an element_token target. \"expand\" opens the element through UIA ExpandCollapsePattern, or clicks the dropdown half of an MSAA split button. Omit for the default invoke."},
                     "capture_id":{"type":"string","minLength":1,"description":"Optional ID from get_window_state or get_desktop_state. When present, x and y are admitted against that exact capture and the ID is consumed before native dispatch."},
                     "x":{"type":"number","description":"X in window-local screenshot pixels — same space as the PNG get_window_state returns. Must be provided together with y."},
                     "y":{"type":"number","description":"Y in window-local screenshot pixels. Must be provided together with x."},
-                    "button": cua_driver_core::tool_schema::button_schema(),
+                    "button": pincer_core::tool_schema::button_schema(),
                     "count":{"type":"integer","minimum":1,"maximum":3,"description":"Click count — 1 (single), 2 (double), 3 (triple). Default 1."},
-                    "modifier": cua_driver_core::tool_schema::modifier_schema(),
+                    "modifier": pincer_core::tool_schema::modifier_schema(),
                     "from_zoom":{"type":"boolean","description":"When true, x and y are pixel coordinates in the last `zoom` image for this pid. The driver maps them back to window coords."},
                     "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"Coordinate frame (default \"window\"). Pass \"desktop\" with x,y and no pid/window_id for a screen-absolute click in get_desktop_state coordinates."},
                     "delivery_mode": crate::input::delivery::delivery_mode_schema()
@@ -3353,7 +3350,7 @@ impl Tool for ClickTool {
     async fn invoke(&self, args: Value) -> ToolResult {
         use crate::input::delivery::{DeliveryMode, EventKind};
         use crate::uia::snapshot::SnapshotKind;
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let cursor_key = resolve_cursor_key(&args);
 
         // ── Window-less screen-absolute branch (desktop target) ───────────────
@@ -3982,7 +3979,7 @@ impl Tool for ClickTool {
                         //
                         // Why this order: PR #1699's WinUI3 control parity tests
                         // surfaced these pattern-dispatch gaps. Without these
-                        // fallthroughs, cua-driver couldn't drive WinUI3
+                        // fallthroughs, pincer couldn't drive WinUI3
                         // CheckBox / RadioButton / ComboBox because PostMessage
                         // doesn't reach their handlers (CoreInput dispatcher).
                         let invoke_result = unsafe { elem.GetCurrentPattern(UIA_InvokePatternId) };
@@ -4584,7 +4581,7 @@ impl Tool for TypeTextTool {
                 UIA path (SetValue is atomic).".into(),
             input_schema: json!({
                 "type":"object","required":["text"],"properties":{
-                    "session": cua_driver_core::tool_schema::session_schema(),
+                    "session": pincer_core::tool_schema::session_schema(),
                     "scope":{"type":"string","enum":["window","desktop"],"description":"Use desktop with no pid/window_id to type into the current foreground application."},
                     "pid":{"type":"integer","description":"Target process ID."},
                     "text":{"type":"string","description":"Text to insert at the focused element's cursor."},
@@ -4602,7 +4599,7 @@ impl Tool for TypeTextTool {
 
     async fn invoke(&self, args: Value) -> ToolResult {
         use crate::input::delivery::{DeliveryMode, EventKind};
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let cursor_key = resolve_cursor_key(&args);
         if args.get("scope").and_then(Value::as_str) == Some("desktop")
             && args.get("pid").is_none()
@@ -4612,9 +4609,8 @@ impl Tool for TypeTextTool {
                 Ok(input) => input,
                 Err(result) => return result,
             };
-            let text =
-                cua_driver_core::text_sanitize::strip_trailing_agent_protocol_tags(&input.text)
-                    .into_owned();
+            let text = pincer_core::text_sanitize::strip_trailing_agent_protocol_tags(&input.text)
+                .into_owned();
             let hwnd = match crate::input::mouse::foreground_window() {
                 Ok(hwnd) => hwnd,
                 Err(error) => return ToolResult::error(error.to_string()),
@@ -4645,8 +4641,8 @@ impl Tool for TypeTextTool {
         // invocation tags into the text param (see text_sanitize docs).
         // Returns Cow::Borrowed on the no-match fast path so the common
         // case is allocation-free.
-        let text = cua_driver_core::text_sanitize::strip_trailing_agent_protocol_tags(&text_raw)
-            .into_owned();
+        let text =
+            pincer_core::text_sanitize::strip_trailing_agent_protocol_tags(&text_raw).into_owned();
         let raw_pid = match args.require_i64("pid") {
             Ok(v) => v,
             Err(e) => return e,
@@ -5295,12 +5291,12 @@ impl Tool for PressKeyTool {
                 top-level window remains backgrounded when delivery_mode is background.".into(),
             input_schema: json!({
                 "type":"object","required":["key"],"properties":{
-                    "session": cua_driver_core::tool_schema::session_schema(),
+                    "session": pincer_core::tool_schema::session_schema(),
                     "scope":{"type":"string","enum":["window","desktop"],"description":"Use desktop with no pid/window_id to send the key to the current foreground application."},
                     "pid":{"type":"integer","description":"Target process ID."},
                     "key":{"type":"string","description":"Key name (return, tab, escape, up, down, left, right, space, delete, home, end, pageup, pagedown, f1-f12, letter, digit)."},
                     "modifiers":{"type":"array","items":{"type":"string"},"description":"Optional modifier names held while the key is pressed (ctrl/shift/alt/win)."},
-                    "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                    "element_token": pincer_core::tool_schema::element_token_schema(),
                     "x":{"type":"number","description":"Window-local screenshot-pixel X — the element px action form: pixel-click there to focus, then send the key. Use when the key must go to a Chromium/Electron surface the UIA path can't focus. Pass with y, no element_token."},
                     "y":{"type":"number","description":"Window-local screenshot-pixel Y (see x)."},
                     "window_id":{"type":"integer","description":"HWND for the target window. Omit when element_token is supplied; otherwise auto-resolves the pid's first visible window."},
@@ -5313,7 +5309,7 @@ impl Tool for PressKeyTool {
 
     async fn invoke(&self, args: Value) -> ToolResult {
         use crate::input::delivery::{DeliveryMode, EventKind};
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         if args.get("scope").and_then(Value::as_str) == Some("desktop")
             && args.get("pid").is_none()
             && args.get("window_id").is_none()
@@ -5634,7 +5630,7 @@ impl Tool for HotkeyTool {
                 Trade-off: brief foreground swap (mitigated by restoring the previous foreground \
                 after the keystrokes flush). Requires the daemon to have UIAccess integrity so \
                 `SetForegroundWindow` is permitted — the MCP proxy auto-prefers the \
-                `cua-driver-uia.exe` worker pipe when both daemons are running.\n\n\
+                `pincer-uia.exe` worker pipe when both daemons are running.\n\n\
                 - **Legacy Win32 targets without modifiers** (plain `enter`, `tab`, `f5`, etc.) \
                 route through `PostMessage(WM_KEYDOWN/UP)` — no focus steal, no need to update \
                 modifier state.\n\n\
@@ -5647,12 +5643,12 @@ impl Tool for HotkeyTool {
                 letters, digits). Order: modifiers first, one non-modifier last.".into(),
             input_schema: json!({
                 "type":"object","required":["keys"],"properties":{
-                    "session": cua_driver_core::tool_schema::session_schema(),
+                    "session": pincer_core::tool_schema::session_schema(),
                     "scope":{"type":"string","enum":["window","desktop"],"description":"Use desktop with no pid/window_id to send the hotkey to the current foreground application."},
                     "pid":{"type":"integer","description":"Target process ID."},
                     "keys":{"type":"array","items":{"type":"string"},"minItems":2,
                         "description":"Modifier(s) and one non-modifier key, e.g. [\"ctrl\", \"c\"]."},
-                    "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                    "element_token": pincer_core::tool_schema::element_token_schema(),
                     "x":{"type":"number","description":"Window-local screenshot-pixel X — the element px action form: pixel-click there to focus, then send the combo (so e.g. Ctrl+V pastes into that field). Pass with y. Use for Chromium/Electron surfaces the background combo can't reach."},
                     "y":{"type":"number","description":"Window-local screenshot-pixel Y (see x)."},
                     "window_id":{"type":"integer","description":"Explicit HWND when the pid owns multiple windows."},
@@ -5665,7 +5661,7 @@ impl Tool for HotkeyTool {
 
     async fn invoke(&self, args: Value) -> ToolResult {
         use crate::input::delivery::{DeliveryMode, EventKind};
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         if args.get("scope").and_then(Value::as_str) == Some("desktop")
             && args.get("pid").is_none()
             && args.get("window_id").is_none()
@@ -6013,10 +6009,10 @@ impl Tool for SetValueTool {
                 caveat as Swift's `AXValue`-vs-WebKit).".into(),
             input_schema: json!({
                 "type":"object","required":["value"],"properties":{
-                    "session": cua_driver_core::tool_schema::session_schema(),
+                    "session": pincer_core::tool_schema::session_schema(),
                     "pid":{"type":"integer","description":"Target process ID. Optional with element_token (the token carries the pid)."},
                     "window_id":{"type":"integer","description":"HWND of the window. Omit when element_token is supplied (the token carries it)."},
-                    "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                    "element_token": pincer_core::tool_schema::element_token_schema(),
                     "value":{"type":"string","description":"New value. UIA will coerce to the element's native type."},
                     "delivery_mode": crate::input::delivery::delivery_mode_schema()
                 },"additionalProperties":false
@@ -6207,7 +6203,7 @@ fn win32_combo_set_value_result(
     args: &Value,
 ) -> ToolResult {
     use crate::win32::combo::ComboWrite;
-    use cua_driver_core::action_record::{
+    use pincer_core::action_record::{
         ActionEffect, ActionEvidence, ActionExecutionRecordBuilder, ActionTransport,
         ActualDelivery, EvidenceKind, RequestedDelivery,
     };
@@ -6312,7 +6308,7 @@ impl Tool for ScrollTool {
                 no-op on Windows (UIA SetFocus not wired up yet — same caveat as `press_key`).".into(),
             input_schema: json!({
                 "type":"object","required":["direction"],"properties":{
-                    "session": cua_driver_core::tool_schema::session_schema(),
+                    "session": pincer_core::tool_schema::session_schema(),
                     "pid":{"type":"integer","description":"Target process ID for window scope. Optional with element_token (the token carries the pid). Omit with scope=desktop for screen-absolute coordinates from get_desktop_state."},
                     "direction":{"type":"string","enum":["up","down","left","right"],"description":"Scroll direction."},
                     "by":{"type":"string","enum":["line","page"],"description":"Scroll granularity. Default: line."},
@@ -6321,7 +6317,7 @@ impl Tool for ScrollTool {
                     "x":{"type":"number","description":"With pid/window_id: window-local screenshot X used to target a nested scroll surface in foreground mode. Without pid/window_id: screen-absolute X for desktop scope. Must be paired with y."},
                     "y":{"type":"number","description":"With pid/window_id: window-local screenshot Y used to target a nested scroll surface in foreground mode. Without pid/window_id: screen-absolute Y for desktop scope. Must be paired with x."},
                     "window_id":{"type":"integer","description":"HWND of the target window. Omit when element_token is supplied; otherwise auto-resolves the pid's first visible window."},
-                    "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                    "element_token": pincer_core::tool_schema::element_token_schema(),
                     "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"Use \"desktop\" with x,y and no pid/window_id for screen-absolute coordinates from get_desktop_state. Default \"window\"."},
                     "delivery_mode": crate::input::delivery::delivery_mode_schema()
                 },"additionalProperties":false
@@ -6332,7 +6328,7 @@ impl Tool for ScrollTool {
 
     async fn invoke(&self, args: Value) -> ToolResult {
         use crate::input::delivery::{DeliveryMode, EventKind};
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         // ── Window-less screen-absolute branch (desktop target) ───────────────
         // No pid/window_id + numeric x,y + desktop scope → synthesize a wheel
         // event at the screen point via SendInput. The wheel routes to whatever
@@ -6881,13 +6877,13 @@ impl Tool for DoubleClickTool {
                 `pid` is required with `x`, `y`; an `element_token` carries its own pid. The macOS-only `modifier` field is accepted for \
                 parity (no-op on Windows — PostMessage doesn't propagate modifier-key state).".into(),
             input_schema: json!({"type":"object","required":[],"properties":{
-                "session": cua_driver_core::tool_schema::session_schema(),
+                "session": pincer_core::tool_schema::session_schema(),
                 "pid":{"type":"integer","description":"Target process ID. Optional with element_token (the token carries the pid)."},
                 "window_id":{"type":"integer","description":"HWND for the target window. Omit when element_token is supplied (the token carries it)."},
-                "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                "element_token": pincer_core::tool_schema::element_token_schema(),
                 "x":{"type":"number","description":"X in window-local screenshot pixels. Must be provided together with y."},
                 "y":{"type":"number","description":"Y in window-local screenshot pixels. Must be provided together with x."},
-                "modifier": cua_driver_core::tool_schema::modifier_schema(),
+                "modifier": pincer_core::tool_schema::modifier_schema(),
                 "from_zoom":{"type":"boolean","description":"After a zoom call, pass true to translate zoom-image coords back to window space."},
                 "delivery_mode": crate::input::delivery::delivery_mode_schema()
             },"additionalProperties":false}),
@@ -6902,7 +6898,7 @@ impl Tool for DoubleClickTool {
             None => return ToolResult::error("Missing required integer field pid."),
         };
         let pid = raw_pid as u32;
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let resolved = match self.state.snapshots.resolve(pid as i32, &args) {
             Ok(r) => r,
             Err(e) => return e,
@@ -7248,13 +7244,13 @@ impl Tool for RightClickTool {
                 `modifier` is accepted for parity (no-op on Windows — PostMessage doesn't \
                 propagate modifier-key state).".into(),
             input_schema: json!({"type":"object","required":[],"properties":{
-                "session": cua_driver_core::tool_schema::session_schema(),
+                "session": pincer_core::tool_schema::session_schema(),
                 "pid":{"type":"integer","description":"Target process ID. Optional with element_token (the token carries the pid)."},
                 "window_id":{"type":"integer","description":"HWND for the target window. Omit when element_token is supplied (the token carries it)."},
-                "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                "element_token": pincer_core::tool_schema::element_token_schema(),
                 "x":{"type":"number","description":"X in window-local screenshot pixels. Must be provided together with y."},
                 "y":{"type":"number","description":"Y in window-local screenshot pixels. Must be provided together with x."},
-                "modifier": cua_driver_core::tool_schema::modifier_schema(),
+                "modifier": pincer_core::tool_schema::modifier_schema(),
                 "from_zoom":{"type":"boolean","description":"After a zoom call, pass true to translate zoom-image coords back to window space."},
                 "delivery_mode": crate::input::delivery::delivery_mode_schema()
             },"additionalProperties":false}),
@@ -7269,7 +7265,7 @@ impl Tool for RightClickTool {
             None => return ToolResult::error("Missing required integer field pid."),
         };
         let pid = raw_pid as u32;
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let resolved = match self.state.snapshots.resolve(pid as i32, &args) {
             Ok(r) => r,
             Err(e) => return e,
@@ -7595,7 +7591,7 @@ impl Tool for DragTool {
                           window itself) cannot be delivered in the background — the OS move/resize loop needs real pointer \
                           input — so they return background_unavailable; re-issue those with delivery_mode:\"foreground\".".into(),
             input_schema: json!({"type":"object","required":["from_x","from_y","to_x","to_y"],"properties":{
-                "session": cua_driver_core::tool_schema::session_schema(),
+                "session": pincer_core::tool_schema::session_schema(),
                 "scope":{"type":"string","enum":["window","desktop"],"description":"Use desktop with no pid/window_id for screen-absolute coordinates."},
                 "pid":{"type":"integer","description":"Target process ID."},
                 "window_id":{"type":"integer","description":"Target window handle (HWND). Optional — driver picks frontmost window of pid when omitted."},
@@ -7605,8 +7601,8 @@ impl Tool for DragTool {
                 "to_y":{"type":"number","description":"Drag-end Y in window-local screenshot pixels."},
                 "duration_ms":{"type":"integer","minimum":0,"maximum":10000,"description":"Wall-clock duration of drag path. Default: 500."},
                 "steps":{"type":"integer","minimum":1,"maximum":200,"description":"Number of intermediate WM_MOUSEMOVE events. Default: 20."},
-                "modifier": cua_driver_core::tool_schema::modifier_schema(),
-                "button": cua_driver_core::tool_schema::button_schema(),
+                "modifier": pincer_core::tool_schema::modifier_schema(),
+                "button": pincer_core::tool_schema::button_schema(),
                 "from_zoom":{"type":"boolean","description":"When true, coordinates are in the last zoom image for this pid."},
                 "delivery_mode": crate::input::delivery::delivery_mode_schema()
             },"additionalProperties":false}),
@@ -7615,7 +7611,7 @@ impl Tool for DragTool {
     }
     async fn invoke(&self, args: Value) -> ToolResult {
         use crate::input::delivery::{DeliveryMode, EventKind};
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let cursor_key = resolve_cursor_key(&args);
         if args.get("scope").and_then(Value::as_str) == Some("desktop")
             && args.get("pid").is_none()
@@ -7961,7 +7957,7 @@ impl Tool for DragTool {
 
 /// Read the primary display size in PHYSICAL pixels.
 ///
-/// With permonitorv2 DPI awareness (set in cua-driver.manifest),
+/// With permonitorv2 DPI awareness (set in pincer.manifest),
 /// `SM_CXSCREEN` / `SM_CYSCREEN` already return physical pixels — the same
 /// coordinate space screenshots and pixel clicks use on Windows. Shared by
 /// `get_screen_size` and `get_desktop_state`.
@@ -7982,7 +7978,7 @@ impl Tool for GetScreenSizeTool {
                 scale factor. On Windows, screenshots and pixel clicks use this same physical-pixel \
                 coordinate space. Requires no special permissions.".into(),
             input_schema: json!({"type":"object","properties":{
-                "session": cua_driver_core::tool_schema::session_schema()
+                "session": pincer_core::tool_schema::session_schema()
             },"additionalProperties":false}),
             read_only: true, destructive: false, idempotent: true, open_world: false,
         })
@@ -7992,7 +7988,7 @@ impl Tool for GetScreenSizeTool {
             return error;
         }
         use windows::Win32::UI::HiDpi::GetDpiForSystem;
-        // With permonitorv2 DPI awareness (set in cua-driver.manifest),
+        // With permonitorv2 DPI awareness (set in pincer.manifest),
         // SM_CXSCREEN/SM_CYSCREEN return PHYSICAL pixels — the same
         // coordinate space screenshots and pixel clicks use on Windows.
         // Report these as-is, along with the scale factor for reference.
@@ -8036,7 +8032,7 @@ impl Tool for GetDesktopStateTool {
                 "properties": {
                     "session": { "type": "string", "description": "For multi-call work, prefer a short public session label and repeat it on every call that accepts it. Omit it to use the authenticated transport's implicit lifecycle session." },
                     "screenshot_out_file": { "type": "string", "description": "Write PNG here instead of base64." },
-                    "max_image_dimension": cua_driver_core::tool_schema::desktop_max_image_dimension_schema()
+                    "max_image_dimension": pincer_core::tool_schema::desktop_max_image_dimension_schema()
                 },
                 "additionalProperties": false
             }),
@@ -8045,7 +8041,7 @@ impl Tool for GetDesktopStateTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::protocol::Content;
+        use pincer_core::protocol::Content;
         let binding_args = args.clone();
         let input = match parse_typed_input::<GetDesktopStateInput>("get_desktop_state", args) {
             Ok(input) => input,
@@ -8186,7 +8182,7 @@ impl Tool for GetCursorPositionTool {
                 "Return the current mouse cursor position in screen points (origin top-left)."
                     .into(),
             input_schema: json!({"type":"object","properties":{
-                "session": cua_driver_core::tool_schema::session_schema()
+                "session": pincer_core::tool_schema::session_schema()
             },"additionalProperties":false}),
             read_only: true,
             destructive: false,
@@ -8228,7 +8224,7 @@ impl Tool for MoveCursorTool {
                 "Move the agent cursor overlay to (x, y). Does NOT move the real mouse cursor."
                     .into(),
             input_schema: json!({"type":"object","required":["x","y"],"properties":{
-                "session": cua_driver_core::tool_schema::session_schema(),
+                "session": pincer_core::tool_schema::session_schema(),
                 "scope":{"type":"string","enum":["window","desktop"],"description":"desktop moves the real OS pointer; window moves only the agent overlay."},
                 "x":{"type":"number","description":"Destination X. Window scope: screen coordinates of the agent cursor overlay. Desktop scope: get_desktop_state screenshot pixels."},
                 "y":{"type":"number","description":"Destination Y, in the same space as x."},
@@ -8241,7 +8237,7 @@ impl Tool for MoveCursorTool {
         })
     }
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         if args.get("scope").and_then(Value::as_str) == Some("desktop") {
             let input = match parse_typed_projection::<MoveCursorInput>("move_cursor", &args) {
                 Ok(input) => input,
@@ -8513,7 +8509,7 @@ impl Tool for GetAgentCursorStateV2Tool {
 }
 
 fn canonical_cursor_def(name: &str) -> ToolDef {
-    let contract = cua_driver_contract::tool_contract(name)
+    let contract = pincer_contract::tool_contract(name)
         .unwrap_or_else(|| panic!("missing canonical cursor contract for {name}"));
     ToolDef::from_contract(&contract)
 }
@@ -8528,7 +8524,7 @@ impl Tool for CheckPermissionsTool {
     fn def(&self) -> &ToolDef {
         PERMS_DEF.get_or_init(|| ToolDef {
             name: "check_permissions".into(),
-            description: "Check required permissions for cua-driver-rs on Windows.".into(),
+            description: "Check required permissions for pincer on Windows.".into(),
             input_schema: json!({"type":"object","properties":{"prompt":{"type":"boolean","description":"Ignored: Windows has no permission prompts."}},"additionalProperties":false}),
             read_only: true,
             destructive: false,
@@ -8539,7 +8535,7 @@ impl Tool for CheckPermissionsTool {
     async fn invoke(&self, _args: Value) -> ToolResult {
         // `elevated` reports the daemon's actual token integrity level, NOT the
         // legacy `TokenIsElevated` UAC-elevation flag. The two diverge in two
-        // important cases that matter to cua-driver:
+        // important cases that matter to pincer:
         //
         //   1. RID-500 built-in Administrator — runs at High IL all the time
         //      because RID 500 has no UAC split token (FilterAdministratorToken=0
@@ -8550,7 +8546,7 @@ impl Tool for CheckPermissionsTool {
         //      and triggered by AtLogon — Task Scheduler hands out the user's
         //      full admin token without going through the UAC prompt path, so
         //      `TokenIsElevated` returns false while IL is High. This is the
-        //      common case for cua-driver's autostart task on non-RID-500
+        //      common case for pincer's autostart task on non-RID-500
         //      admin users — the daemon IS at High IL (cross-AppContainer UIA
         //      works, Calculator-class UWP apps drive cleanly) but the legacy
         //      flag reports it as a "standard user", which confused everyone
@@ -8723,7 +8719,7 @@ impl Tool for GetConfigTool {
         let payload = json!({
             "schema_version":      1,
             "version":             env!("CARGO_PKG_VERSION"),
-            "source_sha":          option_env!("CUA_DRIVER_SOURCE_SHA"),
+            "source_sha":          option_env!("PINCER_SOURCE_SHA"),
             "platform":            "windows",
             "max_image_dimension": cfg.max_image_dimension,
             "agent_cursor":        { "enabled": cursor_enabled },
@@ -8847,7 +8843,7 @@ impl Tool for SetConfigTool {
         let payload = json!({
             "schema_version":      1,
             "version":             env!("CARGO_PKG_VERSION"),
-            "source_sha":          option_env!("CUA_DRIVER_SOURCE_SHA"),
+            "source_sha":          option_env!("PINCER_SOURCE_SHA"),
             "platform":            "windows",
             "max_image_dimension": cfg.max_image_dimension,
             "agent_cursor":        { "enabled": cursor_enabled },
@@ -8988,7 +8984,7 @@ impl Tool for ZoomTool {
             Some(v) => v,
             None => return ToolResult::error("Missing required integer field window_id."),
         };
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let coerce = |k: &str| {
             args.opt_f64(k)
                 .or_else(|| args.opt_i64(k).map(|i| i as f64))
@@ -9052,7 +9048,7 @@ impl Tool for ZoomTool {
                 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
                 let b64 = B64.encode(&crop.jpeg_bytes);
                 let (w, h) = (crop.out_w, crop.out_h);
-                use cua_driver_core::protocol::Content;
+                use pincer_core::protocol::Content;
                 // Match Swift's text format 1:1.
                 let summary = "✅ Zoomed region captured at native resolution. \
                     To click a target in this image, use \
@@ -9107,16 +9103,16 @@ impl Tool for TypeTextCharsTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let pid = args.u64_or("pid", 0) as u32;
         let text_raw = match args.require_str("text") {
             Ok(v) => v,
             Err(e) => return e,
         };
         // Same trailing-protocol-tag scrub as the main TypeTextTool — see
-        // cua_driver_core::text_sanitize for rationale.
-        let text = cua_driver_core::text_sanitize::strip_trailing_agent_protocol_tags(&text_raw)
-            .into_owned();
+        // pincer_core::text_sanitize for rationale.
+        let text =
+            pincer_core::text_sanitize::strip_trailing_agent_protocol_tags(&text_raw).into_owned();
         let delay_ms = args.u64_or("delay_ms", 30);
         let hwnd_opt = args.opt_u64("window_id");
         let hwnd = match hwnd_opt {
@@ -9216,7 +9212,7 @@ impl Tool for InvokeMenuTool {
     fn def(&self) -> &ToolDef {
         INVOKE_MENU_DEF.get_or_init(|| {
             let contract =
-                cua_driver_contract::tool_contract("invoke_menu").expect("invoke_menu contract");
+                pincer_contract::tool_contract("invoke_menu").expect("invoke_menu contract");
             ToolDef {
                 name: contract.name,
                 description: contract.description,
@@ -9230,7 +9226,7 @@ impl Tool for InvokeMenuTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::action_record::{
+        use pincer_core::action_record::{
             ActionEffect, ActionEvidence, ActionExecutionRecord, ActionTransport, ActualDelivery,
             EvidenceKind, RequestedDelivery,
         };
@@ -9356,7 +9352,7 @@ static SET_WINDOW_FRAME_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock:
 impl Tool for SetWindowFrameTool {
     fn def(&self) -> &ToolDef {
         SET_WINDOW_FRAME_DEF.get_or_init(|| {
-            let contract = cua_driver_contract::tool_contract("set_window_frame")
+            let contract = pincer_contract::tool_contract("set_window_frame")
                 .expect("set_window_frame contract");
             ToolDef {
                 name: contract.name,
@@ -9371,14 +9367,14 @@ impl Tool for SetWindowFrameTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_contract::SetWindowFrameInput;
-        use cua_driver_core::action_record::{
+        use pincer_contract::SetWindowFrameInput;
+        use pincer_core::action_record::{
             effect_from_value_readback, ActionEvidence, ActionExecutionRecord, ActionTransport,
             ActualDelivery, EvidenceKind, RequestedDelivery,
         };
 
         let input: SetWindowFrameInput =
-            match cua_driver_core::tool_args::parse_typed_input("set_window_frame", args) {
+            match pincer_core::tool_args::parse_typed_input("set_window_frame", args) {
                 Ok(input) => input,
                 Err(result) => return result,
             };
@@ -9592,7 +9588,7 @@ impl Tool for BringToFrontTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let pid = match args.require_u32("pid") {
             Ok(v) => v,
             Err(e) => return e,
@@ -9792,7 +9788,7 @@ impl Tool for KillAppTool {
         if adapter_id != "process_control" {
             return Ok(None);
         }
-        use cua_driver_core::browser::platform::BrowserPlatform;
+        use pincer_core::browser::platform::BrowserPlatform;
         let pid = args
             .get("pid")
             .and_then(Value::as_i64)
@@ -9906,7 +9902,7 @@ fn kill_app_stale_process_refusal(message: String) -> ToolResult {
 // ── debug_window_info ─────────────────────────────────────────────────────────
 //
 // Diagnostic tool: dump everything the daemon (Session 2 when launched via
-// `cua-driver autostart kick`) sees about a given pid's top-level windows.
+// `pincer autostart kick`) sees about a given pid's top-level windows.
 // Includes Win32 class names, owning .exe basename + full path, and — when
 // CUIAutomation is available — the currently-focused UIA element with the
 // list of patterns it supports.
@@ -9925,7 +9921,7 @@ impl Tool for DebugWindowInfoTool {
     fn def(&self) -> &ToolDef {
         DEBUG_WI_DEF.get_or_init(|| ToolDef {
             name: "debug_window_info".into(),
-            description: "Diagnostic: dump everything cua-driver sees about a pid's \
+            description: "Diagnostic: dump everything pincer sees about a pid's \
                 top-level windows from the daemon's session perspective. Returns \
                 window class names, owning .exe basename + path, and — when \
                 CUIAutomation succeeds — the focused UIA element with the list of \
@@ -10168,13 +10164,13 @@ pub fn build_registry(compat: bool) -> ToolRegistry {
 
 pub fn build_registry_with_provider(
     compat: bool,
-    provider: Option<std::sync::Arc<dyn cua_driver_core::consent::ProtectedConsentProvider>>,
+    provider: Option<std::sync::Arc<dyn pincer_core::consent::ProtectedConsentProvider>>,
 ) -> ToolRegistry {
     let mut r = ToolRegistry::new_with_protected_consent_provider(provider);
     let state = ToolState::new(Some(r.capture_service()));
     let cursor_outcome_reader = {
         let cursor_registry = state.cursor_registry.clone();
-        cua_driver_core::session::register_scoped_cursor_outcome_reader(std::sync::Arc::new(
+        pincer_core::session::register_scoped_cursor_outcome_reader(std::sync::Arc::new(
             move |session_id| {
                 let state = cursor_registry.get(session_id);
                 let motion_customized = state.is_some()
@@ -10187,7 +10183,7 @@ pub fn build_registry_with_provider(
                     .count()
                     .max(1);
                 match state {
-                    Some(state) => cua_driver_core::session::bounded_cursor_outcome(
+                    Some(state) => pincer_core::session::bounded_cursor_outcome(
                         true,
                         state.config.enabled,
                         crate::overlay::is_visible_for_session(session_id),
@@ -10195,7 +10191,7 @@ pub fn build_registry_with_provider(
                         motion_customized,
                         active_cursor_count,
                     ),
-                    None => cua_driver_core::session::bounded_cursor_outcome(
+                    None => pincer_core::session::bounded_cursor_outcome(
                         false,
                         false,
                         false,
@@ -10222,21 +10218,21 @@ pub fn build_registry_with_provider(
     let cursor_registry = state.cursor_registry.clone();
     let snapshots = state.snapshots.clone();
     let session_end_hook =
-        cua_driver_core::session::register_scoped_session_end_hook(move |session_id| {
+        pincer_core::session::register_scoped_session_end_hook(move |session_id| {
             snapshots.retire_session_screenshots(session_id);
             cursor_registry.remove(session_id);
             crate::overlay::remove_cursor(session_id.to_owned());
         });
     let session_revive_hook =
-        cua_driver_core::session::register_scoped_session_revive_hook(move |session_id| {
+        pincer_core::session::register_scoped_session_revive_hook(move |session_id| {
             crate::overlay::revive_cursor(session_id.to_owned());
         });
 
     r.retain_cursor_outcome_reader(cursor_outcome_reader);
     r.retain_session_end_hook(session_end_hook);
     r.retain_session_revive_hook(session_revive_hook);
-    if let Some(runtime_scope) = cua_driver_core::tool::current_dispatch_runtime_scope() {
-        let prefix = format!("__cua_runtime_{runtime_scope}:");
+    if let Some(runtime_scope) = pincer_core::tool::current_dispatch_runtime_scope() {
+        let prefix = format!("__pincer_runtime_{runtime_scope}:");
         let cursor_registry = state.cursor_registry.clone();
         r.retain_runtime_cleanup(move || {
             for cursor in cursor_registry
@@ -10254,16 +10250,14 @@ pub fn build_registry_with_provider(
     r.register(Box::new(GetWindowStateTool {
         state: state.clone(),
     }));
-    r.register(Box::new(
-        cua_driver_core::expectation::VerifyStateTool::new(std::sync::Arc::new(
-            cua_driver_core::expectation::ToolObservationProvider::new(
-                std::sync::Arc::new(ListWindowsTool),
-                std::sync::Arc::new(GetWindowStateTool {
-                    state: state.clone(),
-                }),
-            ),
+    r.register(Box::new(pincer_core::expectation::VerifyStateTool::new(
+        std::sync::Arc::new(pincer_core::expectation::ToolObservationProvider::new(
+            std::sync::Arc::new(ListWindowsTool),
+            std::sync::Arc::new(GetWindowStateTool {
+                state: state.clone(),
+            }),
         )),
-    ));
+    )));
     r.register(Box::new(LaunchAppTool));
     r.register(Box::new(KillAppTool));
     let pid_window_candidates: PidWindowGuardParts = (
@@ -10328,7 +10322,7 @@ pub fn build_registry_with_provider(
         },
         &pid_window_candidates,
     ));
-    cua_driver_core::clipboard::register_clipboard_tools(
+    pincer_core::clipboard::register_clipboard_tools(
         &mut r,
         Arc::new(crate::clipboard::WindowsClipboard::new()),
     );
@@ -10372,11 +10366,9 @@ pub fn build_registry_with_provider(
     // `health_report` — single-call cross-platform driver diagnostics.
     // Stable schema_version="1" contract for downstream consumers. Windows skips
     // tcc_* and bundle_identity with "not applicable on Windows".
-    r.register(Box::new(
-        cua_driver_core::health_report::HealthReportTool::new(std::sync::Arc::new(
-            crate::health_report::WindowsHealthProvider,
-        )),
-    ));
+    r.register(Box::new(pincer_core::health_report::HealthReportTool::new(
+        std::sync::Arc::new(crate::health_report::WindowsHealthProvider),
+    )));
     r.register(Box::new(GetConfigTool {
         state: state.clone(),
     }));
@@ -10395,14 +10387,14 @@ pub fn build_registry_with_provider(
     let _: &TypeTextCharsTool = &TypeTextCharsTool {
         _state: state.clone(),
     }; // touch struct so it stays in this crate for now
-    let browser_engine = cua_driver_core::browser::BrowserEngine::new_with_runtime_services(
+    let browser_engine = pincer_core::browser::BrowserEngine::new_with_runtime_services(
         std::sync::Arc::new(crate::browser_platform::WindowsBrowserPlatform::new(
             state.cursor_registry.clone(),
         )),
         r.approval_broker(),
         r.protected_resource_ownership(),
     );
-    cua_driver_core::browser::register_browser_tools(&browser_engine, &mut r);
+    pincer_core::browser::register_browser_tools(&browser_engine, &mut r);
     r.register_recording_tools();
     r.register_session_tools();
     r

@@ -1,7 +1,7 @@
 use std::{path::Path, sync::Mutex};
 
 use clipboard_rs::{common::RustImage, Clipboard, ClipboardContext, ContentFormat};
-use cua_driver_core::clipboard::ClipboardBackend;
+use pincer_core::clipboard::ClipboardBackend;
 
 pub struct WindowsClipboard {
     context: Result<Mutex<ClipboardContext>, String>,
@@ -92,18 +92,16 @@ mod tests {
     fn native_clipboard_round_trips_text_when_opted_in() {
         // Overwrites the system clipboard, so it runs only where a job opts
         // in explicitly. `CI` alone is not enough: developers export it too.
-        if std::env::var_os("CUA_TEST_ALLOW_CLIPBOARD").as_deref()
+        if std::env::var_os("PINCER_TEST_ALLOW_CLIPBOARD").as_deref()
             != Some(std::ffi::OsStr::new("1"))
         {
             return;
         }
         let backend = WindowsClipboard::new();
-        backend
-            .write_text("cua-driver clipboard test".into())
-            .unwrap();
+        backend.write_text("pincer clipboard test".into()).unwrap();
         assert_eq!(
             backend.read_text().unwrap().as_deref(),
-            Some("cua-driver clipboard test")
+            Some("pincer clipboard test")
         );
     }
 }

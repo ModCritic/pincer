@@ -299,7 +299,7 @@ def passive_focus_evidence(before, after, complete_trace):
 
 
 def read_input_status():
-    return json.loads(subprocess.run(['hyprctl', '-j', 'cua:status'], check=True,
+    return json.loads(subprocess.run(['hyprctl', '-j', 'pincer:status'], check=True,
                                     capture_output=True, text=True, timeout=5).stdout)
 
 
@@ -891,7 +891,7 @@ def run(args):
         primary_before, baseline = wm(), state(args.foreground_journal)
         assert primary_before['pid'] == plan['foreground']['pid']
         if args.trace_socket:
-            assert args.trace_socket.name in ('cua-input-v3.sock', 'cua-input-v3-2.sock')
+            assert args.trace_socket.name in ('pincer-input-v3.sock', 'pincer-input-v3-2.sock')
             trace = Trace(args.trace_socket)
             assert trace.hello['protocol'] == 3
             trace.exchange('TRACE_START')

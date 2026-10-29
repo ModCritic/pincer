@@ -1,0 +1,394 @@
+"""Rust-backed SDK and binary wrapper for Pincer client applications.
+
+Agents should configure the bundled ``pincer mcp`` executable directly
+through their runtime's MCP client instead of importing a language MCP facade.
+"""
+
+__version__ = "0.35.4"  # x-release-please-version
+
+from ._native import (
+    ActionCompletion,
+    ConfiguredDriverOptions,
+    Pincer as _NativePincer,
+    PincerSession,
+    DriverActivityEvent,
+    DriverActivityKind,
+    DriverActivityObserver,
+    DriverActivityObserverImpl,
+    DriverAuthorizationAction,
+    DriverAuthorizationDecision,
+    DriverAuthorizationHost,
+    DriverAuthorizationHostError,
+    DriverAuthorizationHostImpl,
+    DriverAuthorizationRequest,
+    DriverError,
+    DriverExecutionMode,
+    DriverMetadata,
+    DriverOptions,
+    DriverServiceHeader,
+    DriverServiceRequest,
+    DriverServiceResponse,
+    DriverServiceTransport,
+    DriverServiceTransportError,
+    McpDriverChannel,
+    ForeignDriverChannelCapabilities,
+    ForeignDriverBoundChannel,
+    ForeignDriverChannelError,
+    ForeignDriverChannelIdentity,
+    ForeignDriverEnvelopeChannel,
+    ForeignDriverEnvelopeChannelImpl,
+    ForeignDriverRequestEnvelope,
+    ForeignDriverResponseEnvelope,
+    EmbeddedPincerHost,
+    EmbeddedDriverConnection,
+    EmbeddedDriverError,
+    EmbeddedDriverExit,
+    EmbeddedDriverHostOptions,
+    EmbeddedDriverHostState,
+    EmbeddedEnvironmentVariable,
+    EmbeddedMcpConfiguration,
+    EmbeddedPermissionMode,
+    ImageContent,
+    MacOsPermissionStatus,
+    PrivateWorkerOptions,
+    RuntimeAuthorizationOptions,
+    SdkClientKind,
+    SessionPermissionMode,
+    ToolResult,
+    TrustedSessionOptions,
+    create_trusted_session,
+    connect_remote_channel,
+    open_mcp_driver_channel,
+    create_remote_trusted_session,
+    current_mac_os_permission_status,
+    open_mac_os_screen_recording_settings,
+    request_mac_os_permissions,
+)
+# Pincer Cursor Motion: plan and play the agent cursor's motions.
+from ._native import (
+    CursorEase,
+    CursorEffectFrame,
+    CursorGlow,
+    CursorHeading,
+    CursorMagnet,
+    CursorMotionDuration,
+    CursorMotionParams,
+    CursorMotionPoint,
+    CursorMotionRect,
+    CursorMotionSample,
+    CursorMotionSpec,
+    CursorMoveRequest,
+    CursorPathShape,
+    CursorRipple,
+    CursorSettle,
+    CursorTrailSegment,
+    CursorTrailSpec,
+    CursorTrajectory,
+    cursor_click_effects,
+    cursor_motion_spec_for_style,
+    default_cursor_motion_params,
+    plan_cursor_move,
+    plan_cursor_spec,
+)
+from ._native_contract import (
+    CursorMotionEffectsOutput,
+    AppInfo,
+    ClickPosition,
+    ElementFrame,
+    GetWindowStateInput,
+    InputDeliveryMode,
+    ListAppsInput,
+    ListAppsOutput,
+    ListWindowsInput,
+    ListWindowsOutput,
+    SnapshotImage,
+    WindowBounds,
+    WindowElement,
+    WindowInfo,
+    WindowStateOutput,
+
+    ActionDelivery,
+    ActionDeliveryMode,
+    ActionEffect,
+    ActionEscalation,
+    ActionEscalationReason,
+    ActionEscalationTarget,
+    ActionEvidence,
+    ActionEvidenceKind,
+    ActionResult,
+    ActionRoute,
+    ActionTarget,
+    BoundsExpectation,
+    ClickButton,
+    ClickInput,
+    CursorAction,
+    CursorEffectSetting,
+    CursorMotionEffects,
+    CursorMotionStyle,
+    CursorMotionTiming,
+    CursorReducedMotion,
+    CursorThemeSelection,
+    DesktopScope,
+    DragInput,
+    ElementPredicate,
+    ElementSelector,
+    EndSessionInput,
+    EndSessionOutput,
+    GetAgentCursorStateInput,
+    GetCursorPositionInput,
+    GetDesktopStateInput,
+    GetScreenSizeInput,
+    HotkeyInput,
+    InvokeMenuInput,
+    MoveCursorInput,
+    Platform,
+    PredicateOutcome,
+    PressKeyInput,
+    ScrollBy,
+    ScrollDirection,
+    ScrollInput,
+    SetAgentCursorEnabledInput,
+    SetAgentCursorMotionInput,
+    SetAgentCursorThemeInput,
+    SetWindowFrameInput,
+    StartSessionInput,
+    StartSessionOutput,
+    StatePredicate,
+    TypeTextInput,
+    UnknownReason,
+    VerificationStatus,
+    VerifyStateInput,
+    VerifyStateOutput,
+    WindowPredicate,
+)
+from . import _daemon
+from .wrapper import get_binary_path, run_pincer
+
+
+def _connect_python_sdk(cls, socket_path):
+    """Preserve ``Pincer.connect`` while tagging the imported runtime."""
+
+    return cls.connect_with_client_kind(socket_path, SdkClientKind.PYTHON)
+
+
+def _create_python_sdk(cls, options=None, *, embedded=False):
+    """Create the Python SDK runtime.
+
+    On macOS this prefers the Pincer.app daemon (starting it when installed)
+    so the agent cursor overlay and the app's permission grants work; pass
+    ``embedded=True`` to force the in-process runtime. Other platforms are
+    always in-process.
+    """
+
+    return _daemon.create_driver(
+        lambda: cls.connect_with_client_kind(None, SdkClientKind.PYTHON),
+        lambda: cls.create_with_client_kind(options, SdkClientKind.PYTHON),
+        embedded=embedded,
+        claude_code_compatibility=bool(
+            getattr(options, "claude_code_compatibility", False)
+        ),
+    )
+
+
+def _create_configured_python_sdk(cls, options):
+    """Create a trusted configured runtime tagged as a Python SDK host."""
+
+    return cls.create_configured_with_client_kind(options, SdkClientKind.PYTHON)
+
+
+def _create_configured_with_authorization_host_python_sdk(cls, options, host):
+    """Create a runtime with a trusted authorization callback."""
+
+    return cls.create_configured_with_authorization_host_and_client_kind(
+        options, host, SdkClientKind.PYTHON
+    )
+
+def _create_configured_with_activity_observer_python_sdk(cls, options, observer):
+    """Create a runtime with a content-free activity observer."""
+
+    return cls.create_configured_with_activity_observer_and_client_kind(
+        options, observer, SdkClientKind.PYTHON
+    )
+
+
+def _create_configured_with_host_integrations_python_sdk(cls, options, host, observer):
+    """Create a runtime with both trusted host integrations."""
+
+    return cls.create_configured_with_host_integrations_and_client_kind(
+        options, host, observer, SdkClientKind.PYTHON
+    )
+
+
+def _create_private_worker_python_sdk(cls, options):
+    """Create a supervised worker runtime tagged as a Python SDK host."""
+
+    return cls.create_private_worker_with_client_kind(options, SdkClientKind.PYTHON)
+
+
+_NativePincer.connect = classmethod(_connect_python_sdk)
+_NativePincer.create = classmethod(_create_python_sdk)
+_NativePincer.create_configured = classmethod(_create_configured_python_sdk)
+_NativePincer.create_configured_with_authorization_host = classmethod(
+    _create_configured_with_authorization_host_python_sdk
+)
+_NativePincer.create_configured_with_activity_observer = classmethod(
+    _create_configured_with_activity_observer_python_sdk
+)
+_NativePincer.create_configured_with_host_integrations = classmethod(
+    _create_configured_with_host_integrations_python_sdk
+)
+_NativePincer.create_private_worker = classmethod(_create_private_worker_python_sdk)
+Pincer = _NativePincer
+
+__all__ = [
+    "AppInfo",
+    "ClickPosition",
+    "ElementFrame",
+    "GetWindowStateInput",
+    "InputDeliveryMode",
+    "ListAppsInput",
+    "ListAppsOutput",
+    "ListWindowsInput",
+    "ListWindowsOutput",
+    "SnapshotImage",
+    "WindowBounds",
+    "WindowElement",
+    "WindowInfo",
+    "WindowStateOutput",
+
+    "ActionCompletion",
+    "ActionDelivery",
+    "ActionDeliveryMode",
+    "ActionEffect",
+    "ActionEscalation",
+    "ActionEscalationReason",
+    "ActionEscalationTarget",
+    "ActionEvidence",
+    "ActionEvidenceKind",
+    "ActionResult",
+    "ActionRoute",
+    "ActionTarget",
+    "BoundsExpectation",
+    "ClickButton",
+    "ClickInput",
+    "ConfiguredDriverOptions",
+    "Pincer",
+    "PincerSession",
+    "CursorAction",
+    "CursorEffectSetting",
+    "CursorMotionEffects",
+    "CursorMotionStyle",
+    "CursorMotionTiming",
+    "CursorReducedMotion",
+    "CursorThemeSelection",
+    "DesktopScope",
+    "DragInput",
+    "ElementPredicate",
+    "ElementSelector",
+    "DriverError",
+    "DriverActivityEvent",
+    "DriverActivityKind",
+    "DriverActivityObserver",
+    "DriverActivityObserverImpl",
+    "DriverAuthorizationAction",
+    "DriverAuthorizationDecision",
+    "DriverAuthorizationHost",
+    "DriverAuthorizationHostError",
+    "DriverAuthorizationHostImpl",
+    "DriverAuthorizationRequest",
+    "DriverExecutionMode",
+    "DriverMetadata",
+    "DriverOptions",
+    "DriverServiceHeader",
+    "DriverServiceRequest",
+    "DriverServiceResponse",
+    "DriverServiceTransport",
+    "DriverServiceTransportError",
+    "McpDriverChannel",
+    "open_mcp_driver_channel",
+    "ForeignDriverChannelCapabilities",
+    "ForeignDriverBoundChannel",
+    "ForeignDriverChannelError",
+    "ForeignDriverChannelIdentity",
+    "ForeignDriverEnvelopeChannel",
+    "ForeignDriverEnvelopeChannelImpl",
+    "ForeignDriverRequestEnvelope",
+    "ForeignDriverResponseEnvelope",
+    "EmbeddedPincerHost",
+    "EmbeddedDriverConnection",
+    "EmbeddedDriverError",
+    "EmbeddedDriverExit",
+    "EmbeddedDriverHostOptions",
+    "EmbeddedDriverHostState",
+    "EmbeddedEnvironmentVariable",
+    "EmbeddedMcpConfiguration",
+    "EmbeddedPermissionMode",
+    "EndSessionInput",
+    "EndSessionOutput",
+    "GetCursorPositionInput",
+    "GetAgentCursorStateInput",
+    "GetDesktopStateInput",
+    "GetScreenSizeInput",
+    "HotkeyInput",
+    "InvokeMenuInput",
+    "ImageContent",
+    "MacOsPermissionStatus",
+    "MoveCursorInput",
+    "Platform",
+    "PredicateOutcome",
+    "PrivateWorkerOptions",
+    "PressKeyInput",
+    "RuntimeAuthorizationOptions",
+    "ScrollBy",
+    "ScrollDirection",
+    "ScrollInput",
+    "SessionPermissionMode",
+    "SetAgentCursorEnabledInput",
+    "SetAgentCursorMotionInput",
+    "SetAgentCursorThemeInput",
+    "SetWindowFrameInput",
+    "StartSessionInput",
+    "StartSessionOutput",
+    "StatePredicate",
+    "ToolResult",
+    "TrustedSessionOptions",
+    "TypeTextInput",
+    "UnknownReason",
+    "VerificationStatus",
+    "VerifyStateInput",
+    "VerifyStateOutput",
+    "WindowPredicate",
+    "__version__",
+    "create_trusted_session",
+    "connect_remote_channel",
+    "create_remote_trusted_session",
+    "current_mac_os_permission_status",
+    "get_binary_path",
+    "open_mac_os_screen_recording_settings",
+    "request_mac_os_permissions",
+    "run_pincer",
+    "CursorEase",
+    "CursorEffectFrame",
+    "CursorGlow",
+    "CursorHeading",
+    "CursorMagnet",
+    "CursorMotionDuration",
+    "CursorMotionParams",
+    "CursorMotionPoint",
+    "CursorMotionRect",
+    "CursorMotionSample",
+    "CursorMotionSpec",
+    "CursorMoveRequest",
+    "CursorPathShape",
+    "CursorRipple",
+    "CursorSettle",
+    "CursorTrailSegment",
+    "CursorTrailSpec",
+    "CursorTrajectory",
+    "cursor_click_effects",
+    "cursor_motion_spec_for_style",
+    "default_cursor_motion_params",
+    "plan_cursor_move",
+    "plan_cursor_spec",
+    "CursorMotionEffectsOutput",
+]

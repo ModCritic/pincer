@@ -24,7 +24,7 @@ void check(bool condition, const std::string& message) {
 }
 
 void reset_registered_command() {
-#if CUA_HYPRLAND_SOCKET1_API
+#if PINCER_HYPRLAND_SOCKET1_API
     HyprlandAPI::registered_command.reset();
 #else
     HyprlandAPI::registered_legacy_command.reset();
@@ -32,20 +32,20 @@ void reset_registered_command() {
 }
 
 bool status_command_registered() {
-#if CUA_HYPRLAND_SOCKET1_API
+#if PINCER_HYPRLAND_SOCKET1_API
     return HyprlandAPI::registered_command &&
-           HyprlandAPI::registered_command->name == "cua:status" &&
+           HyprlandAPI::registered_command->name == "pincer:status" &&
            HyprlandAPI::registered_command->match ==
                IPC::Socket1::COMMAND_MATCH_EXACT;
 #else
     return HyprlandAPI::registered_legacy_command &&
-           HyprlandAPI::registered_legacy_command->name == "cua:status" &&
+           HyprlandAPI::registered_legacy_command->name == "pincer:status" &&
            HyprlandAPI::registered_legacy_command->exact;
 #endif
 }
 
 std::string json_status() {
-#if CUA_HYPRLAND_SOCKET1_API
+#if PINCER_HYPRLAND_SOCKET1_API
     const auto response = HyprlandAPI::registered_command->handler(
         IPC::Socket1::SRequest{.format = IPC::Socket1::FORMAT_JSON});
     return std::get<std::string>(response.result);
@@ -63,7 +63,7 @@ struct RuntimeTree {
 
 RuntimeTree make_runtime_tree() {
     std::array<char, 64> pattern{};
-    const auto seed = std::string{"/tmp/cua-hyprland-plugin-api-XXXXXX"};
+    const auto seed = std::string{"/tmp/pincer-hyprland-plugin-api-XXXXXX"};
     std::copy(seed.begin(), seed.end(), pattern.begin());
     const auto* root = mkdtemp(pattern.data());
     check(root != nullptr, "plugin API test runtime directory created");
@@ -73,7 +73,7 @@ RuntimeTree make_runtime_tree() {
         .hypr = std::string{root} + "/hypr",
         .instance = std::string{root} + "/hypr/mock-instance",
         .socket = std::string{root} +
-                  "/hypr/mock-instance/cua-inject-v2.sock",
+                  "/hypr/mock-instance/pincer-inject-v2.sock",
     };
     check(mkdir(tree.hypr.c_str(), 0700) == 0,
           "plugin API test Hyprland directory created");
@@ -99,7 +99,7 @@ int main() {
 
     HyprlandAPI::runtime_abi_hash = __hyprland_api_get_client_hash();
     const auto description = pluginInit(nullptr);
-    check(description.name == "cua-hyprland-plugin" &&
+    check(description.name == "pincer-hyprland-plugin" &&
               description.version == "0.1.0",
           "matching ABI initializes plugin metadata");
     check(status_command_registered(),
@@ -191,6 +191,6 @@ int main() {
     unsetenv("XDG_RUNTIME_DIR");
     unsetenv("HYPRLAND_INSTANCE_SIGNATURE");
 
-    std::cout << "cua-hyprland-plugin API tests passed\n";
+    std::cout << "pincer-hyprland-plugin API tests passed\n";
     return 0;
 }

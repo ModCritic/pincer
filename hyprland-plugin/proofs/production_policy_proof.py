@@ -56,8 +56,8 @@ CASES = ('no_manifest_allow', 'resource_allow', 'resource_wrong_pid', 'resource_
          'managed_allow', 'managed_deny')
 DENIALS = frozenset(('resource_wrong_pid', 'resource_wrong_window', 'managed_deny'))
 TOOLS = ['get_window_state', 'type_text', 'press_key', 'hotkey']
-MANAGED_ENV = 'CUA_DRIVER_MANAGED_POLICY_FILE'
-POLICY_ENV = (MANAGED_ENV, 'CUA_DRIVER_POLICY_FILE')
+MANAGED_ENV = 'PINCER_MANAGED_POLICY_FILE'
+POLICY_ENV = (MANAGED_ENV, 'PINCER_POLICY_FILE')
 # Bound Inkscape observations except before select and move: their grounding
 # needs trailing menu nodes and selection status that the cap can omit. Keep
 # default depth and images, and fail closed if either grounding check is unavailable.
@@ -78,7 +78,7 @@ def validate_plan(plan):
     assert type(plan['target']['pid']) is int and 0 < plan['target']['pid'] <= 2**31 - 1
     assert type(plan['target']['window_id']) is int and 0 < plan['target']['window_id'] <= 2**64 - 1
     assert isinstance(plan['document'], str) and Path(plan['document']).is_absolute()
-    expected_name = 'cua-smoke-calc.ods' if plan['app'] == 'calc' else 'cua-smoke-inkscape.svg'
+    expected_name = 'pincer-smoke-calc.ods' if plan['app'] == 'calc' else 'pincer-smoke-inkscape.svg'
     assert Path(plan['document']).name == expected_name, 'requires the canonical synthetic document'
 
 

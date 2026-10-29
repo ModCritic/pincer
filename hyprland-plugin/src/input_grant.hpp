@@ -3,7 +3,7 @@
 #include <chrono>
 #include <cstdint>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 // Technical per-dispatch lifetime, not an independent permission policy.
 class InputGrant {
   public:
@@ -34,4 +34,4 @@ class InputGrant {
     std::uint64_t capability_ = 0;
     Clock::time_point deadline_{};
 };
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

@@ -34,8 +34,8 @@
 
 use std::sync::OnceLock;
 
-use cua_driver_core::cursor_shape::SystemCursorShape;
-use cua_driver_core::pointer_shape::{BackendNames, HitTest, PointerShapeBackend, ScreenRect};
+use pincer_core::cursor_shape::SystemCursorShape;
+use pincer_core::pointer_shape::{BackendNames, HitTest, PointerShapeBackend, ScreenRect};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -206,6 +206,6 @@ fn control_type_name(id: i32) -> &'static str {
 
 /// Install the Windows backend and the system cursor probe.
 pub fn install() -> bool {
-    cua_driver_core::cursor_shape::set_cursor_shape_probe(current_shape);
-    cua_driver_core::pointer_shape::set_pointer_shape_backend(WindowsPointerShapes)
+    pincer_core::cursor_shape::set_cursor_shape_probe(current_shape);
+    pincer_core::pointer_shape::set_pointer_shape_backend(WindowsPointerShapes)
 }

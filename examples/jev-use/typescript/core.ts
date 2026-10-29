@@ -160,7 +160,7 @@ export function parseVisualRegions(
   expectedWindowId: number
 ): VisualObservation {
   const root = record(payload, 'visual result is not an object');
-  if (root.schema !== 'cua.visual_regions_v1') throw new Error('unsupported visual region schema');
+  if (root.schema !== 'pincer.visual_regions_v1') throw new Error('unsupported visual region schema');
   const capture = record(root.capture, 'visual result has no capture provenance');
   if (capture.capture_id !== expectedCaptureId) {
     throw new VisualObservationError(

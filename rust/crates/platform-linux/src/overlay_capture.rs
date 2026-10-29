@@ -353,7 +353,7 @@ pub fn verify_hidden_capture_at(
     if replaced == 0 {
         return (png, ResidualCheck::Clean);
     }
-    match cua_driver_core::image_utils::encode_rgba_to_png(&rgba, width, height) {
+    match pincer_core::image_utils::encode_rgba_to_png(&rgba, width, height) {
         Ok(repaired) => (
             repaired,
             ResidualCheck::Repaired {

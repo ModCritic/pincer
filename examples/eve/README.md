@@ -1,10 +1,10 @@
-# Cua Driver tools for an Eve agent
+# Pincer tools for an Eve agent
 
-This example gives an [Eve](https://eve.dev) agent four Cua Driver tools that
+This example gives an [Eve](https://eve.dev) agent four Pincer tools that
 sit on the model's tool list from the first turn: `get_desktop_state`,
 `click`, `type_text` and `press_key`. Each tool is an Eve
 [`defineTool`](https://eve.dev/docs/tools.md) file that calls the in-process
-`@trycua/cua-driver` TypeScript SDK. The tool set and its action rules match
+`pincer-driver` TypeScript SDK. The tool set and its action rules match
 [`../agent-sdks/native-tools.ts`](../agent-sdks/native-tools.ts), the Claude
 Agent SDK adapter.
 
@@ -17,7 +17,7 @@ support.
 Eve [connections](https://eve.dev/docs/connections.md) reach MCP or OpenAPI
 servers by URL. The model does not see connection tools on its
 default tool list. It finds them through the built-in `connection_search` tool
-and calls them as `<connection>__<tool>`. `cua-driver mcp` is a local stdio
+and calls them as `<connection>__<tool>`. `pincer mcp` is a local stdio
 server, so Eve needs an HTTP bridge to reach it, and the agent still has to
 search before its first desktop action.
 
@@ -47,7 +47,8 @@ summary and each screenshot to the model as content parts.
 
 You need Node.js 24 or newer. The Eve app runtime must run on the computer it
 controls, for example through `eve dev` or a self-hosted Eve service on that
-machine. A hosted deployment cannot reach your desktop.
+machine. A hosted deployment cannot reach your desktop. `npm install` takes the
+SDK from this repository's `typescript/` folder, so build it there first.
 
 ```bash
 npm install
@@ -69,7 +70,7 @@ model.
 ## Behavior to know before you rely on it
 
 - **One Driver client per process.** `agent/lib/desktop.ts` creates one
-  `CuaDriver` client on first use. All Eve sessions served by that process
+  `Pincer` client on first use. All Eve sessions served by that process
   share its implicit Driver session, just as they share the one desktop.
 - **Screenshots stay in history.** Eve keeps each image in session history
   and re-sends it on later model calls, and it warns about payloads above
@@ -103,8 +104,8 @@ Eve's built-in tools.
 - **A packaged tool set.** An Eve
   [extension](https://eve.dev/docs/extensions.md) can ship tools, skills and
   instructions in one npm package. Consumers mount it under a name, which
-  becomes a tool prefix such as `cua__click`. Whether Cua ships an extension,
-  a `@trycua/cua-driver/eve` subpath, or a generator is an open question in
+  becomes a tool prefix such as `pincer__click`. Whether Pincer ships an extension,
+  a `pincer-driver/eve` subpath, or a generator is an open question in
   #4267.
 - **Driver skills.** Eve reads `SKILL.md` skills from `agent/skills/`. The
   Driver skills are written for the CLI and MCP tool names, not these four

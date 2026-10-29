@@ -255,7 +255,7 @@ fn watch_order_after_action(target: i32, front: i32, order: bool, epoch: u64) {
         }
     }
     let spawned = std::thread::Builder::new()
-        .name("cua-order-watch".into())
+        .name("pincer-order-watch".into())
         .spawn(move || {
             // Some apps re-raise right after each restore (a Chromium popup
             // that stays open); cap the restores so the user's app is not
@@ -453,7 +453,7 @@ impl Drop for Lease {
 /// when there is no other frontmost app, or when the SPIs or the event tap are
 /// unavailable; the action then runs exactly as before.
 pub fn protect(target_pid: i32) -> Option<Lease> {
-    if std::env::var_os("CUA_DRIVER_DISABLE_KEY_FOCUS_GUARD").is_some() {
+    if std::env::var_os("PINCER_DISABLE_KEY_FOCUS_GUARD").is_some() {
         return None;
     }
     let own = std::process::id() as i32;
@@ -613,7 +613,7 @@ extern "C" fn tap_callback(
             // front, which raises the target's window over the user's.
             let thief_pid = thief as i32;
             let spawned = std::thread::Builder::new()
-                .name("cua-key-focus-release".into())
+                .name("pincer-key-focus-release".into())
                 .spawn(move || {
                     wait_for_menu_window(thief_pid, MENU_WAIT);
                     let front = lock().tap.as_ref().map(|tap| tap.pid);
@@ -724,7 +724,7 @@ fn spawn_tap(
 ) -> Option<Tap> {
     let (tx, rx) = std::sync::mpsc::channel::<Option<(usize, usize)>>();
     let spawned = std::thread::Builder::new()
-        .name("cua-key-focus-guard".into())
+        .name("pincer-key-focus-guard".into())
         .spawn(move || unsafe {
             let mask = 1u64 << FOCUS_NOTICE_TYPE;
             // kCGHeadInsertEventTap = 0, kCGEventTapOptionDefault = 0.
@@ -773,7 +773,7 @@ fn stop_tap(tap: Tap) {
 /// does not keep a tap on the user's app between tasks.
 fn schedule_idle_teardown() {
     let _ = std::thread::Builder::new()
-        .name("cua-key-focus-guard-idle".into())
+        .name("pincer-key-focus-guard-idle".into())
         .spawn(|| {
             std::thread::sleep(TAIL + Duration::from_secs(1));
             let mut st = lock();

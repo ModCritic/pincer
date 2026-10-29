@@ -6,13 +6,13 @@ import { TypeSafeClient } from '@typesafe-ai/sdk';
 import { chooseBoundedWithTypeSafe, type ProviderChoice } from './jev_adapter.js';
 import { ROLE_CLASSES, type RoleClass } from './native_roles.js';
 
-export const REQUEST_SCHEMA = 'cua.jev_choice_request_v1';
+export const REQUEST_SCHEMA = 'pincer.jev_choice_request_v1';
 // Additive over v1 (RFC #4268): per-candidate `source`, an optional root
 // `snapshot_id`, an optional compact `elements` list of native controls, and
 // an optional `progress` list of task steps counted from the runner's own
 // performed actions (#4313).
-export const REQUEST_SCHEMA_V2 = 'cua.jev_choice_request_v2';
-export const RESPONSE_SCHEMA = 'cua.jev_choice_v1';
+export const REQUEST_SCHEMA_V2 = 'pincer.jev_choice_request_v2';
+export const RESPONSE_SCHEMA = 'pincer.jev_choice_v1';
 const MAX_INPUT_BYTES = 65_536;
 const MAX_CANDIDATES = 32;
 const MAX_REGIONS = 100;
@@ -140,7 +140,7 @@ function validateProgress(value: unknown): ProgressItem[] {
 }
 
 /**
- * Validate a cua.jev_choice_request_v1 or _v2 request strictly. v1 is
+ * Validate a pincer.jev_choice_request_v1 or _v2 request strictly. v1 is
  * unchanged, so any v2 field in a v1 request is rejected. v2 may add a root
  * snapshot_id, elements, and progress and a per-candidate source; reserved
  * candidates never carry a source.

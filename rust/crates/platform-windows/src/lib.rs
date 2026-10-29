@@ -1,4 +1,4 @@
-//! Windows platform backend for cua-driver-rs.
+//! Windows platform backend for pincer.
 //!
 //! Background automation on Windows via:
 //! - UI Automation (UIA / MSAA) for accessibility tree walking
@@ -18,10 +18,10 @@
 // lints stay enforced.
 #![cfg_attr(not(target_os = "windows"), allow(dead_code, unused_variables))]
 // Tool helpers return `Result<_, ToolResult>`: the error arm is the finished
-// tool reply (see the note in cua-driver-core), not a propagated error.
+// tool reply (see the note in pincer-core), not a propagated error.
 #![allow(clippy::result_large_err)]
 
-use cua_driver_core::tool::ToolRegistry;
+use pincer_core::tool::ToolRegistry;
 
 pub mod diagnostics;
 pub mod health_report;
@@ -57,7 +57,7 @@ pub mod pointer_shape;
 
 /// Install the Windows presence pointer-shape backend (UIA hit-test,
 /// `GetCursorInfo` readout, `SetCursorPos` warp) into
-/// `cua_driver_core::pointer_shape`. Returns false off Windows or when a
+/// `pincer_core::pointer_shape`. Returns false off Windows or when a
 /// backend was already installed.
 pub fn install_pointer_shape_backend() -> bool {
     #[cfg(target_os = "windows")]
@@ -141,7 +141,7 @@ pub fn register_tools_with_cursor(cfg: cursor_overlay::CursorConfig, compat: boo
 }
 
 pub fn register_tools_with_cursor_and_provider(
-    provider: Option<std::sync::Arc<dyn cua_driver_core::consent::ProtectedConsentProvider>>,
+    provider: Option<std::sync::Arc<dyn pincer_core::consent::ProtectedConsentProvider>>,
     cfg: cursor_overlay::CursorConfig,
     compat: bool,
 ) -> ToolRegistry {

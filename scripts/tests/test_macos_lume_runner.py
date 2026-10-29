@@ -110,11 +110,11 @@ def test_tcc_guest_seed_sql_executes_against_modern_tcc_schema(tmp_path: Path) -
     verify_sql = _guest_seed_assignment("VERIFY_SQL")
     # The seed targets the local developer build unless told otherwise.
     assert re.search(
-        r'^EXPECTED_CLIENT="\$\{CUA_TCC_EXPECTED_CLIENT:-com\.trycua\.driver\.local\}"$',
+        r'^EXPECTED_CLIENT="\$\{PINCER_TCC_EXPECTED_CLIENT:-io\.github\.modcritic\.pincer\.local\}"$',
         SEED_TCC_GUEST.read_text(encoding="utf-8"),
         re.MULTILINE,
     )
-    client = "com.trycua.driver.local"
+    client = "io.github.modcritic.pincer.local"
     client_type = "0"
     csreq_hex = "01020304"
     substitutions = {
@@ -196,15 +196,15 @@ def test_tcc_guest_seed_requires_certificate_backed_requirement_by_default() -> 
 
 
 # The designated requirement codesign derives for the released, notarized
-# CuaDriver.app (Developer ID Application: Cua AI, Inc.).
+# Pincer.app (Developer ID Application: Cua AI, Inc.).
 RELEASED_DEVELOPER_ID_DR = (
-    'identifier "com.trycua.driver" and anchor apple generic and '
+    'identifier "io.github.modcritic.pincer" and anchor apple generic and '
     "certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and "
     "certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and "
     "certificate leaf[subject.OU] = YCK386LBJ7"
 )
 LOCAL_LEAF_HASH_DR = (
-    'identifier "com.trycua.driver.local" and '
+    'identifier "io.github.modcritic.pincer.local" and '
     'certificate leaf = H"0123456789abcdef0123456789abcdef01234567"'
 )
 
@@ -223,7 +223,7 @@ def _classify_requirement(requirement: str, identifier: str = "") -> subprocess.
         ],
         capture_output=True,
         text=True,
-        env={**os.environ, "CUA_TCC_SEED_LIB_ONLY": "1"},
+        env={**os.environ, "PINCER_TCC_SEED_LIB_ONLY": "1"},
         check=False,
     )
 
@@ -231,19 +231,19 @@ def _classify_requirement(requirement: str, identifier: str = "") -> subprocess.
 @pytest.mark.parametrize(
     ("requirement", "identifier", "kind"),
     [
-        pytest.param(RELEASED_DEVELOPER_ID_DR, "com.trycua.driver", "developer-id", id="released-developer-id"),
+        pytest.param(RELEASED_DEVELOPER_ID_DR, "io.github.modcritic.pincer", "developer-id", id="released-developer-id"),
         pytest.param(RELEASED_DEVELOPER_ID_DR, "", "developer-id", id="released-developer-id-no-identifier"),
         pytest.param(
             RELEASED_DEVELOPER_ID_DR.replace("= YCK386LBJ7", '= "YCK386LBJ7"'),
-            "com.trycua.driver",
+            "io.github.modcritic.pincer",
             "developer-id",
             id="quoted-team-id",
         ),
-        pytest.param(LOCAL_LEAF_HASH_DR, "com.trycua.driver.local", "leaf-hash", id="local-leaf-hash"),
+        pytest.param(LOCAL_LEAF_HASH_DR, "io.github.modcritic.pincer.local", "leaf-hash", id="local-leaf-hash"),
         pytest.param(
-            'identifier "com.trycua.driver.local" and anchor apple generic and '
+            'identifier "io.github.modcritic.pincer.local" and anchor apple generic and '
             'certificate root = H"89abcdef0123456789abcdef0123456789abcdef"',
-            "com.trycua.driver.local",
+            "io.github.modcritic.pincer.local",
             "leaf-hash",
             id="root-hash",
         ),
@@ -262,42 +262,42 @@ def test_tcc_guest_seed_accepts_certificate_backed_requirements(
     [
         pytest.param('cdhash H"0123456789abcdef0123456789abcdef01234567"', "", id="adhoc-cdhash"),
         pytest.param(
-            'identifier "com.trycua.driver.local" and cdhash H"0123456789abcdef0123456789abcdef01234567"',
-            "com.trycua.driver.local",
+            'identifier "io.github.modcritic.pincer.local" and cdhash H"0123456789abcdef0123456789abcdef01234567"',
+            "io.github.modcritic.pincer.local",
             id="adhoc-identifier-cdhash",
         ),
         pytest.param("", "", id="empty"),
         pytest.param(
             RELEASED_DEVELOPER_ID_DR.replace("YCK386LBJ7", "YCK386LBJ"),
-            "com.trycua.driver",
+            "io.github.modcritic.pincer",
             id="short-team-id",
         ),
         pytest.param(
             RELEASED_DEVELOPER_ID_DR.replace("YCK386LBJ7", "yck386lbj7"),
-            "com.trycua.driver",
+            "io.github.modcritic.pincer",
             id="lowercase-team-id",
         ),
         pytest.param(
             RELEASED_DEVELOPER_ID_DR.replace("YCK386LBJ7", "YCK386LBJ7 or cdhash H\"00\""),
-            "com.trycua.driver",
+            "io.github.modcritic.pincer",
             id="trailing-disjunction",
         ),
         pytest.param(
             RELEASED_DEVELOPER_ID_DR.replace("= YCK386LBJ7", '= "YCK386LBJ7'),
-            "com.trycua.driver",
+            "io.github.modcritic.pincer",
             id="unbalanced-quote",
         ),
         pytest.param(
             RELEASED_DEVELOPER_ID_DR.replace("anchor apple generic and ", ""),
-            "com.trycua.driver",
+            "io.github.modcritic.pincer",
             id="missing-apple-anchor",
         ),
         pytest.param(
-            RELEASED_DEVELOPER_ID_DR.replace('identifier "com.trycua.driver" and ', ""),
+            RELEASED_DEVELOPER_ID_DR.replace('identifier "io.github.modcritic.pincer" and ', ""),
             "",
             id="missing-identifier",
         ),
-        pytest.param(RELEASED_DEVELOPER_ID_DR, "com.trycua.driver.local", id="identifier-mismatch"),
+        pytest.param(RELEASED_DEVELOPER_ID_DR, "io.github.modcritic.pincer.local", id="identifier-mismatch"),
     ],
 )
 def test_tcc_guest_seed_rejects_non_certificate_backed_requirements(
@@ -313,7 +313,7 @@ def test_tcc_guest_seed_library_mode_fails_closed_when_executed() -> None:
         ["bash", str(SEED_TCC_GUEST)],
         capture_output=True,
         text=True,
-        env={**os.environ, "CUA_TCC_SEED_LIB_ONLY": "1"},
+        env={**os.environ, "PINCER_TCC_SEED_LIB_ONLY": "1"},
         check=False,
     )
     assert completed.returncode == 2
@@ -380,7 +380,7 @@ def test_tcc_host_seed_runs_the_guest_helper_once_per_vm(tmp_path: Path) -> None
     _forward_jq(fake_bin)
     _write_executable(
         fake_lume,
-        """printf 'lume %s\n' "$*" >> "$CUA_TEST_TRANSPORT_LOG"
+        """printf 'lume %s\n' "$*" >> "$PINCER_TEST_TRANSPORT_LOG"
 if [ "$1" = "get" ]; then
   case "$2" in
     worker-a) ip="192.0.2.10" ;;
@@ -393,13 +393,13 @@ fi
     )
     _write_executable(
         fake_scp,
-        """printf 'scp askpass=%s pass=%s %s\n' "${SSH_ASKPASS_REQUIRE:-}" "${CUA_TCC_SSH_PASSWORD:-}" "$*" >> "$CUA_TEST_TRANSPORT_LOG"
+        """printf 'scp askpass=%s pass=%s %s\n' "${SSH_ASKPASS_REQUIRE:-}" "${PINCER_TCC_SSH_PASSWORD:-}" "$*" >> "$PINCER_TEST_TRANSPORT_LOG"
 """,
     )
     _write_executable(
         fake_ssh,
         """stdin="$(cat || true)"
-printf 'ssh askpass=%s pass=%s stdin=%s %s\n' "${SSH_ASKPASS_REQUIRE:-}" "${CUA_TCC_SSH_PASSWORD:-}" "$stdin" "$*" >> "$CUA_TEST_TRANSPORT_LOG"
+printf 'ssh askpass=%s pass=%s stdin=%s %s\n' "${SSH_ASKPASS_REQUIRE:-}" "${PINCER_TCC_SSH_PASSWORD:-}" "$stdin" "$*" >> "$PINCER_TEST_TRANSPORT_LOG"
 """,
     )
 
@@ -418,8 +418,8 @@ printf 'ssh askpass=%s pass=%s stdin=%s %s\n' "${SSH_ASKPASS_REQUIRE:-}" "${CUA_
         env={
             **os.environ,
             "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "CUA_TEST_TRANSPORT_LOG": str(log),
-            "CUA_TCC_SUDO_PASSWORD": "fixture-password",
+            "PINCER_TEST_TRANSPORT_LOG": str(log),
+            "PINCER_TCC_SUDO_PASSWORD": "fixture-password",
             "LUME_SSH_USER": "lume",
             "LUME_STORAGE": "",
         },
@@ -432,17 +432,17 @@ printf 'ssh askpass=%s pass=%s stdin=%s %s\n' "${SSH_ASKPASS_REQUIRE:-}" "${CUA_
     assert calls[0] == "lume get worker-a --format json"
     assert calls[1].startswith("scp askpass=force pass=lume -o StrictHostKeyChecking=no ")
     assert "seed-tcc-guest.sh" in calls[1]
-    assert calls[1].endswith(" lume@192.0.2.10:/tmp/cua-driver-seed-tcc-guest.sh")
-    assert calls[2].endswith(" lume@192.0.2.10 chmod 700 /tmp/cua-driver-seed-tcc-guest.sh")
+    assert calls[1].endswith(" lume@192.0.2.10:/tmp/pincer-seed-tcc-guest.sh")
+    assert calls[2].endswith(" lume@192.0.2.10 chmod 700 /tmp/pincer-seed-tcc-guest.sh")
     assert "stdin=fixture-password" in calls[3]
-    assert "CUA_TCC_READ_SUDO_PASSWORD=1 /tmp/cua-driver-seed-tcc-guest.sh" in calls[3]
-    assert calls[4].endswith(" lume@192.0.2.10 /bin/rm -f /tmp/cua-driver-seed-tcc-guest.sh")
+    assert "PINCER_TCC_READ_SUDO_PASSWORD=1 /tmp/pincer-seed-tcc-guest.sh" in calls[3]
+    assert calls[4].endswith(" lume@192.0.2.10 /bin/rm -f /tmp/pincer-seed-tcc-guest.sh")
     assert calls[5] == "lume get worker-b --format json"
-    assert calls[6].endswith(" lume@192.0.2.11:/tmp/cua-driver-seed-tcc-guest.sh")
-    assert calls[7].endswith(" lume@192.0.2.11 chmod 700 /tmp/cua-driver-seed-tcc-guest.sh")
+    assert calls[6].endswith(" lume@192.0.2.11:/tmp/pincer-seed-tcc-guest.sh")
+    assert calls[7].endswith(" lume@192.0.2.11 chmod 700 /tmp/pincer-seed-tcc-guest.sh")
     assert "stdin=fixture-password" in calls[8]
-    assert "CUA_TCC_READ_SUDO_PASSWORD=1 /tmp/cua-driver-seed-tcc-guest.sh" in calls[8]
-    assert calls[9].endswith(" lume@192.0.2.11 /bin/rm -f /tmp/cua-driver-seed-tcc-guest.sh")
+    assert "PINCER_TCC_READ_SUDO_PASSWORD=1 /tmp/pincer-seed-tcc-guest.sh" in calls[8]
+    assert calls[9].endswith(" lume@192.0.2.11 /bin/rm -f /tmp/pincer-seed-tcc-guest.sh")
 
 
 # --------------------------------------------------------------------------
@@ -456,5 +456,5 @@ def test_fixture_builds_use_fresh_run_owned_state() -> None:
     assert ELECTRON_LOCK.is_file()
     assert 'tauriTargetDir="${CARGO_TARGET_DIR:-' in tauri
     assert 'srcBin="$tauriTargetDir/release/' in tauri
-    assert 'CUA_E2E_FRESH_FIXTURE_STATE:-0}" == 1' in electron
+    assert 'PINCER_E2E_FRESH_FIXTURE_STATE:-0}" == 1' in electron
     assert "npm ci --silent" in electron

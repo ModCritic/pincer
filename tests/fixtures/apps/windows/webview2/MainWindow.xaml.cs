@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
 
-namespace CuaTestHarness.WebView;
+namespace PincerTestHarness.WebView;
 
 public partial class MainWindow : Window
 {
@@ -19,7 +19,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            // Read the CDP port from CUA_WEBVIEW_CDP_PORT (default 9222).
+            // Read the CDP port from PINCER_WEBVIEW_CDP_PORT (default 9222).
             // This is the analogue of launching Chrome with
             // --remote-debugging-port, for tests that reach this host's
             // page through CDP.
@@ -28,18 +28,18 @@ public partial class MainWindow : Window
             // fixed port and don't read DevToolsActivePort. Reject 0 + any
             // non-numeric input here so failures are diagnosed at startup
             // rather than as opaque "CDP discovery timed out" later.
-            var portStr = Environment.GetEnvironmentVariable("CUA_WEBVIEW_CDP_PORT") ?? "9222";
+            var portStr = Environment.GetEnvironmentVariable("PINCER_WEBVIEW_CDP_PORT") ?? "9222";
             if (!ushort.TryParse(portStr, out var cdpPort) || cdpPort == 0)
             {
                 throw new InvalidOperationException(
-                    $"Invalid CUA_WEBVIEW_CDP_PORT: '{portStr}'. Expected an integer in 1-65535.");
+                    $"Invalid PINCER_WEBVIEW_CDP_PORT: '{portStr}'. Expected an integer in 1-65535.");
             }
             // WebView2 requires every process sharing a user-data directory to
             // use identical environment options. Each fixture gets a different
             // CDP port, so isolate its browser environment by process and port.
             var userData = Path.Combine(
                 Path.GetTempPath(),
-                "CuaTestHarness.WebView.UserData",
+                "PincerTestHarness.WebView.UserData",
                 $"{Environment.ProcessId}-{cdpPort}");
             Directory.CreateDirectory(userData);
             var opts = new CoreWebView2EnvironmentOptions
@@ -51,13 +51,13 @@ public partial class MainWindow : Window
 
             // The Rust E2E harness owns the loopback receiver. Publish DOM state
             // through the shared fixture script so click delivery is judged
-            // independently of cua-driver's UIA or CDP read-back channels.
-            var journalUrl = Environment.GetEnvironmentVariable("CUA_E2E_FIXTURE_JOURNAL_URL");
+            // independently of pincer's UIA or CDP read-back channels.
+            var journalUrl = Environment.GetEnvironmentVariable("PINCER_E2E_FIXTURE_JOURNAL_URL");
             if (!string.IsNullOrWhiteSpace(journalUrl))
             {
                 var encodedJournalUrl = JsonSerializer.Serialize(journalUrl);
                 await Wv.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
-                    $"window.__CUA_E2E_FIXTURE_JOURNAL_URL = {encodedJournalUrl};");
+                    $"window.__PINCER_E2E_FIXTURE_JOURNAL_URL = {encodedJournalUrl};");
             }
 
             var htmlPath = Path.Combine(AppContext.BaseDirectory, "web", "index.html");
@@ -88,7 +88,7 @@ public partial class MainWindow : Window
                     $"Web fixture navigation failed: {navigationResult.WebErrorStatus}");
             }
             LblPageUrl.Text = fileUri;
-            Title = $"CuaTestHarness WebView [ready cdp={cdpPort}]";
+            Title = $"PincerTestHarness WebView [ready cdp={cdpPort}]";
         }
         catch (Exception ex)
         {

@@ -1,7 +1,7 @@
-# Cua Hyprland plugin
+# Pincer Hyprland plugin
 
 This directory is the source of truth for an optional, experimental Hyprland
-plugin. The plugin is disabled by default and is not part of the portable Cua
+plugin. The plugin is disabled by default and is not part of the portable Pincer
 Driver installation. It must be built for the exact Hyprland version that will
 load it; a plugin built against another Hyprland ABI must fail closed rather
 than attempt to run. Load checks compare Hyprland's full client/server ABI
@@ -20,7 +20,7 @@ liveness, but rejects input mutation with the typed `background_unavailable`
 result. Here, discovery means negotiation, status, and liveness, not
 application target discovery or input delivery.
 
-This branch adds an opt-in [input v3 candidate](protocol/cua-input-v3.md) using
+This branch adds an opt-in [input v3 candidate](protocol/pincer-input-v3.md) using
 Driver's existing per-action permission checks and two independent compositor
 seats. It does not require a signer or an Omarchy-specific approval panel.
 The candidate remains experimental and unreleased. A source version of
@@ -37,8 +37,8 @@ source `f180e8828b8f31cc153e3c44eaa89a9c13c5bc68`, with an unchanged plugin
 tree and uninstrumented module hash at
 `1133a06e4f205cf80188a7ac9e41102f37611fea`. Raw background qualification is
 limited to native Calc from `libreoffice-fresh 26.2.5-3`, Inkscape `1.4.4-6`,
-the plain compiled `evdev`/`pc105`/`us` keymap, and the two seats `Cua-Agent`
-and `Cua-Agent-2`. The proof covers the recorded actions and observation
+the plain compiled `evdev`/`pc105`/`us` keymap, and the two seats `Pincer-Agent`
+and `Pincer-Agent-2`. The proof covers the recorded actions and observation
 intervals. Chromium, Electron, and XWayland raw background input remain
 unqualified; semantic AT-SPI actions are separate.
 
@@ -67,7 +67,7 @@ tested artifacts and remaining gates, not production certification.
 
 This design builds on Dillon DuPont's Hyprland injection prototype. That credit
 records the prototype lineage; it does not claim that the prototype or input
-mutation support has shipped in Cua Driver.
+mutation support has shipped in Pincer.
 
 ## Build
 
@@ -83,7 +83,7 @@ cmake --build build
 
 To compile the production-protocol candidate in a disposable test environment,
 add `-DCUA_HYPRLAND_INPUT=ON`. This is separate from
-`CUA_HYPRLAND_TEST_INPUT`; selecting both refuses. Detailed event measurement
+`PINCER_HYPRLAND_TEST_INPUT`; selecting both refuses. Detailed event measurement
 also requires `-DCUA_HYPRLAND_INPUT_TRACE=ON`. Do not ship that instrumentation
 in the production package. Neither build option loads or enables the plugin.
 
@@ -122,17 +122,17 @@ Loading is always an explicit operator action. For a local build, substitute
 the actual module path emitted by CMake:
 
 ```bash
-hyprctl plugin load "$PWD/build/cua-hyprland-plugin.so"
-hyprctl -j cua:status
-hyprctl plugin unload "$PWD/build/cua-hyprland-plugin.so"
+hyprctl plugin load "$PWD/build/pincer-hyprland-plugin.so"
+hyprctl -j pincer:status
+hyprctl plugin unload "$PWD/build/pincer-hyprland-plugin.so"
 ```
 
 For the Arch development package, use:
 
 ```bash
-hyprctl plugin load /usr/lib/cua/hyprland/cua-hyprland-plugin.so
-hyprctl -j cua:status
-hyprctl plugin unload /usr/lib/cua/hyprland/cua-hyprland-plugin.so
+hyprctl plugin load /usr/lib/pincer/hyprland/pincer-hyprland-plugin.so
+hyprctl -j pincer:status
+hyprctl plugin unload /usr/lib/pincer/hyprland/pincer-hyprland-plugin.so
 ```
 
 Do not add a `plugin =` line to Hyprland configuration until the ABI match and
@@ -141,7 +141,7 @@ may be refused by Hyprland or fail during load. If load fails after a Hyprland
 upgrade, leave it unloaded, rebuild against the new exact package, and retry.
 The portable driver remains available without this plugin.
 
-`hyprctl -j cua:status` is the authoritative runtime status surface. Consumers
+`hyprctl -j pincer:status` is the authoritative runtime status surface. Consumers
 must check its compositor epoch, protocol version, advertised capabilities,
 socket path, discovery-only state, and ABI identity before connecting. A loaded
 module alone is not evidence that target discovery or mutation is available.
@@ -165,13 +165,13 @@ disposable session, set the following and reload the configuration after the
 plugin loads. For Omarchy's Lua configuration, add:
 
 ```lua
-hl.config({plugin = {cua = {enabled = true}}})
+hl.config({plugin = {pincer = {enabled = true}}})
 ```
 
 For a legacy Hyprland configuration, use:
 
 ```text
-plugin:cua:enabled = true
+plugin:pincer:enabled = true
 ```
 
 Run `hyprctl reload` after editing the configuration. The plugin reconciles
@@ -189,11 +189,11 @@ and operations outside its qualification scope.
 ## Security boundary
 
 - The socket lives at
-  `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/cua-inject-v2.sock` for
+  `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/pincer-inject-v2.sock` for
   the current Hyprland instance, not in a global temporary directory, and is
   created with mode `0600`.
 - The server verifies `SO_PEERCRED` and accepts only peers with the compositor
-  user's UID. This authenticates only the local Unix user, not a particular Cua
+  user's UID. This authenticates only the local Unix user, not a particular Pincer
   process. Filesystem permissions are defense in depth, not authorization.
 - The default foundation remains mutation-free. The separate v3 candidate
   uses normal Driver policy plus per-action compositor target binding. It does
@@ -216,16 +216,16 @@ and operations outside its qualification scope.
 - A transport acknowledgement proves only receipt and validation. Application
   behavior requires a separate typed result and independent state evidence.
 
-The wire contract is documented in `protocol/cua-inject-v2.md`.
+The wire contract is documented in `protocol/pincer-inject-v2.md`.
 
 ## Relationship to current Hyprland support
 
-Existing Cua Driver paths for capture, target identity, foreground input, and
+Existing Pincer paths for capture, target identity, foreground input, and
 AT-SPI semantic actions are separate from this plugin. A semantic action can
 sometimes update a background application's accessibility object without raw
 pointer or keyboard synthesis; that does not prove isolated synthetic input.
 
-Validate stock Cua Driver `0.23.2` desktop capture, window enumeration,
+Validate stock Pincer `0.23.2` desktop capture, window enumeration,
 foreground actions, and AT-SPI actions separately. Available protocols and
 accessibility services establish prerequisites; successful actions require
 application-state evidence. The host Hyprland/plugin ABI pair, plugin transport,
@@ -242,20 +242,20 @@ This source change is not evidence that the capability has been released.
 
 Compositor administration also remains explicit. Integrations may invoke
 `hyprctl` for an operator-requested workspace, monitor, window-rule, focus, or
-DPMS operation, but a Cua background action must never hide a target-delivery
+DPMS operation, but a Pincer background action must never hide a target-delivery
 failure by changing compositor state. DPMS-on is a precondition for visual
 delivery evidence; an all-black frame while DPMS is off is not success.
 
 `hyprctl` is the compositor administration and plugin status boundary. The
-plugin adds `hyprctl -j cua:status`, but it does not turn arbitrary `hyprctl`
+plugin adds `hyprctl -j pincer:status`, but it does not turn arbitrary `hyprctl`
 commands into application-targeted input or application-delivery proof. Tests
 must observe whether the stock foreground route explicitly activated a window
 and must keep that behavior separate from the opt-in plugin routes. Mutation
 remains disabled in the default discovery-only build.
 
-Application enumeration and call authorization also stay in Cua Driver.
-Filtering `list_apps`, choosing a one-shot `cua-driver call` versus a long-lived
-`cua-driver serve` process, and enforcing per-call capability or policy rules
+Application enumeration and call authorization also stay in Pincer.
+Filtering `list_apps`, choosing a one-shot `pincer call` versus a long-lived
+`pincer serve` process, and enforcing per-call capability or policy rules
 are not plugin capabilities. The plugin authenticates and negotiates its local
 protocol; it does not replace the driver's tool policy or process lifecycle.
 
@@ -280,7 +280,7 @@ The exact initial host acceptance baseline is:
 | Omarchy                     | `4.0.2-1`         |
 | Hyprland                    | `0.56.2`          |
 | xdg-desktop-portal-hyprland | `1.4.1`           |
-| Cua Driver                  | `0.23.2`          |
+| Pincer                  | `0.23.2`          |
 | Session and display manager | UWSM / SDDM       |
 
 This baseline is an acceptance target, not a statement that the reported host

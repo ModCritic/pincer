@@ -28,7 +28,7 @@ verify = load("verify")
 
 class ReleaseTest(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="cua-source-release-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="pincer-source-release-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.repo = self.root / "repo"
@@ -39,7 +39,7 @@ class ReleaseTest(unittest.TestCase):
         # Synthetic source keeps this suite independent of uncommitted product work.
         for name in bundle.SOURCE_FILES:
             self.write(bundle.PLUGIN + name, "// synthetic public source\n")
-        self.write(bundle.PLUGIN + "CMakeLists.txt", "project(cua_hyprland_plugin VERSION 0.1.0 LANGUAGES CXX)\n")
+        self.write(bundle.PLUGIN + "CMakeLists.txt", "project(pincer_hyprland_plugin VERSION 0.1.0 LANGUAGES CXX)\n")
         self.write("rust/Cargo.toml", '[workspace.package]\nversion = "1.2.3"\n')
         self.write("LICENSE", "Synthetic fixture license\n")
         for name in ("verify.py", "PKGBUILD.in", "USAGE.md", "lifecycle.py"):
@@ -103,9 +103,9 @@ class ReleaseTest(unittest.TestCase):
             configure.append("-DCMAKE_CXX_COMPILER=" + compiler)
         for command in (
             configure,
-            ["cmake", "--build", str(build), "--target", "cua_hyprland_foreground_route_test"],
+            ["cmake", "--build", str(build), "--target", "pincer_hyprland_foreground_route_test"],
             ["ctest", "--test-dir", str(build), "--output-on-failure", "--no-tests=error",
-             "-R", "^cua_hyprland_desktop_fault_policy_test$"],
+             "-R", "^pincer_hyprland_desktop_fault_policy_test$"],
         ):
             result = subprocess.run(command, capture_output=True, text=True, timeout=120)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -123,7 +123,7 @@ class ReleaseTest(unittest.TestCase):
             bundle.generate(self.repo, self.git("rev-parse", "HEAD"), "1.2.3", self.root / "missing")
 
     def test_release_archives_match_local_kit_and_are_deterministic(self):
-        self.git("tag", "-a", "cua-driver-rs-v1.2.3", "-m", "Synthetic component tag")
+        self.git("tag", "-a", "pincer-v1.2.3", "-m", "Synthetic component tag")
         local = self.generate()
         outputs = [self.root / name for name in ("assets-first", "assets-second")]
         for output in outputs:
@@ -131,7 +131,7 @@ class ReleaseTest(unittest.TestCase):
             self.write(bundle.RELEASE + "USAGE.md", "dirty documentation must not ship")
         self.assertEqual({p.name: p.read_bytes() for p in outputs[0].iterdir()},
                          {p.name: p.read_bytes() for p in outputs[1].iterdir()})
-        stem = f"cua-hyprland-plugin-1.2.3-{self.revision}"
+        stem = f"pincer-hyprland-plugin-1.2.3-{self.revision}"
         self.assertEqual({p.name for p in outputs[0].iterdir()},
                          {f"{stem}.tar.gz", f"{stem}-build-kit.tar.gz"})
         self.assertEqual((outputs[0] / f"{stem}.tar.gz").read_bytes(),
@@ -156,7 +156,7 @@ class ReleaseTest(unittest.TestCase):
         output = self.root / "invalid-assets"
         with self.assertRaises(subprocess.CalledProcessError):
             bundle.generate(self.repo, self.revision, "1.2.3", output, release_assets=True)
-        self.git("tag", "cua-driver-rs-v1.2.3")
+        self.git("tag", "pincer-v1.2.3")
         self.write("unrelated.txt", "another commit")
         self.git("add", "unrelated.txt")
         self.git("commit", "-qm", "Different source revision")
@@ -206,7 +206,7 @@ class ReleaseTest(unittest.TestCase):
         srcdir = self.root / "src"
         build = srcdir / "build"
         build.mkdir(parents=True)
-        (build / "cua-hyprland-plugin.so").write_text("module fixture")
+        (build / "pincer-hyprland-plugin.so").write_text("module fixture")
         stem = next(output.glob("*.tar.gz")).name.removesuffix(".tar.gz")
         source = srcdir / stem
         source.mkdir()
@@ -226,13 +226,13 @@ package || exit 1
 '''
         subprocess.run(["bash", "-c", script, "test", str(output / "PKGBUILD"), str(srcdir), str(pkgdir)], check=True)
         self.assertEqual({str(p.relative_to(pkgdir)) for p in pkgdir.rglob("*") if p.is_file()}, {
-            "usr/lib/cua/hyprland/cua-hyprland-plugin.so",
-            "usr/share/licenses/cua-hyprland-plugin/LICENSE",
-            "usr/share/cua-hyprland-plugin/SOURCE-PROVENANCE.json",
-            "usr/share/cua-hyprland-plugin/BUILD-PROVENANCE.json",
+            "usr/lib/pincer/hyprland/pincer-hyprland-plugin.so",
+            "usr/share/licenses/pincer-hyprland-plugin/LICENSE",
+            "usr/share/pincer-hyprland-plugin/SOURCE-PROVENANCE.json",
+            "usr/share/pincer-hyprland-plugin/BUILD-PROVENANCE.json",
         })
         text = (output / "PKGBUILD").read_text()
-        for forbidden in ("CUA_SOURCE_ROOT", "hyprctl", "systemctl", "hyprland.conf", "SKIP", "post_install", "post_upgrade"):
+        for forbidden in ("PINCER_SOURCE_ROOT", "hyprctl", "systemctl", "hyprland.conf", "SKIP", "post_install", "post_upgrade"):
             self.assertNotIn(forbidden, text)
         failed = subprocess.run(["bash", "-c", 'source "$1"; check() { return 17; }; package', "test", str(output / "PKGBUILD")])
         self.assertNotEqual(failed.returncode, 0)
@@ -288,7 +288,7 @@ fi
 
 class NativeContractTest(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="cua-release-native-fixture-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="pincer-release-native-fixture-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.cxx = self.root / "g++"
@@ -338,16 +338,16 @@ class NativeContractTest(unittest.TestCase):
     def test_build_option_mismatch_refused(self):
         build = self.root / "build"
         build.mkdir()
-        (build / "CMakeCache.txt").write_text("CUA_HYPRLAND_INPUT:BOOL=OFF\n")
-        with self.assertRaisesRegex(ValueError, "build configuration mismatch: CUA_HYPRLAND_INPUT"):
+        (build / "CMakeCache.txt").write_text("PINCER_HYPRLAND_INPUT:BOOL=OFF\n")
+        with self.assertRaisesRegex(ValueError, "build configuration mismatch: PINCER_HYPRLAND_INPUT"):
             verify.verify_build(build, self.root, self.cxx, "fixture-sha256")
 
     def test_module_runtime_mismatch_refused(self):
         build = self.root / "build"
         build.mkdir()
-        cache = dict(verify.OPTIONS, BUILD_TESTING="ON", CUA_HYPRLAND_BUILD_PLUGIN="ON",
-                     CUA_HYPRLAND_EXPECTED_VERSION="0.56.2", CMAKE_BUILD_TYPE="Release",
-                     CUA_HYPRLAND_TEST_OPERATOR_KEY="", CMAKE_CXX_COMPILER=str(self.cxx),
+        cache = dict(verify.OPTIONS, BUILD_TESTING="ON", PINCER_HYPRLAND_BUILD_PLUGIN="ON",
+                     PINCER_HYPRLAND_EXPECTED_VERSION="0.56.2", CMAKE_BUILD_TYPE="Release",
+                     PINCER_HYPRLAND_TEST_OPERATOR_KEY="", CMAKE_CXX_COMPILER=str(self.cxx),
                      CMAKE_HOME_DIRECTORY=str(self.root.resolve()))
         (build / "CMakeCache.txt").write_text("".join(f"{key}:STRING={value}\n" for key, value in cache.items()))
         with mock.patch.object(verify, "run", return_value="Shared library: [libstdc++.so.6]"), mock.patch.object(verify, "linked_runtime", return_value="different-runtime"):

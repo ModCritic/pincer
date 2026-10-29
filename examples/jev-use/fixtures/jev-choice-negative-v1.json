@@ -1,5 +1,5 @@
 {
-  "schema": "cua.jev_choice_request_v1",
+  "schema": "pincer.jev_choice_request_v1",
   "goal": "Choose exactly one candidate by applying its condition to the supplied state. The host alone authorizes any selected action.",
   "capture_id": "synthetic-negative-1",
   "regions": [

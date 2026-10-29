@@ -106,7 +106,7 @@ def run(args):
     try:
         windows = mcp.tool("list_windows", {})["structuredContent"]["windows"]
         def fixture(name):
-            matches = [w for w in windows if w["title"] == "Cua Isolated Input " + name]
+            matches = [w for w in windows if w["title"] == "Pincer Isolated Input " + name]
             assert len(matches) == 1, "need one exact synthetic fixture per actor"
             return {key: matches[0][key] for key in ("pid", "window_id")}
         background, foreground = fixture("Background"), fixture("Foreground")

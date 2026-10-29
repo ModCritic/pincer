@@ -10,10 +10,13 @@ Pincer is a fork of Cua Driver, taken from `libs/cua-driver` in
 [trycua/cua](https://github.com/trycua/cua) at commit `e6a244a8d`. It is
 licensed under the MIT License; see [LICENSE](LICENSE).
 
-The project is named Pincer, but the binary, crate names, CLI name, and
-environment variable prefixes are still `cua-driver` and `CUA_DRIVER_*`.
-Renaming them is out of scope for now, so every command in this repository
-still uses `cua-driver`.
+Everything upstream named `cua-driver` is renamed: the binary and CLI are
+`pincer`, the crates are `pincer-*`, environment variables start with
+`PINCER_`, settings live in `~/.pincer/config.json`, and Linux state lives in
+`~/.local/state/pincer`. The Python and TypeScript SDK packages are
+`pincer-driver`, because `pincer` is taken on PyPI and npm by unrelated
+projects. Upstream's `CUA_DRIVER_*` variables and `cua-driver` folders are not
+read.
 
 Changes from upstream:
 
@@ -30,10 +33,9 @@ Changes from upstream:
   `install_extension` tool, and the `cua-perception` worker.
 - The update check is removed: the startup check, the `check-update`,
   `update` and `channel` commands, and the `check_for_update` tool. The
-  driver never looks up releases or runs Cua's installer, so it cannot
+  driver never looks up releases or runs upstream's installer, so it cannot
   replace itself with an upstream build. The removed commands exit with a
-  note to pull and rebuild instead. `CUA_DRIVER_RS_UPDATE_CHECK` no longer
-  has any effect.
+  note to pull and rebuild instead.
 - `skills install` and `skills update` write the skill pack built into the
   binary instead of downloading it from GitHub, so they work offline.
   `--from main` is refused.
@@ -61,17 +63,17 @@ stdio profile, legacy compatibility, bundled skill resources, and HTTP limits.
 
    ```bash
    cd rust
-   cargo build --release -p cua-driver
+   cargo build --release -p pincer
    ```
 
-3. The binary is `rust/target/release/cua-driver` (`cua-driver.exe` on
+3. The binary is `rust/target/release/pincer` (`pincer.exe` on
    Windows). If `CARGO_TARGET_DIR` is set, it is
-   `$CARGO_TARGET_DIR/release/cua-driver` instead. The workspace uses Cargo's
+   `$CARGO_TARGET_DIR/release/pincer` instead. The workspace uses Cargo's
    standard `release` profile.
 4. Check that the driver can reach the current graphical session.
 
    ```bash
-   rust/target/release/cua-driver doctor
+   rust/target/release/pincer doctor
    ```
 
 On Linux, the driver must run in the graphical user's session and share its
@@ -83,14 +85,14 @@ Register the binary with Claude Code for your user account, using its
 absolute path.
 
 ```bash
-claude mcp add --scope user pincer -- /path/to/cua-driver mcp
+claude mcp add --scope user pincer -- /path/to/pincer mcp
 ```
 
 The agent cursor overlay is on by default: an arrow that shows where the
 driver points, clicks and types, and follows every pointer move it makes.
 Add `--no-overlay` to turn it off. On a Wayland session in the default
 XWayland mode, the overlay only draws on KDE Plasma (KWin); on other
-compositors it stays off. On Linux and Windows, `cua-driver mcp` owns its
+compositors it stays off. On Linux and Windows, `pincer mcp` owns its
 runtime directly and shuts it down when stdin closes.
 
 On Linux, you can also deny the driver network access by starting it with
@@ -99,7 +101,7 @@ interface is a loopback device that is down.
 
 ```bash
 claude mcp add --scope user pincer -- \
-  unshare -cn /path/to/cua-driver mcp
+  unshare -cn /path/to/pincer mcp
 ```
 
 This needs unprivileged user namespaces. Inside the namespace the driver
@@ -108,24 +110,16 @@ port, so the browser tools do not work. Abstract Unix sockets are isolated as
 well (see `network_namespaces(7)`); Unix sockets with a filesystem path are
 not.
 
-`cua-driver mcp-config --client <name>` prints setup for other MCP clients.
+`pincer mcp-config --client <name>` prints setup for other MCP clients.
 
 ### Claude Code computer-use compatibility
 
-If you want Claude Code's vision/computer-use-style flow to ground on window
-screenshots from the driver, register the compatibility mode.
-
-```bash
-claude mcp add --transport stdio cua-computer-use -- /path/to/cua-driver mcp --claude-code-computer-use-compat
-```
-
-This keeps the driver's normal MCP tools and changes only `screenshot`, which
-requires `pid` and `window_id` and captures that window only.
-
-Use MCP for this Claude Code vision/computer-use-style path. CLI screenshots
-still work as driver calls, but they do not expose the
-`mcp__cua-computer-use__screenshot` tool name that Claude Code appears to use
-as the image-grounding cue.
+`--claude-code-computer-use-compat` is still accepted, so older setup commands
+keep working, but it changes nothing. The window-scoped `screenshot` tool it
+used to register is gone; window screenshots come from `get_window_state`.
+Claude Code reserves the server name `computer-use` for its own server and
+gives no other name special treatment, so register the driver under any other
+name, such as `pincer`.
 
 ## Pointer paths
 
@@ -163,14 +157,14 @@ By default, `scope` is `"window"`: points are pixels in that window's
 window is brought to the front first. `scope: "desktop"` takes
 `get_desktop_state` pixels instead. A path that leaves the screen is refused
 before any input is sent. In the native Wayland mode
-(`CUA_DRIVER_RS_ENABLE_WAYLAND=1`), only `scope: "desktop"` without `pid` and
+(`PINCER_ENABLE_WAYLAND=1`), only `scope: "desktop"` without `pid` and
 `window_id` works. On KDE Plasma's Wayland session, KWin asks whether to let
 the driver control input, and the pointer only moves once you allow it.
 
 This traces a circle with a 200-pixel radius around (800, 500) in 1.5 seconds:
 
 ```bash
-cua-driver call move_along_path '{"scope":"desktop","parametric":{"x":"800+200*cos(t)","y":"500+200*sin(t)","t_from":0,"t_to":6.2832},"duration_ms":1500}'
+pincer call move_along_path '{"scope":"desktop","parametric":{"x":"800+200*cos(t)","y":"500+200*sin(t)","t_from":0,"t_to":6.2832},"duration_ms":1500}'
 ```
 
 The reply ends with one JSON line giving the number of segments and samples,
@@ -178,8 +172,8 @@ the path length in pixels, the duration, and the start and end points.
 
 ## Agent skill pack
 
-The skill pack in `rust/Skills/cua-driver` is compiled into the binary. The
-MCP server serves it as resources, and `cua-driver skills install` writes the
+The skill pack in `rust/Skills/pincer` is compiled into the binary. The
+MCP server serves it as resources, and `pincer skills install` writes the
 same copy into detected agent directories without downloading anything. The
 direct installer keeps only the host OS document unless `--all-platforms` is
 used. The `@cua/driver` skill on ClawHub is upstream's, not this fork's.
@@ -187,23 +181,21 @@ used. The `@cua/driver` skill on ClawHub is upstream's, not this fork's.
 ## Integration surfaces
 
 - **Agent MCP or CLI:** MCP-capable agents connect directly to
-  `cua-driver mcp`; shell-oriented agents and automation can use
-  `cua-driver call`. No generated language client is required.
-- **Application SDK:** Python applications import `cua_driver`; TypeScript
-  applications import `@trycua/cua-driver`. Both package roots call the same
+  `pincer mcp`; shell-oriented agents and automation can use
+  `pincer call`. No generated language client is required.
+- **Application SDK:** Python applications import `pincer_driver`; TypeScript
+  applications import `pincer-driver`. Both package roots call the same
   in-process native runtime through generated UniFFI bindings. The safe Rust
   SDK and generated bindings sit above a versioned C ABI; they do not require
   a daemon for direct application use.
 
 The language packages are for client applications, not agents. They contain no
 language-native MCP facade and have no `/sdk`, `/mcp`, or `/native` public
-suffix. MCP remains implemented by the `cua-driver` executable as the
+suffix. MCP remains implemented by the `pincer` executable as the
 runtime-neutral agent boundary.
 
-The package names in `python/pyproject.toml` (`cua-driver`) and
-`typescript/package.json` (`@trycua/cua-driver`) are upstream's. This fork
-publishes neither, so a package installed under those names from PyPI or npm
-is not this fork.
+This fork publishes neither package, so build them from `python/` and
+`typescript/`. A `pincer` package on PyPI or npm is an unrelated project.
 
 ## Computer History preview
 
@@ -227,40 +219,40 @@ only the tools and resources in a reviewed manifest. `unrestricted` requires
 `--dangerously-bypass-approvals`.
 
 The mode belongs to the process that owns the runtime and is fixed at launch:
-`cua-driver serve` takes the flags, while `cua-driver mcp` and embedding hosts
-use the matching `CUA_DRIVER_PERMISSION_MODE`,
-`CUA_DRIVER_CAPABILITY_MANIFEST_FILE`, and
-`CUA_DRIVER_CAPABILITY_MANIFEST_APPROVED` variables. Choose it before starting
+`pincer serve` takes the flags, while `pincer mcp` and embedding hosts
+use the matching `PINCER_PERMISSION_MODE`,
+`PINCER_CAPABILITY_MANIFEST_FILE`, and
+`PINCER_CAPABILITY_MANIFEST_APPROVED` variables. Choose it before starting
 the daemon; a running daemon must be restarted to change it.
 
 Attaching to an existing logged-in Chromium profile remains explicit:
 
 ```bash
-cua-driver mcp --grant existing-profile
+pincer mcp --grant existing-profile
 ```
 
 An embedding application can instead provide `DriverAuthorizationHost`, and a
 bounded runtime can declare `kind: existing_profile` in its manifest. The
 driver does not render its own authorization modal or banner.
 
-See [`rust/Skills/cua-driver/RUNTIME.md`](rust/Skills/cua-driver/RUNTIME.md)
+See [`rust/Skills/pincer/RUNTIME.md`](rust/Skills/pincer/RUNTIME.md)
 for the permission modes, capability manifests, and authorization rules.
 
 ## Repository layout
 
-| Path                                | Purpose                                                                |
-| ----------------------------------- | ---------------------------------------------------------------------- |
-| `rust/`                             | Cargo workspace for the daemon, UniFFI SDK, platform crates, and tests |
-| `python/`                           | Python SDK, bundled-binary wrapper, and package tests                  |
-| `contract/`                         | Experimental generated SDK contract and fixtures                       |
-| `typescript/`                       | Generated TypeScript SDK                                               |
-| `tests/fixtures/`                   | Source-built GUI harness apps and shared fixtures                      |
-| `rust/crates/cua-driver/tests/`     | Hermetic Rust integration tests for the driver                         |
-| `rust/crates/cua-driver-e2e/tests/` | Desktop E2E suites for the GUI harnesses                               |
-| `scripts/`                          | Local build-and-install, uninstall, and VM sync helpers                |
-| `docs/`                             | Repo-local specs, design notes, and historical plans                   |
+| Path                            | Purpose                                                                |
+| ------------------------------- | ---------------------------------------------------------------------- |
+| `rust/`                         | Cargo workspace for the daemon, UniFFI SDK, platform crates, and tests |
+| `python/`                       | Python SDK, bundled-binary wrapper, and package tests                  |
+| `contract/`                     | Experimental generated SDK contract and fixtures                       |
+| `typescript/`                   | Generated TypeScript SDK                                               |
+| `tests/fixtures/`               | Source-built GUI harness apps and shared fixtures                      |
+| `rust/crates/pincer/tests/`     | Hermetic Rust integration tests for the driver                         |
+| `rust/crates/pincer-e2e/tests/` | Desktop E2E suites for the GUI harnesses                               |
+| `scripts/`                      | Local build-and-install, uninstall, and VM sync helpers                |
+| `docs/`                         | Repo-local specs, design notes, and historical plans                   |
 
-Start with `rust/README.md`, `rust/crates/cua-driver-e2e/tests/README.md`, and
+Start with `rust/README.md`, `rust/crates/pincer-e2e/tests/README.md`, and
 `tests/fixtures/README.md` when changing driver behavior or tests.
 
 Upstream drives the complete Rust harness catalog from canonical GUI runner
@@ -276,20 +268,20 @@ the checked-in manifest and supplies the typed inputs used by the live daemon
 and UniFFI SDK.
 
 The imported SDK bindings are generated by
-`scripts/generate-uniffi-bindings.mjs`. `CuaDriver.create()` loads the native
+`scripts/generate-uniffi-bindings.mjs`. `Pincer.create()` loads the native
 runtime in the application process; the daemon-compatible `connect()` path is
 retained for external clients. The stable native boundary is declared in
-[`rust/include/cua_driver_abi.h`](rust/include/cua_driver_abi.h). That header is
+[`rust/include/pincer_abi.h`](rust/include/pincer_abi.h). That header is
 generated from the Rust `#[repr(C)]` exports with
-`cargo run -p cua-driver-bindgen --bin cua-driver-abi-header`; running the
+`cargo run -p pincer-bindgen --bin pincer-abi-header`; running the
 same command with `--check` confirms that the implementation and the header
 have not drifted. UniFFI separately generates its private FFI scaffolding and
 the Python and TypeScript SDK bindings; that implementation-specific
-scaffolding is not the stable public `cua_driver_*_v1` C contract.
+scaffolding is not the stable public `pincer_*_v1` C contract.
 
 For direct agent integrations, see the
 [`examples/agent-sdks`](examples/agent-sdks/README.md) Codex and Claude Agent
-SDK examples. They connect the agent to `cua-driver mcp` without importing a
+SDK examples. They connect the agent to `pincer mcp` without importing a
 generated client.
 
 Contributor documentation:
@@ -304,17 +296,17 @@ Contributor documentation:
 
 ## macOS process identity and permissions
 
-This fork ships no prebuilt `CuaDriver.app`. On macOS,
-`scripts/install-local.sh` builds a separate `CuaDriverLocal.app` from this
+This fork ships no prebuilt `Pincer.app`. On macOS,
+`scripts/install-local.sh` builds a separate `PincerLocal.app` from this
 checkout.
 
 macOS attributes Accessibility and Screen Recording grants to a responsible app identity, not simply to an executable path. Use one of these supported launch modes:
 
-- **Standalone:** install `CuaDriver.app`, grant permissions to it, and start its daemon with `open -n -g -a CuaDriver --args serve`. The installed `cua-driver mcp` CLI may proxy through this daemon automatically.
-- **Explicit direct MCP:** `cua-driver mcp --direct` makes the MCP process own
+- **Standalone:** install `Pincer.app`, grant permissions to it, and start its daemon with `open -n -g -a Pincer --args serve`. The installed `pincer mcp` CLI may proxy through this daemon automatically.
+- **Explicit direct MCP:** `pincer mcp --direct` makes the MCP process own
   its runtime. On macOS this deliberately uses the spawning host's TCC
   attribution and does not provide the AppKit cursor overlay without a
   certified host adapter.
-- **Embedded:** have the macOS app that owns the grants use the generated `EmbeddedCuaDriverHost` to spawn a private daemon and return both SDK and MCP connection details. The daemon stays in the app's responsibility chain and inherits its grants. A gateway, terminal, or unrelated helper must not spawn the daemon on the app's behalf. `@trycua/cua-driver/embedded` is an organizational alias for the same Rust host exported at the package root; it has no separate lifecycle implementation.
+- **Embedded:** have the macOS app that owns the grants use the generated `EmbeddedPincerHost` to spawn a private daemon and return both SDK and MCP connection details. The daemon stays in the app's responsibility chain and inherits its grants. A gateway, terminal, or unrelated helper must not spawn the daemon on the app's behalf. `pincer-driver/embedded` is an organizational alias for the same Rust host exported at the package root; it has no separate lifecycle implementation.
 
-Directly spawning a raw `cua-driver serve` outside `CuaDriver.app` without embedded mode is unsupported: it has no stable bundle identity for TCC attribution. Do not grant permissions to arbitrary binary paths or rely on that configuration in production. See [`rust/Skills/cua-driver/EMBEDDING.md`](rust/Skills/cua-driver/EMBEDDING.md) for the embedding contract and examples.
+Directly spawning a raw `pincer serve` outside `Pincer.app` without embedded mode is unsupported: it has no stable bundle identity for TCC attribution. Do not grant permissions to arbitrary binary paths or rely on that configuration in production. See [`rust/Skills/pincer/EMBEDDING.md`](rust/Skills/pincer/EMBEDDING.md) for the embedding contract and examples.

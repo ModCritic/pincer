@@ -1,9 +1,9 @@
 //! Legacy-compatible CDP client for Electron and other Chromium apps.
 //! HTTP discovery stays compatible with the page tool; WebSocket calls use
-//! cua-driver-core's shared event-aware `CdpConnection` transport.
+//! pincer-core's shared event-aware `CdpConnection` transport.
 
-use cua_driver_core::browser::cdp_ws::CdpConnection;
-use cua_driver_core::cdp::pick_page;
+use pincer_core::browser::cdp_ws::CdpConnection;
+use pincer_core::cdp::pick_page;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

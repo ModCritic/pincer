@@ -10,8 +10,8 @@ struct Surface {
     int application;
     int client() const { return application; }
 };
-using Target = cua::hyprland::PassivePointerTarget<std::weak_ptr<Window>, std::weak_ptr<Surface>>;
-using cua::hyprland::InputLaneActivity;
+using Target = pincer::hyprland::PassivePointerTarget<std::weak_ptr<Window>, std::weak_ptr<Surface>>;
+using pincer::hyprland::InputLaneActivity;
 struct Owner {
     std::shared_ptr<Window> window;
     std::shared_ptr<Surface> surface;

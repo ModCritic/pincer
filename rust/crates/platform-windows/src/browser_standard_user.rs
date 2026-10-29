@@ -22,8 +22,8 @@ use std::path::Path;
 use std::process::{Command, ExitStatus};
 use std::sync::{Arc, Mutex};
 
-use cua_driver_core::browser::refusal::{BrowserRefusal, BrowserRefusalCode};
-use cua_driver_core::browser::IsolatedBrowserProcess;
+use pincer_core::browser::refusal::{BrowserRefusal, BrowserRefusalCode};
+use pincer_core::browser::IsolatedBrowserProcess;
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_NOT_ALL_ASSIGNED, E_ACCESSDENIED, HANDLE, LUID, WAIT_OBJECT_0,
@@ -469,7 +469,7 @@ pub(crate) fn require_profile_writable(
         }
         Err(error) if error.code() == E_ACCESSDENIED => Err(refusal(
             "the standard-user token that runs the isolated browser cannot write its driver-owned \
-             profile directory; remove the custom permissions from the Cua Driver browser profile \
+             profile directory; remove the custom permissions from the Pincer browser profile \
              root",
         )),
         Err(error) => Err(refusal(format!(
@@ -730,7 +730,7 @@ mod tests {
     fn standard_user_launch_refuses_unforwarded_command_state() {
         let token = Arc::new(current_process_token(TOKEN_QUERY).expect("token"));
         let mut command = Command::new(system32().join("cmd.exe"));
-        command.env("CUA_TEST", "1");
+        command.env("PINCER_TEST", "1");
         assert!(spawn_with_token(token.clone(), &command).is_err());
         let mut command = Command::new(system32().join("cmd.exe"));
         command.current_dir(system32());

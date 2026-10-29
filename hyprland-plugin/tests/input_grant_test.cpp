@@ -4,7 +4,7 @@
 #include <iostream>
 #include <limits>
 
-using cua::hyprland::InputGrant;
+using pincer::hyprland::InputGrant;
 using namespace std::chrono_literals;
 
 namespace {

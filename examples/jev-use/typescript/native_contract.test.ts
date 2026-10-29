@@ -1,4 +1,4 @@
-// Role table and cua.jev_choice_request_v2 contract tests (RFC #4268).
+// Role table and pincer.jev_choice_request_v2 contract tests (RFC #4268).
 // Mirrors python/tests/test_native_contract.py.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -98,7 +98,7 @@ test('role tables are keyed by the Driver normalization', () => {
 
 test('v2 requests validate with sources and elements', () => {
   const validated = validateRequest(fixture('jev-choice-request-v2.json'));
-  assert.equal(validated.schema, 'cua.jev_choice_request_v2');
+  assert.equal(validated.schema, 'pincer.jev_choice_request_v2');
   assert.equal(validated.snapshot_id, 's0000002a');
   assert.equal(validated.elements?.length, 3);
   assert.equal(validated.candidates[0].source, 'ax');
@@ -130,7 +130,7 @@ test('v1 rejects v2 fields and v2 rejects malformed fields', () => {
     'unknown state': (r) => (r.elements[0].state = 'hidden'),
     'too many elements': (r) => (r.elements = Array(22).fill(r.elements).flat()),
     'missing required': (r) => delete r.regions,
-    'unknown schema': (r) => (r.schema = 'cua.jev_choice_request_v3'),
+    'unknown schema': (r) => (r.schema = 'pincer.jev_choice_request_v3'),
   };
   for (const [name, mutate] of Object.entries(v2Mutations)) {
     const request = fixture('jev-choice-request-v2.json');
@@ -146,6 +146,6 @@ test('v1 rejects v2 fields and v2 rejects malformed fields', () => {
 
 test('mock chooser answers v2 with the unchanged response schema', async () => {
   const response = await chooseRequest(fixture('jev-choice-request-v2.json'), { mock: true });
-  assert.equal(response.schema, 'cua.jev_choice_v1');
+  assert.equal(response.schema, 'pincer.jev_choice_v1');
   assert.equal(response.selected_id, 'ax:button:increment');
 });

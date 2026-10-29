@@ -90,7 +90,7 @@ impl Drop for DisabledHwndGuard {
 /// has no effect there, and the daemon WILL transiently steal foreground
 /// from the user. Restoring foreground from a non-UIAccess process is
 /// blocked by the foreground-lock, so the only mitigation is to spawn
-/// cua-driver-uia.exe (UIAccess-manifested worker) and route UIA
+/// pincer-uia.exe (UIAccess-manifested worker) and route UIA
 /// activations through it. See PR #1699 bg-modality tests for the
 /// regression guards.
 pub fn run_with_uwp_bypass<T>(host_hwnd: isize, action: impl FnOnce() -> T) -> T {

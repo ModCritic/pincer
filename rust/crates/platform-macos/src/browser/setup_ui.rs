@@ -7,7 +7,7 @@ use std::{
 };
 
 use core_foundation::base::{CFEqual, CFRelease, CFRetain, CFTypeRef};
-use cua_driver_core::browser::{
+use pincer_core::browser::{
     BrowserProduct, BrowserRefusal, BrowserRefusalCode, BrowserSetupDescriptor,
     EXISTING_PROFILE_SETUP_READY_TIMEOUT,
 };
@@ -1997,7 +1997,7 @@ pub fn disable(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cua_driver_core::browser::{existing_profile_setup_descriptor, BrowserProduct};
+    use pincer_core::browser::{existing_profile_setup_descriptor, BrowserProduct};
 
     fn chrome() -> &'static BrowserSetupDescriptor {
         existing_profile_setup_descriptor(BrowserProduct::GoogleChrome).unwrap()
@@ -2039,7 +2039,7 @@ mod tests {
             tree_markdown: String::new(),
             nodes,
             truncated: false,
-            walk: cua_driver_core::walk_budget::WalkBudget::nodes_only(0).outcome(),
+            walk: pincer_core::walk_budget::WalkBudget::nodes_only(0).outcome(),
             window_scope: Some(crate::ax::WindowScope::Matched),
         }
     }
@@ -2371,7 +2371,7 @@ mod tests {
             tree_markdown: String::new(),
             nodes: Vec::new(),
             truncated: true,
-            walk: cua_driver_core::walk_budget::WalkOutcome::timed_out(
+            walk: pincer_core::walk_budget::WalkOutcome::timed_out(
                 1000,
                 std::time::Duration::from_millis(1000),
             ),

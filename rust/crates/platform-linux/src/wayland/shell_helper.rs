@@ -1,5 +1,5 @@
-//! Client for the bundled **cua WinRects** GNOME Shell extension
-//! (`org.cua.WinRects`, see `wayland-helper/winrects@cua/`).
+//! Client for the bundled **pincer WinRects** GNOME Shell extension
+//! (`org.pincer.WinRects`, see `wayland-helper/winrects@pincer/`).
 //!
 //! On GNOME Mutter (and other non-wlroots compositors) a normal client cannot
 //! query a window's on-screen origin (`org.gnome.Shell.Introspect.GetWindows`
@@ -30,9 +30,9 @@ use std::time::Duration;
 
 use crate::x11::WindowInfo;
 
-const DEST: &str = "org.cua.WinRects";
-const PATH: &str = "/org/cua/WinRects";
-const IFACE: &str = "org.cua.WinRects";
+const DEST: &str = "org.pincer.WinRects";
+const PATH: &str = "/org/pincer/WinRects";
+const IFACE: &str = "org.pincer.WinRects";
 const DBUS_DEST: &str = "org.freedesktop.DBus";
 const DBUS_PATH: &str = "/org/freedesktop/DBus";
 const DBUS_IFACE: &str = "org.freedesktop.DBus";
@@ -645,9 +645,9 @@ mod tests {
     }
 
     const EXTENSION_SOURCE: &str =
-        include_str!("../../../../../wayland-helper/winrects@cua/extension.js");
+        include_str!("../../../../../wayland-helper/winrects@pincer/extension.js");
     const EXTENSION_METADATA: &str =
-        include_str!("../../../../../wayland-helper/winrects@cua/metadata.json");
+        include_str!("../../../../../wayland-helper/winrects@pincer/metadata.json");
 
     #[test]
     fn rejects_malformed_or_display_formatted_snapshots() {

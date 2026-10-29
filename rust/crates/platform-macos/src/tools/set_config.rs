@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
@@ -31,19 +31,19 @@ fn with_cursor_motion_properties(mut schema: Value) -> Value {
 fn def() -> &'static ToolDef {
     DEF.get_or_init(|| ToolDef {
         name: "set_config".into(),
-        description: "Update cua-driver-rs configuration. Changes to \
+        description: "Update pincer configuration. Changes to \
             max_image_dimension take effect immediately. The \
-            experimental_pip keys are persisted to ~/.cua-driver/config.json and \
+            experimental_pip keys are persisted to ~/.pincer/config.json and \
             take effect on the next daemon restart (the PiP backend is \
             initialised once at startup).\n\nCapture modality is selected by \
             each action's target; the old capture_scope config key is \
             retired.\n\nCursor motion defaults: \
             cursor.motion.style, cursor.motion.timing and \
             cursor.motion.effects.<trail|glow|magnet|ripple|squish> are saved to \
-            ~/.cua-driver/config.json and seed sessions started afterwards. \
+            ~/.pincer/config.json and seed sessions started afterwards. \
             start_session cursor_motion and set_agent_cursor_motion override them; \
             reduced motion always wins.\n\nAgent cursor badge: cursor.badges is \
-            minimal (default), verbose or off, saved to ~/.cua-driver/config.json \
+            minimal (default), verbose or off, saved to ~/.pincer/config.json \
             and applied to every cursor at once."
             .into(),
         input_schema: with_cursor_motion_properties(serde_json::json!({
@@ -80,7 +80,7 @@ impl Tool for SetConfigTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         if args.get("capture_scope").is_some() {
             return ToolResult::error(
                 "config key 'capture_scope' is retired; select a window or desktop target on each action",
@@ -154,8 +154,7 @@ impl Tool for SetConfigTool {
             {
                 return ToolResult::error(format!("failed to persist experimental_pip: {e}"));
             }
-            pip_note =
-                format!(" — restart cua-driver for experimental_pip={enabled} to take effect");
+            pip_note = format!(" — restart pincer for experimental_pip={enabled} to take effect");
         }
         if let Some(geom) = args.opt_str("experimental_pip_geometry") {
             // Validate before persisting so the user gets an immediate error.
@@ -174,7 +173,7 @@ impl Tool for SetConfigTool {
             }
             if pip_note.is_empty() {
                 pip_note = format!(
-                    " — restart cua-driver for experimental_pip_geometry={geom} to take effect"
+                    " — restart pincer for experimental_pip_geometry={geom} to take effect"
                 );
             }
         }

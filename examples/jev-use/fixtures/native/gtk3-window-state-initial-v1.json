@@ -1,7 +1,7 @@
 {
  "_fixture": {
   "sanitized": "Recorded by verify_native.py --capture-dir. Screenshot bytes, tree_markdown, local file paths, and Driver guidance notes removed.",
-  "source": "CuaTestHarness task window (initial), observed by get_window_state: Linux GTK3 harness (CUA_GTK3_TASK_STATE), released Cua Driver 0.30.2 on GitHub-hosted ubuntu-latest (Xvfb, openbox, AT-SPI), run 36407837325"
+  "source": "PincerTestHarness task window (initial), observed by get_window_state: Linux GTK3 harness (PINCER_GTK3_TASK_STATE), released Pincer 0.30.2 on GitHub-hosted ubuntu-latest (Xvfb, openbox, AT-SPI), run 36407837325"
  },
  "app_name": "Main.py",
  "bounds_complete": true,
@@ -241,5 +241,5 @@
   "y": 387
  },
  "window_id": 6291459,
- "window_title": "CuaTestHarness GTK3 Tasks"
+ "window_title": "PincerTestHarness GTK3 Tasks"
 }

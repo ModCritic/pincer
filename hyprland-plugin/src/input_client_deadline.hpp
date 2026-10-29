@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 // Pre-HELLO traffic cannot renew the acceptance deadline. Once initialized,
 // the connection retains the existing rolling idle timeout.
 class InputClientDeadline {
@@ -21,4 +21,4 @@ class InputClientDeadline {
     const Clock::time_point accepted_;
     Clock::time_point activity_;
 };
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

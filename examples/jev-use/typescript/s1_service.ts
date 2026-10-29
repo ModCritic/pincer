@@ -1,18 +1,18 @@
 /**
  * Choose one supplied candidate through a warm, loopback S1 decision service.
  *
- * Mirrors python/s1_service.py. `CUA_S1_DECISION_URL` names the decide
+ * Mirrors python/s1_service.py. `PINCER_S1_DECISION_URL` names the decide
  * endpoint (for example `http://127.0.0.1:8791/decide`). The service receives
- * the validated `cua.jev_choice_request_v1` or `_v2` request and returns one
- * `cua.decision_choice_v1` response, which is checked strictly here before the
+ * the validated `pincer.jev_choice_request_v1` or `_v2` request and returns one
+ * `pincer.decision_choice_v1` response, which is checked strictly here before the
  * runner resolves the selected ID to its own immutable candidate.
  */
 import { isIP } from 'node:net';
 
 import { validateRequest } from './choose_action.js';
 
-export const DECISION_SCHEMA = 'cua.decision_choice_v1';
-export const URL_ENV = 'CUA_S1_DECISION_URL';
+export const DECISION_SCHEMA = 'pincer.decision_choice_v1';
+export const URL_ENV = 'PINCER_S1_DECISION_URL';
 const DECISION_KINDS = new Set(['selected', 'reobserve', 'abstain', 'error']);
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 256 * 1024;
@@ -55,13 +55,13 @@ function finiteUnit(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
-/** Check a `cua.decision_choice_v1` response against the request it answers. */
+/** Check a `pincer.decision_choice_v1` response against the request it answers. */
 export function validateDecision(decision: unknown, request: RequestLike): Record<string, unknown> {
   if (typeof decision !== 'object' || decision === null || Array.isArray(decision)) {
-    throw new S1ServiceError('response is not a cua.decision_choice_v1 decision');
+    throw new S1ServiceError('response is not a pincer.decision_choice_v1 decision');
   }
   const value = decision as Record<string, unknown>;
-  if (value.schema !== DECISION_SCHEMA) throw new S1ServiceError('response is not a cua.decision_choice_v1 decision');
+  if (value.schema !== DECISION_SCHEMA) throw new S1ServiceError('response is not a pincer.decision_choice_v1 decision');
   const kind = value.kind;
   if (typeof kind !== 'string' || !DECISION_KINDS.has(kind)) throw new S1ServiceError('response kind is not supported');
   if (value.capture_id !== request.capture_id) throw new S1ServiceError('response capture_id does not match the request');

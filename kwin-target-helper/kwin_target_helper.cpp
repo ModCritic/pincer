@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Cua-owned KWin effect. The Rust driver verifies that this D-Bus name is
+// Pincer-owned KWin effect. The Rust driver verifies that this D-Bus name is
 // owned by the running kwin_wayland process before it trusts any response.
 // Protocol v1 is intentionally read-only: only version and window snapshots
 // are exported; input and activation remain outside this helper.
@@ -19,14 +19,14 @@
 
 namespace
 {
-constexpr auto kService = "org.cua.KWinTarget";
-constexpr auto kPath = "/org/cua/KWinTarget";
+constexpr auto kService = "org.pincer.KWinTarget";
+constexpr auto kPath = "/org/pincer/KWinTarget";
 constexpr quint32 kProtocolVersion = 1;
 
 class TargetApi : public QObject
 {
     Q_OBJECT
-    Q_CLASSINFO("D-Bus Interface", "org.cua.KWinTarget")
+    Q_CLASSINFO("D-Bus Interface", "org.pincer.KWinTarget")
 
 public slots:
     Q_SCRIPTABLE quint32 GetVersion()

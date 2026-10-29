@@ -10,7 +10,7 @@
 //! decision for presence: a button reads as clickable), resize over
 //! splitters, progress over a running busy indicator, the arrow otherwise.
 
-use cua_driver_core::cursor_shape::{ResizeAxis, SystemCursorShape};
+use pincer_core::cursor_shape::{ResizeAxis, SystemCursorShape};
 
 /// The attributes of one AX element the mapping looks at.
 #[derive(Debug, Clone, Default, PartialEq)]

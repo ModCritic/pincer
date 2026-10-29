@@ -10,18 +10,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use cua_driver_core::browser::platform::{
+use pincer_core::browser::platform::{
     BrowserConsentOutcome, BrowserConsentRequest, BrowserPlatform, BrowserVisualAction,
     BrowserVisualActionKind, ExistingProfileSetupOutcome, ExistingProfileSetupRequest,
     IsolatedBrowserProcess, PrepareAction, PrepareOutcome, PrepareRequest,
 };
-use cua_driver_core::browser::refusal::{BrowserRefusal, BrowserRefusalCode};
-use cua_driver_core::browser::types::{
+use pincer_core::browser::refusal::{BrowserRefusal, BrowserRefusalCode};
+use pincer_core::browser::types::{
     BrowserClassification, BrowserEngineFamily, BrowserProcessRole, BrowserProduct,
     EndpointOwnershipMethod, EndpointOwnershipProof, EndpointTransport, NativeOwnershipMethod,
     NativeOwnershipProof, NativeWindowInfo, OwnedEndpoint, ProcessFingerprint, Rect,
 };
-use cua_driver_core::browser::{
+use pincer_core::browser::{
     existing_profile_setup_descriptor, is_firefox, parse_devtools_active_port, BrowserCursorTracker,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -396,12 +396,12 @@ fn authenticode_output(executable: &std::path::Path) -> std::io::Result<std::pro
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            r#"$ErrorActionPreference = 'Stop'; $utf8 = [System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $utf8; $module = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1'; Import-Module -Name $module -Force -ErrorAction Stop; $path = [Environment]::GetEnvironmentVariable('CUA_BROWSER_ATTEST_PATH'); $signature = Microsoft.PowerShell.Security\Get-AuthenticodeSignature -LiteralPath $path; Write-Output $signature.Status; Write-Output $signature.SignerCertificate.Subject"#,
+            r#"$ErrorActionPreference = 'Stop'; $utf8 = [System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $utf8; $module = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1'; Import-Module -Name $module -Force -ErrorAction Stop; $path = [Environment]::GetEnvironmentVariable('PINCER_BROWSER_ATTEST_PATH'); $signature = Microsoft.PowerShell.Security\Get-AuthenticodeSignature -LiteralPath $path; Write-Output $signature.Status; Write-Output $signature.SignerCertificate.Subject"#,
         ])
         // The static command imports Security beside the trusted System32
         // PowerShell, ignoring an incompatible inherited PSModulePath. Pass the
         // browser path as data so PowerShell never parses it as command text.
-        .env("CUA_BROWSER_ATTEST_PATH", &executable)
+        .env("PINCER_BROWSER_ATTEST_PATH", &executable)
         .stdin(Stdio::null())
         .output()
 }
@@ -2059,7 +2059,7 @@ impl BrowserPlatform for WindowsBrowserPlatform {
     async fn visualize_browser_action(&self, action: BrowserVisualAction) {
         if action.session.is_empty()
             || action.cdp_target_id.is_empty()
-            || cua_driver_core::session::is_session_ended(&action.session)
+            || pincer_core::session::is_session_ended(&action.session)
         {
             return;
         }
@@ -2766,7 +2766,7 @@ mod tests {
 
     #[tokio::test]
     async fn live_executable_grant_matches_without_installed_app_identity() {
-        use cua_driver_core::session_manifest::load_manifest;
+        use pincer_core::session_manifest::load_manifest;
         use std::io::Write;
 
         let pid = i64::from(std::process::id());
@@ -3222,7 +3222,7 @@ mod tests {
                 "a refused installation must identify an explicitly granted write right: {diagnostics:?}"
             );
             assert!(
-                std::env::var_os("CUA_TEST_REQUIRE_PROTECTED_WINDOWS_BROWSER").is_none(),
+                std::env::var_os("PINCER_TEST_REQUIRE_PROTECTED_WINDOWS_BROWSER").is_none(),
                 "the standalone-browser runner must provide a vendor-signed browser tree protected from its current token: {diagnostics:?}"
             );
             eprintln!(
@@ -3556,9 +3556,9 @@ mod tests {
 
     #[test]
     fn classifier_covers_embedded_and_standalone_chromium() {
-        assert!(is_chromium("CuaTestHarness.Electron.exe"));
+        assert!(is_chromium("PincerTestHarness.Electron.exe"));
         assert_eq!(
-            browser_product("CuaTestHarness.Electron.exe"),
+            browser_product("PincerTestHarness.Electron.exe"),
             BrowserProduct::Electron
         );
         assert!(is_chromium("msedge.exe"));
@@ -3570,22 +3570,22 @@ mod tests {
     #[test]
     fn only_native_embedded_hosts_may_use_descendant_owned_devtools() {
         assert!(allows_embedded_descendant_endpoint(
-            r"D:\fixtures\CuaTestHarness.Tauri.exe"
+            r"D:\fixtures\PincerTestHarness.Tauri.exe"
         ));
         assert!(allows_embedded_descendant_endpoint(
-            r"D:\fixtures\CuaTestHarness.WebView.exe"
+            r"D:\fixtures\PincerTestHarness.WebView.exe"
         ));
         assert!(!allows_embedded_descendant_endpoint(
             r"C:\Program Files\Google\Chrome\Application\chrome.exe"
         ));
         assert!(!allows_embedded_descendant_endpoint(
-            r"D:\fixtures\CuaTestHarness.Electron.exe"
+            r"D:\fixtures\PincerTestHarness.Electron.exe"
         ));
         assert!(is_embedded_webview_runtime(
             r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application\msedgewebview2.exe"
         ));
         assert!(!is_embedded_webview_runtime(
-            r"D:\fixtures\CuaTestHarness.Electron.exe"
+            r"D:\fixtures\PincerTestHarness.Electron.exe"
         ));
     }
 
@@ -3612,7 +3612,7 @@ mod tests {
             crate::win32::ProcessInfo {
                 pid: 44,
                 parent_pid: 43,
-                name: "CuaTestHarness.Electron.exe".to_owned(),
+                name: "PincerTestHarness.Electron.exe".to_owned(),
             },
             crate::win32::ProcessInfo {
                 pid: 45,

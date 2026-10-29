@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
@@ -34,7 +34,7 @@ fn def() -> &'static ToolDef {
                 "text":          { "type": "string",  "description": "Text to type." },
                 "delay_ms":      { "type": "integer", "description": "Milliseconds between characters (default 30)." },
                 "window_id":     { "type": "integer", "description": "Window ID for element focus. Optional when element_token is supplied." },
-                "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                "element_token": pincer_core::tool_schema::element_token_schema(),
                 "type_chars_only": { "type": "boolean", "description": "Skip AX focus, type directly. Default false." }
             },
             "additionalProperties": false
@@ -53,7 +53,7 @@ impl Tool for TypeTextCharsTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let pid = match args.require_i32("pid") {
             Ok(v) => v,
             Err(e) => return e,
@@ -63,9 +63,9 @@ impl Tool for TypeTextCharsTool {
             Err(e) => return e,
         };
         // Same trailing-protocol-tag scrub as TypeTextTool — see
-        // cua_driver_core::text_sanitize for rationale.
-        let text = cua_driver_core::text_sanitize::strip_trailing_agent_protocol_tags(&text_raw)
-            .into_owned();
+        // pincer_core::text_sanitize for rationale.
+        let text =
+            pincer_core::text_sanitize::strip_trailing_agent_protocol_tags(&text_raw).into_owned();
         let delay_ms = args.u64_or("delay_ms", 30);
         let window_id_arg = args.opt_u64("window_id");
         let resolved = match self.state.snapshots.resolve(pid, &args) {
@@ -91,7 +91,7 @@ impl Tool for TypeTextCharsTool {
                 pid,
                 wid,
                 element_ptr,
-                cua_driver_core::background_input::BackgroundAction::InsertText,
+                pincer_core::background_input::BackgroundAction::InsertText,
             )
             .await
             {

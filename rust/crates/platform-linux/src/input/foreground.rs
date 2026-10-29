@@ -17,7 +17,7 @@
 //! Xlib's process-wide error handler.
 
 use anyhow::{anyhow, Result};
-use cua_driver_core::window_observation::WindowObservationBounds;
+use pincer_core::window_observation::WindowObservationBounds;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use x11rb::connection::Connection as _;
@@ -267,9 +267,9 @@ const FOCUS_RETRY: Duration = Duration::from_millis(500);
 
 /// Post-action observation bounds: `WINDOW_CHANGE_DEADLINE` /
 /// `WINDOW_CHANGE_POLL` unless the embedding host set
-/// `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS` / `CUA_DRIVER_WINDOW_CHANGE_POLL_MS`
+/// `PINCER_WINDOW_CHANGE_TIMEOUT_MS` / `PINCER_WINDOW_CHANGE_POLL_MS`
 /// on the daemon environment (shared parsing with macOS in
-/// `cua_driver_core::window_observation`).
+/// `pincer_core::window_observation`).
 fn window_change_bounds() -> WindowObservationBounds {
     WindowObservationBounds::from_env(WINDOW_CHANGE_DEADLINE, WINDOW_CHANGE_POLL)
 }
@@ -342,7 +342,7 @@ fn run_with_deadline<T: Send + 'static>(
 ) -> Option<T> {
     let (tx, rx) = mpsc::channel();
     std::thread::Builder::new()
-        .name("cua-x11-foreground".into())
+        .name("pincer-x11-foreground".into())
         .spawn(move || {
             let _ = tx.send(f());
         })

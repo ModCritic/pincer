@@ -141,7 +141,7 @@ class OwnershipTests(unittest.TestCase):
 
     def test_snapshot_revalidates_exact_pid_address_native_floating_and_synthetic_title(self):
         window = {'pid': 20, 'address': '0xc8', 'floating': True, 'xwayland': False,
-                  'title': 'cua-smoke-calc.ods', 'at': [10, 20], 'size': [800, 600]}
+                  'title': 'pincer-smoke-calc.ods', 'at': [10, 20], 'size': [800, 600]}
         for change in (None, {'pid': 21}, {'address': '0xc9'}, {'floating': False},
                        {'xwayland': True}, {'title': 'unowned.ods'}):
             fault = self.controller()
@@ -342,7 +342,7 @@ class RecoveryTests(unittest.TestCase):
                 plan_path.write_text(json.dumps(plan()))
                 args = SimpleNamespace(evidence=directory / 'evidence', plan=plan_path, driver=Path('/driver'),
                                        primary_grab=Path('/grab'), foreground_journal=Path('/journal'),
-                                       trace_socket=Path('/cua-input-v3.sock'))
+                                       trace_socket=Path('/pincer-input-v3.sock'))
                 fault = Mock(record=record(), expected=record()['expected_bounds'])
                 fault.inject.side_effect = AssertionError('injection failed') if failure == 'inject' else None
                 fault.inject.return_value = (trace(ACTIVE), 1)

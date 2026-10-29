@@ -21,7 +21,7 @@ Next steps:
                                    # The binary installer never touches your agent dirs.
 
      Prime Agent needs no MCP registration. It loads the installed skill and
-     calls cua-driver from its persistent IPython environment. Print its setup:
+     calls pincer from its persistent IPython environment. Print its setup:
        {{BINARY}} mcp-config --client prime-agent
      Then run /reload in Prime Agent (or start a new session).
 
@@ -33,18 +33,18 @@ Next steps:
        Copy-paste the printed command into your shell — it uses
        `claude mcp add-json` (not bare `--`) so the long flag travels
        through PowerShell's arg parser intact. This mode grounds Claude
-       Code's vision/computer-use-style flow on CuaDriver window
-       screenshots — it keeps the normal CuaDriver tools and changes
+       Code's vision/computer-use-style flow on Pincer window
+       screenshots — it keeps the normal Pincer tools and changes
        only the screenshot tool.
 
      • Codex (OpenAI):
-         codex mcp add cua-driver -- {{BINARY}} mcp
+         codex mcp add pincer -- {{BINARY}} mcp
 
      • Qwen Code:
-         qwen mcp add cua-driver {{BINARY}} mcp
+         qwen mcp add pincer {{BINARY}} mcp
 
      • Factory Droid:
-         droid mcp add cua-driver "{{BINARY}} mcp"
+         droid mcp add pincer "{{BINARY}} mcp"
 
      • OpenClaw:
          {{BINARY}} mcp-config --client openclaw
@@ -52,7 +52,7 @@ Next steps:
      • GitHub Copilot CLI (paste into ~/.copilot/mcp-config.json):
          {
            "mcpServers": {
-             "cua-driver": {
+             "pincer": {
                "type": "local",
                "command": "{{BINARY}}",
                "args": ["mcp"],
@@ -80,7 +80,7 @@ Next steps:
      • Use a reviewed capability manifest to limit tools, apps, browser
        profiles, origins, and file roots. Bounded requires one:
          {{BINARY}} serve --permission-mode bounded \
-           --capability-manifest ./cua-capabilities.yaml \
+           --capability-manifest ./pincer-capabilities.yaml \
            --approve-capability-manifest
      • unrestricted requires explicit risk acceptance:
          {{BINARY}} serve --permission-mode unrestricted \

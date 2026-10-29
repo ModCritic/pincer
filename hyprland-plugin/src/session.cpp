@@ -1,6 +1,6 @@
-#include "cua_hyprland/session.hpp"
+#include "pincer_hyprland/session.hpp"
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 
 Frame Session::handle(const Frame& request, const ServerInfo& server) {
     if (!m_handshaken) {
@@ -76,4 +76,4 @@ bool Session::handshaken() const {
     return m_handshaken;
 }
 
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

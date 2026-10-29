@@ -5,7 +5,7 @@ These fixtures lock selected stable public contract fields from the
 `9eb1f481b8a12cd6ffda2ad5af21653a9e5aa9e5`.
 
 The snapshots were derived from the release-tagged package sources, generated
-bindings, `cua-driver --help`, `cua-driver manifest`, and MCP JSON-RPC responses.
+bindings, `pincer --help`, `pincer manifest`, and MCP JSON-RPC responses.
 The corresponding tests compare semantic fields instead of whole-process
 output. This intentionally excludes executable paths, socket paths, PIDs,
 session identifiers, platform-specific prose, and other volatile values.
@@ -14,13 +14,19 @@ frozen to `0.12.6`, because a compatible later release must change them.
 
 - `python-package.json` locks package-root exports and callable signatures.
 - `typescript-package.json` locks package subpath exports, declaration exports,
-  and the generated `CuaDriver` declaration methods.
+  and the generated `Pincer` declaration methods.
 - `cli.json` locks the CLI help header/catalog and selected manifest fields.
 - `mcp.json` locks initialize, tools-list envelope/tool fields, and the
   method-not-found error category.
 - `apps/` contains unchanged Rust, Python, and TypeScript applications written
   against that baseline. CI compiles or executes them against candidate
   packages.
+
+The rename to Pincer on 2026-10-29 changed every product name these fixtures
+recorded: the binary and CLI header, the `pincer-driver` packages, the `Pincer`
+class and its methods' module paths, and the environment variables. The
+fixtures were updated to the new names as an intentional compatibility break;
+everything else they lock is unchanged.
 
 Additive manifest fields, tools, and package metadata are permitted. Removing
 or changing an item recorded here requires an explicit compatibility decision
@@ -48,7 +54,7 @@ Pincer makes one such decision: it removes the legacy session surface. The
 capture-policy fields of `StartSessionOutput` are gone, and the package
 fixtures no longer list them.
 
-RFC 2549 independently accepts one additive CLI change: `cua-driver mcp
+RFC 2549 independently accepts one additive CLI change: `pincer mcp
 --direct`. Bare MCP behavior remains platform-defined (direct on Windows and
 Linux, signed app service on macOS), while `--socket` continues to select an
 explicit service. The semantic compatibility test permits that additive flag

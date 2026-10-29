@@ -1,4 +1,4 @@
-"""CuaDriver.create() prefers the macOS daemon so the agent cursor works."""
+"""Pincer.create() prefers the macOS daemon so the agent cursor works."""
 
 import importlib.util
 import warnings
@@ -6,8 +6,8 @@ from pathlib import Path
 
 
 def load():
-    path = Path(__file__).resolve().parents[1] / "src/cua_driver/_daemon.py"
-    spec = importlib.util.spec_from_file_location("cua_driver_daemon", path)
+    path = Path(__file__).resolve().parents[1] / "src/pincer_driver/_daemon.py"
+    spec = importlib.util.spec_from_file_location("pincer_daemon", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module._warned = False
@@ -34,7 +34,7 @@ def run(module, daemon, **kwargs):
 
 
 def test_running_daemon_is_used(monkeypatch):
-    monkeypatch.delenv("CUA_DRIVER_EMBEDDED", raising=False)
+    monkeypatch.delenv("PINCER_EMBEDDED", raising=False)
     m = load()
     daemon = Fake("daemon")
     result, _ = run(m, daemon)
@@ -42,7 +42,7 @@ def test_running_daemon_is_used(monkeypatch):
 
 
 def test_installed_app_is_launched(monkeypatch):
-    monkeypatch.delenv("CUA_DRIVER_EMBEDDED", raising=False)
+    monkeypatch.delenv("PINCER_EMBEDDED", raising=False)
     m = load()
     daemon = Fake("daemon", up_after=2)
     launched = []
@@ -53,7 +53,7 @@ def test_installed_app_is_launched(monkeypatch):
 
 
 def test_fallback_warns_once(monkeypatch):
-    monkeypatch.delenv("CUA_DRIVER_EMBEDDED", raising=False)
+    monkeypatch.delenv("PINCER_EMBEDDED", raising=False)
     m = load()
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -65,7 +65,7 @@ def test_fallback_warns_once(monkeypatch):
 
 
 def test_embedded_forced_or_non_macos(monkeypatch):
-    monkeypatch.delenv("CUA_DRIVER_EMBEDDED", raising=False)
+    monkeypatch.delenv("PINCER_EMBEDDED", raising=False)
     m = load()
     daemon = Fake("daemon")
     for kwargs in (
@@ -76,7 +76,7 @@ def test_embedded_forced_or_non_macos(monkeypatch):
     ):
         result, embedded = run(m, daemon, **kwargs)
         assert result is embedded
-    monkeypatch.setenv("CUA_DRIVER_EMBEDDED", "1")
+    monkeypatch.setenv("PINCER_EMBEDDED", "1")
     result, embedded = run(m, daemon)
     assert result is embedded
     assert daemon.calls == 0

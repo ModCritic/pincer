@@ -123,7 +123,7 @@ def parse_visual_regions(
     expected_pid: int,
     expected_window_id: int,
 ) -> VisualObservation:
-    if payload.get("schema") != "cua.visual_regions_v1":
+    if payload.get("schema") != "pincer.visual_regions_v1":
         raise VisualObservationError("unsupported visual region schema")
     capture = payload.get("capture")
     if not isinstance(capture, dict) or capture.get("capture_id") != expected_capture_id:

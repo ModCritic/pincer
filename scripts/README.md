@@ -1,6 +1,6 @@
-# cua-driver scripts
+# Pincer scripts
 
-Local build-and-install, uninstall, and VM sync helpers for cua-driver.
+Local build-and-install, uninstall, and VM sync helpers for pincer.
 
 Upstream Cua's release installers and uninstallers (`install.sh`,
 `install.ps1`, `uninstall.sh`, `uninstall.ps1`, and their helpers) fetched
@@ -9,8 +9,8 @@ without installing it, see the [top-level README](../README.md#build-from-source
 
 | Script | Purpose |
 | --- | --- |
-| `install-local.sh` / `install-local.ps1` | Build this checkout as the separate `cua-driver-local` product |
-| `uninstall-local.sh` / `uninstall-local.ps1` | Remove only the source-built `cua-driver-local` product |
+| `install-local.sh` / `install-local.ps1` | Build this checkout as the separate `pincer-local` product |
+| `uninstall-local.sh` / `uninstall-local.ps1` | Remove only the source-built `pincer-local` product |
 | `_install-local-rust.sh` | Rust build and install internals for `install-local.sh` |
 | `_local-signing.sh` | Stable macOS code-signing helpers for the local installer |
 | `sync-vm-worktree.sh` | Sync this checkout to verification VMs and pull artifacts back |
@@ -32,31 +32,31 @@ bash scripts/install-local.sh \
   --release --autostart --require-stable-signing
 ```
 
-`CUA_DRIVER_REQUIRE_STABLE_SIGNING=1` is the environment equivalent. Strict
+`PINCER_REQUIRE_STABLE_SIGNING=1` is the environment equivalent. Strict
 mode stops before replacing the live app when no usable certificate-backed
 identity is available.
 
 For the most reliable non-interactive rebuilds, use a dedicated keychain:
 
 ```bash
-SIGNING_KEYCHAIN="$HOME/Library/Keychains/cua-driver-signing.keychain-db"
+SIGNING_KEYCHAIN="$HOME/Library/Keychains/pincer-signing.keychain-db"
 security create-keychain "$SIGNING_KEYCHAIN"  # first time only
 security set-keychain-settings "$SIGNING_KEYCHAIN"
 security unlock-keychain "$SIGNING_KEYCHAIN"
-export CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN="$SIGNING_KEYCHAIN"
+export PINCER_LOCAL_SIGNING_KEYCHAIN="$SIGNING_KEYCHAIN"
 ```
 
 To use an existing certificate without allowing the installer to select a
 different identity from that keychain, also provide its exact SHA-1 fingerprint:
 
 ```bash
-export CUA_DRIVER_LOCAL_SIGNING_IDENTITY="<40-hex-character SHA-1>"
+export PINCER_LOCAL_SIGNING_IDENTITY="<40-hex-character SHA-1>"
 ```
 
 The installer fails closed when that exact usable code-signing identity is not
-present in `CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN`.
+present in `PINCER_LOCAL_SIGNING_KEYCHAIN`.
 
-The first install creates `CuaDriver Local Signing (cua-driver-rs)` in that
+The first install creates `Pincer Local Signing (pincer)` in that
 keychain. If `codesign` cannot use its private key non-interactively, unlock
 the keychain, trust the certificate in Keychain Access, and authorize Apple
 code-signing tools:
@@ -71,7 +71,7 @@ unset KEYCHAIN_PASSWORD
 
 Then rerun the strict installer and grant Accessibility and Screen Recording
 once. When the dedicated default keychain above exists, the installer prefers
-it automatically; exporting `CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN` remains the
+it automatically; exporting `PINCER_LOCAL_SIGNING_KEYCHAIN` remains the
 most explicit choice.
 
 Keep source commits host-owned. Verification machines should sync from this
@@ -87,7 +87,7 @@ scripts/uninstall-local.sh
 scripts/uninstall-local.ps1
 ```
 
-The local uninstaller leaves any `cua-driver` or `CuaDriver.app` installed by
+The local uninstaller leaves any `pincer` or `Pincer.app` installed by
 other means untouched, together with their services, state, and TCC grants.
-On macOS it revokes only `com.trycua.driver.local`; pass `--keep-tcc` to
+On macOS it revokes only `io.github.modcritic.pincer.local`; pass `--keep-tcc` to
 retain that local grant.

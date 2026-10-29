@@ -14,7 +14,7 @@ from choose_action import choose_request, validate_request
 
 def request() -> dict:
     return {
-        "schema": "cua.jev_choice_request_v1",
+        "schema": "pincer.jev_choice_request_v1",
         "goal": "Submit the verified form.",
         "capture_id": "capture-1",
         "regions": [
@@ -51,7 +51,7 @@ class ChooseActionTest(unittest.TestCase):
             set(response),
             {"schema", "selected_id", "model", "confidence", "probabilities"},
         )
-        self.assertEqual(response["schema"], "cua.jev_choice_v1")
+        self.assertEqual(response["schema"], "pincer.jev_choice_v1")
         self.assertEqual(response["selected_id"], "submit-form")
         self.assertEqual(response["model"], "mock")
         self.assertEqual(result.stderr, "")

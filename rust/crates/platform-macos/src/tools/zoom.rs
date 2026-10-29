@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use cua_driver_core::{
+use pincer_core::{
     protocol::{Content, ToolResult},
     tool::{Tool, ToolDef},
 };
@@ -53,7 +53,7 @@ impl Tool for ZoomTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         let mut args = args;
         super::default_window_for_pid(&mut args);
         if ["x1", "y1", "x2", "y2"]

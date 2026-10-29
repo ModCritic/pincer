@@ -7,7 +7,7 @@
 //! delivers to whichever surface is focused when KWin processes the event.
 //!
 //! A focus check followed by global input therefore has an unavoidable TOCTOU
-//! race. Until Cua has a KWin input API that binds each mutation to the target
+//! race. Until Pincer has a KWin input API that binds each mutation to the target
 //! token/window, this module intentionally refuses raw target-addressed input.
 //! Window discovery remains available; input authorization does not.
 
@@ -18,10 +18,10 @@ use std::time::Duration;
 
 use crate::x11::WindowInfo;
 
-const DEST: &str = "org.cua.KWinTarget";
+const DEST: &str = "org.pincer.KWinTarget";
 const KWIN_DEST: &str = "org.kde.KWin";
-const PATH: &str = "/org/cua/KWinTarget";
-const IFACE: &str = "org.cua.KWinTarget";
+const PATH: &str = "/org/pincer/KWinTarget";
+const IFACE: &str = "org.pincer.KWinTarget";
 const DBUS_DEST: &str = "org.freedesktop.DBus";
 const DBUS_PATH: &str = "/org/freedesktop/DBus";
 const DBUS_IFACE: &str = "org.freedesktop.DBus";

@@ -1,9 +1,9 @@
-#include "cua_hyprland/protocol.hpp"
+#include "pincer_hyprland/protocol.hpp"
 
 #include <algorithm>
 #include <limits>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 namespace {
 
 void append_u16(std::vector<std::byte>& out, std::uint16_t value) {
@@ -169,4 +169,4 @@ Frame make_error(std::uint64_t request_id, ErrorCode code, std::string detail) {
                       encode_error(ProtocolError{code, std::move(detail)}));
 }
 
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

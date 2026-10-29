@@ -247,7 +247,7 @@ function deduplicate(
     return record.step === undefined ? refs : { step: record.step, ...refs };
   };
   return {
-    schema: 'cua.jev_use_provider_request_golden_v1',
+    schema: 'pincer.jev_use_provider_request_golden_v1',
     language: 'typescript',
     runs: Object.fromEntries(
       Object.entries(runs).map(([name, records]) => [name, records.map(reference)])

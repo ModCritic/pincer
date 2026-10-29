@@ -1,5 +1,5 @@
-#include "cua_hyprland/protocol.hpp"
-#include "cua_hyprland/session.hpp"
+#include "pincer_hyprland/protocol.hpp"
+#include "pincer_hyprland/session.hpp"
 #include "inject_server.hpp"
 
 #include <array>
@@ -31,7 +31,7 @@ class TempDirectory {
   public:
     TempDirectory() {
         std::array<char, 64> pattern{};
-        const auto seed = std::string{"/tmp/cua-hyprland-transport-XXXXXX"};
+        const auto seed = std::string{"/tmp/pincer-hyprland-transport-XXXXXX"};
         std::copy(seed.begin(), seed.end(), pattern.begin());
         const auto* path = mkdtemp(pattern.data());
         check(path != nullptr, "temporary directory created");
@@ -66,8 +66,8 @@ int connect_client(const std::string& socket_path) {
     return fd;
 }
 
-void send_request(int fd, const cua::hyprland::Frame& frame) {
-    const auto bytes = cua::hyprland::encode_frame(frame);
+void send_request(int fd, const pincer::hyprland::Frame& frame) {
+    const auto bytes = pincer::hyprland::encode_frame(frame);
 #ifdef MSG_NOSIGNAL
     constexpr int no_signal = MSG_NOSIGNAL;
 #else
@@ -89,24 +89,24 @@ void send_bytes(int fd, std::span<const std::byte> bytes) {
           "raw packet sent");
 }
 
-cua::hyprland::Frame receive_response(int fd) {
-    std::array<std::byte, cua::hyprland::kMaxFrameSize> bytes{};
+pincer::hyprland::Frame receive_response(int fd) {
+    std::array<std::byte, pincer::hyprland::kMaxFrameSize> bytes{};
     const auto received = recv(fd, bytes.data(), bytes.size(), 0);
     check(received > 0, "response received");
-    const auto decoded = cua::hyprland::decode_frame(
+    const auto decoded = pincer::hyprland::decode_frame(
         std::span<const std::byte>{bytes.data(), static_cast<std::size_t>(received)});
-    check(std::holds_alternative<cua::hyprland::Frame>(decoded),
+    check(std::holds_alternative<pincer::hyprland::Frame>(decoded),
           "response frame decoded");
-    return std::get<cua::hyprland::Frame>(decoded);
+    return std::get<pincer::hyprland::Frame>(decoded);
 }
 
 } // namespace
 
 int main() {
-    using namespace cua::hyprland;
+    using namespace pincer::hyprland;
 
     TempDirectory temporary;
-    const auto socket_path = (temporary.path() / "cua-inject-v2.sock").string();
+    const auto socket_path = (temporary.path() / "pincer-inject-v2.sock").string();
     InjectionServer server{
         socket_path,
         ServerInfo{
@@ -247,7 +247,7 @@ int main() {
     restarted_server.stop();
 
     const auto busy_socket_path =
-        (temporary.path() / "cua-inject-v2-busy.sock").string();
+        (temporary.path() / "pincer-inject-v2-busy.sock").string();
     InjectionServer busy_server{
         busy_socket_path,
         ServerInfo{
@@ -286,7 +286,7 @@ int main() {
           "busy connection rejection was recorded");
 
     const auto timeout_socket_path =
-        (temporary.path() / "cua-inject-v2-timeout.sock").string();
+        (temporary.path() / "pincer-inject-v2-timeout.sock").string();
     InjectionServer timeout_server{
         timeout_socket_path,
         ServerInfo{
@@ -324,7 +324,7 @@ int main() {
     timeout_server.stop();
 
     const auto idle_socket_path =
-        (temporary.path() / "cua-inject-v2-idle.sock").string();
+        (temporary.path() / "pincer-inject-v2-idle.sock").string();
     InjectionServer idle_server{
         idle_socket_path,
         ServerInfo{
@@ -362,7 +362,7 @@ int main() {
     idle_server.stop();
 
     const auto replaced_socket_path =
-        (temporary.path() / "cua-inject-v2-replaced.sock").string();
+        (temporary.path() / "pincer-inject-v2-replaced.sock").string();
     InjectionServer replaced_server{
         replaced_socket_path, ServerInfo{.compositor_epoch = 81}};
     check(replaced_server.start(),
@@ -396,6 +396,6 @@ int main() {
     check(std::filesystem::remove(occupied_path),
           "test removed the preserved occupied path");
 
-    std::cout << "cua-inject-v2 transport tests passed\n";
+    std::cout << "pincer-inject-v2 transport tests passed\n";
     return 0;
 }

@@ -21,7 +21,7 @@ final class SnapshotPublicationFixture: NSObject {
             contentRect: NSRect(x: 100, y: 100, width: 720, height: 700),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         super.init()
-        window.title = "CuaTestHarness Snapshot Publication"
+        window.title = "PincerTestHarness Snapshot Publication"
         window.isReleasedWhenClosed = false
         window.contentView = content
         let bitmap = NSBitmapImageRep(

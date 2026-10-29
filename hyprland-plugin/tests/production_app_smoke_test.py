@@ -38,7 +38,7 @@ def observed(state):
 CALC = complete(CALC_STATE)
 # The pinned closed Edit menu omits its Select All child.
 INKSCAPE = complete({
-    'window_title': 'cua-smoke-inkscape.svg - Inkscape',
+    'window_title': 'pincer-smoke-inkscape.svg - Inkscape',
     'elements': [
         {'element_index': 10, 'role': 'menu', 'label': 'Edit', 'enabled': True},
         {'element_index': 12, 'role': 'table cell', 'label': 'smoke-rectangle', 'enabled': True,
@@ -50,7 +50,7 @@ INKSCAPE = complete({
         'objects, or drag around objects to select."'])})
 # Objects panel not yet open: only the semantic opener exists.
 INKSCAPE_NO_OBJECTS = complete({
-    'window_title': 'cua-smoke-inkscape.svg - Inkscape',
+    'window_title': 'pincer-smoke-inkscape.svg - Inkscape',
     'elements': [
         {'element_index': 10, 'role': 'menu', 'label': 'Edit', 'enabled': True},
         {'element_index': 20, 'element_token': 'token-20', 'role': 'button',
@@ -65,9 +65,9 @@ SETUP_CLICK = {'structuredContent': {'route': 'accessibility', 'effect': 'unveri
 
 class FixtureTests(unittest.TestCase):
     def test_enabled_option_uses_exact_pinned_v2_boolean_contract(self):
-        enabled = {'option': 'plugin:cua:enabled', 'bool': True, 'set': True}
+        enabled = {'option': 'plugin:pincer:enabled', 'bool': True, 'set': True}
         require_enabled_plugin(enabled)
-        for value in ({}, [], {'option': 'plugin:cua:enabled', 'int': 1},
+        for value in ({}, [], {'option': 'plugin:pincer:enabled', 'int': 1},
                       {**enabled, 'option': 'some:other:option'}, {**enabled, 'int': 1},
                       *({**enabled, 'bool': value} for value in (False, 1, 'true', None))):
             with self.subTest(value=value), self.assertRaisesRegex(AssertionError, 'not enabled'):
@@ -217,7 +217,7 @@ class InputTests(unittest.TestCase):
     def test_inkscape_launch_uses_run_unique_app_id_tag_and_positional_document(self):
         launch = launch_arguments('inkscape', Path('/docs/smoke.svg'), Path('/evidence/a/inkscape'))
         tag = inkscape_app_id_tag(Path('/evidence/a/inkscape'))
-        self.assertRegex(tag, r'^cua-smoke-[0-9a-f]{16}$')
+        self.assertRegex(tag, r'^pincer-smoke-[0-9a-f]{16}$')
         self.assertEqual(launch, {'launch_path': '/usr/bin/inkscape',
                                   'additional_arguments': [f'--app-id-tag={tag}', '/docs/smoke.svg']})
         self.assertNotEqual(tag, inkscape_app_id_tag(Path('/evidence/b/inkscape')))
@@ -367,7 +367,7 @@ class InputTests(unittest.TestCase):
         mcp = Mock()
         mcp.tool.side_effect = [{'structuredContent': CALC}, WINDOWS, GOOD_DELIVERY,
                                 {'structuredContent': CALC}, WINDOWS]
-        input_step(mcp, TARGET, 'cua-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
+        input_step(mcp, TARGET, 'pincer-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
         calls = mcp.tool.call_args_list
         self.assertEqual([call.args[0] for call in calls],
                          ['get_window_state', 'list_windows', 'type_text', 'get_window_state', 'list_windows'])
@@ -383,14 +383,14 @@ class InputTests(unittest.TestCase):
             mcp = Mock()
             mcp.tool.side_effect = observed({**CALC, **change})
             with self.subTest(change=change), self.assertRaisesRegex(GroundingUnavailable, 'not proven complete'):
-                input_step(mcp, TARGET, 'cua-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
+                input_step(mcp, TARGET, 'pincer-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
             self.assertEqual([call.args[0] for call in mcp.tool.call_args_list], ['get_window_state'])
         for missing in ('truncated', 'elements_complete', 'timeout_ms'):
             state = {key: value for key, value in CALC.items() if key != missing}
             mcp = Mock()
             mcp.tool.side_effect = observed(state)
             with self.subTest(missing=missing), self.assertRaises(GroundingUnavailable):
-                input_step(mcp, TARGET, 'cua-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
+                input_step(mcp, TARGET, 'pincer-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
             self.assertEqual(mcp.tool.call_count, 1)
 
     def test_truncated_tree_after_input_still_fails_delivery_check_first(self):
@@ -398,13 +398,13 @@ class InputTests(unittest.TestCase):
         partial = {'structuredContent': {**GOOD_DELIVERY['structuredContent'], 'effect': 'partial'}}
         mcp.tool.side_effect = [*observed(CALC), partial, *observed({**CALC, 'truncated': True})]
         with self.assertRaisesRegex(AssertionError, 'partial/refused input cannot pass'):
-            input_step(mcp, TARGET, 'cua-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
+            input_step(mcp, TARGET, 'pincer-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
 
     def test_missing_grounding_sends_no_input(self):
         mcp = Mock()
         mcp.tool.side_effect = [{'structuredContent': {**CALC, 'elements': []}}, WINDOWS]
         with self.assertRaises(GroundingUnavailable):
-            input_step(mcp, TARGET, 'cua-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
+            input_step(mcp, TARGET, 'pincer-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
         self.assertEqual(mcp.tool.call_count, 2)
 
     def test_partial_delivery_stays_failure_even_if_dialog_appears(self):
@@ -414,7 +414,7 @@ class InputTests(unittest.TestCase):
         mcp.tool.side_effect = [{'structuredContent': CALC}, WINDOWS, partial,
                                 {'structuredContent': dialog}, WINDOWS]
         with self.assertRaisesRegex(AssertionError, 'partial/refused input cannot pass'):
-            input_step(mcp, TARGET, 'cua-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
+            input_step(mcp, TARGET, 'pincer-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
         self.assertEqual(mcp.tool.call_count, 5)
 
     def test_unknown_transport_outcome_is_not_replayed(self):
@@ -422,7 +422,7 @@ class InputTests(unittest.TestCase):
         mcp.tool.side_effect = [{'structuredContent': CALC}, WINDOWS, TimeoutError('unknown')]
         with patch('production_app_smoke.read', side_effect=OSError('unavailable')):
             with self.assertRaises(TimeoutError):
-                input_step(mcp, TARGET, 'cua-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
+                input_step(mcp, TARGET, 'pincer-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
         self.assertEqual(mcp.tool.call_count, 3)
 
 
@@ -436,7 +436,7 @@ class ObjectsSetupTests(unittest.TestCase):
         mcp = Mock()
         mcp.directory = self.directory
         mcp.tool.side_effect = side_effect
-        return mcp, lambda: prepare_inkscape_objects(mcp, TARGET, 'cua-smoke-inkscape.svg', self.directory)
+        return mcp, lambda: prepare_inkscape_objects(mcp, TARGET, 'pincer-smoke-inkscape.svg', self.directory)
 
     @staticmethod
     def names(mcp):
@@ -581,7 +581,7 @@ class ObjectsSetupTests(unittest.TestCase):
     def test_observation_helper_requests_explicit_budget(self):
         mcp = Mock()
         mcp.tool.side_effect = observed(INKSCAPE)
-        observe(mcp, TARGET, 'cua-smoke-inkscape.svg')
+        observe(mcp, TARGET, 'pincer-smoke-inkscape.svg')
         self.assertEqual(mcp.tool.call_args_list[0].args,
                          ('get_window_state', {**TARGET, 'timeout_ms': 15000, 'full_output': True}))
 
@@ -591,7 +591,7 @@ UNPROVEN = {'degraded': True,
 
 
 class ObservationRetryTests(unittest.TestCase):
-    FILENAME = 'cua-smoke-calc.ods'
+    FILENAME = 'pincer-smoke-calc.ods'
 
     def names(self, mcp):
         return [call.args[0] for call in mcp.tool.call_args_list]
@@ -675,7 +675,7 @@ class RawInputReportTests(unittest.TestCase):
         mcp.tool.side_effect = tool
         mcp.raw_input_attempted = False
         with patch('production_app_smoke.read', side_effect=OSError('unavailable')), self.assertRaises(TimeoutError):
-            input_step(mcp, TARGET, 'cua-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
+            input_step(mcp, TARGET, 'pincer-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
         self.assertEqual(seen, [True])
 
     def test_grounding_loss_after_raw_attempt_is_failed_not_delivered(self):
@@ -695,7 +695,7 @@ class RawInputReportTests(unittest.TestCase):
         mcp = Mock()
         mcp.tool.side_effect = [*observed(CALC), GOOD_DELIVERY, *observed({**CALC, 'truncated': True})]
         with self.assertRaises(GroundingUnavailable) as caught:
-            input_step(mcp, TARGET, 'cua-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
+            input_step(mcp, TARGET, 'pincer-smoke-calc.ods', 'calc', 'insert', 'type_text', {'text': 'abc'})
         self.assertEqual(grounding_outcome(mcp, caught.exception)['result'], 'failed')
 
 

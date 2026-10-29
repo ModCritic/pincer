@@ -86,7 +86,7 @@ def local_s1_model(
         repo_id=os.environ.get("S1_ADAPTER_ID"),
         revision=os.environ.get("S1_ADAPTER_REVISION"),
     )
-    from cua_s1.four_b import FourBModel
+    from pincer_s1.four_b import FourBModel
 
     return S1DecisionModel(
         FourBModel(

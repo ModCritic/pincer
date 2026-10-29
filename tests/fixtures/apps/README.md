@@ -1,6 +1,6 @@
 # test fixture apps
 
-Each subdirectory is one deterministic host app cua-driver can drive. Apps
+Each subdirectory is one deterministic host app pincer can drive. Apps
 share fixtures through `../shared/scenarios.json` and, for webview hosts,
 `../shared/web/index.html`.
 

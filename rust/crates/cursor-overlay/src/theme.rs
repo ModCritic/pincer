@@ -1,4 +1,4 @@
-//! Canonical cursor-theme semantics and `cua.default` runtime parameters.
+//! Canonical cursor-theme semantics and `pincer.default` runtime parameters.
 //!
 //! The default artwork is authored as a checked-in dotLottie archive and
 //! compiled into the bounded artifact embedded by [`crate::theme_artifact`].
@@ -7,14 +7,14 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use cua_driver_contract::{
+pub use pincer_contract::{
     CursorAction, CursorDelivery as DeliveryModifier, CursorPlayback as PlaybackKind,
     CursorReducedMotion as ReducedMotion, CursorTarget as TargetModifier,
 };
 
-pub const DEFAULT_THEME_ID: &str = "cua.default";
+pub const DEFAULT_THEME_ID: &str = "pincer.default";
 pub const DEFAULT_THEME_VERSION: &str = "3.1.0";
-pub const THEME_PROFILE: &str = "cua-driver-actions-v2";
+pub const THEME_PROFILE: &str = "pincer-actions-v2";
 pub const CANVAS_SIZE: f32 = 128.0;
 pub const DISPLAY_SIZE: f32 = 42.0;
 const FLOAT_DURATION_SECS: f32 = 4.0;

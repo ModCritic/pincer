@@ -8,7 +8,7 @@ transport. It does not replace cua-spacesd, add agent tools, or open a port.
 
 ## Runtime ownership and opt-in
 
-Set `CUA_DRIVER_MCP_ENVELOPES=1` in the trusted launcher. An absent value or `0`
+Set `PINCER_MCP_ENVELOPES=1` in the trusted launcher. An absent value or `0`
 keeps the existing MCP implementation. Other values fail startup.
 
 For direct stdio, the MCP process owns the runtime. For an explicitly selected
@@ -18,7 +18,7 @@ creates and owns the typed sessions. The proxy gains no trusted-session binding
 authority. An old or disabled daemon refuses the upgrade; the proxy does not
 fall back to another protocol or runtime.
 
-The receiver uses `CUA_DRIVER_ENVELOPE_PERMISSION_MODE`, with Standard as the
+The receiver uses `PINCER_ENVELOPE_PERMISSION_MODE`, with Standard as the
 default. Unrestricted requires the existing explicit unrestricted host
 acknowledgement as well as launcher selection. Capability-manifest hosts remain
 unsupported by this first receiver slice. A request cannot select permissions,
@@ -38,7 +38,7 @@ the separate private HTTP receiver listener.
 {
   "capabilities": {
     "experimental": {
-      "ai.cua.driver.envelopes": { "version": 1 }
+      "ai.pincer.driver.envelopes": { "version": 1 }
     }
   }
 }
@@ -90,9 +90,9 @@ pool cleanup.
 Run the focused deterministic tests from `rust/`:
 
 ```sh
-cargo test -p cua-driver --bin cua-driver mcp_envelope --locked
-cargo test -p cua-driver --bin cua-driver driver_service_http --locked
-cargo test -p cua-driver --bin cua-driver proxy --locked
+cargo test -p pincer --bin pincer mcp_envelope --locked
+cargo test -p pincer --bin pincer driver_service_http --locked
+cargo test -p pincer --bin pincer proxy --locked
 ```
 
 Before image enablement, separately prove the generated SDK carrier, real

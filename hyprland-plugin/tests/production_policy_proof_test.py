@@ -18,7 +18,7 @@ from production_policy_proof import (
 )
 
 
-# cua-driver-core: policy.rs:391 via authorize_policy_layers ("{name} policy: ...") and
+# pincer-core: policy.rs:391 via authorize_policy_layers ("{name} policy: ...") and
 # AuthorizationError::Denied; consent.rs:101 around session_manifest.rs:309.
 OUTSIDE_MANIFEST = {'code': 'bounded_resource_outside_manifest',
                     'message': 'protected resource is outside the capability manifest: '
@@ -44,7 +44,7 @@ def plan(case='resource_wrong_window', app='calc', mode='unrestricted'):
     suffix = 'calc.ods' if app == 'calc' else 'inkscape.svg'
     return {'case': case, 'app': app, 'mode': mode, 'disposable': True,
             'target': {'pid': 20, 'window_id': 200},
-            'document': '/disposable/cua-smoke-' + suffix}
+            'document': '/disposable/pincer-smoke-' + suffix}
 
 
 def page(events, active=True):
@@ -151,7 +151,7 @@ class PolicyTests(unittest.TestCase):
             lambda p: p.update(profile={'manifest': '/host-policy'}),
             lambda p: p.update(arguments={'scope': 'desktop'}),
             lambda p: p.update(document='/business/file.ods'),
-            lambda p: p.update(document='cua-smoke-calc.ods'),
+            lambda p: p.update(document='pincer-smoke-calc.ods'),
             lambda p: p['target'].update(pid=True), lambda p: p['target'].update(window_id=0),
             lambda p: p['target'].update(delivery_mode='foreground')]
         for mutate in mutations:
@@ -201,7 +201,7 @@ class PolicyTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'spawn failure'):
                     start_client(Path('/driver'), directory, 'unrestricted', manifest, managed)
             self.assertNotIn(MANAGED_ENV, os.environ)
-            for name in (MANAGED_ENV, 'CUA_DRIVER_POLICY_FILE'):
+            for name in (MANAGED_ENV, 'PINCER_POLICY_FILE'):
                 with patch.dict(os.environ, {name: '/never-read-host-policy'}), \
                         patch('production_policy_proof.DirectMCP') as spawn:
                     with self.assertRaisesRegex(AssertionError, 'inherited'):

@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace CuaTestHarness.WebView;
+namespace PincerTestHarness.WebView;
 
 public partial class App : Application
 {

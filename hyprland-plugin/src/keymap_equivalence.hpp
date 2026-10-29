@@ -2,7 +2,7 @@
 
 // The chord comparison below (foreground_numlock_mask through
 // foreground_chord_failure) is adapted from omacom/omarchy-pkgs#473,
-// pkgbuilds/cua-hyprland-plugin/independent-keymaps.patch, by Spencer Bull.
+// pkgbuilds/pincer-hyprland-plugin/independent-keymaps.patch, by Spencer Bull.
 // Copyright (c) David Heinemeier Hansson. Used under the MIT License, whose
 // permission notice is the same as this repository's LICENSE.md.
 
@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 
 // Lock keys are refused by the KEY command itself, so they never need to match.
 inline constexpr bool foreground_lock_key(std::uint32_t code) {
@@ -201,4 +201,4 @@ inline ForegroundFailureReason foreground_chord_failure(xkb_keymap* physical, xk
     return ForegroundFailureReason::none;
 }
 
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

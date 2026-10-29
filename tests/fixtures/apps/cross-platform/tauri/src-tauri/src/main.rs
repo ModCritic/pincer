@@ -24,10 +24,10 @@ fn fixture_url() -> tauri::Url {
 }
 
 fn main() {
-    let journal_url = std::env::var("CUA_E2E_FIXTURE_JOURNAL_URL").unwrap_or_default();
+    let journal_url = std::env::var("PINCER_E2E_FIXTURE_JOURNAL_URL").unwrap_or_default();
     let journal_plugin = tauri::plugin::Builder::<tauri::Wry, ()>::new("e2e-journal")
         .js_init_script(format!(
-            "window.__CUA_E2E_FIXTURE_JOURNAL_URL = {journal_url:?};"
+            "window.__PINCER_E2E_FIXTURE_JOURNAL_URL = {journal_url:?};"
         ))
         .build();
     tauri::Builder::default()
@@ -43,7 +43,7 @@ fn main() {
                 "main",
                 tauri::WebviewUrl::External(fixture_url()),
             )
-            .title("CuaTestHarness Tauri")
+            .title("PincerTestHarness Tauri")
             .inner_size(900.0, height)
             .resizable(true);
             #[cfg(target_os = "windows")]
@@ -58,5 +58,5 @@ fn main() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running CuaTestHarness.Tauri");
+        .expect("error while running PincerTestHarness.Tauri");
 }

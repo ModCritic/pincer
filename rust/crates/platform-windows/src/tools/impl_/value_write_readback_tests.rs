@@ -28,7 +28,7 @@ fn deferred_publication_remains_unverifiable_without_retry_escalation() {
     assert_eq!(result["verified"], false);
     assert!(result.get("escalation").is_none());
 
-    let record = cua_driver_core::action_record::ActionExecutionRecord::from_legacy(
+    let record = pincer_core::action_record::ActionExecutionRecord::from_legacy(
         "type_text",
         &serde_json::json!({"delivery_mode": "background"}),
         &result,

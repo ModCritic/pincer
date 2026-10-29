@@ -26,9 +26,9 @@ def adapter(monkeypatch):
         DriverServiceTransportError=SimpleNamespace(Failed=RuntimeError),
         open_mcp_driver_channel=create,
     )
-    monkeypatch.setitem(sys.modules, "cua_driver", sdk)
-    path = Path(__file__).parents[1] / "src/cua_driver/fleet.py"
-    spec = importlib.util.spec_from_file_location("cua_driver.fleet", path)
+    monkeypatch.setitem(sys.modules, "pincer_driver", sdk)
+    path = Path(__file__).parents[1] / "src/pincer_driver/fleet.py"
+    spec = importlib.util.spec_from_file_location("pincer_driver.fleet", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
@@ -175,8 +175,8 @@ def test_response_exactly_at_limit_is_accepted(adapter):
 
 
 def test_real_generated_channel_uses_fleet_records_and_frozen_target():
-    import cua_driver as sdk
-    from cua_driver.fleet import open_fleet_mcp_driver_channel
+    import pincer_driver as sdk
+    from pincer_driver.fleet import open_fleet_mcp_driver_channel
     from fleet_sdk import HttpHeader, HttpResponse, Sandbox
 
     async def check():
@@ -194,7 +194,7 @@ def test_real_generated_channel_uses_fleet_records_and_frozen_target():
                 headers.append(HttpHeader(name="Mcp-Session-Id", value="fleet-session"))
                 result = {
                     "protocolVersion": "2025-06-18",
-                    "capabilities": {"experimental": {"ai.cua.driver.envelopes": {"version": 1}}},
+                    "capabilities": {"experimental": {"ai.pincer.driver.envelopes": {"version": 1}}},
                 }
             elif method == "notifications/initialized" or request.method == "DELETE":
                 return HttpResponse(status=202, headers=[], body=b"")
@@ -238,7 +238,7 @@ def test_real_generated_channel_uses_fleet_records_and_frozen_target():
         try:
             await channel.open()
             driver = channel.driver()
-            assert type(driver) is sdk.CuaDriver
+            assert type(driver) is sdk.Pincer
             assert channel.public_session() == "host-session"
             result = await driver.get_screen_size(sdk.GetScreenSizeInput(session=None))
             assert result.text == "fleet-native"

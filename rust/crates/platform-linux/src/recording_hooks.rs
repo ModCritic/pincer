@@ -7,7 +7,7 @@
 pub fn app_state_json_for(
     window_id: Option<u64>,
     pid: Option<i64>,
-    budget: cua_driver_core::recording::StateCaptureBudget,
+    budget: pincer_core::recording::StateCaptureBudget,
 ) -> Option<Vec<u8>> {
     if tokio::runtime::Handle::try_current().is_ok() {
         return std::thread::spawn(move || app_state_json_for_blocking(window_id, pid, budget))
@@ -22,7 +22,7 @@ pub fn app_state_json_for(
 fn app_state_json_for_blocking(
     window_id: Option<u64>,
     pid: Option<i64>,
-    budget: cua_driver_core::recording::StateCaptureBudget,
+    budget: pincer_core::recording::StateCaptureBudget,
 ) -> Option<Vec<u8>> {
     let pid = u32::try_from(pid?).ok()?;
     let window_id = if crate::wayland::is_inject_mode() {
@@ -58,7 +58,7 @@ fn app_state_json_for_blocking(
         "window_id": window_id,
         "element_count": element_count,
         "tree_markdown": result.tree_markdown,
-        // The shared walk fields (see cua_driver_core::walk_budget).
+        // The shared walk fields (see pincer_core::walk_budget).
         "truncated": result.truncated,
         "nodes_visited": result.nodes_visited,
         "nodes_pending": result.nodes_pending,
@@ -97,7 +97,7 @@ pub fn element_window_local_xy(
     args: &serde_json::Value,
     capture_point: bool,
 ) -> Option<(u64, Option<(f64, f64)>)> {
-    let cache = cua_driver_core::snapshot_store::current_runtime_store::<
+    let cache = pincer_core::snapshot_store::current_runtime_store::<
         crate::atspi::snapshot::AtspiSnapshot,
     >()?;
     let resolved = cache.resolve(i32::try_from(pid).ok()?, args).ok()?;
@@ -231,7 +231,7 @@ fn resolve_window_for_recording(
 pub fn app_state_json_for(
     _window_id: Option<u64>,
     _pid: Option<i64>,
-    _budget: cua_driver_core::recording::StateCaptureBudget,
+    _budget: pincer_core::recording::StateCaptureBudget,
 ) -> Option<Vec<u8>> {
     None
 }
@@ -296,14 +296,14 @@ mod tests {
 /// black video and reported no error (KDE Plasma 6.8.1, 2026-10-25).
 pub struct X11VideoBackendFactory;
 
-impl cua_driver_core::video::VideoBackendFactory for X11VideoBackendFactory {
+impl pincer_core::video::VideoBackendFactory for X11VideoBackendFactory {
     fn start(
         &self,
         output_path: &std::path::Path,
-    ) -> anyhow::Result<Box<dyn cua_driver_core::video::VideoBackend>> {
+    ) -> anyhow::Result<Box<dyn pincer_core::video::VideoBackend>> {
         if crate::x11::rootless_xwayland() {
             anyhow::bail!(crate::x11::ROOTLESS_XWAYLAND_CAPTURE);
         }
-        cua_driver_core::video_ffmpeg::FfmpegVideoBackendFactory.start(output_path)
+        pincer_core::video_ffmpeg::FfmpegVideoBackendFactory.start(output_path)
     }
 }

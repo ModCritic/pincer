@@ -1,6 +1,6 @@
-# build.ps1 - stage the Tauri test harness for cua-driver tests on Windows.
+# build.ps1 - stage the Tauri test harness for pincer tests on Windows.
 #
-# Output: rust/test-apps/harness-tauri/CuaTestHarness.Tauri.exe
+# Output: rust/test-apps/harness-tauri/PincerTestHarness.Tauri.exe
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -10,8 +10,8 @@ $crossDir = Split-Path -Parent $tauriDir
 $appsDir = Split-Path -Parent $crossDir
 $harnessDir = Split-Path -Parent $appsDir
 $testsDir = Split-Path -Parent $harnessDir
-$cuaDriverDir = Split-Path -Parent $testsDir
-$testAppsDir = Join-Path $cuaDriverDir "rust\test-apps"
+$pincerDir = Split-Path -Parent $testsDir
+$testAppsDir = Join-Path $pincerDir "rust\test-apps"
 $outDir = Join-Path $testAppsDir "harness-tauri"
 
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
@@ -34,12 +34,12 @@ try {
 }
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed for Tauri harness" }
 
-$srcExe = Join-Path $tauriDir "src-tauri\target\release\cua-test-harness-tauri.exe"
+$srcExe = Join-Path $tauriDir "src-tauri\target\release\pincer-test-harness-tauri.exe"
 if (-not (Test-Path $srcExe)) {
     throw "Tauri exe not found after build: $srcExe"
 }
 
 if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
 New-Item -ItemType Directory -Force $outDir | Out-Null
-Copy-Item $srcExe (Join-Path $outDir "CuaTestHarness.Tauri.exe") -Force
-Write-Host "[OK]    Staged: $outDir\CuaTestHarness.Tauri.exe" -ForegroundColor Green
+Copy-Item $srcExe (Join-Path $outDir "PincerTestHarness.Tauri.exe") -Force
+Write-Host "[OK]    Staged: $outDir\PincerTestHarness.Tauri.exe" -ForegroundColor Green

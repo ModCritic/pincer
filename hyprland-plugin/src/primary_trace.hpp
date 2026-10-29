@@ -5,12 +5,12 @@
 #include <string>
 
 struct wl_resource;
-namespace cua::hyprland {
+namespace pincer::hyprland {
 // Test instrumentation, never part of the discovery-only production build.
 // No input is emitted. Capture is bounded, explicit, and kept in memory.
 class PrimaryTrace {
   public:
-#if defined(CUA_HYPRLAND_TEST_INPUT) || defined(CUA_HYPRLAND_INPUT_TRACE)
+#if defined(PINCER_HYPRLAND_TEST_INPUT) || defined(PINCER_HYPRLAND_INPUT_TRACE)
     PrimaryTrace(void* plugin, std::function<unsigned(wl_resource*)> actor);
     ~PrimaryTrace();
     std::string request(const std::string& command, unsigned after = 0);

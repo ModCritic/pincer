@@ -2,4 +2,4 @@
 
 use libfuzzer_sys::fuzz_target;
 
-fuzz_target!(|data: &[u8]| cua_driver_testkit::boundary_fuzz::typed_input_json(data));
+fuzz_target!(|data: &[u8]| pincer_testkit::boundary_fuzz::typed_input_json(data));

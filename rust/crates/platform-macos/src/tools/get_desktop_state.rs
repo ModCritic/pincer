@@ -11,8 +11,8 @@
 //! `structuredContent` object.
 
 use async_trait::async_trait;
-use cua_driver_contract::GetDesktopStateInput;
-use cua_driver_core::{
+use pincer_contract::GetDesktopStateInput;
+use pincer_core::{
     protocol::{Content, ToolResult},
     tool::{Tool, ToolDef},
     tool_args::parse_typed_input,
@@ -48,7 +48,7 @@ fn def() -> &'static ToolDef {
             "properties": {
                 "session": { "type": "string", "description": "For multi-call work, prefer a short public session label and repeat it on every call that accepts it. Omit it to use the authenticated transport's implicit lifecycle session." },
                 "screenshot_out_file": { "type": "string", "description": "Write PNG here instead of base64." },
-                "max_image_dimension": cua_driver_core::tool_schema::desktop_max_image_dimension_schema()
+                "max_image_dimension": pincer_core::tool_schema::desktop_max_image_dimension_schema()
             },
             "additionalProperties": false
         }),
@@ -73,7 +73,7 @@ impl Tool for GetDesktopStateTool {
         };
         // Call arg > session override > global config, as get_window_state.
         let max_image_dimension = input.max_image_dimension.or_else(|| {
-            use cua_driver_core::tool_args::ArgsExt;
+            use pincer_core::tool_args::ArgsExt;
             let session_id = capture_args.opt_str("_session_id");
             let cfg = self.state.config.read().unwrap();
             Some(

@@ -50,7 +50,7 @@
 //! NSWorkspace's block-based observer fires on the queue you give it. If
 //! the queue is `nil` (Swift default) or `mainQueue`, the block runs on
 //! the main thread — which means it requires a live main run loop.
-//! `cua-driver call` (one-shot subcommand) and `--no-overlay` mode don't
+//! `pincer call` (one-shot subcommand) and `--no-overlay` mode don't
 //! have one, so the activation observer would never fire. A fresh
 //! background `NSOperationQueue` sidesteps that — the block runs on the
 //! queue's own thread regardless of run-loop state.

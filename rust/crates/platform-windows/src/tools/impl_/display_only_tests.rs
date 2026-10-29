@@ -1,5 +1,5 @@
 use super::{GetWindowStateTool, ToolState};
-use cua_driver_core::tool::Tool;
+use pincer_core::tool::Tool;
 
 // T3 Code feature-detects the preview mode from this schema property.
 #[test]
@@ -26,7 +26,7 @@ async fn display_only_refuses_accessibility_snapshot_requests() {
         let result = tool.invoke(args).await;
         assert_eq!(
             serde_json::to_value(result).unwrap(),
-            serde_json::to_value(cua_driver_core::protocol::ToolResult::error(
+            serde_json::to_value(pincer_core::protocol::ToolResult::error(
                 "display_only requires include_accessibility_tree:false"
             ))
             .unwrap()

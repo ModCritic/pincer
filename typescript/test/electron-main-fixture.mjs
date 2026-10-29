@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from "node:os"
 import path from "node:path"
 
-const directory = mkdtempSync(path.join(os.tmpdir(), "cua-driver-electron-host-"))
+const directory = mkdtempSync(path.join(os.tmpdir(), "pincer-electron-host-"))
 const binaryPath = path.join(directory, "generic-driver-host")
 const packageVersion = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
@@ -64,15 +64,15 @@ const waitForExit = async (pid) => {
 }
 
 try {
-  const { EmbeddedCuaDriverHost, EmbeddedDriverHostState } = await import(
-    "@trycua/cua-driver/embedded"
+  const { EmbeddedPincerHost, EmbeddedDriverHostState } = await import(
+    "pincer-driver/embedded"
   )
-  const host = new EmbeddedCuaDriverHost(binaryPath, "com.example.electron-host")
+  const host = new EmbeddedPincerHost(binaryPath, "com.example.electron-host")
   const connection = await host.start()
   const socketPath = connection.socketPath
   const pid = connection.pid
-  const { CuaDriver } = await import("@trycua/cua-driver")
-  const driver = CuaDriver.connect(socketPath)
+  const { Pincer } = await import("pincer-driver")
+  const driver = Pincer.connect(socketPath)
   const tools = JSON.parse(await driver.listToolsJson())
   driver.uniffiDestroy()
   const result = {
@@ -84,7 +84,7 @@ try {
     connection: {
       driverVersion: connection.driverVersion,
       socketPathIsPrivate:
-        socketPath.startsWith(os.tmpdir()) && path.basename(socketPath).startsWith("cua-"),
+        socketPath.startsWith(os.tmpdir()) && path.basename(socketPath).startsWith("pincer-"),
       pidMatchesChild: Number(readFileSync(path.join(directory, "com.example.electron-host.pid"), "utf8")) === pid,
       stateIsReady: host.state() === EmbeddedDriverHostState.Ready,
       mcpCommand: connection.mcp.command,
@@ -99,7 +99,7 @@ try {
     childExited: await waitForExit(pid),
   }
 
-  const failingHost = new EmbeddedCuaDriverHost(binaryPath, "com.example.electron-host.failure")
+  const failingHost = new EmbeddedPincerHost(binaryPath, "com.example.electron-host.failure")
   let failureCode
   try {
     await failingHost.start()

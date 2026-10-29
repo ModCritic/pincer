@@ -12,7 +12,7 @@
 #include <format>
 #include <stdexcept>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 struct PrimaryTrace::Impl {
     using Clock = std::chrono::steady_clock;
     struct Event {

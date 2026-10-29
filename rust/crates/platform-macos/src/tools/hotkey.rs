@@ -1,11 +1,11 @@
 use async_trait::async_trait;
-use cua_driver_contract::HotkeyInput;
-use cua_driver_core::{
+use libc;
+use pincer_contract::HotkeyInput;
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
     tool_args::parse_typed_projection,
 };
-use libc;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -82,9 +82,9 @@ fn def() -> &'static ToolDef {
                     "type": "integer",
                     "description": "Target window. Required for delivery_mode:\"foreground\" (the NSMenu activation needs a window). Does NOT itself raise the window — raising is gated on delivery_mode."
                 },
-                "element_token": cua_driver_core::tool_schema::element_token_schema(),
+                "element_token": pincer_core::tool_schema::element_token_schema(),
                 "scope": { "type": "string", "enum": ["window", "desktop"], "default": "window", "description": "Use desktop with no pid/window_id to send the chord to the frontmost application." },
-                "delivery_mode": cua_driver_core::tool_schema::delivery_mode_schema()
+                "delivery_mode": pincer_core::tool_schema::delivery_mode_schema()
             },
             "additionalProperties": false
         }),
@@ -153,7 +153,7 @@ fn screen_sharing_modifier_delivery_error(
     Some(
         ToolResult::error(
             "Screen Sharing modifier hotkeys require delivery_mode:\"foreground\" and window_id \
-             so Cua Driver can deliver physical modifier transitions safely.",
+             so Pincer can deliver physical modifier transitions safely.",
         )
         .with_structured(serde_json::json!({
             "code": "SCREEN_SHARING_REQUIRES_FOREGROUND_HID",
@@ -175,7 +175,7 @@ impl Tool for HotkeyTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         if args.opt_str("scope").as_deref() == Some("desktop")
             && args.get("pid").is_none()
             && args.get("window_id").is_none()
@@ -380,7 +380,7 @@ impl Tool for HotkeyTool {
                     pid,
                     wid,
                     element_ptr,
-                    cua_driver_core::background_input::BackgroundAction::GenericKey,
+                    pincer_core::background_input::BackgroundAction::GenericKey,
                 )
                 .await
                 {

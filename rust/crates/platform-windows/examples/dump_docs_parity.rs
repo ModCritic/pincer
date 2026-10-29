@@ -1,4 +1,4 @@
-//! Parity check for `cua-driver dump-docs`.
+//! Parity check for `pincer dump-docs`.
 
 #[cfg(target_os = "windows")]
 use std::process::Command;
@@ -10,7 +10,7 @@ fn main() {
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/debug/cua-driver.exe");
+        .join("target/debug/pincer.exe");
 
     // 1. Default: --type=all → {cli, mcp}.
     let out = Command::new(&exe).arg("dump-docs").output().expect("run");

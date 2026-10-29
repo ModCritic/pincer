@@ -54,7 +54,7 @@ class NestedCompositor:
         self.metadata = None
         directory.mkdir()
         self.config = directory / "hyprland.lua"
-        self.config.write_text("hl.config({plugin = {cua = {enabled = true}}})\n")
+        self.config.write_text("hl.config({plugin = {pincer = {enabled = true}}})\n")
 
     def ctl(self, *args):
         if not self.instance:
@@ -102,7 +102,7 @@ class NestedCompositor:
             # Socket1 can answer before nested output creation/config reload
             # finishes. Discovery tests require an actual initialized desktop.
             try:
-                status = json.loads(self.ctl("-j", "cua:status"))
+                status = json.loads(self.ctl("-j", "pincer:status"))
                 monitors = json.loads(self.ctl("-j", "monitors"))
                 workspace = json.loads(self.ctl("-j", "activeworkspace"))
                 return (status["transport"]["ready"] and bool(monitors)
@@ -115,7 +115,7 @@ class NestedCompositor:
         result = json.loads(command(sys.executable, str(Path(live.__file__)), env=env))
         assert result["mutation_refusals"] == 6
         assert result["compositor_state_unchanged"] is True
-        self.metadata = json.loads(self.ctl("-j", "cua:status"))
+        self.metadata = json.loads(self.ctl("-j", "pincer:status"))
         assert self.metadata["transport"]["ready"] and self.metadata["abi"]["match"]
         return self.metadata
 
@@ -221,7 +221,7 @@ def main():
     parser.add_argument("--hyprland", default="Hyprland")
     args = parser.parse_args()
     module = args.module.resolve(strict=True)
-    directory = Path(tempfile.mkdtemp(prefix="cua-plugin-lifecycle-"))
+    directory = Path(tempfile.mkdtemp(prefix="pincer-plugin-lifecycle-"))
     print(f"Lifecycle logs: {directory}", file=sys.stderr)
     print(json.dumps(run(module, directory, args.hyprland)))
 

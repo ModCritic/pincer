@@ -5,7 +5,7 @@
 //! handshake on a real GNOME / KDE-Wayland host.
 //!
 //! Usage:
-//!   CUA_DRIVER_RS_ENABLE_WAYLAND=1 \
+//!   PINCER_ENABLE_WAYLAND=1 \
 //!   WAYLAND_DISPLAY=wayland-0 \
 //!   cargo run --example libei_input --release
 

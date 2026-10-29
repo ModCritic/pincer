@@ -20,9 +20,9 @@ SOURCE_FILES = """
 CMakeLists.txt
 cmake/DetectHyprlandAPI.cmake
 cmake/VerifyRuntime.cmake
-include/cua_hyprland/protocol.hpp
-include/cua_hyprland/session.hpp
-include/cua_hyprland/status.hpp
+include/pincer_hyprland/protocol.hpp
+include/pincer_hyprland/session.hpp
+include/pincer_hyprland/status.hpp
 src/drag_geometry.hpp
 src/foreground_route.hpp
 src/inject_server.cpp
@@ -112,7 +112,7 @@ def generate(repo, revision, driver_version, output, *, release_assets=False):
     if cargo["workspace"]["package"]["version"] != driver_version:
         raise ValueError("driver version does not match committed Cargo.toml")
     if release_assets:
-        tag = f"refs/tags/cua-driver-rs-v{driver_version}"
+        tag = f"refs/tags/pincer-v{driver_version}"
         if git(repo, "rev-parse", "--verify", f"{tag}^{{commit}}").decode().strip() != revision:
             raise ValueError("source revision does not match the exact Driver release tag")
     payload = {name: committed_file(repo, revision, PLUGIN + name) for name in SOURCE_FILES}
@@ -120,7 +120,7 @@ def generate(repo, revision, driver_version, output, *, release_assets=False):
     # profile tooling expect; this repository ships the file as LICENSE.
     payload["LICENSE.md"] = committed_file(repo, revision, "LICENSE")
     payload["verify.py"] = committed_file(repo, revision, RELEASE + "verify.py")
-    version = re.search(rb"project\(cua_hyprland_plugin VERSION ([0-9.]+) LANGUAGES CXX\)", payload["CMakeLists.txt"])
+    version = re.search(rb"project\(pincer_hyprland_plugin VERSION ([0-9.]+) LANGUAGES CXX\)", payload["CMakeLists.txt"])
     if not version:
         raise ValueError("cannot resolve committed plugin version")
     metadata = {
@@ -128,18 +128,18 @@ def generate(repo, revision, driver_version, output, *, release_assets=False):
         "source_revision": revision,
         "driver_version": driver_version,
         "plugin_version": version[1].decode(),
-        "release_tag": f"cua-driver-rs-v{driver_version}",
+        "release_tag": f"pincer-v{driver_version}",
         "hyprland_version": "0.56.2",
         "hyprland_package": "0.56.2-1",
         "compiler_version": "16.1.1 20260728",
         "compiler_comment": "GCC: (GNU) 16.1.1 20260728",
         "architecture": "x86_64",
         "native_certified": False,
-        "cmake_options": {"CUA_HYPRLAND_INPUT": "ON", "CUA_HYPRLAND_TEST_INPUT": "OFF", "CUA_HYPRLAND_INPUT_TRACE": "OFF"},
+        "cmake_options": {"PINCER_HYPRLAND_INPUT": "ON", "PINCER_HYPRLAND_TEST_INPUT": "OFF", "PINCER_HYPRLAND_INPUT_TRACE": "OFF"},
         "files": {name: sha256(data) for name, data in sorted(payload.items())},
     }
     payload["SOURCE-PROVENANCE.json"] = json_bytes(metadata)
-    stem = f"cua-hyprland-plugin-{driver_version}-{revision}"
+    stem = f"pincer-hyprland-plugin-{driver_version}-{revision}"
     tarball = deterministic_archive({f"{stem}/{name}": data for name, data in payload.items()})
     template = committed_file(repo, revision, RELEASE + "PKGBUILD.in").decode()
     replacements = {

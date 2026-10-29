@@ -2,7 +2,7 @@
 
 #include <array>
 
-namespace cua::hyprland {
+namespace pincer::hyprland {
 struct InputLaneActivity {
     bool reserved = false, leased = false, dragging = false;
     bool button = false, keys = false, keyboard_focus = false;
@@ -68,4 +68,4 @@ class PassivePointerTarget {
     Geometry geometry_{};
     bool entered_ = false;
 };
-} // namespace cua::hyprland
+} // namespace pincer::hyprland

@@ -58,7 +58,7 @@ def lane(index, **values):
 
 
 def lane_status(*lanes):
-    """Complete ``cua:status`` for a production v3 build (two inert lanes by default)."""
+    """Complete ``pincer:status`` for a production v3 build (two inert lanes by default)."""
     return {'state': 'input_v3_candidate', 'configured': True, 'transport': {'ready': True}, 'input': {
         'protocol': 3, 'test_only': False, 'seat_lifetime': 'compositor',
         'upgrade': 'desktop_restart', 'transport_ready': True,
@@ -249,7 +249,7 @@ def inkscape_profile(candidate, *, drag=True):
     candidate = deepcopy(candidate)
     candidate['app_profile'] = 'inkscape-only'
     for index, spec in enumerate(candidate['agents']):
-        spec.update(app='inkscape', document=f'/synthetic/agent-{index}/cua-smoke-inkscape.svg')
+        spec.update(app='inkscape', document=f'/synthetic/agent-{index}/pincer-smoke-inkscape.svg')
         if drag:
             spec.update(pointer_stage='move_rectangle', drag={})
     for key in ('identities', 'processes'):
@@ -262,7 +262,7 @@ def inkscape_profile(candidate, *, drag=True):
 
 # Accessibility snapshots and synthetic pixels.
 
-CALC = {'window_title': 'cua-smoke-calc.ods - LibreOffice Calc',
+CALC = {'window_title': 'pincer-smoke-calc.ods - LibreOffice Calc',
         'elements': [{'role': 'text', 'label': 'Name Box', 'value': 'A1'}]}
 INKSCAPE = {
     'elements': [
@@ -322,7 +322,7 @@ class Image:
 
 
 def app_snapshot(app):
-    return {'window_title': f'cua-smoke-{app}', 'window_bounds': {'x': 600, 'y': 400, 'width': 500, 'height': 500},
+    return {'window_title': f'pincer-smoke-{app}', 'window_bounds': {'x': 600, 'y': 400, 'width': 500, 'height': 500},
             'screenshot_width': 500, 'screenshot_height': 500}
 
 

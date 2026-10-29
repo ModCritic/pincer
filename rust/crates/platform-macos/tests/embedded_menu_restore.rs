@@ -164,7 +164,7 @@ mod native {
             let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
             let _: bool = msg_send![app, setActivationPolicy: 0i64];
             let _: () = msg_send![app, finishLaunching];
-            if let Some(directory) = std::env::var_os("CUA_EMBEDDED_MENU_CHILD") {
+            if let Some(directory) = std::env::var_os("PINCER_EMBEDDED_MENU_CHILD") {
                 child(app, Path::new(&directory));
                 return;
             }
@@ -176,7 +176,7 @@ mod native {
             let mut fixture = Fixture(
                 Command::new(std::env::current_exe().unwrap())
                     .arg("--run-gui")
-                    .env("CUA_EMBEDDED_MENU_CHILD", directory.path())
+                    .env("PINCER_EMBEDDED_MENU_CHILD", directory.path())
                     .spawn()
                     .unwrap(),
             );

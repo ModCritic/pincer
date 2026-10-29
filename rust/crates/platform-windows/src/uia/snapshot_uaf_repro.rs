@@ -29,7 +29,7 @@
 //! luck.
 
 use super::{RetainedElement, SnapshotKind, Snapshots, UiaSnapshot};
-use cua_driver_core::element_token::{token_for, ResolvedElement};
+use pincer_core::element_token::{token_for, ResolvedElement};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -284,7 +284,7 @@ fn eviction_remove_and_clear_release_payload_but_not_acquired_guard() {
     let ptr = make_fake(hits);
     let first = cache.publish(PID as i32, HWND, snapshot_with(vec![ptr]));
     let guard = acquire(&cache, first, 0).unwrap();
-    for offset in 1..=cua_driver_core::element_token::LRU_CAP_PER_PID {
+    for offset in 1..=pincer_core::element_token::LRU_CAP_PER_PID {
         cache.publish(
             PID as i32,
             HWND + offset as u64,
@@ -378,10 +378,10 @@ async fn detached_worker_keeps_only_admitted_target_and_geometry() {
 
 #[test]
 fn recording_metadata_uses_snapshot_without_native_geometry() {
-    cua_driver_core::tool::with_runtime_scope("windows-recording-metadata-test".into(), || {
+    pincer_core::tool::with_runtime_scope("windows-recording-metadata-test".into(), || {
         let hits = Box::leak(Box::new(AtomicUsize::new(0)));
         let cache = Arc::new(Snapshots::new());
-        cua_driver_core::snapshot_store::register_runtime_store(&cache);
+        pincer_core::snapshot_store::register_runtime_store(&cache);
         let ptr = make_fake(hits);
         let id = cache.publish(PID as i32, HWND, snapshot_with(vec![ptr]));
         let args = serde_json::json!({"element_token": token_for(id, 0)});

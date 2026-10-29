@@ -18,7 +18,7 @@ test('bounded chooser mock emits only the fixed response', async () => {
     new Set(Object.keys(response)),
     new Set(['schema', 'selected_id', 'model', 'confidence', 'probabilities'])
   );
-  assert.equal(response.schema, 'cua.jev_choice_v1');
+  assert.equal(response.schema, 'pincer.jev_choice_v1');
   assert.equal(response.selected_id, 'submit-form');
   assert.equal(response.model, 'mock');
 });

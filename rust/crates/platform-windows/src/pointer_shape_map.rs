@@ -6,7 +6,7 @@
 //! tested everywhere; the Win32 and UIA calls that feed them live in
 //! [`crate::pointer_shape`] (Windows only).
 
-use cua_driver_core::cursor_shape::{ResizeAxis, SystemCursorShape};
+use pincer_core::cursor_shape::{ResizeAxis, SystemCursorShape};
 
 /// UIA control type ids (`UIA_*ControlTypeId`).
 pub mod control_type {

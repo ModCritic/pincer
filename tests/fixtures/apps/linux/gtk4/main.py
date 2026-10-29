@@ -9,7 +9,7 @@ from gi.repository import Gtk  # noqa: E402
 
 def activate(app):
     window = Gtk.ApplicationWindow(application=app)
-    window.set_title("CuaTestHarness GTK4")
+    window.set_title("PincerTestHarness GTK4")
     window.set_default_size(420, 180)
 
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -25,6 +25,6 @@ def activate(app):
     window.present()
 
 
-application = Gtk.Application(application_id="ai.cua.testharness.gtk4")
+application = Gtk.Application(application_id="ai.pincer.testharness.gtk4")
 application.connect("activate", activate)
 raise SystemExit(application.run(None))

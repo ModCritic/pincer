@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use cua_driver_core::{
+use pincer_core::{
     protocol::ToolResult,
     tool::{Tool, ToolDef},
 };
@@ -23,7 +23,7 @@ static DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 fn def() -> &'static ToolDef {
     DEF.get_or_init(|| ToolDef {
         name: "get_config".into(),
-        description: "Return the current cua-driver-rs configuration.".into(),
+        description: "Return the current pincer configuration.".into(),
         input_schema: serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         read_only: true,
         destructive: false,
@@ -39,7 +39,7 @@ impl Tool for GetConfigTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        use cua_driver_core::tool_args::ArgsExt;
+        use pincer_core::tool_args::ArgsExt;
         // Resolve effective values for the CALLING session: a named session
         // sees its own override layered over the global; the anonymous session
         // (absent `_session_id`) sees the raw global — today's behavior.
@@ -68,13 +68,13 @@ impl Tool for GetConfigTool {
         // response reflects whatever set_config (or a direct JSON edit)
         // last wrote.
         let (pip_enabled, pip_geometry) = pip_preview::read_pip_keys_from_file();
-        ToolResult::text("cua-driver-rs configuration").with_structured(serde_json::json!({
+        ToolResult::text("pincer configuration").with_structured(serde_json::json!({
             "version": env!("CARGO_PKG_VERSION"),
             // Maintainer E2E builds set this at compile time so the
             // preflight can prove that the installed, TCC-authorized
             // daemon came from the requested commit rather than merely
             // sharing its package version.
-            "source_sha": option_env!("CUA_DRIVER_SOURCE_SHA"),
+            "source_sha": option_env!("PINCER_SOURCE_SHA"),
             "platform": "macos",
             // capture_mode and capture_scope are not stored settings.
             // Actions select a target per call.

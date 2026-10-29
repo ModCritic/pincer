@@ -1,19 +1,19 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/cua-driver",
-    "crates/cua-driver-contract",
-    "crates/cua-driver-sdk",
-    "crates/cua-driver-bindgen",
-    "crates/cua-driver-testkit",
-    "crates/cua-driver-e2e",
-    "crates/cua-driver-uia",
-    "crates/cua-driver-core",
+    "crates/pincer",
+    "crates/pincer-contract",
+    "crates/pincer-sdk",
+    "crates/pincer-bindgen",
+    "crates/pincer-testkit",
+    "crates/pincer-e2e",
+    "crates/pincer-uia",
+    "crates/pincer-core",
     "crates/platform-macos",
     "crates/platform-windows",
     "crates/platform-linux",
     "crates/cursor-overlay",
-    "crates/cua-cursor-motion",
+    "crates/pincer-cursor-motion",
     "crates/cursor-theme-cli",
     "crates/pip-preview",
 ]

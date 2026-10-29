@@ -44,7 +44,7 @@ fi
 
 mode="$1"
 target="$2"
-remote_dir="${3:-~/cua}"
+remote_dir="${3:-~/pincer}"
 remote_artifact_dir="${REMOTE_ARTIFACT_DIR:-vm-out}"
 rsync_ssh="${RSYNC_SSH:-ssh}"
 transport="${SYNC_TRANSPORT:-rsync}"
@@ -70,7 +70,7 @@ if [[ "$mode" == push ]] && [[ -n "$(git -C "$repo_root" status --porcelain --un
   fi
   source_sha="${source_sha}-dirty"
 fi
-artifact_root="$repo_root/artifacts/cua-driver/vm"
+artifact_root="$repo_root/artifacts/pincer/vm"
 target_slug="$(printf '%s' "$target" | tr -c 'A-Za-z0-9_.-' '_')"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
@@ -170,12 +170,12 @@ write_source_marker() {
   case "$remote_os" in
     windows)
       "${rsync_ssh_argv[@]}" "$target" \
-        "powershell -NoProfile -Command \"Set-Content -NoNewline -Path '$remote_dir/.cua-e2e-source-sha' -Value '$source_sha'\""
+        "powershell -NoProfile -Command \"Set-Content -NoNewline -Path '$remote_dir/.pincer-e2e-source-sha' -Value '$source_sha'\""
       ;;
     posix)
       marker_dir=${remote_dir/#\~/"\$HOME"}
       printf '%s\n' "$source_sha" \
-        | "${rsync_ssh_argv[@]}" "$target" "mkdir -p $marker_dir && tee $marker_dir/.cua-e2e-source-sha >/dev/null"
+        | "${rsync_ssh_argv[@]}" "$target" "mkdir -p $marker_dir && tee $marker_dir/.pincer-e2e-source-sha >/dev/null"
       ;;
   esac
 }

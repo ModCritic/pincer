@@ -5,6 +5,6 @@ export default defineAgent({
   model: 'anthropic/claude-opus-5.5',
   build: {
     // The Driver SDK loads a native library, so keep it out of eve's bundle.
-    externalDependencies: ['@trycua/cua-driver'],
+    externalDependencies: ['pincer-driver'],
   },
 });

@@ -26,7 +26,7 @@
 
 use std::sync::Mutex;
 
-pub use cua_driver_contract::{AgentOverlayCapture, AgentOverlayCaptureStatus};
+pub use pincer_contract::{AgentOverlayCapture, AgentOverlayCaptureStatus};
 
 /// Outcome of asking a platform to keep its overlays out of the next capture.
 #[derive(Debug)]

@@ -1,4 +1,4 @@
-// Task progress in cua.jev_choice_request_v2 (#4313). Mirrors
+// Task progress in pincer.jev_choice_request_v2 (#4313). Mirrors
 // python/tests/test_native_progress.py: a native task declares the steps it
 // requires, the request reports how often this run has performed each step
 // (counted only from the runner's own successful actions), and a step's

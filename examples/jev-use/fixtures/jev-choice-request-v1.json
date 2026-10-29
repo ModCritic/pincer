@@ -1,5 +1,5 @@
 {
-  "schema": "cua.jev_choice_request_v1",
+  "schema": "pincer.jev_choice_request_v1",
   "goal": "Submit the verified form.",
   "capture_id": "capture-fixture-1",
   "regions": [

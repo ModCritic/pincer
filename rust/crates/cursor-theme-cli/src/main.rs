@@ -84,18 +84,18 @@ struct DotLottieAnimation {
 
 fn usage() -> &'static str {
     "Usage:
-  cua-driver cursor-theme validate <source.lottie> [--development]
-  cua-driver cursor-theme build <source.lottie> --output <theme.cua-theme> [--development]
-  cua-driver cursor-theme inspect <theme.cua-theme> [--json]
-  cua-driver cursor-theme preview <theme.cua-theme> --output <directory>
-  cua-driver cursor-theme install <theme.cua-theme>
-  cua-driver cursor-theme list [--json]
-  cua-driver cursor-theme uninstall <theme-id>"
+  pincer cursor-theme validate <source.lottie> [--development]
+  pincer cursor-theme build <source.lottie> --output <theme.pincer-theme> [--development]
+  pincer cursor-theme inspect <theme.pincer-theme> [--json]
+  pincer cursor-theme preview <theme.pincer-theme> --output <directory>
+  pincer cursor-theme install <theme.pincer-theme>
+  pincer cursor-theme list [--json]
+  pincer cursor-theme uninstall <theme-id>"
 }
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("cua-driver cursor-theme: {error:#}");
+        eprintln!("pincer cursor-theme: {error:#}");
         std::process::exit(1);
     }
 }
@@ -236,7 +236,7 @@ fn read_source_archive(path: &Path) -> Result<SourceArchive> {
         }
         let name = path.to_string_lossy().replace('\\', "/");
         let allowed = name == "manifest.json"
-            || name == "cua/theme.json"
+            || name == "pincer/theme.json"
             || (name.starts_with("a/") && name.ends_with(".json"));
         if !allowed {
             bail!("unsupported archive entry `{name}`");
@@ -274,21 +274,21 @@ fn parse_json<T: for<'de> Deserialize<'de>>(bytes: &[u8], name: &str) -> Result<
 fn compile_source(path: &Path, full: bool) -> Result<CompiledTheme> {
     let (source, entries) = read_source_archive(path)?;
     let manifest_bytes = entries
-        .get("cua/theme.json")
-        .ok_or_else(|| anyhow!("archive is missing cua/theme.json"))?;
-    let manifest_value: Value = parse_json(manifest_bytes, "cua/theme.json")?;
+        .get("pincer/theme.json")
+        .ok_or_else(|| anyhow!("archive is missing pincer/theme.json"))?;
+    let manifest_value: Value = parse_json(manifest_bytes, "pincer/theme.json")?;
     let source_schema = manifest_value
         .get("schema")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if source_schema == "cua.cursor-theme/1" {
+    if source_schema == "pincer.cursor-theme/1" {
         bail!(
-            "cursor-theme source targets the retired v1 contract; remove `modifiers` and rebuild as cua.cursor-theme/2"
+            "cursor-theme source targets the retired v1 contract; remove `modifiers` and rebuild as pincer.cursor-theme/2"
         );
     }
     let manifest: ThemeManifest =
-        serde_json::from_value(manifest_value).context("parse cua/theme.json")?;
-    if manifest.schema != "cua.cursor-theme/2" {
+        serde_json::from_value(manifest_value).context("parse pincer/theme.json")?;
+    if manifest.schema != "pincer.cursor-theme/2" {
         bail!("unsupported source schema `{}`", manifest.schema);
     }
     if manifest.compatibility.semantics != 2 {
@@ -301,7 +301,7 @@ fn compile_source(path: &Path, full: bool) -> Result<CompiledTheme> {
         || manifest.canvas.height != CANVAS
         || (manifest.canvas.fps - FPS).abs() > f32::EPSILON
     {
-        bail!("Cua cursor profile v2 requires a 128×128 canvas at 30 fps");
+        bail!("Pincer cursor profile v2 requires a 128×128 canvas at 30 fps");
     }
     if full && manifest.compatibility.profile != THEME_PROFILE {
         bail!("full validation requires profile `{THEME_PROFILE}`");
@@ -313,7 +313,7 @@ fn compile_source(path: &Path, full: bool) -> Result<CompiledTheme> {
     }
 
     // Parse the standard manifest too: it must exist and be valid JSON. The
-    // Cua manifest remains authoritative for semantic mapping.
+    // Pincer manifest remains authoritative for semantic mapping.
     let standard = entries
         .get("manifest.json")
         .ok_or_else(|| anyhow!("archive is missing manifest.json"))?;
@@ -334,7 +334,7 @@ fn compile_source(path: &Path, full: bool) -> Result<CompiledTheme> {
     }
     for id in &referenced {
         if !standard_ids.contains(id) {
-            bail!("Cua semantic manifest references `{id}`, which is absent from manifest.json");
+            bail!("Pincer semantic manifest references `{id}`, which is absent from manifest.json");
         }
     }
     let mut compiled = BTreeMap::new();
@@ -997,7 +997,7 @@ mod tests {
     }
 
     fn source_archive(standard_id: &str, variants: &str) -> tempfile::NamedTempFile {
-        source_archive_with_schema(standard_id, variants, "cua.cursor-theme/2")
+        source_archive_with_schema(standard_id, variants, "pincer.cursor-theme/2")
     }
 
     fn source_archive_with_schema(
@@ -1012,11 +1012,11 @@ mod tests {
         let mut archive = ZipWriter::new(file.reopen().unwrap());
         let options = SimpleFileOptions::default();
         let standard = format!(r#"{{"version":"2","animations":[{{"id":"{standard_id}"}}]}}"#);
-        let legacy = schema == "cua.cursor-theme/1";
+        let legacy = schema == "pincer.cursor-theme/1";
         let profile = if legacy {
-            "cua-driver-full-v1"
+            "pincer-full-v1"
         } else {
-            "cua-driver-development-v2"
+            "pincer-development-v2"
         };
         let semantics = if legacy { 1 } else { 2 };
         let modifiers = if legacy { r#","modifiers":{}"# } else { "" };
@@ -1041,7 +1041,7 @@ mod tests {
         let animation = r#"{"v":"5.12.2","fr":30,"ip":0,"op":1,"w":128,"h":128,"nm":"base","ddd":0,"assets":[],"layers":[]}"#;
         for (name, contents) in [
             ("manifest.json", standard.as_str()),
-            ("cua/theme.json", semantic.as_str()),
+            ("pincer/theme.json", semantic.as_str()),
             ("a/base.json", animation),
         ] {
             archive.start_file(name, options).unwrap();
@@ -1166,13 +1166,13 @@ mod tests {
 
     #[test]
     fn rejects_v1_sources_with_rebuild_guidance() {
-        let source = source_archive_with_schema("base", "{}", "cua.cursor-theme/1");
+        let source = source_archive_with_schema("base", "{}", "pincer.cursor-theme/1");
         let message = compile_source(source.path(), false)
             .unwrap_err()
             .to_string();
         assert!(message.contains("retired v1 contract"));
         assert!(message.contains("remove `modifiers`"));
-        assert!(message.contains("cua.cursor-theme/2"));
+        assert!(message.contains("pincer.cursor-theme/2"));
     }
 
     #[test]

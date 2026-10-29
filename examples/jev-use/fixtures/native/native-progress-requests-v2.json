@@ -5,7 +5,7 @@
       "task": "appkit-save-note",
       "history": [],
       "request": {
-        "schema": "cua.jev_choice_request_v2",
+        "schema": "pincer.jev_choice_request_v2",
         "goal": "Enter the note text into the Note field, then save the note.",
         "capture_id": "cap-appkit-initial",
         "snapshot_id": "s00000086",
@@ -128,7 +128,7 @@
         }
       ],
       "request": {
-        "schema": "cua.jev_choice_request_v2",
+        "schema": "pincer.jev_choice_request_v2",
         "goal": "Enter the note text into the Note field, then save the note.",
         "capture_id": "cap-appkit-initial",
         "snapshot_id": "s00000086",
@@ -267,7 +267,7 @@
         }
       ],
       "request": {
-        "schema": "cua.jev_choice_request_v2",
+        "schema": "pincer.jev_choice_request_v2",
         "goal": "The counter starts at 0. Set it to exactly 3 by pressing Increment once per step, then stop.",
         "capture_id": "cap-appkit-initial",
         "snapshot_id": "s00000086",

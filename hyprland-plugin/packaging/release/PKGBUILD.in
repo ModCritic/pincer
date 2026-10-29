@@ -1,9 +1,9 @@
 # Generated from an explicit committed revision. No checkout is needed.
 # shellcheck shell=bash disable=SC2034,SC2154
-pkgname=cua-hyprland-plugin
+pkgname=pincer-hyprland-plugin
 pkgver=@DRIVER_VERSION@
 pkgrel=1
-pkgdesc='Cua production input candidate for pinned Hyprland 0.56.2'
+pkgdesc='Pincer production input candidate for pinned Hyprland 0.56.2'
 arch=('x86_64')
 url='https://github.com/ModCritic/pincer'
 license=('MIT')
@@ -14,9 +14,9 @@ _revision='@REVISION@'
 _stem='@STEM@'
 _archive_sha256='@ARCHIVE_SHA256@'
 _manifest_sha256='@MANIFEST_SHA256@'
-source=("https://github.com/ModCritic/pincer/releases/download/cua-driver-rs-v${pkgver}/${_stem}.tar.gz")
+source=("https://github.com/ModCritic/pincer/releases/download/pincer-v${pkgver}/${_stem}.tar.gz")
 sha256sums=('@ARCHIVE_SHA256@')
-_cxx="${CUA_RELEASE_CXX:-/usr/bin/g++}"
+_cxx="${PINCER_RELEASE_CXX:-/usr/bin/g++}"
 
 _verify() {
   # Recheck even when makepkg --skipinteg or --noextract was requested.
@@ -60,8 +60,8 @@ package() {
   # Packaging always runs the tests, including makepkg --nocheck / --repackage.
   check || return 1
   _verify --build "$srcdir/build" --output "$srcdir/BUILD-PROVENANCE.json" || return 1
-  install -Dm755 "$srcdir/build/cua-hyprland-plugin.so" \
-    "$pkgdir/usr/lib/cua/hyprland/cua-hyprland-plugin.so" || return 1
+  install -Dm755 "$srcdir/build/pincer-hyprland-plugin.so" \
+    "$pkgdir/usr/lib/pincer/hyprland/pincer-hyprland-plugin.so" || return 1
   install -Dm644 "$srcdir/$_stem/LICENSE.md" \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSE" || return 1
   install -Dm644 "$srcdir/$_stem/SOURCE-PROVENANCE.json" \

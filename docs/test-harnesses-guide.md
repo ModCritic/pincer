@@ -1,6 +1,6 @@
-# CUA Driver Test Harnesses Guide
+# Pincer Test Harnesses Guide
 
-This contributor guide explains where the CUA Driver tests live, how to run
+This contributor guide explains where the Pincer tests live, how to run
 them, and where to add a new case. For current coverage and platform gaps, use
 `test-matrix.md` and `action-support.md`.
 
@@ -29,7 +29,7 @@ macOS:  scripts/ci/macos/run-rust-e2e.sh
 Those runners live in upstream's monorepo-level `scripts/ci/` and are not part
 of this repository, so this guide's references to them describe upstream's
 process. Here, run the suites with `cargo test` as described in
-[`rust/crates/cua-driver-e2e/tests/README.md`](../rust/crates/cua-driver-e2e/tests/README.md).
+[`rust/crates/pincer-e2e/tests/README.md`](../rust/crates/pincer-e2e/tests/README.md).
 The legacy `tests/runners/windows-sandbox/` runner is a supporting runner, not a
 canonical entrypoint.
 
@@ -61,7 +61,7 @@ the runner's required cells, assertions, and evidence checks. Record compositor
 and backend provenance; an X11 run does not establish native Hyprland coverage.
 Environment failures and failed cells remain failures, not permission to skip
 tests or change expected results. In the same desktop, also run
-`cargo test -p cua-driver-e2e --test hyprland_foreground_test -- --ignored --test-threads=1`
+`cargo test -p pincer-e2e --test hyprland_foreground_test -- --ignored --test-threads=1`
 and the same command for `hyprland_native_observation_test`. No automated lane
 runs these foreground-safety and exact-identity rows, so
 `tests/manual-e2e-allowlist.txt` records them as a manual native-Hyprland gate.
@@ -71,8 +71,8 @@ disposable desktop's Lua configuration and reload it:
 
 ```lua
 hl.window_rule({
-    name = "cua-canonical-sentinel-animation",
-    match = {title = "^CuaTestHarness Sentinel \\[cdp=[0-9]+\\]$"},
+    name = "pincer-canonical-sentinel-animation",
+    match = {title = "^PincerTestHarness Sentinel \\[cdp=[0-9]+\\]$"},
     no_anim = true,
 })
 ```
@@ -143,10 +143,10 @@ RFC 3550 (`rfcs/3550-hyprland-isolated-input.md` in upstream's trycua/cua).
 pincer/
 |-- rust/
 |   |-- crates/
-|   |   |-- cua-driver/          Rust driver and hermetic integration tests
-|   |   |-- cua-driver-e2e/      Desktop E2E suites the OS runners select
-|   |   |-- cua-driver-core/     Shared driver logic and unit tests
-|   |   |-- cua-driver-testkit/  Shared Rust E2E helpers and evidence capture
+|   |   |-- pincer/          Rust driver and hermetic integration tests
+|   |   |-- pincer-e2e/      Desktop E2E suites the OS runners select
+|   |   |-- pincer-core/     Shared driver logic and unit tests
+|   |   |-- pincer-testkit/  Shared Rust E2E helpers and evidence capture
 |   |   |-- platform-linux/      Linux backend
 |   |   |-- platform-macos/      macOS backend
 |   |   |-- platform-windows/    Windows backend
@@ -168,7 +168,7 @@ The important separation is:
 | Layer                 | Owns                                                                      | Does not own                     |
 | --------------------- | ------------------------------------------------------------------------- | -------------------------------- |
 | Rust integration test | Scenarios, driver calls, assertions, action metadata                      | OS setup and fixture compilation |
-| `cua-driver-testkit`  | Session helpers, fixture launching, screenshots, recordings, trajectories | The scenario list                |
+| `pincer-testkit`  | Session helpers, fixture launching, screenshots, recordings, trajectories | The scenario list                |
 | Fixture app           | Visible controls and externally observable state markers                  | Driver correctness assertions    |
 | OS runner             | Build environment, user session, test selection, artifact collection      | Test behavior definitions        |
 
@@ -217,7 +217,7 @@ workers. They do not prove that a real click, key, scroll, or background input
 reached an application.
 
 The fuzz smoke test drives the target bodies in
-`cua_driver_testkit::boundary_fuzz` (JSON-RPC parsing, reserved-argument
+`pincer_testkit::boundary_fuzz` (JSON-RPC parsing, reserved-argument
 stripping, argument normalisation, authorization, typed contract inputs, and
 `ToolRegistry` dispatch against stubs). The same bodies run under libFuzzer
 from `rust/fuzz/`; see `rust/fuzz/README.md` and
@@ -228,16 +228,16 @@ from `rust/fuzz/`; see `rust/fuzz/README.md` and
 These are Rust integration tests in their own crate:
 
 ```text
-rust/crates/cua-driver-e2e/tests/
+rust/crates/pincer-e2e/tests/
 ```
 
 Hermetic protocol, CLI, and schema tests stay in
-`rust/crates/cua-driver/tests/`. A test that needs a desktop,
+`rust/crates/pincer/tests/`. A test that needs a desktop,
 built fixtures, installed apps, or platform permissions belongs in
-`cua-driver-e2e`. Most E2E tests are marked `#[ignore]`; the OS runner selects
-them with `cargo test -p cua-driver-e2e --test <suite> -- --ignored`. The
-crate does not depend on the driver, so build `cua-driver` first or set
-`CUA_TEST_DRIVER_BIN`. Its few non-ignored tests are hermetic oracle and
+`pincer-e2e`. Most E2E tests are marked `#[ignore]`; the OS runner selects
+them with `cargo test -p pincer-e2e --test <suite> -- --ignored`. The
+crate does not depend on the driver, so build `pincer` first or set
+`PINCER_TEST_DRIVER_BIN`. Its few non-ignored tests are hermetic oracle and
 parser checks that ordinary CI runs with the driver's tests.
 
 The canonical E2E suite has two behavior owners:
@@ -314,7 +314,7 @@ canonical logged-in macOS lane, but they do not replace repo-local fixtures.
 Workers cloned from a granted private seed verify and reuse its app-owned TCC
 identity. A disposable SIP-disabled Lume worker without inherited grants must
 use `tests/runners/macos-lume/seed-tcc.sh` after installing the exact candidate
-as a certificate-signed `CuaDriverLocal.app`. The guarded helper is the only
+as a certificate-signed `PincerLocal.app`. The guarded helper is the only
 supported automated path: it verifies `VirtualMac*`, disabled SIP, the expected
 bundle identity, and the signed requirement before seeding only Accessibility
 and Screen Recording. Never hand-edit `TCC.db`. Restart the app afterward and
@@ -390,7 +390,7 @@ question for any action, harness, or catalog area:
 > Did the driver perform or reject the operation without disturbing the user's
 > foreground application or desktop?
 
-`cua-driver-testkit::DesktopObserver` owns the shared interface. Native Windows,
+`pincer-testkit::DesktopObserver` owns the shared interface. Native Windows,
 macOS, and Linux backends snapshot foreground-window, target z-order, cursor,
 and focus state before and after an action. A separate full-desktop Electron
 sentinel journals keyboard, pointer, wheel, visibility, focus, and heartbeat
@@ -425,7 +425,7 @@ the cross-cutting desktop observer.
 
 These tests require a real interactive Windows user desktop. They reject
 Session 0, locked desktops, and disconnected RDP sessions. Without
-`CUA_REQUIRE_GUI=1`, an unusable desktop can self-skip for local development;
+`PINCER_REQUIRE_GUI=1`, an unusable desktop can self-skip for local development;
 the canonical Windows runner enables the hard-failure behavior.
 
 ## Evidence
@@ -433,7 +433,7 @@ the canonical Windows runner enables the hard-failure behavior.
 Canonical GUI runs are expected to produce evidence per test cell:
 
 ```text
-artifacts/cua-driver/<os>/
+artifacts/pincer/<os>/
 |-- recordings/<cell-label>-pid<pid>-<sequence>/recording.mp4
 |-- recordings/<cell-label>-pid<pid>-<sequence>/trajectory.json
 |-- recordings/<cell-label>-pid<pid>-<sequence>/turn-*/before_state.json
@@ -485,8 +485,8 @@ need normal test output and logs; they do not need desktop video.
 - Strict lane preflights fail on missing fixtures, desktop access, permissions,
   accessibility, capture, recording support, or ineffective background guards
   instead of silently skipping.
-- Canonical runners set `CUA_E2E_FORBID_SKIPS=1`. Unfiltered shared runs also
-  set `CUA_E2E_EXPECTED_MIN_CELLS` to 80 on Windows/Linux and 120 on macOS, so
+- Canonical runners set `PINCER_E2E_FORBID_SKIPS=1`. Unfiltered shared runs also
+  set `PINCER_E2E_EXPECTED_MIN_CELLS` to 80 on Windows/Linux and 120 on macOS, so
   a filtered, shortened, or accidentally emptied catalog cannot report green.
   Explicit diagnostic cell or harness filters disable only the minimum-count
   check; matching no cells still fails inside the Rust matrix.
@@ -526,10 +526,10 @@ to give each behavior one clear owner and make cross-cutting evidence reusable.
 ### Target Ownership
 
 ```text
-rust/crates/cua-driver-testkit/src/
+rust/crates/pincer-testkit/src/
 `-- observer.rs                     Cross-OS desktop-side-effect interface
 
-rust/crates/cua-driver-e2e/tests/
+rust/crates/pincer-e2e/tests/
 |-- cross_platform_behavior_test.rs Shared Electron/Tauri action matrix
 |-- harness_wpf_test.rs             Windows WPF action rows
 |-- harness_winui3_test.rs          Windows WinUI3 action rows
@@ -540,7 +540,7 @@ rust/crates/cua-driver-e2e/tests/
 |-- capture_contract_test.rs        Tree and screenshot read contract
 `-- desktop_scope_<os>_test.rs      Window/desktop scope invariants
 
-rust/crates/cua-driver/tests/
+rust/crates/pincer/tests/
 `-- protocol_*_test.rs              Protocol and schema tests
 ```
 
@@ -561,7 +561,7 @@ user-facing command; lane selectors are internal diagnostics.
 When adding a new scenario:
 
 1. Add or update the repo-local fixture and its external state marker.
-2. Add the Rust scenario under `rust/crates/cua-driver-e2e/tests/`.
+2. Add the Rust scenario under `rust/crates/pincer-e2e/tests/`.
 3. Declare AX/PX addressing, foreground/background delivery, scope, and oracle.
 4. Add the scenario to `docs/test-matrix.md` and this guide when it changes the
    cross-OS structure.
@@ -583,8 +583,8 @@ Rust tests in the driver workspace use one layout:
 | Small unit suite | Inline `#[cfg(test)] mod tests { ... }` at the end of the module |
 | Large unit suite | `src/<module>/tests.rs`, declared as `#[cfg(test)] mod tests;` in `src/<module>.rs` |
 | Several suites for one large module | `src/<module>/<name>_tests.rs`, one `#[cfg(test)] mod <name>_tests;` each, for example `platform-{linux,windows}/src/tools/impl_/` |
-| Crate-root suites | `src/tests/`, for example `cua-driver-sdk/src/tests/` |
-| Integration test in `cua-driver` or its E2E suites | `tests/<subject>_test.rs`; shared helpers go in `tests/support/` |
+| Crate-root suites | `src/tests/`, for example `pincer-sdk/src/tests/` |
+| Integration test in `pincer` or its E2E suites | `tests/<subject>_test.rs`; shared helpers go in `tests/support/` |
 
 Moving a suite into its own file keeps its module path, so test names and
 CI filters stay the same. Prefer Rust's default module file lookup over

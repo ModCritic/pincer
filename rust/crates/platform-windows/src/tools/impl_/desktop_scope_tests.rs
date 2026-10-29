@@ -1,5 +1,5 @@
 use super::{is_windowless_desktop_action, GetDesktopStateTool};
-use cua_driver_core::tool::Tool;
+use pincer_core::tool::Tool;
 use serde_json::json;
 
 // ── is_windowless_desktop_action ──────────────────────────────────────────

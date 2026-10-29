@@ -7,18 +7,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use cua_driver_core::browser::platform::{
+use pincer_core::browser::platform::{
     select_isolated_browser_executable, BrowserConsentOutcome, BrowserConsentRequest,
     BrowserPlatform, BrowserVisualAction, BrowserVisualActionKind, ExistingProfileSetupOutcome,
     ExistingProfileSetupRequest, PrepareAction, PrepareOutcome, PrepareRequest,
 };
-use cua_driver_core::browser::refusal::{BrowserRefusal, BrowserRefusalCode};
-use cua_driver_core::browser::types::{
+use pincer_core::browser::refusal::{BrowserRefusal, BrowserRefusalCode};
+use pincer_core::browser::types::{
     BrowserClassification, BrowserEngineFamily, BrowserProcessRole, BrowserProduct,
     EndpointOwnershipMethod, EndpointOwnershipProof, EndpointTransport, NativeOwnershipMethod,
     NativeOwnershipProof, NativeWindowInfo, OwnedEndpoint, ProcessFingerprint, Rect,
 };
-use cua_driver_core::browser::{
+use pincer_core::browser::{
     existing_profile_setup_descriptor, is_firefox, loopback_websocket_port,
     parse_devtools_active_port, BrowserCursorTracker,
 };
@@ -68,7 +68,7 @@ fn run_existing_profile_cleanup<T: Send + 'static>(
     cleanup: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, BrowserRefusal> {
     std::thread::Builder::new()
-        .name("cua-browser-cleanup".into())
+        .name("pincer-browser-cleanup".into())
         .spawn(cleanup)
         .map_err(|error| {
             refusal(
@@ -524,7 +524,7 @@ impl BrowserPlatform for LinuxBrowserPlatform {
     async fn visualize_browser_action(&self, action: BrowserVisualAction) {
         if action.session.is_empty()
             || action.cdp_target_id.is_empty()
-            || cua_driver_core::session::is_session_ended(&action.session)
+            || pincer_core::session::is_session_ended(&action.session)
         {
             return;
         }
@@ -858,7 +858,7 @@ impl BrowserPlatform for LinuxBrowserPlatform {
                     return Ok(Some(owned.len() == 1 && owned[0] == window_id));
                 }
                 if crate::wayland::is_inject_mode() {
-                    // The private cua-compositor route owns both the native
+                    // The private pincer-compositor route owns both the native
                     // toplevel enumeration and its PID correlation. Unlike a
                     // generic AT-SPI-only Wayland session, that is sufficient
                     // to attest singleton native-window cardinality for an
@@ -874,7 +874,9 @@ impl BrowserPlatform for LinuxBrowserPlatform {
                     .map_err(|error| {
                         refusal(
                             BrowserRefusalCode::BrowserRouteUnavailable,
-                            format!("could not enumerate cua-compositor browser windows: {error}"),
+                            format!(
+                                "could not enumerate pincer-compositor browser windows: {error}"
+                            ),
                         )
                     })?;
                     return Ok(Some(owned.len() == 1 && owned[0] == window_id));
@@ -1568,7 +1570,7 @@ mod tests {
 
     #[test]
     fn classifier_covers_embedded_and_standalone_chromium() {
-        assert!(is_chromium("CuaTestHarness.Electron"));
+        assert!(is_chromium("PincerTestHarness.Electron"));
         assert!(is_chromium("chromium-browser"));
         assert!(is_chromium("msedge --remote-debugging-port=9222"));
         assert!(is_chromium("/opt/microsoft/msedge/msedge"));

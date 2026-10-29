@@ -4,7 +4,7 @@ use std::{
 };
 
 use clipboard_rs::{common::RustImage, Clipboard, ClipboardContext, ContentFormat};
-use cua_driver_core::clipboard::ClipboardBackend;
+use pincer_core::clipboard::ClipboardBackend;
 
 pub struct LinuxClipboard {
     context: OnceLock<Result<Mutex<ClipboardContext>, String>>,
@@ -105,12 +105,10 @@ mod tests {
     #[ignore = "requires an X11 display (run under xvfb-run)"]
     fn native_clipboard_round_trips_text_on_x11() {
         let backend = LinuxClipboard::new();
-        backend
-            .write_text("cua-driver clipboard test".into())
-            .unwrap();
+        backend.write_text("pincer clipboard test".into()).unwrap();
         assert_eq!(
             backend.read_text().unwrap().as_deref(),
-            Some("cua-driver clipboard test")
+            Some("pincer clipboard test")
         );
     }
 }

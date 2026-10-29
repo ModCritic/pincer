@@ -9,14 +9,14 @@ from typing import Any, Mapping
 from jev_adapter import ProviderChoice, choose_bounded_with_typesafe
 from native_roles import ROLE_CLASSES
 
-REQUEST_SCHEMA = "cua.jev_choice_request_v1"
+REQUEST_SCHEMA = "pincer.jev_choice_request_v1"
 # Additive over v1 (RFC #4268): per-candidate ``source``, an optional root
 # ``snapshot_id``, an optional compact ``elements`` list of native controls, and
 # an optional ``progress`` list of task steps counted from the runner's own
 # performed actions (#4313).
-REQUEST_SCHEMA_V2 = "cua.jev_choice_request_v2"
+REQUEST_SCHEMA_V2 = "pincer.jev_choice_request_v2"
 REQUEST_SCHEMAS = (REQUEST_SCHEMA, REQUEST_SCHEMA_V2)
-RESPONSE_SCHEMA = "cua.jev_choice_v1"
+RESPONSE_SCHEMA = "pincer.jev_choice_v1"
 MAX_INPUT_BYTES = 65_536
 MAX_CANDIDATES = 32
 MAX_REGIONS = 100
@@ -109,7 +109,7 @@ def _validate_progress(value: Any) -> list[dict[str, Any]]:
 
 
 def validate_request(value: Any) -> dict[str, Any]:
-    """Validate a ``cua.jev_choice_request_v1`` or ``_v2`` request strictly.
+    """Validate a ``pincer.jev_choice_request_v1`` or ``_v2`` request strictly.
 
     v1 is unchanged: exactly its six root keys and ``id``/``description``
     candidates, so any v2 field in a v1 request is rejected. v2 may add a root

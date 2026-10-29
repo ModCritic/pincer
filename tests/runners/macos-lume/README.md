@@ -8,7 +8,7 @@ Upstream ran its macOS acceptance gate in such a worker through a `run-all.sh`
 entrypoint that delegated to its monorepo-level `scripts/ci/macos/run-rust-e2e.sh`.
 Neither script is part of this repository. In a worker, run the ignored suites
 with `cargo test` as described in
-[`rust/crates/cua-driver-e2e/tests/README.md`](../../../rust/crates/cua-driver-e2e/tests/README.md).
+[`rust/crates/pincer-e2e/tests/README.md`](../../../rust/crates/pincer-e2e/tests/README.md).
 
 The golden image supplies the logged-in Aqua session, stable local signing
 identity, and existing Accessibility and Screen Recording grants. Install the
@@ -35,7 +35,7 @@ exact source commit in each worker before testing it.
 - Put no repository credentials, signing secrets, or maintainer private SSH
   keys in the guest. A host public key is sufficient for source sync.
 - For reusable private seeds, request the app-owned Accessibility and Screen
-  Recording grants through `CuaDriverLocal.app`. For disposable SIP-off workers
+  Recording grants through `PincerLocal.app`. For disposable SIP-off workers
   that are not cloned from a granted seed, use the checked-in `seed-tcc.sh`
   helper below. Do not hand-edit `TCC.db`.
 - Require a certificate-backed local signature. An ad-hoc signature invalidates
@@ -44,7 +44,7 @@ exact source commit in each worker before testing it.
 
 SIP-off alone does not grant Accessibility, Screen Recording, Automation, or
 direct-capture consent. The reusable private seed still carries grants approved
-through the normal `CuaDriverLocal.app` prompt flow. The helper below is only for
+through the normal `PincerLocal.app` prompt flow. The helper below is only for
 disposable SIP-off workers that need the same app-owned Accessibility and Screen
 Recording grants without preserving a granted seed. The SIP-on check below proves
 the normal user-facing permission flow still works with platform protection.
@@ -57,7 +57,7 @@ macOS build, toolchain versions, signing-certificate hash, TCC grants, and
 Chrome consent state. The seed and both backups must be stopped:
 
 ```bash
-SEED=cua-driver-macos-e2e-seed-26.5.2-YYYYMMDD
+SEED=pincer-macos-e2e-seed-26.5.2-YYYYMMDD
 BACKUP_A="${SEED}-backup-a"
 BACKUP_B="${SEED}-backup-b"
 
@@ -79,7 +79,7 @@ credentials are `lume` / `lume`:
 
 ```bash
 IMAGE=macos-tahoe-cua:26.5.2
-BUILDER=cua-driver-macos-e2e-builder-26.5.2
+BUILDER=pincer-macos-e2e-builder-26.5.2
 lume pull "$IMAGE" "$BUILDER"
 lume run "$BUILDER"
 ```
@@ -151,13 +151,13 @@ builder while `xcrun` or `swiftc` still requests an agreement.
 
 From another host terminal, get the builder address and sync a clean committed
 checkout. The sync intentionally omits `.git` and writes the exact commit to
-`.cua-e2e-source-sha`. It also excludes ignored credential files such as
+`.pincer-e2e-source-sha`. It also excludes ignored credential files such as
 `.env.local`.
 
 ```bash
-BUILDER=cua-driver-macos-e2e-builder-26.5.2
+BUILDER=pincer-macos-e2e-builder-26.5.2
 VM_IP="$(lume get "$BUILDER" --format json | jq -r '.[0].ipAddress')"
-scripts/sync-vm-worktree.sh push "lume@${VM_IP}" '~/cua'
+scripts/sync-vm-worktree.sh push "lume@${VM_IP}" '~/pincer'
 ```
 
 Back in Terminal in the VM display, install the app with the commit embedded
@@ -167,13 +167,13 @@ golden identity in a dedicated keychain. Create it with the same password as
 the VM account so maintainers have only one local credential to enter:
 
 ```bash
-SIGNING_KEYCHAIN="$HOME/Library/Keychains/cua-driver-signing.keychain-db"
+SIGNING_KEYCHAIN="$HOME/Library/Keychains/pincer-signing.keychain-db"
 security create-keychain "$SIGNING_KEYCHAIN"
 security set-keychain-settings "$SIGNING_KEYCHAIN"
 security list-keychains -d user -s "$SIGNING_KEYCHAIN" \
   "$HOME/Library/Keychains/login.keychain-db"
 security unlock-keychain "$SIGNING_KEYCHAIN"
-export CUA_DRIVER_LOCAL_SIGNING_KEYCHAIN="$SIGNING_KEYCHAIN"
+export PINCER_LOCAL_SIGNING_KEYCHAIN="$SIGNING_KEYCHAIN"
 ```
 
 Keep the login Keychain in the search list. Computer History adds its key to
@@ -184,14 +184,14 @@ with only the signing keychain fails the history gate with
 The first strict local install creates and imports the self-signed identity,
 then stops without replacing the app if the new certificate is not usable yet.
 Run it once, then open Keychain Access in the VM display, select the
-`cua-driver-signing` keychain, open
-`CuaDriver Local Signing (cua-driver-rs)`, and set Trust to Always Trust. Back
+`pincer-signing` keychain, open
+`Pincer Local Signing (pincer)`, and set Trust to Always Trust. Back
 in Terminal, give Apple tooling access to the private key without storing the
 keychain password in the image or repository:
 
 ```bash
-cd ~/cua
-export CUA_DRIVER_SOURCE_SHA="$(cat .cua-e2e-source-sha)"
+cd ~/pincer
+export PINCER_SOURCE_SHA="$(cat .pincer-e2e-source-sha)"
 bash scripts/install-local.sh \
   --release --autostart --require-stable-signing
 
@@ -208,7 +208,7 @@ identity` message before granting permissions through the app-owned flow:
 ```bash
 bash scripts/install-local.sh \
   --release --autostart --require-stable-signing
-~/.local/bin/cua-driver-local permissions grant
+~/.local/bin/pincer-local permissions grant
 ```
 
 Record the certificate hash after the successful install and keep that identity
@@ -216,8 +216,8 @@ for the life of the seed:
 
 ```bash
 security find-certificate \
-  -c 'CuaDriver Local Signing (cua-driver-rs)' -Z "$SIGNING_KEYCHAIN"
-codesign -d -r- /Applications/CuaDriverLocal.app 2>&1 \
+  -c 'Pincer Local Signing (pincer)' -Z "$SIGNING_KEYCHAIN"
+codesign -d -r- /Applications/PincerLocal.app 2>&1 \
   | grep 'certificate leaf'
 ```
 
@@ -235,18 +235,18 @@ osascript -e \
 
 # The installed app owns driver-side app enumeration. This uses NSWorkspace and
 # must not require Automation access to System Events.
-~/.local/bin/cua-driver-local list_apps '{}'
+~/.local/bin/pincer-local list_apps '{}'
 
 # The app-owned grant flow probes a desktop capture and triggers Tahoe's
 # direct-capture/private-window prompt.
-~/.local/bin/cua-driver-local permissions grant
+~/.local/bin/pincer-local permissions grant
 ```
 
-Choose Allow for `Terminal` -> `System Events` and on the CuaDriverLocal
+Choose Allow for `Terminal` -> `System Events` and on the PincerLocal
 direct-capture prompt. Then add Terminal under System Settings > Privacy &
 Security > Accessibility: the `bring_to_front` oracles raise fixture windows and
 read `AXFocusedWindow` through System Events UI scripting, which needs it.
-CuaDriverLocal app enumeration must not ask for System Events. Target-specific Automation prompts may still appear later when a user
+PincerLocal app enumeration must not ask for System Events. Target-specific Automation prompts may still appear later when a user
 explicitly requests an Apple Events-backed browser or app operation; do not
 pre-grant those in the seed. These are normal macOS consent flows; do not edit
 `TCC.db` by hand while building a reusable seed. Rerun the commands and require
@@ -257,8 +257,8 @@ restart the app-owned daemon once before checking status so the live process
 observes the new grant:
 
 ```bash
-~/.local/bin/cua-driver-local stop
-open -a CuaDriverLocal
+~/.local/bin/pincer-local stop
+open -a PincerLocal
 ```
 
 Then verify the daemon's own identity and the read-only status contract before
@@ -267,24 +267,24 @@ LaunchServices-hosted grant flow. The first command must not raise a dialog;
 the second is intentionally prompt-capable and must be run by the human:
 
 ```bash
-~/.local/bin/cua-driver-local permissions status --json | jq -e '
+~/.local/bin/pincer-local permissions status --json | jq -e '
   .accessibility == true
   and .screen_recording == true
   and .screen_recording_capturable == null
   and .direct_capture_status == "not_checked"
   and .source.attribution == "driver-daemon"
 '
-~/.local/bin/cua-driver-local permissions grant
-~/.local/bin/cua-driver-local permissions status --json | jq -e '
+~/.local/bin/pincer-local permissions grant
+~/.local/bin/pincer-local permissions status --json | jq -e '
   .accessibility == true
   and .screen_recording == true
   and .screen_recording_capturable == null
   and .direct_capture_status == "not_checked"
   and .direct_capture_verification.source == "permissions_grant"
   and (.direct_capture_verification.verified_at | endswith("Z"))
-  and .direct_capture_verification.bundle_id == "com.trycua.driver.local"
+  and .direct_capture_verification.bundle_id == "io.github.modcritic.pincer.local"
 '
-codesign -d -r- /Applications/CuaDriverLocal.app 2>&1 | grep 'certificate leaf'
+codesign -d -r- /Applications/PincerLocal.app 2>&1 | grep 'certificate leaf'
 csrutil status
 ```
 
@@ -295,12 +295,12 @@ All five commands must succeed, and `csrutil status` must report disabled.
 Upstream's public [Run Cua Driver in a macOS Lume VM](https://cua.ai/docs/cua-driver/guides/vms-and-remote)
 guide grants macOS consent through the VM display. Keep using that prompt flow
 for reusable private seeds. For automated disposable workers that are not cloned
-from a granted seed, run the host helper after `CuaDriverLocal.app` is installed
+from a granted seed, run the host helper after `PincerLocal.app` is installed
 in each running worker with a certificate-backed identity:
 
 ```bash
-WORKER_A=cua-driver-macos-e2e-a
-WORKER_B=cua-driver-macos-e2e-b
+WORKER_A=pincer-macos-e2e-a
+WORKER_B=pincer-macos-e2e-b
 tests/runners/macos-lume/seed-tcc.sh "$WORKER_A" "$WORKER_B"
 ```
 
@@ -314,25 +314,25 @@ Use the default `lume` SSH password, set `LUME_SSH_PASSWORD`, or pass
 empty when the VM accepts host SSH keys.
 The guest helper refuses to write unless `sysctl -n hw.model` reports a
 `VirtualMac*` VM and `csrutil status` reports disabled SIP. It derives the
-permission identity from `/Applications/CuaDriverLocal.app`, writes only the
+permission identity from `/Applications/PincerLocal.app`, writes only the
 Accessibility and Screen Recording entries for that app, restarts `tccd`, and
 verifies both entries.
 It accepts a designated requirement that pins a certificate leaf or root hash
 (local stable signing) or the exact Apple-anchored Developer ID requirement of a
 notarized release (`anchor apple generic` with a 10-character team ID). It
 rejects ad hoc `cdhash` requirements unless `--allow-adhoc` is passed. To seed
-the released app, pass `--app /Applications/CuaDriver.app --expected-client
-com.trycua.driver`. The host wrapper parses `lume get` with `jq`.
+the released app, pass `--app /Applications/Pincer.app --expected-client
+io.github.modcritic.pincer`. The host wrapper parses `lume get` with `jq`.
 Database rows or a successful helper exit alone do not certify the desktop:
 require both grants in `permissions status --json`, a fresh screenshot, and a
 reversible input action through the guest Driver before the matrix.
 
-After seeding, restart `CuaDriverLocal.app` before checking permission status if
+After seeding, restart `PincerLocal.app` before checking permission status if
 `install-local --autostart` or an earlier probe may have started the daemon:
 
 ```bash
-~/.local/bin/cua-driver-local stop
-open -a CuaDriverLocal
+~/.local/bin/pincer-local stop
+open -a PincerLocal
 ```
 
 If the VM sudo password is not the default `lume`, pass it without putting it
@@ -351,7 +351,7 @@ Stop the builder and clone it to a date/version-named private seed plus two
 stopped backups:
 
 ```bash
-SEED=cua-driver-macos-e2e-seed-26.5.2-YYYYMMDD
+SEED=pincer-macos-e2e-seed-26.5.2-YYYYMMDD
 BACKUP_A="${SEED}-backup-a"
 BACKUP_B="${SEED}-backup-b"
 lume stop "$BUILDER"
@@ -367,11 +367,11 @@ Lume version, CLT version, Rust version, Node version, and signing-certificate
 hash in the maintainer log. Also record that the following consent paths were
 granted and then rerun without prompts:
 
-- `CuaDriverLocal.app`: Accessibility and Screen Recording
+- `PincerLocal.app`: Accessibility and Screen Recording
 - Terminal controlling System Events
 - Terminal: Accessibility, for System Events UI scripting
-- CuaDriverLocal direct screen capture without the system picker. macOS labels
-  this combined consent as screen and system-audio access even though Cua
+- PincerLocal direct screen capture without the system picker. macOS labels
+  this combined consent as screen and system-audio access even though Pincer
   Driver's current ScreenCaptureKit recorder does not enable audio capture.
 
 Build a new seed instead of updating one in place.
@@ -381,8 +381,8 @@ Build a new seed instead of updating one in place.
 Start from a clean committed host checkout. Give the worker a unique name:
 
 ```bash
-SEED=cua-driver-macos-e2e-seed-26.5.2-YYYYMMDD
-WORKER="cua-driver-macos-e2e-$(date -u +%Y%m%dT%H%M%SZ)"
+SEED=pincer-macos-e2e-seed-26.5.2-YYYYMMDD
+WORKER="pincer-macos-e2e-$(date -u +%Y%m%dT%H%M%SZ)"
 lume clone "$SEED" "$WORKER"
 echo "$WORKER"
 lume run "$WORKER"
@@ -392,9 +392,9 @@ Keep `lume run` open. From another host terminal, set `WORKER` to the printed
 name and sync the exact host commit:
 
 ```bash
-WORKER=cua-driver-macos-e2e-YYYYMMDDTHHMMSSZ
+WORKER=pincer-macos-e2e-YYYYMMDDTHHMMSSZ
 VM_IP="$(lume get "$WORKER" --format json | jq -r '.[0].ipAddress')"
-scripts/sync-vm-worktree.sh push "lume@${VM_IP}" '~/cua'
+scripts/sync-vm-worktree.sh push "lume@${VM_IP}" '~/pincer'
 ```
 
 Run GUI suites from Terminal in the VM display, not over SSH: GUI fixtures must
@@ -421,14 +421,14 @@ Pull evidence before deleting the worker, even after a failed run. Set
 the tests wrote their evidence to:
 
 ```bash
-REMOTE_ARTIFACT_DIR=artifacts/cua-driver/macos \
+REMOTE_ARTIFACT_DIR=artifacts/pincer/macos \
   scripts/sync-vm-worktree.sh pull-artifacts \
-  "lume@${VM_IP}" '~/cua'
+  "lume@${VM_IP}" '~/pincer'
 lume stop "$WORKER"
 lume delete "$WORKER" --force
 ```
 
-The host stores pulled evidence under `artifacts/cua-driver/vm/`. A setup
+The host stores pulled evidence under `artifacts/pincer/vm/`. A setup
 failure is an environment failure, not permission to report a smaller green
 matrix.
 
@@ -450,13 +450,13 @@ golden image's inherited grants.
 1. Clone the golden seed to a new worker while both are stopped.
 2. Run `lume sip on <worker> --yes`.
 3. Boot it with a display, sync the exact source as above, and install it with
-   `CUA_DRIVER_SOURCE_SHA` set to `.cua-e2e-source-sha`.
+   `PINCER_SOURCE_SHA` set to `.pincer-e2e-source-sha`.
 4. In the VM display, reset only the disposable worker's grants:
 
    ```bash
-   tccutil reset Accessibility com.trycua.driver.local
-   tccutil reset ScreenCapture com.trycua.driver.local
-   ~/.local/bin/cua-driver-local permissions grant
+   tccutil reset Accessibility io.github.modcritic.pincer.local
+   tccutil reset ScreenCapture io.github.modcritic.pincer.local
+   ~/.local/bin/pincer-local permissions grant
    ```
 
 5. Complete the prompts and require the same four-field

@@ -162,8 +162,8 @@ class CanvasTaskTest(unittest.TestCase):
         self.assertIn(CANVAS_TASK_ID, NATIVE_TASK_IDS)
         self.assertEqual(split_task_id(CANVAS_TASK_ID), (CANVAS, "cancel"))
         task = native_task(CANVAS_TASK_ID, Path("/tmp/none.json"), pid=7)
-        self.assertEqual(task.scope.window_title, "Cua Visual-Only Canvas Fixture")
-        self.assertEqual(task.oracle.schema, "cua.visual_canvas_task_state_v1")
+        self.assertEqual(task.scope.window_title, "Pincer Visual-Only Canvas Fixture")
+        self.assertEqual(task.oracle.schema, "pincer.visual_canvas_task_state_v1")
         self.assertEqual(task.allowed_action_kinds, frozenset({"click"}))
 
     def test_only_the_cancel_region_is_executable(self) -> None:
@@ -228,7 +228,7 @@ class JournalTest(unittest.TestCase):
                     with urllib.request.urlopen(request, timeout=5) as response:
                         self.assertEqual(response.status, 204)
                     written = json.loads(state.read_text(encoding="utf-8"))
-                    self.assertEqual(written, {**published, "schema": "cua.visual_canvas_task_state_v1"})
+                    self.assertEqual(written, {**published, "schema": "pincer.visual_canvas_task_state_v1"})
             finally:
                 close()
         self.assertTrue(url.startswith("http://127.0.0.1:"))

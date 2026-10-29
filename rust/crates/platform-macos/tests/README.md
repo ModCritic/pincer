@@ -21,19 +21,19 @@ part of this repository:
 
 ```bash
 bash scripts/ci/macos/build-embedded-menu-fixture.sh \
-  "$HOME/Applications/CuaEmbeddedMenuFixture.app" \
-  com.trycua.tests.embedded-menu-fixture
+  "$HOME/Applications/PincerEmbeddedMenuFixture.app" \
+  io.github.modcritic.pincer.tests.embedded-menu-fixture
 ```
 
 The builder refuses to overwrite an existing application. It uses an ad-hoc
 signature; preserve the built bytes after authorization. Rebuilding can invalidate
-that authorization. Do not borrow the installed CuaDriver application's identity
+that authorization. Do not borrow the installed Pincer application's identity
 or modify TCC databases.
 
 In a logged-in Aqua session, request Accessibility through the normal macOS flow:
 
 ```bash
-open -W -n "$HOME/Applications/CuaEmbeddedMenuFixture.app" \
+open -W -n "$HOME/Applications/PincerEmbeddedMenuFixture.app" \
   --args --request-accessibility --report /tmp/embedded-menu-permission.txt
 ```
 
@@ -43,7 +43,7 @@ the regression. If it expires, grant access in System Settings before rerunning.
 ## Run the foreground regression
 
 ```bash
-open -W -n "$HOME/Applications/CuaEmbeddedMenuFixture.app" \
+open -W -n "$HOME/Applications/PincerEmbeddedMenuFixture.app" \
   --args --run-gui --report /tmp/embedded-menu-result.txt
 ```
 

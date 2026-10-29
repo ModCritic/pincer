@@ -45,7 +45,7 @@ export const ease = {
   },
   // Hogan & Flash minimum-jerk: the classic human point-to-point profile.
   minJerk: (t) => t * t * t * (10 - 15 * t + 6 * t * t),
-  // Smootherstep, same as minJerk; kept as an alias for the Cua renderer's naming.
+  // Smootherstep, same as minJerk; kept as an alias for the Pincer renderer's naming.
   smootherstep: (t) => t * t * t * (t * (6 * t - 15) + 10),
   // Overshooting ease-out ("back").
   outBack: (t, k = 1.70158) => 1 + (k + 1) * (t - 1) ** 3 + k * (t - 1) ** 2,
@@ -172,9 +172,9 @@ export function quad(p0, p1, p2) {
   };
 }
 
-// The Cua Driver bezier formula (bezier.rs `build_motion_bezier`): handles
+// The Pincer bezier formula (bezier.rs `build_motion_bezier`): handles
 // along the chord plus a perpendicular deflection split by `arcFlow`.
-export function cuaBezier(
+export function pincerBezier(
   a,
   b,
   { startHandle = 0.3, endHandle = 0.3, arcSize = 0.25, arcFlow = 0 } = {}
@@ -253,7 +253,7 @@ export function catmullRom(points, alpha = 0.5) {
 
 // ---------------------------------------------------------------------------
 // Dubins (arc-straight-arc) planner: a JS port of
-// cua-cursor-motion dubins.rs, used to reproduce today's Cua Driver glide.
+// pincer-cursor-motion dubins.rs, used to reproduce today's Pincer glide.
 // ---------------------------------------------------------------------------
 
 const mod2pi = (x) => {

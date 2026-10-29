@@ -1,8 +1,8 @@
-# Ignored cua-driver and cua-driver-e2e integration tests that no canonical
+# Ignored pincer and pincer-e2e integration tests that no canonical
 # runner selects.
 #
 # Upstream's CI checked that every #[ignore] test under
-# rust/crates/cua-driver/tests or rust/crates/cua-driver-e2e/tests is either
+# rust/crates/pincer/tests or rust/crates/pincer-e2e/tests is either
 # selected by a runner or listed here. This repository has no such check;
 # keep the list current by hand.
 #
@@ -12,9 +12,9 @@
 # prepared native Hyprland desktop alongside upstream's
 # `scripts/ci/linux/run-rust-e2e.sh`
 # (see docs/test-harnesses-guide.md, Hyprland validation).
-hyprland_foreground_test::foreground_action_refused_while_independent_virtual_pointer_holds_primary_grab | Manual native-Hyprland gate: needs a live Hyprland compositor with the Cua plugin; RFC 3550 foreground grab refusal
-hyprland_foreground_test::foreground_drag_focus_loss_does_not_release_into_successor | Manual native-Hyprland gate: needs a live Hyprland compositor with the Cua plugin; RFC 3550 drag focus-loss safety
-hyprland_foreground_test::foreground_drag_focus_loss_does_not_release_into_same_client_sibling | Manual native-Hyprland gate: needs a live Hyprland compositor with the Cua plugin; RFC 3550 drag focus-loss safety
+hyprland_foreground_test::foreground_action_refused_while_independent_virtual_pointer_holds_primary_grab | Manual native-Hyprland gate: needs a live Hyprland compositor with the Pincer plugin; RFC 3550 foreground grab refusal
+hyprland_foreground_test::foreground_drag_focus_loss_does_not_release_into_successor | Manual native-Hyprland gate: needs a live Hyprland compositor with the Pincer plugin; RFC 3550 drag focus-loss safety
+hyprland_foreground_test::foreground_drag_focus_loss_does_not_release_into_same_client_sibling | Manual native-Hyprland gate: needs a live Hyprland compositor with the Pincer plugin; RFC 3550 drag focus-loss safety
 hyprland_native_observation_test::native_window_capture_and_background_ax_keep_exact_identity | Manual native-Hyprland gate: needs a live Hyprland compositor; exact-identity capture and owner-mismatch refusals
 
 # Optional external-app suite: the canonical Windows image has no LibreOffice.

@@ -6,7 +6,7 @@ use std::{
 };
 
 use clipboard_rs::{common::RustImage, Clipboard, ClipboardContext, ContentFormat};
-use cua_driver_core::clipboard::ClipboardBackend;
+use pincer_core::clipboard::ClipboardBackend;
 
 pub struct MacosClipboard {
     context: Mutex<Option<ClipboardContext>>,
@@ -181,23 +181,20 @@ mod tests {
     fn native_clipboard_round_trips_text_png_and_file_url_when_opted_in() {
         // Overwrites the general pasteboard, so it runs only where a job opts
         // in explicitly. `CI` alone is not enough: developers export it too.
-        if std::env::var_os("CUA_TEST_ALLOW_CLIPBOARD").as_deref()
+        if std::env::var_os("PINCER_TEST_ALLOW_CLIPBOARD").as_deref()
             != Some(std::ffi::OsStr::new("1"))
         {
             return;
         }
         let backend = MacosClipboard::new();
         let original_text = backend.read_text().ok().flatten();
-        backend
-            .write_text("cua-driver clipboard test".into())
-            .unwrap();
+        backend.write_text("pincer clipboard test".into()).unwrap();
         assert_eq!(
             backend.read_text().unwrap().as_deref(),
-            Some("cua-driver clipboard test")
+            Some("pincer clipboard test")
         );
 
-        let png =
-            std::env::temp_dir().join(format!("cua-driver-clipboard-{}.png", std::process::id()));
+        let png = std::env::temp_dir().join(format!("pincer-clipboard-{}.png", std::process::id()));
         image::RgbaImage::from_pixel(1, 1, image::Rgba([1, 2, 3, 255]))
             .save(&png)
             .unwrap();

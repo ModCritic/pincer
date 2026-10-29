@@ -19,7 +19,7 @@ class CanonicalTest(unittest.TestCase):
     def test_exact_bytes_and_final_newline(self):
         self.assertEqual(
             operator.canonical_message(EPOCH, CHALLENGE, TARGET, "1700000000123", "15"),
-            b"CUA_TEST_LEASE_1\n" + b"a" * 32 + b"\n" + b"b" * 32
+            b"PINCER_TEST_LEASE_1\n" + b"a" * 32 + b"\n" + b"b" * 32
             + b"\n" + b"c" * 32 + b"\n1700000000123\n15\n",
         )
 

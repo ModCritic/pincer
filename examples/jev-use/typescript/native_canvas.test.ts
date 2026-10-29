@@ -97,8 +97,8 @@ test('the canvas task is registered and bound to its state file', () => {
   assert.ok(NATIVE_TASK_IDS.includes(CANVAS_TASK_ID));
   assert.deepEqual(splitTaskId(CANVAS_TASK_ID), [CANVAS, 'cancel']);
   const task = nativeTask(CANVAS_TASK_ID, '/tmp/none.json', { pid: 7 });
-  assert.equal(task.scope.windowTitle, 'Cua Visual-Only Canvas Fixture');
-  assert.equal(task.oracle.schema, 'cua.visual_canvas_task_state_v1');
+  assert.equal(task.scope.windowTitle, 'Pincer Visual-Only Canvas Fixture');
+  assert.equal(task.oracle.schema, 'pincer.visual_canvas_task_state_v1');
   assert.equal(task.oracle.expectedPid, 7);
   assert.deepEqual(task.scope.maxDepth, 1);
   assert.equal(task.visualMinConfidence, 0.8);

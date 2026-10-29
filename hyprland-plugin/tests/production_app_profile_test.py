@@ -178,8 +178,8 @@ class ProfileProvenanceTests(unittest.TestCase):
             profile_path.write_text(json.dumps(profile))
             kit = {'schema': 1, 'tooling_revision': 'b' * 40, 'source': source,
                    'profile_sha256': digest(profile_path)['sha256'],
-                   'cmake_options': {'CUA_HYPRLAND_INPUT': 'ON', 'CUA_HYPRLAND_TEST_INPUT': 'OFF',
-                                     'CUA_HYPRLAND_INPUT_TRACE': 'OFF'}}
+                   'cmake_options': {'PINCER_HYPRLAND_INPUT': 'ON', 'PINCER_HYPRLAND_TEST_INPUT': 'OFF',
+                                     'PINCER_HYPRLAND_INPUT_TRACE': 'OFF'}}
             build = {'source': {'source_revision': source['revision'], 'driver_version': '0.24.0'},
                      'profile': profile, 'kit': kit, 'module_sha256': digest(plugin)['sha256']}
             kit_path, build_path = root / 'KIT-PROVENANCE.json', root / 'BUILD-PROVENANCE.json'
@@ -201,7 +201,7 @@ class ProfileProvenanceTests(unittest.TestCase):
                     artifact_identity(args, product, plugin, 'inkscape-only')
             build_path.write_text(json.dumps(build))
             bad_kit = copy.deepcopy(kit)
-            bad_kit['cmake_options']['CUA_HYPRLAND_INPUT_TRACE'] = 'ON'
+            bad_kit['cmake_options']['PINCER_HYPRLAND_INPUT_TRACE'] = 'ON'
             kit_path.write_text(json.dumps(bad_kit))
             build_path.write_text(json.dumps({**build, 'kit': bad_kit}))
             with self.assertRaisesRegex(AssertionError, 'production kit configuration'):

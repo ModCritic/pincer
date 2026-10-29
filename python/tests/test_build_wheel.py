@@ -1,4 +1,4 @@
-"""Tests for cua-driver wheel build helpers."""
+"""Tests for pincer wheel build helpers."""
 
 import importlib.util
 import os
@@ -118,7 +118,7 @@ def test_platform_tag_follows_the_binary_not_the_host():
     build_wheel = load_build_wheel_module()
 
     with tempfile.TemporaryDirectory() as tmp:
-        binary = Path(tmp) / "cua-driver"
+        binary = Path(tmp) / "pincer"
         binary.write_bytes(_elf(183))
         with mock.patch.object(build_wheel.platform, "machine", return_value="x86_64"), \
                 mock.patch.object(build_wheel.os, "confstr", return_value="glibc 2.39"):
@@ -131,7 +131,7 @@ def test_platform_tag_follows_the_binary_not_the_host():
 
 def test_plat_name_overrides_detection():
     build_wheel = load_build_wheel_module()
-    missing = Path("/nonexistent/cua-driver")
+    missing = Path("/nonexistent/pincer")
 
     assert (
         build_wheel.select_platform_tag("linux", missing, "manylinux_2_31_x86_64")
@@ -152,9 +152,9 @@ def test_plat_name_overrides_detection():
 def test_binary_names_match_cargo_outputs():
     build_wheel = load_build_wheel_module()
 
-    assert build_wheel.get_binary_names("darwin") == ("cua-driver", "libcua_driver_sdk.dylib")
-    assert build_wheel.get_binary_names("linux") == ("cua-driver", "libcua_driver_sdk.so")
-    assert build_wheel.get_binary_names("windows") == ("cua-driver.exe", "cua_driver_sdk.dll")
+    assert build_wheel.get_binary_names("darwin") == ("pincer", "libpincer_sdk.dylib")
+    assert build_wheel.get_binary_names("linux") == ("pincer", "libpincer_sdk.so")
+    assert build_wheel.get_binary_names("windows") == ("pincer.exe", "pincer_sdk.dll")
 
 
 def test_default_target_dir_follows_cargo_target_dir():
@@ -176,17 +176,17 @@ def test_stage_artifacts_copies_the_local_build_into_the_package():
     with tempfile.TemporaryDirectory() as tmp:
         release = Path(tmp) / "target" / "release"
         release.mkdir(parents=True)
-        (release / "cua-driver").write_bytes(b"cli")
-        (release / "libcua_driver_sdk.so").write_bytes(b"sdk")
-        package = Path(tmp) / "cua_driver"
+        (release / "pincer").write_bytes(b"cli")
+        (release / "libpincer_sdk.so").write_bytes(b"sdk")
+        package = Path(tmp) / "pincer_driver"
 
         staged = build_wheel.stage_artifacts(
-            release / "cua-driver", release / "libcua_driver_sdk.so", package, "linux"
+            release / "pincer", release / "libpincer_sdk.so", package, "linux"
         )
 
-        assert staged == [package / "bin" / "cua-driver", package / "libcua_driver_sdk.so"]
-        assert (package / "bin" / "cua-driver").read_bytes() == b"cli"
-        assert (package / "libcua_driver_sdk.so").read_bytes() == b"sdk"
+        assert staged == [package / "bin" / "pincer", package / "libpincer_sdk.so"]
+        assert (package / "bin" / "pincer").read_bytes() == b"cli"
+        assert (package / "libpincer_sdk.so").read_bytes() == b"sdk"
 
 
 def test_stage_artifacts_bundles_the_windows_uia_worker_when_built():
@@ -195,18 +195,18 @@ def test_stage_artifacts_bundles_the_windows_uia_worker_when_built():
     with tempfile.TemporaryDirectory() as tmp:
         release = Path(tmp) / "release"
         release.mkdir()
-        for name in ("cua-driver.exe", "cua-driver-uia.exe", "cua_driver_sdk.dll"):
+        for name in ("pincer.exe", "pincer-uia.exe", "pincer_sdk.dll"):
             (release / name).write_bytes(name.encode())
-        package = Path(tmp) / "cua_driver"
+        package = Path(tmp) / "pincer_driver"
 
         staged = build_wheel.stage_artifacts(
-            release / "cua-driver.exe", release / "cua_driver_sdk.dll", package, "windows"
+            release / "pincer.exe", release / "pincer_sdk.dll", package, "windows"
         )
 
         assert staged == [
-            package / "bin" / "cua-driver.exe",
-            package / "bin" / "cua-driver-uia.exe",
-            package / "cua_driver_sdk.dll",
+            package / "bin" / "pincer.exe",
+            package / "bin" / "pincer-uia.exe",
+            package / "pincer_sdk.dll",
         ]
 
 
@@ -214,10 +214,10 @@ def test_missing_local_build_names_the_cargo_command():
     build_wheel = load_build_wheel_module()
 
     with tempfile.TemporaryDirectory() as tmp:
-        missing = Path(tmp) / "release" / "cua-driver"
+        missing = Path(tmp) / "release" / "pincer"
         try:
             build_wheel.stage_artifacts(
-                missing, missing.with_name("libcua_driver_sdk.so"), Path(tmp) / "pkg", "linux"
+                missing, missing.with_name("libpincer_sdk.so"), Path(tmp) / "pkg", "linux"
             )
         except FileNotFoundError as error:
             assert build_wheel.CARGO_BUILD_HINT in str(error)

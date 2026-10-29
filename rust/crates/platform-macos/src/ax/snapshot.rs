@@ -1,7 +1,7 @@
 use super::bindings::AXUIElementRef;
 use super::tree::AXNode;
 use core_foundation::base::{CFRelease, CFRetain, CFTypeRef};
-use cua_driver_core::snapshot_store::{SnapshotPayload, SnapshotStore};
+use pincer_core::snapshot_store::{SnapshotPayload, SnapshotStore};
 
 pub struct RetainedElement(usize);
 
@@ -82,7 +82,7 @@ mod tests {
     use super::*;
     use core_foundation::base::{CFGetRetainCount, TCFType};
     use core_foundation::string::CFString;
-    use cua_driver_core::element_token::{token_for, ResolvedElement};
+    use pincer_core::element_token::{token_for, ResolvedElement};
 
     fn resolve(cache: &Snapshots, snapshot: u32, index: usize) -> Option<RetainedElement> {
         match cache
@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn retained_element_survives_concurrent_snapshot_replace() {
-        let value = CFString::new("cua-driver-uaf-test-element-placeholder");
+        let value = CFString::new("pincer-uaf-test-element-placeholder");
         let ptr = value.as_concrete_TypeRef() as usize;
         let base = unsafe { CFGetRetainCount(ptr as CFTypeRef) };
         let cache = Snapshots::new();
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn admitted_element_survives_cache_destruction_until_native_work_finishes() {
-        let value = CFString::new("cua-driver-invariant-admitted-native-work");
+        let value = CFString::new("pincer-invariant-admitted-native-work");
         let ptr = value.as_concrete_TypeRef() as usize;
         let base = unsafe { CFGetRetainCount(ptr as CFTypeRef) };
         let cache = Snapshots::new();
@@ -154,8 +154,8 @@ mod tests {
 
     #[test]
     fn abandoned_preparation_releases_native_payload_without_replacing_snapshot() {
-        let original = CFString::new("cua-driver-original-published-native-work");
-        let replacement = CFString::new("cua-driver-abandoned-prepared-native-work");
+        let original = CFString::new("pincer-original-published-native-work");
+        let replacement = CFString::new("pincer-abandoned-prepared-native-work");
         let original_ptr = original.as_concrete_TypeRef() as usize;
         let replacement_ptr = replacement.as_concrete_TypeRef() as usize;
         let base = unsafe { CFGetRetainCount(replacement_ptr as CFTypeRef) };

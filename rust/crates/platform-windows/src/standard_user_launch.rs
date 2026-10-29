@@ -48,7 +48,7 @@ use crate::browser_standard_user::{browser_launch_context, BrowserLaunchContext,
 
 /// First argument that turns this Driver executable into the shell launch
 /// helper. Never a public command.
-pub const SHELL_LAUNCH_HELPER_FLAG: &str = "--cua-driver-standard-user-shell-launch";
+pub const SHELL_LAUNCH_HELPER_FLAG: &str = "--pincer-standard-user-shell-launch";
 
 /// Set once the Driver's own entry point has checked for the helper flag,
 /// which proves this executable can serve as the helper.

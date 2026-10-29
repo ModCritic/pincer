@@ -393,11 +393,11 @@ async function run(args: Arguments): Promise<Outcome> {
   const token = args.token ?? `jev-${randomUUID().replaceAll('-', '').slice(0, 10)}`;
   const task: Task = new FixtureFormTask(token, args.fixtureUrl, args.maxSteps);
   const transport = new StdioClientTransport({
-    command: process.env.CUA_DRIVER_BIN ?? 'cua-driver',
+    command: process.env.PINCER_BIN ?? 'pincer',
     args: ['mcp'],
     env: driverEnvironment(),
   });
-  const client = new Client({ name: 'cua-driver-jev-use-example', version: '0.1.0' });
+  const client = new Client({ name: 'pincer-jev-use-example', version: '0.1.0' });
   // Compact what-happened record for the decision model. The full telemetry
   // events (timings, probabilities) go only to the JSONL log.
   const history: HistoryEntry[] = [];

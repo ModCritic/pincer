@@ -35,7 +35,7 @@ Run `makepkg` as an ordinary user. The original source tarball is already in the
 kit; no Git checkout or network source resolution is needed. The matching native
 compiler, headers, runtime, CMake, Ninja, Python, pkg-config and binutils must
 already be installed. To select a compiler outside `/usr/bin/g++`, set
-`CUA_RELEASE_CXX` to its absolute path. The kit neither installs a compiler nor
+`PINCER_RELEASE_CXX` to its absolute path. The kit neither installs a compiler nor
 changes runtime search paths or the desktop environment.
 
 The recipe checks exact native package versions, compositor and compiler bytes,
@@ -100,10 +100,10 @@ With Python 3.11+, binutils (`readelf`) and the system `ldd` available, check th
 installed package using the previously reviewed kit-provenance digest:
 
 ```sh
-python3 /usr/share/cua-hyprland-plugin/profile_verify.py \
-  --kit /usr/share/cua-hyprland-plugin \
+python3 /usr/share/pincer-hyprland-plugin/profile_verify.py \
+  --kit /usr/share/pincer-hyprland-plugin \
   --kit-sha256 REVIEWED_KIT_PROVENANCE_SHA256 \
-  --consumer /usr/lib/cua/hyprland/cua-hyprland-plugin.so
+  --consumer /usr/lib/pincer/hyprland/pincer-hyprland-plugin.so
 ```
 
 This check needs no compiler, headers, or pkg-config. It verifies the reviewed
