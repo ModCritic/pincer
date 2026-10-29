@@ -432,6 +432,11 @@ fn configure_linux_isolated_browser_command(
     sandbox: LinuxBrowserSandbox,
 ) {
     command.arg("--password-store=basic");
+    // Chromium names its window class and app id after CHROME_DESKTOP. Electron
+    // apps set it for themselves, so a driver started from one (the Claude
+    // desktop app sets com.anthropic.Claude.desktop) would hand its identity to
+    // the browser, and the desktop would list the browser as that app.
+    command.env_remove("CHROME_DESKTOP");
     if let Some(platform) = ozone_platform {
         command.arg(format!("--ozone-platform={platform}"));
     }
@@ -2166,6 +2171,19 @@ mod tests {
         assert!(args.iter().any(|arg| arg == "--password-store=basic"));
         assert!(args.iter().any(|arg| arg == "--ozone-platform=wayland"));
         assert!(args.iter().any(|arg| arg == "--no-sandbox"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn isolated_launch_does_not_inherit_the_parent_apps_chrome_desktop() {
+        let mut command = Command::new("chromium-under-test");
+        configure_linux_isolated_browser_command(&mut command, None, LinuxBrowserSandbox::Full);
+        let chrome_desktop = command
+            .get_envs()
+            .find(|(name, _)| *name == "CHROME_DESKTOP")
+            .map(|(_, value)| value);
+        // Some(None) is an explicit removal, whatever the parent's environment holds.
+        assert_eq!(chrome_desktop, Some(None));
     }
 
     #[cfg(target_os = "linux")]
