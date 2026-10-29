@@ -273,7 +273,8 @@ every click, and this desktop is reached only through RustDesk.
   or none. All four cursor tools add a `renderer` field; with none, the text adds "Nothing
   changes on screen: no agent cursor is drawn in XWayland mode ...". The output schemas allow
   extra properties, so the contract is unchanged. The header comment now matches the code.
-- Test: `xwayland_mode_has_no_cursor_renderer`. Sandbox: the XWayland-mode daemon reported
+- Test: `xwayland_mode_has_no_cursor_renderer` (since 2026-10-29
+  `cursor_renderer_follows_the_x11_overlay_gate`). Sandbox: the XWayland-mode daemon reported
   `renderer: null`; the daemon started without `WAYLAND_DISPLAY` reported `x11_overlay`.
 - This means the agent cursor turned on 2026-10-20 doesn't show on KDE Wayland in the configured
   mode.
@@ -378,3 +379,103 @@ the tab. The first attach per connection and tab now enables dialog events
   `root/usr/local/bin/pincer.before-fixes`. AT-SPI doesn't run in the sandbox: its
   `at-spi-bus-launcher` starts `dbus-broker`, which exits without a systemd journal. Bugs 3 and 5
   were therefore checked on the desktop.
+
+## Sandbox round, 2026-10-28
+
+The desktop is back on Plasma 6.7.5 X11, so this round ran only in the rehearsal sandbox: a
+headless KWin 6.7.5 Wayland (`kwin_wayland --virtual`, 1600x1000) with XWayland, Qt 6.12, no
+network, `/dev/uinput` covered by a plain file. The desktop test above was on KWin 6.8.1, so
+anything that depends on the KWin version is unconfirmed for 6.8.
+
+### Harness
+
+`~/plasma-x11-baseline/sonicde/rehearsal/tools/ptest/wl/`: `run.sh <script> [seconds]` boots the
+session and runs `wl/<script>` as the test user; results land in `screens/wl-<script>`.
+`common.sh` adds what the 10/25 rounds lacked:
+
+- AT-SPI. The stock `at-spi-bus-launcher` starts `dbus-broker`, which exits without a systemd
+  journal. `common.sh` runs the accessibility bus with `dbus-daemon` and the stock
+  `accessibility.conf`, starts `at-spi2-registryd`, and `a11y_shim.py` answers `org.a11y.Bus`
+  on the session bus. Pincer's tree walks work there now.
+- Real compositor input. `fakeinput.c` sends pointer events through KWin's
+  `org_kde_kwin_fake_input` (allowed by `KWIN_WAYLAND_NO_PERMISSION_CHECKS=1` in KWin's
+  environment), so clicks reach native Wayland windows the way a mouse's would. `fakeinput hold`
+  keeps one pointer device on the seat for the whole run (see below).
+- `EIS_NO_PROMPT=1` sets `[Xwayland] XwaylandEisNoPrompt=true` in the sandbox user's `kwinrc`
+  for one run, which pre-approves KWin's "is asking to control input devices" prompt for XTEST.
+
+### Agent cursor on XWayland (bug 6 follow-up)
+
+The X11 overlay was started on XWayland with a throwaway build (an env switch around
+`should_start_x11_overlay`, not committed; the binary is `root/usr/local/bin/pincer.overlay-exp`).
+On KWin 6.7.5:
+
+- It drew correctly: KWin owns `_NET_WM_CM_S0`, the overlay picked its 32-bit ARGB visual, and
+  the cursor showed over a native Wayland Kate with everything outside it see-through. No black
+  window. KWin lists it as an unmanaged full-screen window in layer 9.
+- Clicks passed through. Real compositor clicks opened the File menu of a native Wayland Kate
+  and of an XWayland Kate with the overlay mapped, also with the cursor resting exactly on the
+  File item, so KWin honors the overlay's empty input shape.
+- Pincer's own foreground click worked with the overlay up.
+
+So upstream's reason for keeping it off (an opaque black window over the Wayland desktop) does
+not hold on KWin 6.7.5. Not checked: KWin 6.8, GNOME, scaled or multi-monitor outputs, and CPU
+cost.
+
+Turned on for KWin on 2026-10-29. `x11_overlay_allowed` in `overlay.rs` starts the overlay
+under `WAYLAND_DISPLAY` only when XWayland's window manager is KWin: the
+`_NET_SUPPORTING_WM_CHECK` window points at itself and its `_NET_WM_NAME` is `KWin`. KWin sets
+that before anything in the session runs (`wl/wmprobe.sh`). The decision is made once per
+process. Native Wayland mode (`CUA_DRIVER_RS_ENABLE_WAYLAND=1`) still keeps it off on every
+compositor, since the layer-shell backend draws there. Checked with the release build and no
+switch (`wl/gate.sh`):
+
+- Default mode: `renderer: "x11_overlay"`, and `Cua.AgentCursorOverlay.default` is mapped at
+  1600x1000, depth 32.
+- A real click on the cursor's pixels over an XWayland Kate's File item opened the menu.
+- Native mode: `renderer: "wayland_layer_shell"` and no X11 overlay window.
+
+### `move_along_path` on XWayland
+
+With KWin's prompt approved, both scopes glide the real pointer to the right place (`wl/gate.sh`,
+`wl/example.sh`). A smoothed desktop polyline ended at (1000, 700), a window-scope 360° arc on
+Kate ended at its expected screen point (600, 400), and the README's parametric circle ended at
+(1000, 500), all read from KWin's `workspace.cursorPos`. Don't check this with `xdotool
+getmouselocation`: XWayland only learns the pointer position while it is over an X11 window, so
+the desktop path seemed to stop at (898, 415), the edge of Kate.
+
+### Foreground XTEST
+
+With the prompt approved, `click`, `right_click` and `press_key` with
+`delivery_mode: "foreground"` all land on an XWayland Kate.
+
+One false lead: the first foreground click of a session lost its button press (only a
+`RawButtonRelease` arrived, after a `HierarchyChanged`). That happens only when KWin's seat has
+no pointer device at all, which the sandbox had between `fakeinput` calls: XWayland disables its
+pointer devices, and the press arrives while they come back. With `fakeinput hold` keeping a
+pointer on the seat, as a physical mouse does, the first click lands. A bare `ctypes` XTEST
+client behaves the same way, so this is not Pincer's. The first foreground key press landed
+either way.
+
+### Chromium's window class
+
+Confirmed and fixed. The Claude desktop app sets `CHROME_DESKTOP=com.anthropic.Claude.desktop`;
+an isolated Chromium launched by a Pincer with that variable set its `WM_CLASS` to
+`com.anthropic.Claude`, without it `chromium-browser`. `configure_linux_isolated_browser_command`
+now removes `CHROME_DESKTOP` from the browser's environment. Test:
+`isolated_launch_does_not_inherit_the_parent_apps_chrome_desktop`. Sandbox, with the variable
+set: `Chromium-browser`, exact bind, and `end_session` closed Chromium. This run also used a
+normal Wayland session environment (`XDG_SESSION_TYPE=wayland`, `WAYLAND_DISPLAY` set), which
+confirms the `--ozone-platform=x11` fix from 10/25 outside the desktop.
+
+### Still open, not Wayland-specific
+
+Reproduced with AT-SPI working:
+
+- `invoke_menu(["Selection", "Select All"])` fires the item but leaves the Selection popup open
+  until something closes it (an XTEST Escape did).
+- A foreground `right_click` opens Kate's context menu, and the reply doesn't name it (no
+  `window_change`, `effect: "unverifiable"`).
+- The default 1000 ms walk budget is borderline: the default read of Kate took 1.02 s and came
+  back `truncated: true` (`truncation_reason: "timeout"`, `elements_complete: false`), with the
+  same 51 elements a 15 s read returned complete in 1.04 s.

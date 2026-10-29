@@ -25,11 +25,12 @@
 //!   as it was at the last paint until the cursor moves or fades. The cutoff
 //!   path had the same limitation over the smaller alpha≥128 silhouette.
 //! - Z-ordering: `XRaiseWindow` every 80ms to stay above normal windows.
-//! - Wayland: this X11 overlay never starts when WAYLAND_DISPLAY is set, even
-//!   with DISPLAY pointing at XWayland (see `run_on_thread` for why). With
-//!   `CUA_DRIVER_RS_ENABLE_WAYLAND=1` the native backends in `wayland::overlay`
-//!   and the GNOME Shell helper draw the cursor instead; in the default
-//!   XWayland mode nothing draws it, and [`active_renderer`] reports `None`.
+//! - Wayland: in the default XWayland mode this X11 overlay starts only when
+//!   KWin is XWayland's window manager (see `x11_overlay_allowed`). Elsewhere
+//!   nothing draws the cursor in XWayland mode, and [`active_renderer`] reports
+//!   `None`. With `CUA_DRIVER_RS_ENABLE_WAYLAND=1` the native backends in
+//!   `wayland::overlay` and the GNOME Shell helper draw it instead, and this
+//!   overlay stays off on every compositor.
 //!
 //! ## Cross-platform note (2026-05 dedup audit)
 //!
@@ -133,8 +134,91 @@ fn try_send_x11_message(
     sender.is_some_and(|tx| tx.try_send(msg).is_ok())
 }
 
-fn should_start_x11_overlay(wayland_display_present: bool) -> bool {
-    !wayland_display_present
+/// Whether the X11 overlay may draw in this process. Decided once, since the
+/// overlay thread's start depends on it.
+fn x11_overlay_allowed() -> bool {
+    static ALLOWED: OnceLock<bool> = OnceLock::new();
+    #[cfg(target_os = "linux")]
+    let native_wayland = crate::wayland::is_wayland();
+    #[cfg(not(target_os = "linux"))]
+    let native_wayland = false;
+    *ALLOWED.get_or_init(|| {
+        should_start_x11_overlay(
+            std::env::var_os("WAYLAND_DISPLAY").is_some(),
+            native_wayland,
+            xwayland_wm_is_kwin,
+        )
+    })
+}
+
+/// Plain X11 always gets the overlay. Under Wayland it maps a full-root window
+/// on XWayland, which upstream kept off everywhere for fear of an opaque black
+/// sheet over the desktop. On KWin 6.7.5 (sandbox test, 2026-10-28) it stays
+/// see-through and click-through, so KWin's XWayland gets it. Native Wayland
+/// mode never does: the layer-shell or GNOME Shell backend draws there, and a
+/// second X11 cursor would double it.
+fn should_start_x11_overlay(
+    wayland_display_present: bool,
+    native_wayland: bool,
+    xwayland_wm_is_kwin: impl FnOnce() -> bool,
+) -> bool {
+    if !wayland_display_present {
+        return true;
+    }
+    !native_wayland && xwayland_wm_is_kwin()
+}
+
+/// Whether the X11 window manager on `DISPLAY` is KWin. KWin names its EWMH
+/// check window "KWin" on its own XWayland, so under Wayland this says KWin is
+/// the compositor.
+#[cfg(target_os = "linux")]
+fn xwayland_wm_is_kwin() -> bool {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as XprotoConnectionExt, Window};
+
+    let Ok((conn, screen_num)) = x11rb::connect(None) else {
+        return false;
+    };
+    let root = conn.setup().roots[screen_num].root;
+    let atom = |name: &[u8]| {
+        conn.intern_atom(false, name)
+            .ok()?
+            .reply()
+            .ok()
+            .map(|reply| reply.atom)
+    };
+    let check_window = |window: Window, check: u32| {
+        conn.get_property(false, window, check, AtomEnum::WINDOW, 0, 1)
+            .ok()?
+            .reply()
+            .ok()?
+            .value32()?
+            .next()
+    };
+    let (Some(check), Some(net_wm_name), Some(utf8_string)) = (
+        atom(b"_NET_SUPPORTING_WM_CHECK"),
+        atom(b"_NET_WM_NAME"),
+        atom(b"UTF8_STRING"),
+    ) else {
+        return false;
+    };
+    // EWMH has the check window point at itself; one that doesn't is left
+    // over from a window manager that has exited.
+    let Some(wm) = check_window(root, check) else {
+        return false;
+    };
+    if check_window(wm, check) != Some(wm) {
+        return false;
+    }
+    conn.get_property(false, wm, net_wm_name, utf8_string, 0, 16)
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .is_some_and(|reply| reply.value == b"KWin")
+}
+
+#[cfg(not(target_os = "linux"))]
+fn xwayland_wm_is_kwin() -> bool {
+    false
 }
 
 /// The renderer that draws this process's agent cursors, or `None` when no
@@ -151,7 +235,7 @@ pub(crate) fn active_renderer() -> Option<&'static str> {
     renderer_for(
         native_wayland,
         wayland_backend,
-        std::env::var_os("WAYLAND_DISPLAY").is_some(),
+        x11_overlay_allowed(),
         x11_overlay_live(),
     )
 }
@@ -159,7 +243,7 @@ pub(crate) fn active_renderer() -> Option<&'static str> {
 fn renderer_for(
     native_wayland: bool,
     wayland_backend: Option<WaylandOverlayBackend>,
-    wayland_display_present: bool,
+    x11_overlay_allowed: bool,
     x11_overlay_live: bool,
 ) -> Option<&'static str> {
     if native_wayland {
@@ -170,7 +254,7 @@ fn renderer_for(
             WaylandOverlayBackend::None => None,
         };
     }
-    (should_start_x11_overlay(wayland_display_present) && x11_overlay_live).then_some("x11_overlay")
+    (x11_overlay_allowed && x11_overlay_live).then_some("x11_overlay")
 }
 
 /// Why [`active_renderer`] is `None`, worded for a tool reply.
@@ -179,9 +263,9 @@ pub(crate) fn missing_renderer_reason() -> &'static str {
     let native_wayland = crate::wayland::is_wayland();
     #[cfg(not(target_os = "linux"))]
     let native_wayland = false;
-    if !native_wayland && std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        "no agent cursor is drawn in XWayland mode: the X11 overlay stays off while \
-         WAYLAND_DISPLAY is set, and the native Wayland overlay needs \
+    if !native_wayland && std::env::var_os("WAYLAND_DISPLAY").is_some() && !x11_overlay_allowed() {
+        "no agent cursor is drawn in XWayland mode outside KWin: the X11 overlay \
+         only runs on KWin's XWayland, and the native Wayland overlay needs \
          CUA_DRIVER_RS_ENABLE_WAYLAND=1"
     } else {
         "no agent cursor overlay is running (it is disabled, or it failed to start)"
@@ -430,8 +514,7 @@ fn try_send_command_for(key: CursorKey, cmd: OverlayCommand) -> bool {
     });
     #[cfg(target_os = "linux")]
     let native_wayland = crate::wayland::is_wayland();
-    let x11_overlay_allowed =
-        should_start_x11_overlay(std::env::var_os("WAYLAND_DISPLAY").is_some());
+    let x11_overlay_allowed = x11_overlay_allowed();
     let x11_queued = x11_overlay_allowed && try_send_x11_message(CMD_TX.get(), msg.clone());
     if x11_overlay_allowed && !x11_queued {
         tracing::warn!(
@@ -857,14 +940,11 @@ pub fn run_on_thread() {
         return;
     }
 
-    // A Wayland session normally also exposes DISPLAY through XWayland, but
-    // that does not make the legacy full-root X11 overlay safe. This decision
-    // must be independent of the experimental native-Wayland feature opt-in:
-    // without that opt-in there is no layer-shell fallback, but showing no
-    // overlay is preferable to mapping an opaque black X11 root window over
-    // the Wayland desktop. With the opt-in enabled, commands are forwarded to
-    // the native layer-shell backend below.
-    if !should_start_x11_overlay(std::env::var_os("WAYLAND_DISPLAY").is_some()) {
+    // A Wayland session also exposes DISPLAY through XWayland, but that alone
+    // doesn't make the full-root X11 overlay safe; see should_start_x11_overlay
+    // for which compositors get it. With the native-Wayland opt-in, commands go
+    // to the layer-shell backend below instead.
+    if !x11_overlay_allowed() {
         return;
     }
 
@@ -3140,41 +3220,45 @@ mod tests {
     }
 
     #[test]
-    fn wayland_display_does_not_start_legacy_x11_overlay() {
-        assert!(!should_start_x11_overlay(true));
-        assert!(should_start_x11_overlay(false));
+    fn x11_overlay_starts_on_plain_x11_and_kwin_xwayland_only() {
+        let no_probe = || -> bool { panic!("plain X11 must not probe the window manager") };
+        assert!(should_start_x11_overlay(false, false, no_probe));
+        // XWayland mode: only KWin gets the overlay.
+        assert!(should_start_x11_overlay(true, false, || true));
+        assert!(!should_start_x11_overlay(true, false, || false));
+        // Native Wayland mode draws elsewhere, even on KWin.
+        assert!(!should_start_x11_overlay(true, true, || true));
     }
 
     // Regression for 2026-10-25: in XWayland mode the cursor setters reported
     // success although no overlay existed. They now read this.
     #[test]
-    fn xwayland_mode_has_no_cursor_renderer() {
-        // XWayland mode: WAYLAND_DISPLAY set, native backend off.
-        assert_eq!(renderer_for(false, None, true, false), None);
-        // A live X11 overlay never counts under WAYLAND_DISPLAY.
-        assert_eq!(renderer_for(false, None, true, true), None);
-        // Plain X11.
-        assert_eq!(renderer_for(false, None, false, true), Some("x11_overlay"));
+    fn cursor_renderer_follows_the_x11_overlay_gate() {
+        // XWayland mode off KWin: the overlay is not allowed, live or not.
         assert_eq!(renderer_for(false, None, false, false), None);
+        assert_eq!(renderer_for(false, None, false, true), None);
+        // Plain X11, or KWin's XWayland.
+        assert_eq!(renderer_for(false, None, true, true), Some("x11_overlay"));
+        assert_eq!(renderer_for(false, None, true, false), None);
         // Native Wayland, per backend.
         assert_eq!(
-            renderer_for(true, Some(WaylandOverlayBackend::LayerShell), true, false),
+            renderer_for(true, Some(WaylandOverlayBackend::LayerShell), false, false),
             Some("wayland_layer_shell")
         );
         assert_eq!(
             renderer_for(
                 true,
                 Some(WaylandOverlayBackend::LegacyShellHelper),
-                true,
+                false,
                 false
             ),
             Some("gnome_shell_helper")
         );
         assert_eq!(
-            renderer_for(true, Some(WaylandOverlayBackend::None), true, false),
+            renderer_for(true, Some(WaylandOverlayBackend::None), false, false),
             None
         );
-        assert_eq!(renderer_for(true, None, true, false), None);
+        assert_eq!(renderer_for(true, None, false, false), None);
     }
 
     #[test]
