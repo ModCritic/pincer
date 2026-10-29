@@ -17,8 +17,19 @@
 //!   COM activation factory lookup. Subsequent calls don't cache the
 //!   device — could be optimized later, but a single-shot screenshot
 //!   tool isn't the place to fight that.
+//! - `GraphicsCapture.dll` can throw a C++ exception out of
+//!   `CreateForWindow` instead of returning an error. Seen on Tiny10
+//!   (Windows 10 21H2 with components removed, in a VM with no GPU):
+//!   `winrt::hresult_error` E_FAIL. Rust can't catch it. Left alone on
+//!   Tiny10, which has no Windows Error Reporting, Windows shows an error
+//!   dialog and the next throw ends the process. With Error Reporting the
+//!   first throw most likely ends it (not reproduced).
+//!   `screenshot_window_via_wgc` stops both; see its comment.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Once, OnceLock};
 use std::time::Duration;
 
 use windows::{
@@ -38,6 +49,10 @@ use windows::{
             },
             Dxgi::IDXGIDevice,
         },
+        System::Diagnostics::Debug::{
+            SetUnhandledExceptionFilter, EXCEPTION_CONTINUE_SEARCH, EXCEPTION_POINTERS,
+            LPTOP_LEVEL_EXCEPTION_FILTER,
+        },
         System::WinRT::{
             Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess},
             Graphics::Capture::IGraphicsCaptureItemInterop,
@@ -46,11 +61,130 @@ use windows::{
     },
 };
 
+/// How long a caller waits for one WGC capture. A working capture takes
+/// about 50 ms plus at most the 1500 ms frame wait below; the rest is slack.
+/// It has to stay under `get_window_state`'s 4 s screenshot budget, so the
+/// caller still has time for the screen-region fallback.
+const WGC_CAPTURE_TIMEOUT: Duration = Duration::from_millis(2500);
+
+/// MSVC's exception code for a C++ `throw`.
+const CPP_EXCEPTION: u32 = 0xE06D_7363;
+
+type Capture = Result<(Vec<u8>, u32, u32)>;
+
+/// Set while a WGC capture thread is running, so a second capture never
+/// starts beside one that hasn't returned.
+static WGC_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+/// Set for good once WGC has thrown in this process.
+static WGC_THREW: AtomicBool = AtomicBool::new(false);
+static INSTALL_FILTER: Once = Once::new();
+static PREVIOUS_FILTER: OnceLock<LPTOP_LEVEL_EXCEPTION_FILTER> = OnceLock::new();
+
+thread_local! {
+    /// Where a `pincer-wgc` thread sends its result. Only those threads set
+    /// it, which is how the exception filter knows a throw came from WGC.
+    static RESULT_SENDER: RefCell<Option<mpsc::Sender<Capture>>> = const { RefCell::new(None) };
+}
+
+struct InFlight;
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        WGC_IN_FLIGHT.store(false, Ordering::Release);
+    }
+}
+
+/// Windows calls this before its own crash handling, for any exception no
+/// frame handled. A C++ exception on a `pincer-wgc` thread gets its error
+/// sent to the waiting caller, and then the thread sleeps forever: it can't
+/// return into the code that threw, and ending it would run DLL thread-detach
+/// code in the middle of that call. Everything else goes on to the filter
+/// that was there before.
+unsafe extern "system" fn wgc_exception_filter(info: *const EXCEPTION_POINTERS) -> i32 {
+    let code = (*(*info).ExceptionRecord).ExceptionCode.0 as u32;
+    let sender = if code == CPP_EXCEPTION {
+        RESULT_SENDER
+            .try_with(|cell| cell.try_borrow_mut().ok().and_then(|mut slot| slot.take()))
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+    let Some(sender) = sender else {
+        return match PREVIOUS_FILTER.get().copied().flatten() {
+            Some(previous) => previous(info),
+            None => EXCEPTION_CONTINUE_SEARCH,
+        };
+    };
+    WGC_THREW.store(true, Ordering::Release);
+    let _ = sender.send(Err(anyhow!(
+        "Windows.Graphics.Capture threw a C++ exception instead of returning \
+         an error; WGC is off for the rest of this process"
+    )));
+    loop {
+        std::thread::sleep(Duration::from_secs(3600));
+    }
+}
+
 /// Capture a window via WGC, returning BGRA pixels + (width, height).
 /// Caller is responsible for encoding to PNG (or whatever format) via
 /// `pincer_core::image_utils::encode_bgra_to_png`.
+///
+/// The capture runs on its own `pincer-wgc` thread, under the exception
+/// filter above, so a throw costs this one capture instead of the process.
+/// The caller stops waiting after `WGC_CAPTURE_TIMEOUT` and can fall back.
+/// No capture starts while an earlier one is still running.
 pub fn screenshot_window_via_wgc(hwnd: u64) -> Result<(Vec<u8>, u32, u32)> {
-    unsafe { wgc_capture_impl(HWND(hwnd as *mut _)) }
+    if WGC_THREW.load(Ordering::Acquire) {
+        bail!(
+            "skipped Windows.Graphics.Capture: it threw a C++ exception earlier \
+             in this process"
+        );
+    }
+    if WGC_IN_FLIGHT
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        bail!("skipped Windows.Graphics.Capture: an earlier WGC capture has not returned");
+    }
+    INSTALL_FILTER.call_once(|| {
+        let previous = unsafe { SetUnhandledExceptionFilter(Some(wgc_exception_filter)) };
+        let _ = PREVIOUS_FILTER.set(previous);
+    });
+    let (sender, receiver) = mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("pincer-wgc".into())
+        .spawn(move || {
+            let in_flight = InFlight;
+            RESULT_SENDER.with(|cell| *cell.borrow_mut() = Some(sender));
+            let _ = unsafe {
+                windows::Win32::System::Com::CoInitializeEx(
+                    None,
+                    windows::Win32::System::Com::COINIT_MULTITHREADED,
+                )
+            };
+            let result = unsafe { wgc_capture_impl(HWND(hwnd as *mut _)) };
+            // Clear the flag before sending, so a caller that captures again
+            // right after this one returns isn't turned away.
+            drop(in_flight);
+            if let Some(sender) = RESULT_SENDER.with(|cell| cell.borrow_mut().take()) {
+                let _ = sender.send(result);
+            }
+        });
+    if let Err(error) = spawned {
+        WGC_IN_FLIGHT.store(false, Ordering::Release);
+        return Err(error).context("failed to start the WGC capture thread");
+    }
+    match receiver.recv_timeout(WGC_CAPTURE_TIMEOUT) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => bail!(
+            "Windows.Graphics.Capture did not return within {} ms",
+            WGC_CAPTURE_TIMEOUT.as_millis()
+        ),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            bail!("the WGC capture thread ended without a result")
+        }
+    }
 }
 
 unsafe fn wgc_capture_impl(hwnd: HWND) -> Result<(Vec<u8>, u32, u32)> {

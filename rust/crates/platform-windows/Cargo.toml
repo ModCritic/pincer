@@ -54,8 +54,14 @@ windows = { version = "0.58", features = [
     # token an elevated Driver uses to run isolated browsers.
     "Win32_Security_AppLocker",
     "Win32_System_Com",
+    # SetUnhandledExceptionFilter: keeps a C++ exception thrown by
+    # Windows.Graphics.Capture from ending the process (see wgc.rs).
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
     "Win32_Storage_Xps",
     "Win32_Storage_FileSystem",
+    # GetPackageFullName: tells packaged Win 11 Notepad from classic notepad.exe.
+    "Win32_Storage_Packaging_Appx",
     "Win32_UI_Shell",
     # IShellItem2::GetString — used by launch_uwp::resolve_aumid_by_name to
     # read PKEY_AppUserModel_ID off entries enumerated from shell:AppsFolder.

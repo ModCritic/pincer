@@ -62,6 +62,13 @@ const XAML_HOST_EXES: &[&str] = &[
     "systemsettings.exe",       // modern Settings
 ];
 
+/// Names in `XAML_HOST_EXES` that a classic Win32 program also uses. They
+/// count only when the process has a package identity: Win 11's Notepad is
+/// the `Microsoft.WindowsNotepad` package, while Win 10's
+/// `System32\notepad.exe` is the classic editor, which has no package and
+/// captures and types fine through GDI and PostMessage.
+const PACKAGED_ONLY_EXES: &[&str] = &["notepad.exe"];
+
 fn class_name(hwnd: HWND) -> Option<String> {
     let mut buf = [0u16; 256];
     let n = unsafe { GetClassNameW(hwnd, &mut buf) };
@@ -108,6 +115,33 @@ fn owning_exe_basename(hwnd: HWND) -> Option<String> {
     Some(name)
 }
 
+/// `true` when the process that owns `hwnd` runs from an app package.
+/// When that can't be read, assume packaged, which keeps the earlier
+/// name-only behavior.
+fn owning_process_is_packaged(hwnd: HWND) -> bool {
+    let mut pid: u32 = 0;
+    if unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) } == 0 || pid == 0 {
+        return true;
+    }
+    process_is_packaged(pid)
+}
+
+/// `GetPackageFullName` with an empty buffer answers "buffer too small" for a
+/// packaged process and `APPMODEL_ERROR_NO_PACKAGE` for an unpackaged one.
+fn process_is_packaged(pid: u32) -> bool {
+    use windows::Win32::Foundation::{CloseHandle, APPMODEL_ERROR_NO_PACKAGE};
+    use windows::Win32::Storage::Packaging::Appx::GetPackageFullName;
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+
+    let Ok(handle) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) else {
+        return true;
+    };
+    let mut len: u32 = 0;
+    let result = unsafe { GetPackageFullName(handle, &mut len, windows::core::PWSTR::null()) };
+    let _ = unsafe { CloseHandle(handle) };
+    result != APPMODEL_ERROR_NO_PACKAGE
+}
+
 /// `true` iff the given HWND should bypass the PostMessage keyboard
 /// path and route through UIA patterns (or another non-PostMessage
 /// mechanism). See module docs + CUA-543 for the routing rationale.
@@ -120,7 +154,7 @@ pub fn is_xaml_host_hwnd(hwnd: u64) -> bool {
     }
     if let Some(exe) = owning_exe_basename(h) {
         if XAML_HOST_EXES.iter().any(|known| exe == *known) {
-            return true;
+            return !PACKAGED_ONLY_EXES.contains(&exe.as_str()) || owning_process_is_packaged(h);
         }
     }
     false
@@ -999,6 +1033,24 @@ fn key_name_to_vk(key: &str) -> Result<VIRTUAL_KEY> {
         }
     };
     Ok(vk)
+}
+
+#[cfg(test)]
+mod xaml_host_tests {
+    use super::*;
+
+    #[test]
+    fn an_unpackaged_process_reads_as_unpackaged() {
+        // The test executable has no package identity, like classic notepad.exe.
+        assert!(!process_is_packaged(std::process::id()));
+    }
+
+    #[test]
+    fn packaged_only_names_are_xaml_host_names() {
+        for name in PACKAGED_ONLY_EXES {
+            assert!(XAML_HOST_EXES.contains(name), "{name}");
+        }
+    }
 }
 
 #[cfg(test)]
