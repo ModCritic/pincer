@@ -191,6 +191,7 @@ async fn dispatch(
     });
     let id = req.id.clone().unwrap_or(serde_json::Value::Null);
     let timer = http_tool_observation_timer(&req, |name| sdk.is_known_tool(name));
+    let method = req.method.clone();
     let response =
         handle_request_with_transport_session(req, id, sdk.as_ref(), transport_session).await;
     if let Some(timer) = timer {
@@ -199,6 +200,8 @@ async fn dispatch(
             context.complete(&outcome);
         }
     }
+    // After the observation, so it reads the structured result.
+    let response = pincer_core::mcp_text_results::for_client(&method, response);
     Some(serialize(&response))
 }
 

@@ -130,6 +130,7 @@ pub async fn run_direct(driver: Arc<pincer_sdk::Pincer>) -> anyhow::Result<()> {
                     StdioExecutionPath::DirectDaemon,
                 );
                 let id = request.id.clone().unwrap_or(serde_json::Value::Null);
+                let method = request.method.clone();
                 let response = pincer_core::server::handle_request_with_transport_session(
                     request,
                     id,
@@ -148,7 +149,8 @@ pub async fn run_direct(driver: Arc<pincer_sdk::Pincer>) -> anyhow::Result<()> {
                     }
                     observe_proxy_tool_completed(outcome);
                 }
-                response
+                // After the observation, so it reads the structured result.
+                pincer_core::mcp_text_results::for_client(&method, response)
             }
         };
         let serialized = serde_json::to_string(&response).unwrap_or_else(|error| {
@@ -378,6 +380,7 @@ where
                     })
                     .flatten();
                 let id = req.id.clone().unwrap_or(serde_json::Value::Null);
+                let method = req.method.clone();
                 let response = handle_proxy_request(
                     req,
                     id,
@@ -398,7 +401,9 @@ where
                     }
                     observe_proxy_tool_completed(outcome);
                 }
-                response
+                // After the observation, so it reads the structured result.
+                // The cached list keeps its schemas for the result boundary.
+                pincer_core::mcp_text_results::for_client(&method, response)
             }
         };
 

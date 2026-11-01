@@ -270,6 +270,7 @@ where
                     |name| sdk.is_known_tool(name),
                     StdioExecutionPath::DirectDaemon,
                 );
+                let method = request.method.clone();
                 let response = pincer_core::server::handle_request_with_transport_session(
                     request,
                     id,
@@ -284,7 +285,9 @@ where
                     }
                     observe_proxy_tool_completed(outcome);
                 }
-                response
+                // After the observation, so it reads the structured result.
+                // Typed `cua/driver/v1/` exchanges above are not MCP results.
+                pincer_core::mcp_text_results::for_client(&method, response)
             };
             write_response(&writer, response).await?;
             Ok::<_, anyhow::Error>(key)
