@@ -79,7 +79,7 @@ pub(crate) fn session_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "string",
         "description": format!(
-            "{} Browser targets, tabs, and refs belong to the resolved lifecycle session.",
+            "{} Browser targets, tabs, and refs belong to that session.",
             pincer_contract::MULTI_CALL_SESSION_DESCRIPTION
         )
     })
@@ -88,7 +88,7 @@ pub(crate) fn session_schema() -> serde_json::Value {
 pub(crate) fn required_session_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "string",
-        "description": "For multi-call work, prefer a short public session label and repeat it on every call that accepts it. This tool requires the label that owns its browser target, tab, and refs."
+        "description": "Session label that owns the browser target, tab, and refs; this tool requires the label. Repeat it on every call."
     })
 }
 
@@ -102,8 +102,8 @@ mod tests {
         let description = schema["description"]
             .as_str()
             .expect("browser session description");
-        assert!(description.contains("prefer a short public session label"));
-        assert!(description.contains("repeat it on every call that accepts it"));
+        assert!(description.contains("session label for multi-call work"));
+        assert!(description.contains("repeat it on every call"));
         assert!(description.contains("Browser targets, tabs, and refs"));
     }
 
@@ -113,8 +113,8 @@ mod tests {
         let description = schema["description"]
             .as_str()
             .expect("required browser session description");
-        assert!(description.contains("prefer a short public session label"));
-        assert!(description.contains("repeat it on every call that accepts it"));
+        assert!(description.contains("Session label"));
+        assert!(description.contains("Repeat it on every call"));
         assert!(description.contains("requires the label"));
         assert!(!description.contains("Omit it"));
     }

@@ -215,7 +215,7 @@ fn move_cursor() -> ToolContract {
 fn set_window_frame() -> ToolContract {
     contract::<SetWindowFrameInput, ActionResult>(
         "set_window_frame",
-        "Set one exact top-level window's frame in the desktop-coordinate space reported by list_windows and verify the resulting geometry through an independent readback.",
+        "Set one top-level window's frame (x, y, width, height) in list_windows desktop coordinates, then verify it by reading the geometry back. The window manager can refuse the change, for example for a maximized, fullscreen or tiled window; the result then says the frame did not settle (effect suspected_noop) and the window is unchanged. Check with list_windows.",
         &["window.frame.set"],
         ToolAnnotations {
             read_only: false,

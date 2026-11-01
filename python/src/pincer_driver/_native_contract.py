@@ -2975,9 +2975,7 @@ class _UniffiFfiConverterOptionalTypeCursorMotionEffects(_UniffiConverterRustBuf
 @dataclass
 class CursorMotionSelection:
     """
-    Cursor motion for a session, with the fields of `set_agent_cursor_motion` minus `session`.
-    Omitted or null fields keep the saved default (`cursor.motion.*` in the driver config), then
-    the built-in `signature_arc`.
+    Fields of `set_agent_cursor_motion` minus `session`. Omitted fields keep the saved default.
 """
     def __init__(self, *, style:typing.Optional[CursorMotionStyle], timing:typing.Optional[CursorMotionTiming], effects:typing.Optional[CursorMotionEffects], start_handle:typing.Optional[float], end_handle:typing.Optional[float], arc_size:typing.Optional[float], arc_flow:typing.Optional[float], spring:typing.Optional[float], glide_duration_ms:typing.Optional[float], dwell_after_click_ms:typing.Optional[float], idle_hide_ms:typing.Optional[float], turn_radius:typing.Optional[float]):
         self.style = style

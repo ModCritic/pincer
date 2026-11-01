@@ -77,19 +77,19 @@ pub fn schema_properties() -> Value {
         "tree_format": {
             "type": "string",
             "enum": ["markdown", "elements", "both"],
-            "description": "Which tree representation to return. Default \"markdown\": the compact `tree_markdown` only, where a row `[N]` is addressed with element_token `<snapshot_id>:N`. \"elements\": the structured `elements` array only (per-element element_token, frame, parent_index, value). \"both\": the two together; roughly doubles the size."
+            "description": "\"markdown\" (default): compact `tree_markdown`; row `[N]` is element_token `<snapshot_id>:N`. \"elements\": structured `elements` array (element_token, frame, parent_index, value). \"both\": both, about twice the size."
         },
         "since": {
             "type": "string",
-            "description": "A `snapshot_id` from an earlier get_window_state of the same window, or \"latest\" for this window's most recent read with the same query/max_elements/max_depth. Use it on every re-read after acting. Returns only what changed against that snapshot: `+` added rows, `~` changed rows, `-` removed rows (removed ids are the old snapshot's), or `no change`. Falls back to a full read when the snapshot is unknown, expired, belongs to another window, or was read with a different query/max_elements/max_depth; `since_status` says which. The response still carries a new snapshot_id and its element_tokens; rows not listed keep their previous [N] unless a `reindexed:` line says otherwise."
+            "description": "`snapshot_id` of an earlier read of this window, or \"latest\" (its last read with the same query/max_elements/max_depth). Use it on every re-read after acting. Returns only changes: `+` added, `~` changed, `-` removed rows (old ids), or `no change`; unlisted rows keep their [N] unless a `reindexed:` line says otherwise. Falls back to a full read if the snapshot is unknown, expired, from another window, or read with a different query/max_elements/max_depth (`since_status` says which). Use the new snapshot_id in element_tokens."
         },
         "verbose": {
             "type": "boolean",
-            "description": "Default false. Set true to include the `_note` string and the full `background_input` capability report (macOS), which are omitted by default to save context."
+            "description": "Default false. True adds the `_note` string and, on macOS, the full `background_input` report."
         },
         "full_output": {
             "type": "boolean",
-            "description": "Default false. Set true for the full response: both `elements` and `tree_markdown`, all metadata, and the platform's own walk limits unless max_elements / max_depth are passed. Does not combine with `since`."
+            "description": "Default false. True returns everything: `elements` and `tree_markdown`, all metadata, and the platform's own walk limits unless max_elements/max_depth are set. Not with `since`."
         },
         "display_only": {
             "type": "boolean",

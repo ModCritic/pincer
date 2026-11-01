@@ -89,8 +89,8 @@ fn element_token_schema(_: &mut SchemaGenerator) -> Schema {
 }
 
 pub const MULTI_CALL_SESSION_DESCRIPTION: &str =
-    "For multi-call work, prefer a short public session label and repeat it on every call that \
-     accepts it. Omit it to use the authenticated transport's implicit lifecycle session.";
+    "Short session label for multi-call work; repeat it on every call. Omit to use the \
+     connection's default session.";
 
 fn string_list_schema(generator: &mut SchemaGenerator) -> Schema {
     Vec::<String>::json_schema(generator)
@@ -263,20 +263,16 @@ impl ScrollBy {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, uniffi::Record)]
 pub struct StartSessionInput {
-    /// Optional stable public label for this run (e.g. "research-run-1").
-    /// When omitted, the authenticated transport lease's implicit session is
-    /// created or returned.
+    /// Public label for this run, e.g. "research-run-1". Omit to create or return the
+    /// connection's default session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "string_schema")]
     pub session: Option<String>,
-    /// Optional initial cursor theme. The host applies it before the cursor is
-    /// first made visible, avoiding a flash of the default theme.
+    /// Initial cursor theme, applied before the cursor first appears.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor_theme: Option<CursorThemeSelection>,
-    /// Optional initial cursor motion (style, timing, effects and tuning). The host applies it
-    /// before the cursor is first made visible. A later `set_agent_cursor_motion` call wins;
-    /// this wins over the saved default (`cursor.motion.*` in the driver config) and the
-    /// built-in `signature_arc`. Reduced motion always wins.
+    /// Initial cursor motion, applied before the cursor first appears. Overrides the saved
+    /// default (`cursor.motion.*` config); a later `set_agent_cursor_motion` overrides it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor_motion: Option<CursorMotionSelection>,
 }
@@ -336,54 +332,49 @@ impl ToolInput for SetAgentCursorEnabledInput {
     const TOOL_NAME: &'static str = "set_agent_cursor_enabled";
 }
 
-/// Cursor motion for a session, with the fields of `set_agent_cursor_motion` minus `session`.
-/// Omitted or null fields keep the saved default (`cursor.motion.*` in the driver config), then
-/// the built-in `signature_arc`.
+/// Fields of `set_agent_cursor_motion` minus `session`. Omitted fields keep the saved default.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, uniffi::Record)]
 #[serde(deny_unknown_fields)]
 pub struct CursorMotionSelection {
-    /// Trajectory style. `signature_arc` (default) is one arc with a small follow-through;
-    /// `spring_settle` lands with one soft bounce; `magnetic` is pulled into the target;
-    /// `comet_swoop` is a wide arc with a short trail; `adaptive` picks a careful approach for
-    /// small targets and a swoop for long moves; `classic` is the previous Dubins glide. When
-    /// the theme's reduced motion is on, every move is a short straight glide with no effects.
+    /// Path style: `signature_arc` (default) one arc with a small follow-through;
+    /// `spring_settle` one soft bounce on landing; `magnetic` pulled into the target;
+    /// `comet_swoop` wide arc with a short trail; `adaptive` careful for small targets, swoop
+    /// for long moves; `classic` Dubins glide. Reduced motion forces a short straight glide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "cursor_motion_style_schema")]
     pub style: Option<crate::CursorMotionStyle>,
-    /// `steady` (default) keeps the style's timing but makes every move take at least 600 ms,
-    /// with a gentler ease; `relaxed` and `calm` do the same with a 450 or 750 ms floor.
-    /// `native` uses the style's own timing; `fitts` scales the move time with distance and
-    /// target size; `deliberate` is a slower Fitts curve (450..1300 ms); `fixed` uses
-    /// glide_duration_ms (1430 ms when 0).
+    /// `steady` (default) style timing with a 600 ms minimum and a gentler ease; `relaxed`,
+    /// `calm` the same with a 450 or 750 ms minimum; `native` the style's own timing; `fitts`
+    /// scales with distance and target size; `deliberate` slower Fitts (450..1300 ms); `fixed`
+    /// uses glide_duration_ms.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "cursor_motion_timing_schema")]
     pub timing: Option<crate::CursorMotionTiming>,
     /// Turn effects on or off. Omit a field to keep it; `"default"` restores the style default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<crate::CursorMotionEffects>,
-    /// Arc control-point offset from the start, as a fraction of the distance, for
-    /// `signature_arc`, `spring_settle` and `comet_swoop`. Clamped to 0..1 (default 0.3).
+    /// Arc control point offset from the start, as a fraction of the distance (`signature_arc`,
+    /// `spring_settle`, `comet_swoop`). Clamped to 0..1 (default 0.3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_handle: Option<f64>,
-    /// Arc control-point offset from the end, as a fraction of the distance, for
-    /// `signature_arc`, `spring_settle` and `comet_swoop`. Clamped to 0..1 (default 0.3).
+    /// Arc control point offset from the end, as a fraction of the distance (`signature_arc`,
+    /// `spring_settle`, `comet_swoop`). Clamped to 0..1 (default 0.3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_handle: Option<f64>,
-    /// Scales the arc of `signature_arc`, `spring_settle` and `comet_swoop`: 0.25 (default)
-    /// keeps the style's arc, 0 is a straight line, 0.5 doubles it. Clamped to 0..1.
+    /// Arc scale for `signature_arc`, `spring_settle`, `comet_swoop`: 0.25 (default) keeps the
+    /// style's arc, 0 is straight, 0.5 doubles it. Clamped to 0..1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc_size: Option<f64>,
-    /// Added to the arc asymmetry of `signature_arc`, `spring_settle` and `comet_swoop`:
-    /// positive moves the apex toward the destination. Clamped to -1..1 (default 0).
+    /// Arc asymmetry added for `signature_arc`, `spring_settle`, `comet_swoop`; positive moves
+    /// the apex toward the destination. Clamped to -1..1 (default 0).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc_flow: Option<f64>,
     /// Arrival spring damping for `classic`: 1 is critically damped, 0.3 is bouncy. Clamped
     /// to 0.3..1 (default 0.72).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spring: Option<f64>,
-    /// Move duration in milliseconds for `fixed` timing (1430 ms when 0, the default). A
-    /// nonzero value with `native` or the default `steady` timing also fixes the duration.
-    /// Clamped to 0..5000.
+    /// Move duration in ms for `fixed` timing (0, the default, means 1430 ms). A nonzero value
+    /// also fixes the duration under `native` or `steady`. Clamped to 0..5000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub glide_duration_ms: Option<f64>,
     /// Pause after a click animation, in milliseconds. Clamped to 0..5000 (default 80).
@@ -405,48 +396,45 @@ pub struct SetAgentCursorMotionInput {
     /// Public label of the session that owns the cursor. Omitted or null motion fields keep
     /// their current value.
     pub session: String,
-    /// Trajectory style. `signature_arc` (default) is one arc with a small follow-through;
-    /// `spring_settle` lands with one soft bounce; `magnetic` is pulled into the target;
-    /// `comet_swoop` is a wide arc with a short trail; `adaptive` picks a careful approach for
-    /// small targets and a swoop for long moves; `classic` is the previous Dubins glide. When
-    /// the theme's reduced motion is on, every move is a short straight glide with no effects.
+    /// Path style: `signature_arc` (default) one arc with a small follow-through;
+    /// `spring_settle` one soft bounce on landing; `magnetic` pulled into the target;
+    /// `comet_swoop` wide arc with a short trail; `adaptive` careful for small targets, swoop
+    /// for long moves; `classic` Dubins glide. Reduced motion forces a short straight glide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "cursor_motion_style_schema")]
     pub style: Option<crate::CursorMotionStyle>,
-    /// `steady` (default) keeps the style's timing but makes every move take at least 600 ms,
-    /// with a gentler ease; `relaxed` and `calm` do the same with a 450 or 750 ms floor.
-    /// `native` uses the style's own timing; `fitts` scales the move time with distance and
-    /// target size; `deliberate` is a slower Fitts curve (450..1300 ms); `fixed` uses
-    /// glide_duration_ms (1430 ms when 0).
+    /// `steady` (default) style timing with a 600 ms minimum and a gentler ease; `relaxed`,
+    /// `calm` the same with a 450 or 750 ms minimum; `native` the style's own timing; `fitts`
+    /// scales with distance and target size; `deliberate` slower Fitts (450..1300 ms); `fixed`
+    /// uses glide_duration_ms.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "cursor_motion_timing_schema")]
     pub timing: Option<crate::CursorMotionTiming>,
     /// Turn effects on or off. Omit a field to keep it; `"default"` restores the style default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<crate::CursorMotionEffects>,
-    /// Arc control-point offset from the start, as a fraction of the distance, for
-    /// `signature_arc`, `spring_settle` and `comet_swoop`. Clamped to 0..1 (default 0.3).
+    /// Arc control point offset from the start, as a fraction of the distance (`signature_arc`,
+    /// `spring_settle`, `comet_swoop`). Clamped to 0..1 (default 0.3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_handle: Option<f64>,
-    /// Arc control-point offset from the end, as a fraction of the distance, for
-    /// `signature_arc`, `spring_settle` and `comet_swoop`. Clamped to 0..1 (default 0.3).
+    /// Arc control point offset from the end, as a fraction of the distance (`signature_arc`,
+    /// `spring_settle`, `comet_swoop`). Clamped to 0..1 (default 0.3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_handle: Option<f64>,
-    /// Scales the arc of `signature_arc`, `spring_settle` and `comet_swoop`: 0.25 (default)
-    /// keeps the style's arc, 0 is a straight line, 0.5 doubles it. Clamped to 0..1.
+    /// Arc scale for `signature_arc`, `spring_settle`, `comet_swoop`: 0.25 (default) keeps the
+    /// style's arc, 0 is straight, 0.5 doubles it. Clamped to 0..1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc_size: Option<f64>,
-    /// Added to the arc asymmetry of `signature_arc`, `spring_settle` and `comet_swoop`:
-    /// positive moves the apex toward the destination. Clamped to -1..1 (default 0).
+    /// Arc asymmetry added for `signature_arc`, `spring_settle`, `comet_swoop`; positive moves
+    /// the apex toward the destination. Clamped to -1..1 (default 0).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc_flow: Option<f64>,
     /// Arrival spring damping for `classic`: 1 is critically damped, 0.3 is bouncy. Clamped
     /// to 0.3..1 (default 0.72).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spring: Option<f64>,
-    /// Move duration in milliseconds for `fixed` timing (1430 ms when 0, the default). A
-    /// nonzero value with `native` or the default `steady` timing also fixes the duration.
-    /// Clamped to 0..5000.
+    /// Move duration in ms for `fixed` timing (0, the default, means 1430 ms). A nonzero value
+    /// also fixes the duration under `native` or `steady`. Clamped to 0..5000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub glide_duration_ms: Option<f64>,
     /// Pause after a click animation, in milliseconds. Clamped to 0..5000 (default 80).
@@ -502,10 +490,8 @@ impl ToolInput for EndSessionInput {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, uniffi::Record)]
 #[serde(deny_unknown_fields)]
 pub struct GetDesktopStateInput {
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
     /// Write the PNG here instead of returning base64.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -531,10 +517,8 @@ impl ToolInput for GetDesktopStateInput {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, uniffi::Record)]
 #[serde(deny_unknown_fields)]
 pub struct GetScreenSizeInput {
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
 }
 
@@ -545,10 +529,8 @@ impl ToolInput for GetScreenSizeInput {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, uniffi::Record)]
 #[serde(deny_unknown_fields)]
 pub struct GetCursorPositionInput {
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
 }
 
@@ -566,18 +548,16 @@ pub struct MoveCursorInput {
     /// Destination Y, in the same space as `x`.
     #[schemars(schema_with = "number_schema")]
     pub y: f64,
-    /// Preferred per-call target: an exact window (`kind="window"`, `pid`, `window_id`) or the
-    /// primary desktop (`kind="desktop"`, `display_id="primary"`).
+    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
+    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "desktop_scope_schema")]
     pub scope: Option<DesktopScope>,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
 }
 
@@ -602,10 +582,8 @@ pub struct SetWindowFrameInput {
     /// New height, in the same units as list_windows bounds.
     #[schemars(schema_with = "positive_number_schema")]
     pub height: f64,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
 }
 
@@ -631,10 +609,8 @@ pub struct InvokeMenuInput {
     /// (1 to 16 labels).
     #[schemars(schema_with = "menu_path_schema")]
     pub path: Vec<String>,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
 }
 
@@ -653,18 +629,16 @@ pub struct LegacyClickInput {
     pub x: f64,
     #[schemars(schema_with = "number_schema")]
     pub y: f64,
-    /// Preferred per-call target: an exact window (`kind="window"`, `pid`, `window_id`) or the
-    /// primary desktop (`kind="desktop"`, `display_id="primary"`).
+    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
+    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "desktop_scope_schema")]
     pub scope: Option<DesktopScope>,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "click_button_schema")]
@@ -732,10 +706,8 @@ struct ClickWireInput {
     #[serde(default, deserialize_with = "present_click_field")]
     #[schemars(schema_with = "nonempty_string_schema")]
     capture_id: Option<String>,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default)]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     session: Option<String>,
     #[serde(default)]
     #[schemars(schema_with = "click_button_schema")]
@@ -832,18 +804,16 @@ pub struct DragInput {
     pub to_x: f64,
     #[schemars(schema_with = "number_schema")]
     pub to_y: f64,
-    /// Preferred per-call target: an exact window (`kind="window"`, `pid`, `window_id`) or the
-    /// primary desktop (`kind="desktop"`, `display_id="primary"`).
+    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
+    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "desktop_scope_schema")]
     pub scope: Option<DesktopScope>,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "drag_duration_schema")]
@@ -871,18 +841,16 @@ pub struct ScrollInput {
     #[schemars(schema_with = "number_schema")]
     pub y: f64,
     pub direction: ScrollDirection,
-    /// Preferred per-call target: an exact window (`kind="window"`, `pid`, `window_id`) or the
-    /// primary desktop (`kind="desktop"`, `display_id="primary"`).
+    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
+    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "desktop_scope_schema")]
     pub scope: Option<DesktopScope>,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "scroll_by_schema")]
@@ -900,18 +868,16 @@ impl ToolInput for ScrollInput {
 #[serde(deny_unknown_fields)]
 pub struct TypeTextInput {
     pub text: String,
-    /// Preferred per-call target: an exact window (`kind="window"`, `pid`, `window_id`) or the
-    /// primary desktop (`kind="desktop"`, `display_id="primary"`).
+    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
+    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "desktop_scope_schema")]
     pub scope: Option<DesktopScope>,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
 }
 
@@ -926,10 +892,8 @@ pub struct ClipboardReadInput {
     /// Clipboard content is privacy-sensitive and is never retained in telemetry.
     #[serde(default)]
     pub include_text: bool,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
 }
 
@@ -952,10 +916,8 @@ pub struct ClipboardWriteInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "string_schema")]
     pub file_path: Option<String>,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
 }
 
@@ -967,18 +929,16 @@ impl ToolInput for ClipboardWriteInput {
 #[serde(deny_unknown_fields)]
 pub struct PressKeyInput {
     pub key: String,
-    /// Preferred per-call target: an exact window (`kind="window"`, `pid`, `window_id`) or the
-    /// primary desktop (`kind="desktop"`, `display_id="primary"`).
+    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
+    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "desktop_scope_schema")]
     pub scope: Option<DesktopScope>,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "string_list_schema")]
@@ -999,18 +959,16 @@ pub struct HotkeyInput {
     #[schemars(length(min = 2))]
     #[serde(deserialize_with = "at_least_two_keys")]
     pub keys: Vec<String>,
-    /// Preferred per-call target: an exact window (`kind="window"`, `pid`, `window_id`) or the
-    /// primary desktop (`kind="desktop"`, `display_id="primary"`).
+    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
+    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "desktop_scope_schema")]
     pub scope: Option<DesktopScope>,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(schema_with = "string_schema", description = MULTI_CALL_SESSION_DESCRIPTION)]
     pub session: Option<String>,
 }
 

@@ -295,19 +295,19 @@ impl GetBrowserStateTool {
                     "snapshot_format": {
                         "type": "string",
                         "enum": ["dom_refs_v1", "semantic_v2"],
-                        "description": "Versioned snapshot contract. dom_refs_v1 remains the compatibility default."
+                        "description": "\"dom_refs_v1\" (default) lists interactive elements, often labeled by raw attributes such as id=... or href=...; \"semantic_v2\" adds roles, accessible names and page text, and is required for query, scope_ref and continuation (pass query to keep it short)."
                     },
                     "scope_ref": {
                         "type": "string",
-                        "description": "Current semantic/content ref whose subtree should be observed."
+                        "description": "Requires snapshot_format \"semantic_v2\". A current semantic or content ref whose subtree to read."
                     },
                     "query": {
                         "type": "string",
-                        "description": "Read-only semantic match over role, accessible name, and visible text."
+                        "description": "Requires snapshot_format \"semantic_v2\". Read-only match over role, accessible name and visible text."
                     },
                     "continuation": {
                         "type": "string",
-                        "description": "Opaque continuation minted by an earlier semantic_v2 response."
+                        "description": "Requires snapshot_format \"semantic_v2\". The continuation token from an earlier semantic_v2 response."
                     },
                     "include_screenshot": {
                         "type": "boolean",
@@ -612,51 +612,34 @@ impl BrowserPrepareTool {
     pub fn new(engine: Arc<BrowserEngine>) -> Self {
         let def = ToolDef {
             name: "browser_prepare".into(),
-            description: "Attach the browser tools to a browser. When the task does not need \
-                the user's logins, prefer a driver-owned isolated profile: allow_launch=true and \
+            description: "Attach the browser tools to a browser. If the task does not need the \
+                user's logins, prefer a driver-owned isolated profile: allow_launch=true and \
                 profile {\"mode\":\"isolated_new\"}. Attaching to the user's running Chrome, \
                 Edge or Brave (pid, window_id, session and strategy \
                 {\"kind\":\"existing_profile\"}, as in get_browser_state's detail.next_call) \
-                reaches their logged-in profile, so ask the user first; it is refused unless the \
-                runtime authorizes it (below). Then call get_browser_state again and act with \
-                browser_click, browser_type or browser_pointer. It attaches, or refuses with \
-                nothing changed and says why. \
-                pid is required for an existing process or existing-profile attachment, \
-                and optional only for allow_launch=true with an isolated profile. Existing \
-                endpoints are detected without side effects. Acting setup \
-                for an isolated profile follows the runtime permission mode and optional \
-                capability manifest. It requires allow_launch=true, launches a separate browser, and never \
-                copies, modifies, or terminates the requested user profile. Without pid, only a \
-                platform-attested system Chrome/Edge installation (or a root-owned package \
-                payload on Linux) is eligible; redirects and user-controlled locations fail closed. Existing-profile \
-                attachment is explicit and follows the runtime's immutable permission mode: \
-                standard requires an explicit --grant existing-profile launch grant or an \
-                embedding authorization host, bounded requires a launch-approved exact resource \
-                manifest, and unrestricted requires explicit trusted startup risk acceptance. \
-                Ordinary MCP transport approval never proves profile authorization. On proven platforms, an \
-                authorized request also permits one bounded exact-window setup: \
-                open the recognized browser product's fixed remote-debugging page, toggle \
-                its uniquely matched per-instance checkbox, prove the PID-owned loopback \
-                endpoint, and close the temporary tab. Every visible effect is reported; \
-                ambiguity is refused. Where attaching would bring the browser in front of \
-                the user's app (macOS Chrome shows its own remote-debugging prompt in front \
-                whenever the driver opens a new browser connection; sessions for the same \
-                browser share one approved connection, kept for up to 30 minutes idle and \
-                8 hours in total, so later sessions do not prompt again), existing-profile \
-                attachment refuses with \
-                background_unavailable unless delivery_mode is \"foreground\" (the app that \
-                was in front is brought back afterwards) or the browser window is on another \
-                Space than the user's, where it attaches in the background while the driver \
-                reverts the browser's own brief activations. A driver-owned isolated launch \
-                result carries an advisory lifecycle object: the browser process ends with the \
-                calling session after idle_expires_in_seconds without session activity, an \
-                isolated_named profile persists after the session and an isolated_new profile \
-                does not, and explicit end, disconnect, revocation or shutdown end it earlier."
+                reaches their logged-in profile, so ask the user first. Then find the \
+                browser window with list_windows({pid: <prepared_pid>}), call \
+                get_browser_state({pid, window_id}), and act with browser_click, browser_type \
+                or browser_pointer. The call attaches, or refuses with nothing changed and says \
+                why.\n\n\
+                Isolated launch follows the runtime permission mode, starts a separate browser, \
+                and never copies, modifies or ends the user's profile. Without pid, only a \
+                platform-attested system Chrome/Edge install (on Linux, a root-owned package) is \
+                used. The result's lifecycle object says when the browser ends: with the \
+                session after idle_expires_in_seconds idle, or earlier on end, disconnect, \
+                revocation or shutdown. An isolated_named profile persists after the session; \
+                an isolated_new one does not.\n\n\
+                Existing profile: refused unless the runtime authorizes it (standard mode: a \
+                --grant existing-profile launch grant or an embedding authorization host; \
+                bounded: a launch-approved resource manifest; unrestricted: explicit trusted \
+                startup risk acceptance). MCP transport approval is not authorization. Once \
+                authorized, it may open the browser's remote-debugging page, tick its \
+                per-instance checkbox and close that tab; every visible effect is reported."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "pid": { "type": "integer", "description": "Browser process id to prepare. Required except for a driver-owned isolated_new/isolated_named launch with allow_launch=true." },
+                    "pid": { "type": "integer", "description": "Browser process id. Required except for an isolated_new/isolated_named launch with allow_launch=true." },
                     "window_id": { "type": "integer", "description": "Exact native window approval anchor; required for strategy.kind=existing_profile." },
                     "allow_launch": {
                         "type": "boolean",
@@ -664,7 +647,7 @@ impl BrowserPrepareTool {
                     },
                     "profile": {
                         "type": "object",
-                        "description": "Driver-owned isolated Chromium profile to launch with allow_launch=true. mode=isolated_new creates a fresh throwaway profile; mode=isolated_named reuses the named driver-owned profile. Never an existing user profile.",
+                        "description": "Isolated profile to launch with allow_launch=true: mode isolated_new is a fresh throwaway profile, isolated_named reuses the named driver-owned one. Never a user profile.",
                         "properties": {
                             "mode": { "type": "string", "enum": ["isolated_new", "isolated_named"] },
                             "name": { "type": "string", "description": "Required only for isolated_named; 1-64 path-safe ASCII characters." }
@@ -674,7 +657,7 @@ impl BrowserPrepareTool {
                     },
                     "strategy": {
                         "type": "object",
-                        "description": "Attach to an already-running browser instead of launching one. Pass an object, {\"kind\":\"existing_profile\"}, not a string. kind=existing_profile attaches to the user's running profile at pid/window_id under the runtime's profile authorization.",
+                        "description": "Attach to a running browser instead of launching: an object {\"kind\":\"existing_profile\"}, not a string. Attaches to the user's profile at pid/window_id, subject to profile authorization.",
                         "properties": {
                             "kind": { "type": "string", "enum": ["existing_profile"] }
                         },
@@ -685,7 +668,7 @@ impl BrowserPrepareTool {
                         "type": "string",
                         "enum": ["background", "foreground"],
                         "default": "background",
-                        "description": "Existing-profile attachment only. background (default) attaches in the background when the browser window is on another Space than the user's, and otherwise refuses with background_unavailable, before any visible effect, where attaching would bring the browser in front of the user's app. foreground accepts that, for a screen nobody else is using or when the user agreed; the app that was in front is brought back afterwards."
+                        "description": "Existing-profile attachment only. background (default) refuses with background_unavailable, before any visible effect, where attaching would bring the browser in front of the user's app (a window on another Space attaches in the background). foreground accepts that, for an unused screen or when the user agreed; the previous front app is restored after."
                     },
                     "session": schema_session(),
                 },
@@ -857,7 +840,9 @@ impl BrowserNavigateTool {
         let def = ToolDef {
             name: "browser_navigate".into(),
             description: "Navigate one tab of an exactly-bound browser target to a \
-                new URL (http/https/about only). Refused for heuristic bindings. \
+                new URL: http, https or about: only (file: and data: are refused). about: pages \
+                that map to chrome:// are blocked and load as about:blank#blocked even when \
+                the call reports ok. Refused for heuristic bindings. \
                 Navigation invalidates all p<snapshot>:<index> refs for the tab."
                 .into(),
             input_schema: json!({
@@ -999,8 +984,10 @@ impl BrowserClickTool {
                 activate (including Linux Chromium configurations whose trusted route cannot stay in the background; \
                 for example a browser inside a sandbox). \
                 input_route=\"dom_event\" (synthetic pointer and mouse \
-                down/up/click sequence at the element's center, ref required) is used only when explicitly requested; \
-                it proves dispatch, not control activation, because trust-gated \
+                down/up/click sequence at the element's center, ref required) is never picked \
+                automatically; request it when the trusted route is refused in background, since \
+                it clicks without activating the window. It proves dispatch, not control \
+                activation, because trust-gated \
                 controls may ignore synthetic events. \
                 Refused for heuristic bindings."
                 .into(),
@@ -1019,8 +1006,9 @@ impl BrowserClickTool {
                         "enum": ["trusted", "dom_event"],
                         "description": "\"trusted\" (default): Input.dispatchMouseEvent. \
                             It refuses rather than foregrounding a standalone browser. \
-                            \"dom_event\": synthetic full-background DOM click, only \
-                            when explicitly requested. Dispatch does not prove the \
+                            \"dom_event\": synthetic full-background DOM click, never \
+                            picked automatically; use it when the trusted route is \
+                            refused in background. Dispatch does not prove the \
                             control activated; refresh page state and verify the \
                             expected postcondition."
                     },

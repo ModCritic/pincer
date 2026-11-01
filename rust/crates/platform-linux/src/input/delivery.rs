@@ -41,18 +41,13 @@ pub fn delivery_mode_schema() -> Value {
     // (the gate compares shape only — descriptions may vary per platform). The
     // `default` advertisement is additive on top of the canon shape.
     let mut v = pincer_core::tool_schema::delivery_mode_schema_with(
-        "Input delivery mode. 'background' (default) never activates or raises \
-         the target window. On X11 it uses the session's XInput2 virtual \
-         pointer and keyboard (no focus steal). On Wayland it goes through libei + \
-         xdg-desktop-portal, which injects to the compositor's input focus — \
-         Wayland's security model has no per-window background targeting, so a \
-         specific non-focused window cannot be aimed at; when no libei backend \
-         is available the tool returns a structured background_unavailable \
-         error. 'foreground' is the explicit escalation: activate the target \
-         (X11 _NET_ACTIVE_WINDOW; Wayland compositor activate), inject, then \
-         restore the prior active window — a brief focus swap unless the \
-         target was already active. Matches the macOS / Windows delivery_mode \
-         surface.",
+        "\"background\" (default) acts without activating or raising the window; on \
+         Wayland it reaches only the focused window. Targets that cannot take \
+         background input (Chromium/Electron, WebKitGTK, toolkits reachable only \
+         through the focused widget, Wayland without libei) return \
+         background_unavailable. \"foreground\" activates the window (the pointer may \
+         move), acts, then restores the prior active window. Use it only when a \
+         background attempt is refused or unverifiable.",
     );
     v["default"] = serde_json::json!("background");
     v

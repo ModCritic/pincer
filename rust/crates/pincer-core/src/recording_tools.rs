@@ -45,63 +45,25 @@ impl Tool for StartRecordingTool {
     fn def(&self) -> &ToolDef {
         START_REC_DEF.get_or_init(|| ToolDef {
             name: "start_recording".into(),
-            description: "Start trajectory recording for the calling session. Each action-tool \
-                invocation (click, right_click, scroll, type_text, press_key, hotkey, \
-                set_value) from that session writes a turn folder under `output_dir`. \
-                Without `session`, every call on the same connection is recorded, \
-                including named-session calls. Other connections and session lifecycle \
-                calls (`start_session` / `end_session`) are not recorded. CLI recordings started with \
-                `pincer recording start` are daemon-wide.\n\n\
-                Each turn folder holds:\n\n\
-                - `before_state.json` / `after_state.json` — application AX/UIA/AT-SPI \
-                  state immediately before and after the action.\n\
-                - `before.png` / `after.png` — target-window screenshots immediately \
-                  before and after the action.\n\
-                - `evidence.json` — capture status and a stable classification when an \
-                  expected artifact could not be captured.\n\
-                - `app_state.json` — post-action AX/UIA snapshot for the target pid.\n\
-                - `screenshot.png` — compatibility alias of `after.png`.\n\
-                - `action.json` — tool name, full input arguments, result summary, \
-                  result-error flag, pid, click point (when applicable), ISO-8601 \
-                  timestamp.\n\
-                - `click.png` — for dispatched click-family actions only, `before.png` \
-                  with a red marker at the click point. A call refused before target \
-                  resolution is explicitly not applicable instead.\n\n\
-                The per-turn accessibility walk is bounded like `get_window_state`: \
-                `state_timeout_ms` (default 1000) caps each before/after walk, a walk \
-                that runs out of budget records the partial tree, and `evidence.json` \
-                carries `truncated`, `truncation_reason`, `nodes_visited`, \
-                `nodes_pending` and `timeout_ms` for that phase. A provider that stops \
-                answering is abandoned after the budget plus a short grace and the \
-                phase is classified `state_capture_timeout`. Actions refused before \
-                dispatch (for example an unknown or expired `capture_id`) skip the \
-                state walk; their state is classified `not_applicable` / \
-                `action_refused_before_dispatch`. Pass `include_accessibility_tree: \
-                false` to record screenshots and actions without state.\n\n\
-                Turn folders are named `turn-00001/`, `turn-00002/`, etc.  Turn \
-                numbering restarts at 1 each time recording is (re-)started.\n\n\
-                **Video is off by default.** Pass `record_video: true` to also \
-                capture the main display to `<output_dir>/recording.mp4` (H.264 / \
-                30 fps) for the lifetime of the session. The recording is torn \
-                down automatically when the MCP client disconnects.\n\n\
-                **macOS uses native ScreenCaptureKit** (daemon-owned SCStream + \
-                SCRecordingOutput) under the daemon's Screen Recording grant, \
-                with no ffmpeg subprocess. Requires macOS 15.0+. On macOS 26 \
-                (Tahoe), the first direct capture can also show a one-time \
-                consent asking to let Pincer bypass the system private \
-                window picker and directly access your screen and audio; \
-                choose Allow, or run `pincer permissions grant` beforehand \
-                to answer it up front. The recorder captures screen video only \
-                and does not enable system-audio capture.\n\n\
-                **Windows + Linux use an ffmpeg subprocess** (`gdigrab` / \
-                `x11grab` + libx264). Requires ffmpeg on PATH (winget install \
-                Gyan.FFmpeg / apt install ffmpeg); when ffmpeg is missing or \
-                fails on startup the per-turn capture (screenshots + \
-                action.json) still runs and the session's `last_error` field \
-                carries the diagnostic.\n\n\
-                State persists for the life of the daemon; a restart \
-                resets to disabled with no on-disk state. Call `stop_recording` to \
-                disable + finalize the mp4."
+            description: "Start trajectory recording for the calling session: each action-tool \
+                call (click, right_click, scroll, type_text, press_key, hotkey, set_value) from \
+                that session writes a turn folder (`turn-00001/`, `turn-00002/`, ..., numbered \
+                from 1 on each start) under `output_dir`. Without `session`, every call on this \
+                connection is recorded, named sessions included. Other connections and \
+                start_session/end_session are not recorded. CLI recordings (`pincer recording \
+                start`) are daemon-wide.\n\n\
+                Each turn folder holds `before_state.json`/`after_state.json` (accessibility \
+                state before and after the action), `before.png`/`after.png` (target-window \
+                screenshots), `evidence.json` (capture status, and why an expected artifact is \
+                missing), `app_state.json` (post-action snapshot of the target pid), \
+                `screenshot.png` (alias of after.png), `action.json` (tool, arguments, result \
+                summary, error flag, pid, click point, ISO-8601 timestamp) and, for dispatched \
+                clicks, `click.png` (before.png with a red marker at the click point). An action \
+                refused before dispatch (such as an expired capture_id) gets no state walk; its \
+                state is classified `action_refused_before_dispatch`.\n\n\
+                Video is off by default (see `record_video`). Recording lasts until \
+                `stop_recording` or a daemon restart (nothing is kept on disk); video also stops \
+                when the MCP client disconnects. `stop_recording` finalizes the mp4."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -114,39 +76,31 @@ impl Tool for StartRecordingTool {
                     },
                     "record_video": {
                         "type": "boolean",
-                        "description": "Capture the main display to <output_dir>/recording.mp4. \
-                            Default: false. Set to true to also capture the main \
-                            display to recording.mp4 (otherwise only the per-turn \
-                            screenshots + JSON are recorded). On macOS this uses native \
-                            ScreenCaptureKit (macOS 15.0+); macOS 26 can show a one-time \
-                            direct screen-capture consent on first use (see \
-                            `pincer permissions grant`). On Windows + Linux it \
-                            requires ffmpeg on PATH."
+                        "description": "Also capture the main display to <output_dir>/recording.mp4 \
+                            (H.264, 30 fps, no audio). Default false. macOS uses \
+                            ScreenCaptureKit (macOS 15.0+); macOS 26 may show a one-time \
+                            capture consent, which `pincer permissions grant` answers ahead. \
+                            Windows and Linux need ffmpeg on PATH; if it is missing or fails, \
+                            per-turn capture still runs and the session's `last_error` says \
+                            why."
                     },
                     "state_timeout_ms": {
                         "type": "integer",
                         "minimum": crate::tool_schema::TIMEOUT_MS_MIN,
                         "maximum": crate::tool_schema::TIMEOUT_MS_MAX,
                         "default": crate::recording::TURN_STATE_TIMEOUT_MS_DEFAULT,
-                        "description": "Wall-clock budget in milliseconds for each per-turn \
-                            before/after accessibility walk (same default and bounds as \
-                            get_window_state's timeout_ms). A walk that runs out records \
-                            the partial tree and marks it truncated in evidence.json."
+                        "description": "Time budget in ms for each before/after accessibility walk \
+                            (same default and bounds as get_window_state's timeout_ms). A cut \
+                            walk records the partial tree, marked truncated in evidence.json."
                     },
                     "include_accessibility_tree": {
                         "type": "boolean",
                         "default": true,
-                        "description": "Default true. Set false to skip the per-turn \
-                            before/after accessibility walks entirely; screenshots, \
-                            click markers and action.json are still recorded and state \
-                            is classified `state_capture_disabled`."
+                        "description": "Default true. False skips the before/after accessibility \
+                            walks; screenshots, click markers and action.json are still \
+                            recorded (state classified `state_capture_disabled`)."
                     },
-                    "session": {
-                        "type": "string",
-                        "description": "For multi-call work, prefer a short public session label \
-                            and repeat it on every call that accepts it. Omit it to use the \
-                            authenticated transport's implicit lifecycle session."
-                    }
+                    "session": crate::tool_schema::session_schema()
                 },
                 "additionalProperties": false
             }),

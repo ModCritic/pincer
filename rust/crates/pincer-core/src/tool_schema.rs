@@ -97,11 +97,10 @@ pub fn element_token_schema() -> Value {
     json!({
         "type": "string",
         "pattern": "^s[0-9a-f]{8}:[0-9]+$",
-        "description": "Element handle `<snapshot_id>:<row>` from get_window_state: \
-            row `[11]` of a read whose snapshot_id is s0000002a is \
-            \"s0000002a:11\" (also in `structuredContent.elements[].element_token`). \
-            Returns an explicit stale error naming the current snapshots once a \
-            newer read supersedes it."
+        "description": "Element handle `<snapshot_id>:<row>` from get_window_state: row \
+            `[11]` of snapshot s0000002a is \"s0000002a:11\". Take the row from that same \
+            read: rows renumber between reads. Stale once a newer read replaces that \
+            snapshot; the error names the current one."
     })
 }
 
@@ -121,12 +120,10 @@ pub fn timeout_ms_schema() -> Value {
         "maximum": TIMEOUT_MS_MAX,
         "default": TIMEOUT_MS_DEFAULT,
         "description": format!(
-            "Wall-clock budget in milliseconds for the accessibility-tree walk \
-             (default {TIMEOUT_MS_DEFAULT}, min {TIMEOUT_MS_MIN}, max {TIMEOUT_MS_MAX}). \
-             Bounds the whole walk. When the budget runs out the tool returns the partial tree \
-             it has, flagged with `truncated: true`, `truncation_reason`, `nodes_visited`, \
-             `nodes_pending` and `elements_complete: false`; retry with a larger value \
-             (e.g. 5000) or narrow with `query` / `max_depth`."
+            "Time budget in ms for the whole accessibility-tree walk (default \
+             {TIMEOUT_MS_DEFAULT}, {TIMEOUT_MS_MIN}..{TIMEOUT_MS_MAX}). When it runs out, the \
+             partial tree returns with `truncated: true` and `elements_complete: false`; retry \
+             with a larger value (e.g. 5000) or narrow with `query`/`max_depth`."
         )
     })
 }
@@ -248,10 +245,15 @@ fn session_description_has_multi_call_guidance(schema: &Value) -> bool {
     schema
         .get("description")
         .and_then(Value::as_str)
-        .map(|description| description.split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|description| {
+            description
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        })
         .is_some_and(|description| {
-            description.contains("prefer a short public session label")
-                && description.contains("repeat it on every call that accepts it")
+            description.contains("session label") && description.contains("repeat it on every call")
         })
 }
 

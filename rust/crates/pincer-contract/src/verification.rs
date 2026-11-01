@@ -156,9 +156,8 @@ pub struct VerifyStateInput {
     /// One to eight predicates, combined with logical AND.
     #[schemars(length(min = 1, max = 8))]
     pub expect: Vec<StatePredicate>,
-    /// For multi-call work, prefer a short public session label and repeat it on every call that
-    /// accepts it. Omit it to use the authenticated transport's implicit lifecycle session. This
-    /// field never selects capture modality or authorization.
+    /// Short session label for multi-call work; repeat it on every call. Omit to use the
+    /// connection's default session. This field never selects capture modality or authorization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "string_schema")]
     pub session: Option<String>,

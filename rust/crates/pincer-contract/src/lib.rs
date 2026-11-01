@@ -543,9 +543,9 @@ mod tests {
         assert!(description.starts_with(MULTI_CALL_SESSION_DESCRIPTION));
         assert!(description.contains("never selects capture modality or authorization"));
 
-        assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("prefer a short public session label"));
-        assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("repeat it on every call that accepts it"));
-        assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("implicit lifecycle session"));
+        assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("session label for multi-call work"));
+        assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("repeat it on every call"));
+        assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("connection's default session"));
     }
 
     #[test]

@@ -1065,6 +1065,22 @@ fn linux_snapshot_timeout_ms(timeout: Option<&Value>, has_prior_snapshot: bool) 
     )
 }
 
+/// Whether a get_window_state read captures a screenshot.
+///
+/// A full read does by default. A `since` re-read of the tree does not unless
+/// `include_screenshot:true` asks for one: it reports what changed after an
+/// action, and a fresh frame costs far more context than the diff. A read
+/// that skips the tree is not a diff, so `since` does not change its default.
+/// `screenshot_out_file` always captures, to disk.
+fn window_state_captures_screenshot(
+    include_screenshot: Option<bool>,
+    since_read: bool,
+    want_tree: bool,
+    out_file: bool,
+) -> bool {
+    out_file || include_screenshot.unwrap_or(!(since_read && want_tree))
+}
+
 static GWS_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
 #[async_trait]
@@ -1072,88 +1088,41 @@ impl Tool for GetWindowStateTool {
     fn def(&self) -> &ToolDef {
         GWS_DEF.get_or_init(|| ToolDef {
             name: "get_window_state".into(),
-            description: "Walk a running app's AT-SPI tree and return it as \
-                compact Markdown by default (`tree_format:\"markdown\"`). Every actionable \
-                element is tagged `[N]` (an element_index); its element_token is \
-                `<snapshot_id>:N`, where `snapshot_id` is printed in the response header and \
-                returned in structuredContent. Pass `tree_format:\"elements\"` for the \
-                structured `elements` array instead (explicit `element_token`, `role`, \
-                `label`, `value`, `enabled`, `selected`, `actions`, `frame: {x,y,w,h}` when \
-                AT-SPI reports usable bounds, `parent_index`, `depth`), or `\"both\"` for \
-                both (about twice the size). Set `query` to project the tree to matching rows \
-                plus their ancestor chain while preserving original indices; \
-                `total_element_count` reports the complete snapshot.\n\n\
-                Size: a read is bounded by default (`max_elements` 250 actionable nodes). \
-                When the walk stops at that budget the response says `Tree truncated at \
-                max_elements=…` and `truncated: true`; pass a larger `max_elements`, or \
-                `query` / `max_depth`, to reach the rest. `_note` is omitted unless \
-                `verbose:true`. `full_output:true` returns the full response: both \
-                representations, all metadata, and the walker's own limits (≤5 000 nodes).\n\n\
-                DIFF READS: pass `since: <snapshot_id>` from an earlier read of the same window \
-                to get only what changed: `+` added rows, `~` changed rows, `-` removed rows \
-                (their ids are the old snapshot's), or `no change since …`. Rows not listed keep \
-                their previous `[N]` unless a `reindexed:` line says otherwise. The response \
-                carries a new snapshot_id: use it in element_tokens. An unknown, expired, \
-                other-window or differently-scoped (query/max_elements/max_depth) `since` falls \
-                back to a full read and `since_status` says why. The focused element is not \
-                reported on Linux yet.\n\n\
-                By default returns both the element tree and a screenshot; ground on \
-                both and cross-check (the tree lies on some surfaces). Choose the \
-                modality at action time: an element ax action \
-                (element_token → accessibility rung) or an element px \
-                action (x,y → pixel rung off this screenshot). On Wayland, where output capture cannot prove \
-                the requested surface's identity, the truthful tree is returned without \
-                a screenshot and `screenshot_error.code` is \
-                `surface_identity_unproven`.\n\n\
-                Pass `include_accessibility_tree:false` to skip \
-                the AT-SPI walk and return just the screenshot plus \
-                window metadata (window_bounds, app_name, window_title), or \
-                `include_screenshot:false` for the tree only; setting both to false is an \
-                error. A per-call `max_image_dimension` caps the returned screenshot's long \
-                edge for a cheap thumbnail.\n\n\
-                Optional `max_elements` / `max_depth` bound the AT-SPI walk \
-                (Electron / large web apps produce 10k+ element trees). Markdown and \
-                structured elements are truncated identically. Default: `max_elements` 250.\n\n\
-                TIME BUDGET: `timeout_ms` (default 1000) bounds the whole AT-SPI \
-                walk. When omitted, a window's first snapshot gets a 2000 ms \
-                cold-start budget so Chromium/Electron can finish publishing its \
-                initial tree. Explicit values are always honored. Large apps \
-                (LibreOffice, GIMP, file managers) can exceed the budget; \
-                the call then returns the partial tree with `truncated: true`, \
-                `truncation_reason`, `nodes_visited`/`nodes_pending` and \
-                `elements_complete: false`. Every element listed is real and \
-                clickable; elements after the cut are simply missing. Retry with a \
-                larger `timeout_ms` (e.g. 5000) or narrow with `query`/`max_depth` \
-                when the element you need is absent.\n\n\
-                SCREENSHOT SCALE: the screenshot is delivered at or below 1.15 megapixels \
-                (long edge <= max_image_dimension, 1568 by default), because larger images \
-                are downsized before a model reads them and its pixel coordinates would then \
-                be uniformly short. Element `screenshot_frame`s and x/y for the pointer tools \
-                are pixels of the delivered screenshot (`frame` stays in screen coordinates, \
-                as on every platform); `frame_scale` < 1 reports the downsizing. An \
-                explicit per-call `max_image_dimension` (0 = native) replaces this cap.\n\n\
-                POPUP MENUS: a context menu / popover / combo list is an \
-                override-redirect window that list_windows never shows. A click or \
-                right_click that opened one names it in its result (`popup: \
-                {window_id, bounds, title}`); pass that window_id here to walk the \
-                popup's own AT-SPI toplevel so its menu items get element indices \
-                (then click them by element_token). Omitting window_id while a popup \
-                of this pid is open walks that popup.".into(),
+            description: "Read a window: its AT-SPI element tree as compact Markdown, plus a \
+                screenshot. Each actionable row is tagged `[N]`; its element_token is \
+                `<snapshot_id>:N`, with snapshot_id in the response header and returned in the \
+                result. Re-read with `since` to get only the changes; narrow with `query`.\n\n\
+                Screenshot: returned by default, but a `since` tree read returns none unless \
+                include_screenshot:true. The tree is wrong on some surfaces, so cross-check it \
+                against the screenshot: act by element_token where the tree is right, by pixel \
+                x,y off this screenshot where it is not. On Wayland, when capture cannot prove \
+                the surface's identity, the tree comes back without a screenshot and \
+                `screenshot_error.code` is `surface_identity_unproven`. The image is at most \
+                1.15 megapixels (long edge 1568 by default); element `screenshot_frame`s and \
+                pointer-tool x/y are pixels of this image, `frame` stays in screen \
+                coordinates, and `frame_scale` < 1 reports the downscale.\n\n\
+                Limits: `max_elements` and `timeout_ms` (when omitted, 2000 ms for a window's \
+                first read and 1000 ms after; pass more for big apps) bound the walk. A cut tree says `truncated: true`; listed elements are \
+                real, later ones are missing. Raise the limit or narrow with `query`/`max_depth`. \
+                The focused element is not reported on Linux yet.\n\n\
+                Popup menus (context menus, popovers, combo lists) never appear in list_windows. \
+                A click or right_click that opens one returns `popup: {window_id, bounds, \
+                title}`; pass that window_id here to get element indices for its items.".into(),
             input_schema: pincer_core::window_state_view::extend_input_schema(json!({"type":"object","required":["pid"],"properties":{
                 "session": pincer_core::tool_schema::session_schema(),
                 "pid":{"type":"integer","description":"Process ID that owns the window."},
-                "window_id":{"type":"integer","description":"Native window identifier from list_windows, or the `popup.window_id` a click / right_click result named (an open context menu / popover; its menu items then get element indices). Omitted: the pid's open popup menu when one is mapped, else its focused / active / largest window."},
+                "window_id":{"type":"integer","description":"Window id from list_windows, or a click/right_click result's `popup.window_id` to read an open menu. Omitted: the pid's open popup menu, else its focused, active or largest window."},
                 "include_accessibility_tree":{"type":"boolean",
-                    "description":"Default true: walk the AT-SPI tree and return it (per `tree_format`) alongside the screenshot. Set false to skip the AT-SPI walk and return just the screenshot plus window metadata (window_bounds, app_name, window_title). Setting both include_accessibility_tree:false and include_screenshot:false is an error (nothing to return)."},
+                    "description":"Default true. False skips the tree walk and returns only the screenshot and window metadata (window_bounds, app_name, window_title). Setting this and include_screenshot both false is an error."},
                 "include_screenshot":{"type":"boolean",
-                    "description":"Default true — returns a grounding screenshot alongside the tree. Set false to skip the grab and return tree only (the cheap path for re-indexing before an element ax action)."},
+                    "description":"Default true, except with `since`, where the default is false. True returns a grounding screenshot alongside the tree; false skips the grab and returns the tree only (the cheap path for re-indexing before an element ax action)."},
                 "screenshot_out_file":{"type":"string",
-                    "description":"When set, write the PNG to this file path (~ expanded) instead of embedding base64 in the response. The structured output carries screenshot_file_path instead."},
-                "query":{"type":"string","description":"Optional case-insensitive substring. Projects both tree_markdown and structured elements to matches plus ancestors while preserving original indices. Compare total_element_count with returned_element_count."},
-                "max_elements":{"type":"integer","minimum":1,"description":"Cap on total AT-SPI nodes walked. Default 250 (5 000 with full_output:true); the response states when the tree was cut. Raise it to read further into a large window."},
-                "max_depth":{"type":"integer","minimum":1,"description":"Cap on the AT-SPI tree walk depth. Omit for the default (uncapped). Lower for deeply nested apps."},
+                    "description":"Write the PNG to this path (~ expanded) instead of embedding it; the result gives screenshot_file_path."},
+                "query":{"type":"string","description":"Case-insensitive substring. Returns only matching rows plus their ancestors, keeping original indices; compare total_element_count with returned_element_count."},
+                "max_elements":{"type":"integer","minimum":1,"description":"Cap on AT-SPI nodes walked. Default 250 (5000 with full_output). The response says when the tree was cut; raise it to read further."},
+                "max_depth":{"type":"integer","minimum":1,"description":"Cap on tree walk depth. Default uncapped."},
                 "timeout_ms": pincer_core::tool_schema::timeout_ms_schema(),
-                "max_image_dimension":{"type":"integer","minimum":0,"description":"Per-call long-edge override. This value wins over the configured limit; 0 returns native-resolution PNG bytes. Omit to preserve configured behavior."}
+                "max_image_dimension":{"type":"integer","minimum":0,"description":"Long-edge cap in pixels for this call, overriding the configured limit; 0 returns native resolution."}
             },"additionalProperties":false})),
             read_only: true, destructive: false, idempotent: false, open_world: false,
         })
@@ -1239,10 +1208,9 @@ impl Tool for GetWindowStateTool {
         };
         let query = args.opt_str("query");
         let session_id = args.opt_str("_session_id");
-        // include_screenshot (default true) — the perf opt-out. The tree+screenshot
-        // pair is the default; `include_screenshot:false` skips the grab and returns
-        // tree only (the cheap re-index path before an element ax action). A
-        // screenshot_out_file still forces a capture (to disk), regardless.
+        // include_screenshot (default true, false on a `since` re-read): see
+        // `window_state_captures_screenshot`. A screenshot_out_file still
+        // forces a capture (to disk), regardless.
         let include_screenshot = args.get("include_screenshot").and_then(|v| v.as_bool());
         // `include_accessibility_tree` (default true) mirrors include_screenshot:
         // set false to SKIP the AT-SPI walk and return just the screenshot +
@@ -1319,12 +1287,17 @@ impl Tool for GetWindowStateTool {
             ));
         }
 
-        // Always walk the AT-SPI tree; capture the screenshot by default. The
-        // tree+screenshot pair is the default so the agent grounds on both and
-        // cross-checks the (sometimes-lying) tree against the frame. An explicit
-        // `include_screenshot:false` skips the grab; an unproven Wayland surface
-        // returns the tree with a typed screenshot error instead of unrelated pixels.
-        let should_capture = include_screenshot != Some(false) || screenshot_out_file.is_some();
+        // A full read captures the screenshot by default so the agent grounds
+        // on both and cross-checks the (sometimes-lying) tree against the
+        // frame; a `since` re-read does not unless asked. An unproven Wayland
+        // surface returns the tree with a typed screenshot error instead of
+        // unrelated pixels.
+        let should_capture = window_state_captures_screenshot(
+            include_screenshot,
+            view.since.is_some(),
+            want_tree,
+            screenshot_out_file.is_some(),
+        );
         if !want_tree && !should_capture {
             return ToolResult::error(
                 "Nothing to return: both include_accessibility_tree:false and \
@@ -1473,6 +1446,12 @@ impl Tool for GetWindowStateTool {
                 let screenshot_scale = shot_opt.as_ref().map(|(_, _, w, _, original_w, _)| {
                     original_w.map_or(1.0, |ow| ow as f64 / *w as f64)
                 });
+                // The window's size at this read. A later tree-only read keeps
+                // this read's screenshot frame while the size holds, and
+                // retires it once the window was resized.
+                let window_size = window_meta
+                    .as_ref()
+                    .map(|meta| (f64::from(meta.width), f64::from(meta.height)));
                 let mut published_snapshot = false;
                 let mut invalidated = Vec::new();
 
@@ -1533,7 +1512,7 @@ impl Tool for GetWindowStateTool {
                     }
                     let (snapshot_id, replaced) = (!observation_only && target_scoped)
                         .then(|| {
-                            state.snapshots.publish_for_session(
+                            state.snapshots.publish_sized_for_session(
                                 pid as i32,
                                 xid,
                                 crate::atspi::snapshot::update_snapshot(
@@ -1541,6 +1520,7 @@ impl Tool for GetWindowStateTool {
                                 ),
                                 session_id.as_deref(),
                                 screenshot_scale,
+                                window_size,
                             )
                         })
                         .flatten()
@@ -1695,7 +1675,7 @@ impl Tool for GetWindowStateTool {
                         xid,
                         session_id.as_deref(),
                         scale,
-                        None,
+                        window_size,
                     );
                     if refreshed.is_none() {
                         if let Some((_, replaced)) = state.snapshots.publish_capture_for_session(
@@ -2531,10 +2511,9 @@ fn coordinate_frame_schema() -> Value {
     json!({
         "type": "string",
         "enum": ["window", "desktop"],
-        "description": "Frame of x/y (and from_x/from_y/to_x/to_y). Default \"window\": \
-            window-local screenshot pixels as returned by get_window_state. \"desktop\": \
-            full-screen pixels as returned by get_desktop_state, translated to the target \
-            window. Passing scope:\"desktop\" together with pid/window_id means the same thing."
+        "description": "Frame of all x/y coordinates: \"window\" (default) get_window_state \
+            screenshot pixels; \"desktop\" get_desktop_state pixels. scope:\"desktop\" with \
+            pid/window_id means the same."
     })
 }
 
@@ -6614,33 +6593,34 @@ impl Tool for ClickTool {
     fn def(&self) -> &ToolDef {
         CLICK_DEF.get_or_init(|| ToolDef {
             name: "click".into(),
-            description: "Click against a target pid. **Prefer `element_token` over pixel \
-                coordinates** — element_token works on backgrounded / hidden windows, surfaces \
-                a stable handle, and tells you what you're clicking via the cached AT-SPI \
-                element's role + label. Reach for `x, y` only when the target is a canvas / \
-                custom-drawn surface that doesn't appear in the AT-SPI tree.\n\n\
-                Provide either (window_id + x/y) or (pid + element_token). x/y are \
-                WINDOW-LOCAL pixels of window_id (the get_window_state screenshot frame); \
-                a point outside the window is refused (point_outside_window) and every \
-                pixel result reports the resolved window_point / screen_point. Background \
-                delivery first resolves the accessible under the point and fires its action \
-                (the result says `hit: <role> \"<name>\" action=...`; a file / list item is \
-                selected through its container: `selected: ...`), else presses the real \
-                virtual pointer there. A click that opens a popup menu names it (`popup: \
-                {window_id, bounds}`): pass that window_id to get_window_state to index its \
-                items. The token goes stale once a newer get_window_state of the same \
-                window replaces its snapshot; the click then fails with a stale error that \
-                names the current snapshot.\n\n\
-                After a zoom call, pass from_zoom=true to auto-translate zoom-image coords \
-                back to full-window space.\n\n\
-                `count`: 1 (default), 2 for a double-click, 3 for a triple-click (selects a \
-                line / paragraph in editors) — one press train with real double-click cadence, \
-                in background and foreground alike; there is no separate triple_click tool.\n\n\
-                button: \"left\" (default), \"right\", or \"middle\". Native Wayland: only left-button is supported \
-                via the virtual-pointer protocol — right/middle return an error rather than \
-                silently degrading to left. `modifier` holds ctrl/shift/alt/super for the \
-                click on X11. Native Wayland refuses modified pointer clicks until its input \
-                protocol can carry keyboard modifier state.".into(),
+            description: "Click in a window. Prefer `element_token`: it works on hidden or \
+                background windows and names the element's role and label. A token click \
+                fires the element's accessible action, so a row with `actions=[]` (a text \
+                area, for example) cannot be clicked by token in background; use \
+                delivery_mode foreground. Use x,y only for \
+                canvas or custom-drawn surfaces missing from the AT-SPI tree.\n\n\
+                Pass pid + window_id + x,y, or an element_token (pid optional); a `target` \
+                {kind: \"window\", pid, window_id} can stand in for pid + window_id. A point \
+                outside the window is refused (point_outside_window); pixel results report \
+                window_point (real window pixels, scaled back from the screenshot) and \
+                screen_point. In background, a pixel click first fires the accessible action \
+                under the point (result `hit: <role> \"<name>\" action=...`, or `selected: ...` \
+                for a list or file item), else presses the virtual pointer there. Toolkits \
+                that drop synthetic pointer events (Qt on X11, for example) refuse a pixel \
+                click with no accessible control under it (background_unavailable). If `hit:` \
+                names an element you did not aim at, that element's action ran. The tree can \
+                hold items that are not visible, such as entries of closed menus, so on a \
+                surface with no action of its own (a text area) prefer delivery_mode \
+                foreground. When a token \
+                or pixel click opens a popup menu Pincer can identify, the result includes \
+                `popup: {window_id, bounds}`; pass that window_id to get_window_state to index \
+                its items. Without `popup` (the result may instead say a popup holds the \
+                keyboard grab), a menu may still be open even though window screenshots never \
+                show popup menus; press Escape on the window before more pixel clicks. A stale \
+                token fails with an error naming \
+                the current snapshot.\n\n\
+                `count` 2 or 3 gives a double or triple click; there is no triple_click tool. \
+                Native Wayland supports only the left button and refuses `modifier` clicks.".into(),
             input_schema: json!({
                 // `pid` is conditionally required (validated in code: needed for
                 // window/element clicks, omitted for windowless scope="desktop"),
@@ -6649,20 +6629,20 @@ impl Tool for ClickTool {
                 "type":"object","required":[],"properties":{
                     "session": pincer_core::tool_schema::session_schema(),
                     "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
-                    "pid":{"type":"integer","description":"Target process ID. Required unless scope is \"desktop\" or element_token is supplied (the token carries the pid)."},
+                    "pid":{"type":"integer","description":"Process id. Required unless scope is \"desktop\" or element_token is given (the token carries it)."},
                     "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
-                    "x":{"type":"number","description":"Window-local pixel X of the target window's own get_window_state screenshot (0..screenshot_width). For get_desktop_state pixels pass scope:\"desktop\" (or coordinate_frame:\"desktop\")."},
-                    "y":{"type":"number","description":"Window-local pixel Y of the target window's own get_window_state screenshot (0..screenshot_height); see x."},
+                    "x":{"type":"number","description":"Pixel X in the window's get_window_state screenshot (0..screenshot_width). Pass scope:\"desktop\" for get_desktop_state pixels."},
+                    "y":{"type":"number","description":"Pixel Y in the window's get_window_state screenshot (0..screenshot_height); see x."},
                     "element_token": pincer_core::tool_schema::element_token_schema(),
-                    "capture_id":{"type":"string","description":"Optional one-shot binding to the exact PNG returned by get_window_state or get_desktop_state. When present, x/y are interpreted in that capture and admitted before native dispatch."},
+                    "capture_id":{"type":"string","description":"One-shot id of the get_window_state or get_desktop_state image that x/y come from; x/y are read in that capture."},
                     // Shape matches the shared button_schema() canon (string +
                     // [left,right,middle]); kept inline to carry the Linux/Wayland
                     // back-compat prose the click button-schema test asserts on.
-                    "button":{"type":"string","enum":["left","right","middle"],"description":"Mouse button. Default: \"left\". Native Wayland: only left-button is supported via the virtual-pointer protocol; right/middle return an error."},
-                    "count":{"type":"integer","minimum":1,"description":"Number of clicks in one press train: 1 (default), 2 = double-click, 3 = triple-click (line/paragraph selection). There is no separate triple_click tool — pass count: 3 here."},
+                    "button":{"type":"string","enum":["left","right","middle"],"description":"Mouse button. Default \"left\". Native Wayland supports only left; right/middle return an error."},
+                    "count":{"type":"integer","minimum":1,"description":"Clicks in one press train: 1 (default), 2 double click, 3 triple click (selects a line or paragraph)."},
                     "modifier": pincer_core::tool_schema::modifier_schema(),
-                    "from_zoom":{"type":"boolean","description":"Set true after a zoom call to auto-translate zoom-image pixel coordinates back to full-window space."},
-                    "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"Coordinate frame (default \"window\"). Pass \"desktop\" with x,y and no pid/window_id for a screen-absolute click in get_desktop_state coordinates."},
+                    "from_zoom":{"type":"boolean","description":"True when the coordinates come from a zoom image; maps them back to window pixels."},
+                    "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"Default \"window\". \"desktop\" with x,y and no pid/window_id clicks at get_desktop_state screen coordinates."},
                     "coordinate_frame": coordinate_frame_schema(),
                     "delivery_mode": crate::input::delivery::delivery_mode_schema()
                 },"additionalProperties":false
@@ -7203,7 +7183,7 @@ impl Tool for ClickTool {
         }
         let xid = match args.opt_u64("window_id") {
             Some(v) => v,
-            None => return ToolResult::error("Provide either element_token or window_id + x/y."),
+            None => return ToolResult::error("Provide either element_token or pid + window_id + x/y."),
         };
         let desktop_frame = desktop_frame_requested(&args);
         let from_zoom = args.bool_or("from_zoom", false);
@@ -7678,7 +7658,8 @@ impl Tool for TypeTextTool {
             name: "type_text".into(),
             description: "Type text into a window without stealing focus: through AT-SPI \
                 editable text (the element_token's field when given), a terminal's pty, or real \
-                key events from the session's virtual keyboard.".into(),
+                key events from the session's virtual keyboard. Text goes in at the caret; \
+                set_value replaces a field's whole value.".into(),
             input_schema: json!({
                 "type":"object","required":["text"],"properties":{
                     "session": pincer_core::tool_schema::session_schema(),
@@ -9941,7 +9922,10 @@ impl Tool for ScrollTool {
             name: "scroll".into(),
             description: "Scroll a window without stealing focus: real wheel steps from the \
                 session's virtual pointer over the element_token or x,y point, else the window's \
-                center. direction required; by defaults to line, amount defaults to 3.".into(),
+                center. direction required; by defaults to line, amount defaults to 3. Success \
+                means the wheel events were sent: some apps ignore background wheel events \
+                without an error (Qt on X11, for example), so verify with a screenshot or a \
+                scroll bar value, and if nothing moved, retry with delivery_mode foreground.".into(),
             input_schema: json!({
                 // `pid` is conditionally required (validated in code), so only
                 // `direction` is pinned — matches the scroll→["direction"] canon
@@ -9949,7 +9933,7 @@ impl Tool for ScrollTool {
                 "type":"object","required":["direction"],"properties":{
                     "session": pincer_core::tool_schema::session_schema(),
                     "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
-                    "pid":{"type":"integer","description":"Target process ID. Required unless scope is \"desktop\" or element_token is supplied (the token carries the pid)."},
+                    "pid":{"type":"integer","description":"Process id. Required unless scope is \"desktop\" or element_token is given (the token carries it)."},
                     "direction":{"type":"string","enum":["up","down","left","right"],"description":"Scroll direction."},
                     "by":{"type":"string","enum":["line","page"],"description":"Scroll granularity. Default: line."},
                     "amount":{"type":"integer","minimum":1,"maximum":50,"description":"Number of scroll steps. Default: 3."},
@@ -10499,22 +10483,25 @@ impl Tool for DoubleClickTool {
     fn def(&self) -> &ToolDef {
         DCLICK_DEF.get_or_init(|| ToolDef {
             name: "double_click".into(),
-            description: "Double-click at (x,y) or an element_token (AT-SPI bounds). Background \
-                delivery on X11 sends real button events from the session's virtual master pointer \
-                (path mpx_pointer); a point covered by another application's window is refused \
+            description: "Double-click at (x,y) or at the center of an element_token's bounds. \
+                Background delivery on X11 uses the session's virtual pointer (path mpx_pointer) \
+                when it can, else synthetic XSendEvent (path x11_xsendevent), which some apps, \
+                Qt included, treat as a single click: check `path` and verify the result. A \
+                point covered by another application's window is refused \
                 (target_occluded), one covered by this app's own dialog is retargeted to it \
-                (retargeted_to). No focus steal. Provide either (window_id + x/y) or (pid + element_token). \
+                (retargeted_to). No focus steal. Pass pid + window_id + x,y, or an element_token \
+                (pid optional). \
                 After a zoom call, pass from_zoom=true to auto-translate zoom-image coords.".into(),
             input_schema: json!({"type":"object","required":[],"properties":{
                 "session": pincer_core::tool_schema::session_schema(),
                 "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
                 "pid":{"type":"integer","description":"Target process ID. Optional with element_token (the token carries the pid)."},
                 "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
-                "x":{"type":"number","description":"Window-local pixel X of the target window's own get_window_state screenshot (0..screenshot_width). For get_desktop_state pixels pass scope:\"desktop\" (or coordinate_frame:\"desktop\")."},
-                "y":{"type":"number","description":"Window-local pixel Y of the target window's own get_window_state screenshot (0..screenshot_height); see x."},
+                "x":{"type":"number","description":"Pixel X in the window's get_window_state screenshot (0..screenshot_width). Pass scope:\"desktop\" for get_desktop_state pixels."},
+                "y":{"type":"number","description":"Pixel Y in the window's get_window_state screenshot (0..screenshot_height); see x."},
                 "coordinate_frame": coordinate_frame_schema(),
                 "element_token": pincer_core::tool_schema::element_token_schema(),
-                "from_zoom":{"type":"boolean","description":"Set true after a zoom call to auto-translate zoom-image pixel coordinates back to full-window space."},
+                "from_zoom":{"type":"boolean","description":"True when the coordinates come from a zoom image; maps them back to window pixels."},
                 "delivery_mode": crate::input::delivery::delivery_mode_schema()
             },"additionalProperties":false}),
             read_only: false, destructive: true, idempotent: false, open_world: true,
@@ -10649,7 +10636,7 @@ impl Tool for DoubleClickTool {
         }
         let xid = match window_id_resolved {
             Some(v) => v,
-            None => return ToolResult::error("Provide either element_token or window_id + x/y."),
+            None => return ToolResult::error("Provide either element_token or pid + window_id + x/y."),
         };
         let desktop_frame = desktop_frame_requested(&args);
         let from_zoom = args.bool_or("from_zoom", false);
@@ -10781,27 +10768,29 @@ impl Tool for RightClickTool {
     fn def(&self) -> &ToolDef {
         RCLICK_DEF.get_or_init(|| ToolDef {
             name: "right_click".into(),
-            description: "Right-click at (x,y) or an element_token (AT-SPI bounds). Background \
-                delivery on X11 sends real button events from the session's virtual master pointer \
-                (path mpx_pointer); a point covered by another application's window is refused \
-                (target_occluded), one covered by this app's own dialog is retargeted to it \
-                (retargeted_to), one outside the window is refused (point_outside_window; x/y are \
-                window-local pixels, the result reports window_point / screen_point). No focus \
-                steal. When a context menu opens, the result names it (`popup: {window_id, bounds, \
-                title}`): call get_window_state(pid, window_id=<that id>) to index its menu items \
-                and click them by element_token. Provide either (window_id + x/y) or (pid + element_token). \
-                After a zoom call, pass from_zoom=true to auto-translate zoom-image coords.".into(),
+            description: "Right-click at window pixel (x, y) or an element_token. Pass pid + \
+                window_id + x,y, or an element_token (pid optional); after a zoom, from_zoom=true \
+                maps zoom-image coordinates \
+                back. Background delivery does not steal focus. A point covered by another app's \
+                window is refused (target_occluded), one covered by this app's own dialog goes to \
+                the dialog (retargeted_to), and one outside the window is refused \
+                (point_outside_window); results report window_point and screen_point. When Pincer \
+                can identify the context menu it opened, the result includes `popup: {window_id, \
+                bounds, title}`: read it with get_window_state(pid, window_id) and click its \
+                items by element_token. Without `popup`, a menu may still be open even though \
+                window screenshots never show popup menus; press Escape on the window to close \
+                it.".into(),
             input_schema: json!({"type":"object","required":[],"properties":{
                 "session": pincer_core::tool_schema::session_schema(),
                 "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
                 "pid":{"type":"integer","description":"Target process ID. Optional with element_token (the token carries the pid)."},
                 "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
-                "x":{"type":"number","description":"Window-local pixel X of the target window's own get_window_state screenshot (0..screenshot_width). For get_desktop_state pixels pass scope:\"desktop\" (or coordinate_frame:\"desktop\")."},
-                "y":{"type":"number","description":"Window-local pixel Y of the target window's own get_window_state screenshot (0..screenshot_height); see x."},
+                "x":{"type":"number","description":"Pixel X in the window's get_window_state screenshot (0..screenshot_width). Pass scope:\"desktop\" for get_desktop_state pixels."},
+                "y":{"type":"number","description":"Pixel Y in the window's get_window_state screenshot (0..screenshot_height); see x."},
                 "coordinate_frame": coordinate_frame_schema(),
                 "element_token": pincer_core::tool_schema::element_token_schema(),
                 "modifier": pincer_core::tool_schema::modifier_schema(),
-                "from_zoom":{"type":"boolean","description":"Set true after a zoom call to auto-translate zoom-image pixel coordinates back to full-window space."},
+                "from_zoom":{"type":"boolean","description":"True when the coordinates come from a zoom image; maps them back to window pixels."},
                 "delivery_mode": crate::input::delivery::delivery_mode_schema()
             },"additionalProperties":false}),
             read_only: false, destructive: true, idempotent: false, open_world: true,
@@ -10936,7 +10925,7 @@ impl Tool for RightClickTool {
         }
         let xid = match window_id_resolved {
             Some(v) => v,
-            None => return ToolResult::error("Provide either element_token or window_id + x/y."),
+            None => return ToolResult::error("Provide either element_token or pid + window_id + x/y."),
         };
         let desktop_frame = desktop_frame_requested(&args);
         let from_zoom = args.bool_or("from_zoom", false);
@@ -11097,27 +11086,26 @@ impl Tool for DragTool {
     fn def(&self) -> &ToolDef {
         DRAG_DEF.get_or_init(|| ToolDef {
             name: "drag".into(),
-            description: "Press-drag-release gesture from (from_x, from_y) to (to_x, to_y) in \
-                          window-local screenshot pixels. Background delivery on X11 is one real held \
-                          gesture on the session's virtual master pointer (path mpx_pointer: press, \
-                          interpolated motion, release) — it lands on GTK/VCL/Qt/Chromium; a point \
-                          covered by another application's window is refused (target_occluded), one \
-                          covered by this app's own dialog is retargeted to it. Headless servers fall \
-                          back to XSendEvent. duration_ms (default 500), steps (default 20). No focus steal.".into(),
+            description: "Press, move and release from (from_x, from_y) to (to_x, to_y) in \
+                          window screenshot pixels, without stealing focus. A point covered by \
+                          another app's window is refused (target_occluded); one covered by this \
+                          app's own dialog goes to the dialog. Background drags need a pointer \
+                          backend some apps lack even where clicks work, so a drag can return \
+                          background_unavailable; it then needs delivery_mode foreground.".into(),
             input_schema: json!({"type":"object","required":["from_x","from_y","to_x","to_y"],"properties":{
                 "session": pincer_core::tool_schema::session_schema(),
                 "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
                 "pid":{"type":"integer","description":"Target process ID. Required unless scope is \"desktop\"."},
                 "window_id":{"type":"integer","description":"Target window XID. Required."},
-                "from_x":{"type":"number","description":"Drag start X: window-local pixels of the target window's own get_window_state screenshot; pass scope:\"desktop\" for get_desktop_state pixels."},
+                "from_x":{"type":"number","description":"Start X in the window's get_window_state screenshot pixels; pass scope:\"desktop\" for get_desktop_state pixels."},
                 "from_y":{"type":"number","description":"Drag start Y (same frame as from_x)."},
                 "to_x":{"type":"number","description":"Drag end X (same frame as from_x)."},
                 "to_y":{"type":"number","description":"Drag end Y (same frame as from_x)."},
-                "duration_ms":{"type":"integer","minimum":0,"maximum":10000,"description":"Total drag duration. Default: 500."},
-                "steps":{"type":"integer","minimum":1,"maximum":200,"description":"Intermediate MotionNotify events. Default: 20."},
+                "duration_ms":{"type":"integer","minimum":0,"maximum":10000,"description":"Total drag duration in ms. Default: 500."},
+                "steps":{"type":"integer","minimum":1,"maximum":200,"description":"Intermediate motion events. Default: 20."},
                 "modifier": pincer_core::tool_schema::modifier_schema(),
                 "button": pincer_core::tool_schema::button_schema(),
-                "from_zoom":{"type":"boolean","description":"Set true after a zoom call to auto-translate zoom-image pixel coordinates back to full-window space."},
+                "from_zoom":{"type":"boolean","description":"True when the coordinates come from a zoom image; maps them back to window pixels."},
                 "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"Use \"desktop\" with no pid/window_id for get_desktop_state screen coordinates. Default \"window\"."},
                 "coordinate_frame": coordinate_frame_schema(),
                 "delivery_mode": crate::input::delivery::delivery_mode_schema()
@@ -11828,16 +11816,16 @@ impl Tool for MouseButtonDownTool {
                 Returns the current held-button state.".into(),
             input_schema: json!({"type":"object","required":["pid","window_id","x","y"],"properties":{
                 "session": pincer_core::tool_schema::session_schema_with(
-                    "When both are present, session takes precedence over cursor_id."
+                    "Takes precedence over cursor_id."
                 ),
                 "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
                 "pid":{"type":"integer","description":"Target process ID."},
                 "window_id":{"type":"integer","description":"Window id from list_windows."},
-                "x":{"type":"number","description":"Window-local pixel X of the target window's own get_window_state screenshot (0..screenshot_width). For get_desktop_state pixels pass scope:\"desktop\" (or coordinate_frame:\"desktop\")."},
-                "y":{"type":"number","description":"Window-local pixel Y of the target window's own get_window_state screenshot (0..screenshot_height); see x."},
+                "x":{"type":"number","description":"Pixel X in the window's get_window_state screenshot (0..screenshot_width). Pass scope:\"desktop\" for get_desktop_state pixels."},
+                "y":{"type":"number","description":"Pixel Y in the window's get_window_state screenshot (0..screenshot_height); see x."},
                 "coordinate_frame": coordinate_frame_schema(),
                 "button": pincer_core::tool_schema::button_schema(),
-                "from_zoom":{"type":"boolean","description":"Set true after a zoom call to auto-translate zoom-image pixel coordinates back to full-window space."}
+                "from_zoom":{"type":"boolean","description":"True when the coordinates come from a zoom image; maps them back to window pixels."}
             },"additionalProperties":false}),
             read_only: false, destructive: true, idempotent: false, open_world: true,
         })
@@ -12004,16 +11992,16 @@ impl Tool for MouseDragTool {
                 Returns the updated held-button state.".into(),
             input_schema: json!({"type":"object","required":["x","y"],"properties":{
                 "session": pincer_core::tool_schema::session_schema_with(
-                    "When both are present, session takes precedence over cursor_id."
+                    "Takes precedence over cursor_id."
                 ),
                 "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
                 "pid":{"type":"integer","description":"Optional process ID; must match the held button's target."},
                 "window_id":{"type":"integer","description":"Optional window id; must match the held button's target."},
-                "x":{"type":"number","description":"Window-local pixel X of the target window's own get_window_state screenshot (0..screenshot_width). For get_desktop_state pixels pass scope:\"desktop\" (or coordinate_frame:\"desktop\")."},
-                "y":{"type":"number","description":"Window-local pixel Y of the target window's own get_window_state screenshot (0..screenshot_height); see x."},
-                "duration_ms":{"type":"integer","minimum":0,"maximum":10000,"description":"Total drag duration. Default: 500."},
-                "steps":{"type":"integer","minimum":1,"maximum":200,"description":"Intermediate MotionNotify events. Default: 20."},
-                "from_zoom":{"type":"boolean","description":"Set true after a zoom call to auto-translate zoom-image pixel coordinates back to full-window space."}
+                "x":{"type":"number","description":"Pixel X in the window's get_window_state screenshot (0..screenshot_width). Pass scope:\"desktop\" for get_desktop_state pixels."},
+                "y":{"type":"number","description":"Pixel Y in the window's get_window_state screenshot (0..screenshot_height); see x."},
+                "duration_ms":{"type":"integer","minimum":0,"maximum":10000,"description":"Total drag duration in ms. Default: 500."},
+                "steps":{"type":"integer","minimum":1,"maximum":200,"description":"Intermediate motion events. Default: 20."},
+                "from_zoom":{"type":"boolean","description":"True when the coordinates come from a zoom image; maps them back to window pixels."}
             },"additionalProperties":false}),
             read_only: false, destructive: true, idempotent: false, open_world: true,
         })
@@ -12214,15 +12202,15 @@ impl Tool for MouseButtonUpTool {
                 If x/y are omitted, releases at the last held position. Returns the current held-button state.".into(),
             input_schema: json!({"type":"object","properties":{
                 "session": pincer_core::tool_schema::session_schema_with(
-                    "When both are present, session takes precedence over cursor_id."
+                    "Takes precedence over cursor_id."
                 ),
                 "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
                 "pid":{"type":"integer","description":"Optional process ID; must match the held button's target."},
                 "window_id":{"type":"integer","description":"Optional window id; must match the held button's target."},
-                "x":{"type":"number","description":"Window-local pixel X of the target window's own get_window_state screenshot (0..screenshot_width). For get_desktop_state pixels pass scope:\"desktop\" (or coordinate_frame:\"desktop\")."},
-                "y":{"type":"number","description":"Window-local pixel Y of the target window's own get_window_state screenshot (0..screenshot_height); see x."},
+                "x":{"type":"number","description":"Pixel X in the window's get_window_state screenshot (0..screenshot_width). Pass scope:\"desktop\" for get_desktop_state pixels."},
+                "y":{"type":"number","description":"Pixel Y in the window's get_window_state screenshot (0..screenshot_height); see x."},
                 "coordinate_frame": coordinate_frame_schema(),
-                "from_zoom":{"type":"boolean","description":"Set true after a zoom call to auto-translate zoom-image pixel coordinates back to full-window space."}
+                "from_zoom":{"type":"boolean","description":"True when the coordinates come from a zoom image; maps them back to window pixels."}
             },"additionalProperties":false}),
             read_only: false, destructive: true, idempotent: false, open_world: true,
         })
@@ -12921,7 +12909,7 @@ impl Tool for GetDesktopStateTool {
                 Use the returned PNG directly as the coordinate source for actions whose target is \
                 {kind:\"desktop\",display_id:\"primary\"}. No AT-SPI walk.".into(),
             input_schema: json!({"type":"object","properties":{
-                "session":{"type":"string","description":"For multi-call work, prefer a short public session label and repeat it on every call that accepts it. Omit it to use the authenticated transport's implicit lifecycle session."},
+                "session": pincer_core::tool_schema::session_schema(),
                 "screenshot_out_file":{"type":"string","description":"Write PNG here instead of base64."},
                 "max_image_dimension": pincer_core::tool_schema::desktop_max_image_dimension_schema(),
                 "region": pincer_core::capture_series::region_schema(
@@ -13296,10 +13284,10 @@ impl Tool for MoveCursorTool {
             name: "move_cursor".into(),
             description: "Move the synthetic agent cursor without changing the user's pointer. Only an explicit scope=desktop request moves the real OS pointer in get_desktop_state coordinates.".into(),
             input_schema: json!({"type":"object","required":["x","y"],"properties":{
-                "x":{"type":"number","description":"Destination X. Window scope: screen coordinates of the agent cursor overlay. Desktop scope: get_desktop_state screenshot pixels."},
+                "x":{"type":"number","description":"Destination X in screen coordinates: window scope moves only the agent cursor overlay, and a window target does not convert window pixels. Desktop scope: get_desktop_state screenshot pixels."},
                 "y":{"type":"number","description":"Destination Y, in the same space as x."},
                 "session": pincer_core::tool_schema::session_schema(),
-                "cursor_id":{"type":"string","description":"Cursor instance to move. Default: 'default'."},
+                "cursor_id":{"type":"string","description":"Cursor instance to move when no `session` is given; with `session`, the session label names the cursor. Default 'default'."},
                 "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"\"window\" (default) moves only the agent cursor overlay; \"desktop\" moves the real OS pointer."}
             },"additionalProperties":false}),
             read_only: false, destructive: false, idempotent: true, open_world: false,
@@ -13412,11 +13400,11 @@ fn move_along_path_schema() -> Value {
     };
     json!({"type":"object","properties":{
         "session": pincer_core::tool_schema::session_schema(),
-        "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"\"window\" (default): points are window-local pixels of window_id's get_window_state screenshot, and the window is brought to front first. \"desktop\": get_desktop_state pixels, without pid/window_id."},
+        "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"\"window\" (default): window_id's get_window_state screenshot pixels; the window is raised first. \"desktop\": get_desktop_state pixels, no pid/window_id."},
         "pid":{"type":"integer","description":"Target process ID. Required for window scope."},
         "window_id":{"type":"integer","description":"Target window ID. Required for window scope."},
         "start": point("First point [x, y] of `segments`."),
-        "segments":{"type":"array","minItems":1,"maxItems":MAX_SEGMENTS,"description":"Path pieces after `start`, each with exactly one key: line, quad, cubic, or arc (around center from the current point; positive sweep_deg is clockwise on screen, the radius is the distance to center).","items":{
+        "segments":{"type":"array","minItems":1,"maxItems":MAX_SEGMENTS,"description":"Pieces after `start`, each with one key: line, quad, cubic, or arc (from the current point around center, which sets the radius).","items":{
             "type":"object",
             "minProperties":1,
             "maxProperties":1,
@@ -13429,8 +13417,8 @@ fn move_along_path_schema() -> Value {
             }
         }},
         "points":{"type":"array","minItems":2,"maxItems":MAX_POINTS,"items": point("Point [x, y]."),"description":"Polyline [[x, y], ...], instead of segments."},
-        "smooth":{"type":"boolean","description":"With `points`: a Catmull-Rom curve through every point instead of straight spans. Default false."},
-        "parametric":{"type":"object","required":["x","y","t_from","t_to"],"additionalProperties":false,"description":"Curve x(t), y(t) for t from t_from to t_to, for circles, loops and spirals. Expressions support + - * / ^, sin/cos/tan, sqrt, abs, exp, ln, pi, e.","properties":{
+        "smooth":{"type":"boolean","description":"With `points`: a Catmull-Rom curve through the points instead of straight spans. Default false."},
+        "parametric":{"type":"object","required":["x","y","t_from","t_to"],"additionalProperties":false,"description":"x(t), y(t) for t from t_from to t_to (circles, loops, spirals). Supports + - * / ^, sin, cos, tan, sqrt, abs, exp, ln, pi, e.","properties":{
             "x":{"type":"string","description":"x(t), e.g. \"1280+300*cos(t)\"."},
             "y":{"type":"string","description":"y(t), e.g. \"720+300*sin(t)\"."},
             "t_from":{"type":"number","description":"First value of t."},
@@ -13438,11 +13426,11 @@ fn move_along_path_schema() -> Value {
         }},
         // The shared `button` shape (left/right/middle); leaving it out is the
         // hover-only glide, and "none" is accepted as the same thing.
-        "button":{"type":"string","enum":["left","right","middle"],"description":"Button pressed at the first point, held along the path and released at the last. Omit for a hover-only glide."},
+        "button":{"type":"string","enum":["left","right","middle"],"description":"Button held from the first point to the last. Omit to only move."},
         "click_at_end":{"type":"string","enum":["left","right","middle","double"],"description":"Click at the last point after the glide. Only without `button`."},
-        "duration_ms":{"type":"integer","minimum":0,"maximum":MAX_DURATION_MS,"default":600,"description":"Glide time in milliseconds. Default 600."},
-        "easing":{"type":"string","enum":["linear","ease_in","ease_out","ease_in_out"],"default":"ease_in_out","description":"Speed along the path; linear is even speed. Default ease_in_out."},
-        "spacing_px":{"type":"number","minimum":MIN_SPACING_PX,"maximum":MAX_SPACING_PX,"default":4,"description":format!("Largest distance between samples along the path, in the path's pixels. Default 4. At most {MAX_SAMPLES} samples.")}
+        "duration_ms":{"type":"integer","minimum":0,"maximum":MAX_DURATION_MS,"default":600,"description":"Glide time in ms. Default 600."},
+        "easing":{"type":"string","enum":["linear","ease_in","ease_out","ease_in_out"],"default":"ease_in_out","description":"Speed profile; linear is even. Default ease_in_out."},
+        "spacing_px":{"type":"number","minimum":MIN_SPACING_PX,"maximum":MAX_SPACING_PX,"default":4,"description":format!("Max distance between samples, in path pixels. Default 4; at most {MAX_SAMPLES} samples.")}
     },"additionalProperties":false})
 }
 
@@ -13468,10 +13456,9 @@ impl Tool for MoveAlongPathTool {
     fn def(&self) -> &ToolDef {
         MOVE_ALONG_PATH_DEF.get_or_init(|| ToolDef {
             name: "move_along_path".into(),
-            description: "Glide the real OS pointer along a path: line, quad, cubic and arc segments, a \
-                polyline (optionally smoothed), or a parametric x(t), y(t). Optionally hold a button \
-                along it (draw, drag) or click at the end. Samples are evenly spaced along the path and \
-                timed by duration_ms and easing. On Wayland, only scope \"desktop\" without pid/window_id."
+            description: "Move the real pointer along a path (segments, a polyline, or a \
+                parametric x(t), y(t)), optionally holding a button to draw or drag, or clicking \
+                at the end. On Wayland, only scope \"desktop\" without pid/window_id works."
                 .into(),
             input_schema: move_along_path_schema(),
             read_only: false,
@@ -14360,9 +14347,9 @@ impl Tool for ZoomTool {
     fn def(&self) -> &ToolDef {
         ZOOM_DEF.get_or_init(|| ToolDef {
             name: "zoom".into(),
-            description: "Capture a cropped JPEG of a window region (x1,y1)–(x2,y2) in \
+            description: "Capture a cropped JPEG of a window region from (x1,y1) to (x2,y2) in \
                 screenshot pixels, with 20% padding. Output is at most 500 px wide. \
-                Corners, not a size: x1,y1 is the top-left and x2,y2 the bottom-right (x,y,width,height is also accepted and converted).\n\n\
+                Corners, not a size: x1,y1 is the top-left and x2,y2 the bottom-right (x,y,width,height is also accepted and converted). The result echoes the region in window pixels, which differ from screenshot pixels when frame_scale < 1.\n\n\
                 After a zoom, pass from_zoom=true to click, double_click, right_click, drag or \
                 a mouse_button / mouse_drag call to auto-translate coordinates back to \
                 full-window space. Coordinate actions return \
@@ -15732,6 +15719,8 @@ mod session_cursor_target_tests;
 
 #[cfg(test)]
 mod display_only_tests;
+#[cfg(test)]
+mod since_screenshot_default_tests;
 #[cfg(test)]
 mod window_capture_dimension_tests;
 
