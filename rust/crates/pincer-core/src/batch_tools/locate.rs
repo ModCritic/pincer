@@ -694,7 +694,18 @@ impl<'a> Locator<'a> {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .insert((window.pid, window.window_id));
-            if first {
+            // The caller's own last read of the window is the baseline the
+            // `observe` description promises; a read here is only for a
+            // window the caller never read with this view. It used to be
+            // taken every time, so the end diff named a snapshot the caller
+            // never saw (A/B test, 2026-11-03), and, taken at the first
+            // lookup, it missed what earlier token steps had changed.
+            let remembered = crate::window_state_view::remembers_plain_read(
+                window.pid,
+                window.window_id,
+                usize::try_from(max_elements).unwrap_or(usize::MAX),
+            );
+            if first && !remembered {
                 // Best effort: a failed baseline only means a full end read.
                 let _ = self
                     .call(

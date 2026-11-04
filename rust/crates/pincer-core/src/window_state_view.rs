@@ -295,15 +295,16 @@ pub fn apply(
             since.to_owned()
         }
     });
+    let truncated = structured.get("truncated").and_then(Value::as_bool) == Some(true);
     let outcome = since_resolved.as_deref().map(|since| {
         if since.is_empty() {
             SinceOutcome::Fallback("no_baseline")
         } else {
-            resolve_since(since, snapshot_id.as_deref(), &md, ctx)
+            resolve_since(since, snapshot_id.as_deref(), &md, truncated, ctx)
         }
     });
     if let Some(sid) = &snapshot_id {
-        remember(sid, ctx, &md);
+        remember(sid, ctx, &md, truncated);
     }
 
     // Header text added to the first line of the tree block.
@@ -318,10 +319,7 @@ pub fn apply(
 
     let body;
     match outcome {
-        Some(SinceOutcome::Diff(mut report)) => {
-            if structured.get("truncated").and_then(Value::as_bool) == Some(true) {
-                report.mark_cut(parse_rows(&md).iter().filter_map(|row| row.index).max());
-            }
+        Some(SinceOutcome::Diff(report)) => {
             let since = since_resolved.as_deref().unwrap_or_default();
             let focus = if report.is_empty() {
                 ctx.focus_probe.and_then(|probe| probe())
@@ -330,17 +328,24 @@ pub fn apply(
             };
             let text = report.render(since, snapshot_id.as_deref(), focus.as_deref());
             structured["since"] = json!(since);
-            structured["since_status"] = json!(if report.is_empty() {
-                "no_change"
-            } else {
-                "diff"
-            });
+            structured["since_status"] =
+                json!(if report.is_empty() && report.first_read.is_empty() {
+                    "no_change"
+                } else {
+                    "diff"
+                });
             structured["tree_diff"] = json!(text);
             structured["diff_counts"] = json!({
                 "added": report.added.len(),
                 "changed": report.changed.len(),
                 "removed": report.removed.len(),
             });
+            if report.unreached > 0 {
+                structured["diff_counts"]["not_reached"] = json!(report.unreached);
+            }
+            if !report.first_read.is_empty() {
+                structured["diff_counts"]["first_read"] = json!(report.first_read.len());
+            }
             if let Some(focus) = focus {
                 structured["focused_element"] = json!(focus);
             }
@@ -348,13 +353,14 @@ pub fn apply(
                 .added
                 .iter()
                 .chain(report.changed.iter())
+                .chain(report.first_read.iter())
                 .filter_map(|row| row.index)
                 .collect();
             retain_elements(structured, opts.tree_format, Some(&keep));
             if let Some(obj) = structured.as_object_mut() {
                 obj.remove("tree_markdown");
             }
-            if structured.get("truncated").and_then(Value::as_bool) == Some(true) {
+            if truncated {
                 if let (Some(sid), Some(last)) = (
                     &snapshot_id,
                     parse_rows(&md).iter().filter_map(|row| row.index).max(),
@@ -396,7 +402,6 @@ pub fn apply(
                 }
             }
             if let (TreeFormat::Markdown, Some(sid)) = (opts.tree_format, &snapshot_id) {
-                let truncated = structured.get("truncated").and_then(Value::as_bool) == Some(true);
                 header_extra.push_str(&token_hint(sid, &md, truncated));
             }
         }
@@ -460,8 +465,9 @@ pub fn shorten_long_values(md: &str) -> std::borrow::Cow<'_, str> {
     const OPEN: &str = " value=\"";
     if !md.lines().any(|line| {
         line.find(OPEN).is_some_and(|start| {
-            value_end(line, start + OPEN.len())
-                .is_some_and(|end| line[start + OPEN.len()..end].chars().count() > VALUE_PREVIEW_CHARS)
+            value_end(line, start + OPEN.len()).is_some_and(|end| {
+                line[start + OPEN.len()..end].chars().count() > VALUE_PREVIEW_CHARS
+            })
         })
     }) {
         return std::borrow::Cow::Borrowed(md);
@@ -547,6 +553,23 @@ fn token_hint(snapshot_id: &str, md: &str, truncated: bool) -> String {
 
 /// The most recent remembered read of this window with the same view key,
 /// other than the read being shaped now.
+/// Whether a plain read of this window (no query, no depth limit) with
+/// `max_elements` is still remembered, so a `since:"latest"` read of that
+/// view has a baseline to diff against.
+pub(crate) fn remembers_plain_read(pid: i64, window_id: u64, max_elements: usize) -> bool {
+    let ctx = ViewContext {
+        pid,
+        window_id,
+        key: ViewKey {
+            query: None,
+            max_elements,
+            max_depth: None,
+        },
+        focus_probe: None,
+    };
+    latest_snapshot(&ctx, None).is_some()
+}
+
 fn latest_snapshot(ctx: &ViewContext<'_>, current_id: Option<&str>) -> Option<String> {
     let guard = store().lock().unwrap_or_else(|e| e.into_inner());
     guard
@@ -680,6 +703,9 @@ struct StoredSnapshot {
     window_id: u64,
     key: ViewKey,
     markdown: String,
+    /// The read was cut short (walk timeout or node budget): it holds only
+    /// the leading rows of the window's tree.
+    truncated: bool,
     at: Instant,
 }
 
@@ -688,7 +714,7 @@ fn store() -> &'static Mutex<VecDeque<StoredSnapshot>> {
     STORE.get_or_init(|| Mutex::new(VecDeque::new()))
 }
 
-fn remember(snapshot_id: &str, ctx: &ViewContext<'_>, md: &str) {
+fn remember(snapshot_id: &str, ctx: &ViewContext<'_>, md: &str, truncated: bool) {
     let mut guard = store().lock().unwrap_or_else(|e| e.into_inner());
     // A screenshot-only read keeps its snapshot id and returns no tree. It
     // must not erase the rows that snapshot's tokens were read from.
@@ -702,6 +728,7 @@ fn remember(snapshot_id: &str, ctx: &ViewContext<'_>, md: &str) {
         window_id: ctx.window_id,
         key: ctx.key.clone(),
         markdown: md.to_owned(),
+        truncated,
         at: Instant::now(),
     });
     let same_window = |s: &StoredSnapshot| s.pid == ctx.pid && s.window_id == ctx.window_id;
@@ -854,13 +881,14 @@ pub(crate) fn remember_for_test(snapshot_id: &str, pid: i64, window_id: u64, mar
         },
         focus_probe: None,
     };
-    remember(snapshot_id, &ctx, markdown);
+    remember(snapshot_id, &ctx, markdown, false);
 }
 
 fn resolve_since(
     since: &str,
     current_id: Option<&str>,
     md: &str,
+    truncated: bool,
     ctx: &ViewContext<'_>,
 ) -> SinceOutcome {
     if current_id.is_none() {
@@ -880,7 +908,7 @@ fn resolve_since(
     if old.key != ctx.key {
         return SinceOutcome::Fallback("view_changed");
     }
-    match diff_markdown(&old.markdown, md) {
+    match diff_markdown(&old.markdown, md, old.truncated, truncated) {
         Err(DiffError::TooLarge) => SinceOutcome::Fallback("diff_too_large"),
         Ok(report) => {
             // Both sides as the caller would read them, long values cut: an
@@ -923,8 +951,13 @@ pub struct DiffReport {
     /// The new read was cut after this row: old rows past it were not
     /// reached, which says nothing about whether they still exist.
     cut_after: Option<u64>,
-    /// Old rows past `cut_after` left out of `removed`.
+    /// Old rows past the new read's cut, left out of `removed`.
     unreached: usize,
+    /// The old read was cut after this row.
+    old_cut_after: Option<u64>,
+    /// New rows past the old read's cut, left out of `added`: the old read
+    /// never got that far, so they need not be new.
+    first_read: Vec<Row>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -987,47 +1020,87 @@ fn identity_of(indent: usize, after_index: &str) -> String {
     format!("{indent}|{role}|{}", id.or(label).unwrap_or(""))
 }
 
-fn diff_markdown(old_md: &str, new_md: &str) -> Result<DiffReport, DiffError> {
+/// Diff two reads row by row. `old_cut` / `new_cut` say a read was cut short.
+/// A cut read is assumed to be the leading part of the full tree: the Linux
+/// walk is depth-first and renders rows in visit order (atspi/native.rs), and
+/// the macOS and Windows walks say they truncate depth-first (ax/tree.rs and
+/// the Windows max_elements description; not run here). The rows after the
+/// last row both reads share are therefore the only ones a cut can hide:
+/// there, an old row the cut new read lacks was not reached, and a new row
+/// the cut old read lacks was not read before. Neither is reported as removed
+/// or added
+/// (A/B test of 62b714f, 2026-11-03: toolbar rows with no `[N]` came out as
+/// removed, and run_steps listed menu items past its cut baseline as added).
+fn diff_markdown(
+    old_md: &str,
+    new_md: &str,
+    old_cut: bool,
+    new_cut: bool,
+) -> Result<DiffReport, DiffError> {
     let old = parse_rows(old_md);
     let new = parse_rows(new_md);
-    let ops = diff_ops(&old, &new)?;
+    let ops = diff_ops(&old, &new, old_cut || new_cut)?;
 
     let mut report = DiffReport::default();
+    if new_cut {
+        report.cut_after = new.iter().filter_map(|row| row.index).max();
+    }
+    if old_cut {
+        report.old_cut_after = old.iter().filter_map(|row| row.index).max();
+    }
     let mut dels: Vec<usize> = Vec::new();
     let mut inss: Vec<usize> = Vec::new();
     // Unchanged rows whose index moved, grouped into runs of equal delta.
     let mut run: Option<(u64, u64, i64)> = None;
 
-    let flush_hunk = |dels: &mut Vec<usize>, inss: &mut Vec<usize>, report: &mut DiffReport| {
-        let mut used = vec![false; dels.len()];
-        for &i in inss.iter() {
-            let pair = dels
-                .iter()
-                .enumerate()
-                .find(|(d, &o)| !used[*d] && old[o].identity == new[i].identity);
-            match pair {
-                Some((d, _)) => {
+    // `last` marks the hunk after the last shared row, where a cut hides rows.
+    let flush_hunk =
+        |dels: &mut Vec<usize>, inss: &mut Vec<usize>, report: &mut DiffReport, last: bool| {
+            let mut used = vec![false; dels.len()];
+            let mut paired = vec![false; inss.len()];
+            for (k, &i) in inss.iter().enumerate() {
+                let pair = dels
+                    .iter()
+                    .enumerate()
+                    .find(|(d, &o)| !used[*d] && old[o].identity == new[i].identity);
+                if let Some((d, _)) = pair {
                     used[d] = true;
-                    report.changed.push(new[i].clone());
+                    paired[k] = true;
                 }
-                None => report.added.push(new[i].clone()),
             }
-        }
-        for (d, &o) in dels.iter().enumerate() {
-            if !used[d] {
-                report.removed.push(old[o].clone());
+            // Both reads reached a paired row, so only rows after the last pair
+            // can sit past a cut.
+            let reached_old = used.iter().rposition(|&u| u).map_or(0, |d| d + 1);
+            let reached_new = paired.iter().rposition(|&p| p).map_or(0, |k| k + 1);
+            for (k, &i) in inss.iter().enumerate() {
+                if paired[k] {
+                    report.changed.push(new[i].clone());
+                } else if last && old_cut && k >= reached_new {
+                    report.first_read.push(new[i].clone());
+                } else {
+                    report.added.push(new[i].clone());
+                }
             }
-        }
-        dels.clear();
-        inss.clear();
-    };
+            for (d, &o) in dels.iter().enumerate() {
+                if used[d] {
+                    continue;
+                }
+                if last && new_cut && d >= reached_old {
+                    report.unreached += 1;
+                } else {
+                    report.removed.push(old[o].clone());
+                }
+            }
+            dels.clear();
+            inss.clear();
+        };
 
     for op in ops {
         match op {
             Op::Del(o) => dels.push(o),
             Op::Ins(n) => inss.push(n),
             Op::Equal(o, n) => {
-                flush_hunk(&mut dels, &mut inss, &mut report);
+                flush_hunk(&mut dels, &mut inss, &mut report, false);
                 if let (Some(oi), Some(ni)) = (old[o].index, new[n].index) {
                     let delta = ni as i64 - oi as i64;
                     match (&mut run, delta) {
@@ -1048,7 +1121,7 @@ fn diff_markdown(old_md: &str, new_md: &str) -> Result<DiffReport, DiffError> {
             }
         }
     }
-    flush_hunk(&mut dels, &mut inss, &mut report);
+    flush_hunk(&mut dels, &mut inss, &mut report, true);
     if let Some(done) = run.take() {
         report.reindexed.push(done);
     }
@@ -1072,7 +1145,9 @@ enum Op {
     Ins(usize),
 }
 
-fn diff_ops(old: &[Row], new: &[Row]) -> Result<Vec<Op>, DiffError> {
+/// `cut`: one read was cut short, so the two reads end at different places
+/// in the tree and their last rows are not matched up.
+fn diff_ops(old: &[Row], new: &[Row], cut: bool) -> Result<Vec<Op>, DiffError> {
     let mut prefix = 0;
     while prefix < old.len()
         && prefix < new.len()
@@ -1082,7 +1157,8 @@ fn diff_ops(old: &[Row], new: &[Row]) -> Result<Vec<Op>, DiffError> {
         prefix += 1;
     }
     let mut suffix = 0;
-    while suffix < old.len() - prefix
+    while !cut
+        && suffix < old.len() - prefix
         && suffix < new.len() - prefix
         && old[old.len() - 1 - suffix].key == new[new.len() - 1 - suffix].key
         && old[old.len() - 1 - suffix].indent == new[new.len() - 1 - suffix].indent
@@ -1148,26 +1224,14 @@ impl DiffReport {
             .iter()
             .chain(&self.changed)
             .chain(&self.removed)
+            .chain(&self.first_read)
             .map(|r| shorten_long_values(&r.text).len() + 3)
             .sum()
     }
 
-    /// The new read stopped after row `last`: old rows past it were not
-    /// reached, so they are not reported as removed (a cut `since` re-read
-    /// listed "- [54] menu item \"Settings\"" for a menu that was still
-    /// there, desc-test round 1 redo).
-    fn mark_cut(&mut self, last: Option<u64>) {
-        self.cut_after = last;
-        let Some(last) = last else { return };
-        let before = self.removed.len();
-        self.removed
-            .retain(|row| row.index.is_none_or(|index| index <= last));
-        self.unreached = before - self.removed.len();
-    }
-
     fn render(&self, since: &str, snapshot_id: Option<&str>, focus: Option<&str>) -> String {
         let new_id = snapshot_id.unwrap_or("the new snapshot");
-        if self.is_empty() {
+        if self.is_empty() && self.first_read.is_empty() {
             let mut out = match self.cut_after {
                 Some(last) => format!(
                     "no change since {since} among the rows this read reached (it stops at row [{last}])"
@@ -1183,7 +1247,7 @@ impl DiffReport {
             return out;
         }
         let mut out = format!(
-            "since {since}: {} added, {} changed, {} removed. Use element_tokens {new_id}:N for + and ~ rows and unchanged rows; - ids are from {since}.\n",
+            "since {since}: {} added, {} changed, {} removed. Use element_tokens {new_id}:N for every row except - rows; - ids are from {since}.\n",
             self.added.len(),
             self.changed.len(),
             self.removed.len()
@@ -1199,10 +1263,20 @@ impl DiffReport {
         }
         if self.unreached > 0 {
             out.push_str(&format!(
-                "{} row(s) past [{}] were not reached by this cut read; they are not removed.\n",
+                "{} later row(s) of {since} were not reached by this read, which stops at row [{}]; they are not removed.\n",
                 self.unreached,
                 self.cut_after.unwrap_or_default()
             ));
+        }
+        if !self.first_read.is_empty() {
+            out.push_str(&format!(
+                "{since} stopped at row [{}] (cut short), so these {} row(s) past it are read for the first time, not added:\n",
+                self.old_cut_after.unwrap_or_default(),
+                self.first_read.len()
+            ));
+            for row in &self.first_read {
+                out.push_str(&format!("  {}\n", row.text));
+            }
         }
         const MAX_RUNS: usize = 20;
         for (first_old, last_old, delta) in self.reindexed.iter().take(MAX_RUNS) {
@@ -1281,7 +1355,7 @@ mod tests {
 
     #[test]
     fn identical_trees_report_no_change() {
-        let report = diff_markdown(OLD, OLD).unwrap();
+        let report = diff_markdown(OLD, OLD, false, false).unwrap();
         assert!(report.is_empty());
         let text = report.render(
             "s00000001",
@@ -1295,7 +1369,7 @@ mod tests {
     #[test]
     fn value_edit_is_a_change_and_removal_and_addition_are_reported() {
         let new = "- [0] AXWindow \"Doc\"\n  - [1] AXTextField \"Name\" = \"ab\" [id=name]\n  - AXStaticText = \"hello\"\n  - [2] AXButton \"Save\" [id=save actions=[press]]\n  - [3] AXButton \"Help\" [id=help actions=[press]]";
-        let report = diff_markdown(OLD, new).unwrap();
+        let report = diff_markdown(OLD, new, false, false).unwrap();
         assert_eq!(report.changed.len(), 1);
         assert_eq!(report.changed[0].index, Some(1));
         assert_eq!(report.added.len(), 1);
@@ -1310,7 +1384,7 @@ mod tests {
     #[test]
     fn inserted_row_reports_reindexed_range() {
         let new = "- [0] AXWindow \"Doc\"\n  - [1] AXTextField \"Name\" = \"a\" [id=name]\n  - AXStaticText = \"hello\"\n  - [2] AXCheckBox \"New\" [id=new]\n  - [3] AXButton \"Save\" [id=save actions=[press]]\n  - [4] AXButton \"Cancel\" [id=cancel actions=[press]]";
-        let report = diff_markdown(OLD, new).unwrap();
+        let report = diff_markdown(OLD, new, false, false).unwrap();
         assert_eq!(report.added.len(), 1);
         assert!(report.removed.is_empty());
         assert_eq!(report.reindexed, vec![(2, 3, 1)]);
@@ -1322,7 +1396,7 @@ mod tests {
     #[test]
     fn display_only_text_changes_are_seen() {
         let new = OLD.replace("hello", "goodbye");
-        let report = diff_markdown(OLD, &new).unwrap();
+        let report = diff_markdown(OLD, &new, false, false).unwrap();
         assert_eq!(report.changed.len(), 1);
         assert_eq!(report.changed[0].index, None);
     }
@@ -1331,7 +1405,7 @@ mod tests {
     fn multiline_action_rows_stay_one_row() {
         let md = "- [0] AXWindow\n  - [1] AXButton \"x\" [actions=[press,name:move\ntarget:0x0\nselector:(null)]]\n  - [2] AXButton \"y\"";
         assert_eq!(parse_rows(md).len(), 3);
-        assert!(diff_markdown(md, md).unwrap().is_empty());
+        assert!(diff_markdown(md, md, false, false).unwrap().is_empty());
     }
 
     #[test]
@@ -1568,7 +1642,10 @@ mod tests {
             text.contains(&format!("...\" ({chars} chars) [actions=[]]")),
             "{text}"
         );
-        assert!(text.contains("full_output:true returns them whole"), "{text}");
+        assert!(
+            text.contains("full_output:true returns them whole"),
+            "{text}"
+        );
         assert!(text.len() < 1200, "{}", text.len());
         let shown = s["tree_markdown"].as_str().unwrap();
         assert!(shown.len() < 1000, "{}", shown.len());
@@ -1608,7 +1685,10 @@ mod tests {
             shorten_long_values(md),
             std::borrow::Cow::Borrowed(_)
         ));
-        let long = format!("- [1] entry \"q\" value=\"{}\" [actions=[]]", "\"x\" ".repeat(80));
+        let long = format!(
+            "- [1] entry \"q\" value=\"{}\" [actions=[]]",
+            "\"x\" ".repeat(80)
+        );
         let short = shorten_long_values(&long);
         assert!(short.ends_with("...\" (320 chars) [actions=[]]"), "{short}");
     }
@@ -1617,25 +1697,145 @@ mod tests {
     fn a_cut_read_does_not_call_unreached_rows_removed() {
         let old = "- [0] W \"Doc\"\n  - [1] push button \"A\" [actions=[Press]]\n  - [2] push button \"B\" [actions=[Press]]\n  - [3] menu item \"Settings\" [actions=[Show Menu]]";
         let new = "- [0] W \"Doc\"\n  - [1] push button \"A\" [actions=[Press]]";
-        let mut report = diff_markdown(old, new).unwrap();
-        assert_eq!(report.removed.len(), 2);
-        report.mark_cut(Some(1));
+        assert_eq!(
+            diff_markdown(old, new, false, false).unwrap().removed.len(),
+            2
+        );
+        let report = diff_markdown(old, new, false, true).unwrap();
         assert!(report.removed.is_empty());
         let text = report.render("s1", Some("s2"), None);
         assert!(
-            text.starts_with("no change since s1 among the rows this read reached (it stops at row [1])"),
+            text.starts_with(
+                "no change since s1 among the rows this read reached (it stops at row [1])"
+            ),
             "{text}"
         );
 
         // A real removal before the cut is still reported, with the count
         // of rows the cut read did not reach.
         let new = "- [0] W \"Doc\"\n  - [2] push button \"B\" [actions=[Press]]";
-        let mut report = diff_markdown(old, new).unwrap();
-        report.mark_cut(Some(2));
+        let report = diff_markdown(old, new, false, true).unwrap();
         let text = report.render("s1", Some("s2"), None);
         assert!(text.contains("- [1] push button \"A\""), "{text}");
         assert!(!text.contains("Settings"), "{text}");
-        assert!(text.contains("1 row(s) past [2] were not reached"), "{text}");
+        assert!(
+            text.contains(
+                "1 later row(s) of s1 were not reached by this read, which stops at row [2]"
+            ),
+            "{text}"
+        );
+    }
+
+    /// A Kate window as a timed-out walk sees it: many rows first, then
+    /// toolbar rows with no `[N]` (containers, disabled buttons), then the
+    /// menu bar, which the walk reaches last (A/B test, 2026-11-03).
+    /// `find_bar` inserts a row at [1], shifting every later index by one.
+    fn kate_rows(find_bar: bool) -> Vec<String> {
+        let mut rows = vec!["- [0] frame \"kate-scratch.txt - Kate\"".to_owned()];
+        let mut n = 1;
+        if find_bar {
+            rows.push(format!("  - [{n}] label \"Find\" [actions=[]]"));
+            n += 1;
+        }
+        for line in 0..40 {
+            rows.push(format!(
+                "  - [{n}] list item \"line {line}\" [actions=[Toggle]]"
+            ));
+            n += 1;
+        }
+        rows.push("  - tool bar = \"Main Toolbar\"".to_owned());
+        rows.push("    - push button = \"Undo\" (disabled)".to_owned());
+        rows.push("    - push button = \"Redo\" (disabled)".to_owned());
+        rows.push("  - tool bar = \"Hamburger Menu Toolbar\"".to_owned());
+        rows.push(format!(
+            "    - [{n}] push button \"Open Menu\" [actions=[Press]]"
+        ));
+        n += 1;
+        rows.push("  - menu bar".to_owned());
+        for name in ["File", "Edit", "Settings", "Help"] {
+            rows.push(format!(
+                "    - [{n}] menu item \"{name}\" [actions=[Show Menu]]"
+            ));
+            n += 1;
+        }
+        rows
+    }
+
+    /// The rows of `rows` up to and including the first one containing `last`.
+    fn cut_at(rows: &[String], last: &str) -> String {
+        let end = rows.iter().position(|row| row.contains(last)).unwrap();
+        rows[..=end].join("\n")
+    }
+
+    /// Read `md` as snapshot `sid` of `window`, optionally `since:"latest"`
+    /// and optionally cut short, through the same path a tool call takes.
+    fn read(window: u64, sid: &str, md: &str, cut: bool, since: bool) -> (String, Value) {
+        let (mut content, mut s) = payload(sid, md);
+        if cut {
+            s["truncated"] = json!(true);
+            s["truncation_reason"] = json!("timeout");
+        }
+        let args = if since {
+            json!({"since": "latest"})
+        } else {
+            json!({})
+        };
+        apply(&opts(args), &ctx(window), &mut content, &mut s);
+        (text_of(&content), s)
+    }
+
+    #[test]
+    fn a_cut_since_read_lists_no_unreached_row_as_removed() {
+        // A/B fixes-1: the re-read stopped before the toolbars; their rows
+        // have no [N], so the index rule kept them as "- tool bar ...".
+        let window = 7104;
+        let full = kate_rows(false).join("\n");
+        read(window, "s0000f201", &full, false, false);
+        let cut = cut_at(&kate_rows(false), "line 39");
+        let (text, s) = read(window, "s0000f202", &cut, true, true);
+        assert_eq!(s["since_status"], "no_change", "{text}");
+        assert!(!text.contains("\n- "), "{text}");
+        assert!(text.contains("among the rows this read reached"), "{text}");
+    }
+
+    #[test]
+    fn a_cut_since_read_after_a_reindex_lists_no_unreached_row_as_removed() {
+        // A/B fixes-2: a row inserted at [1] moved every index up by one, so
+        // the cut read's last row [44] is the old [43], and the old [44]
+        // "Settings", never reached, came out as removed.
+        let window = 7105;
+        let full = kate_rows(false).join("\n");
+        read(window, "s0000f211", &full, false, false);
+        let cut = cut_at(&kate_rows(true), "\"Edit\"");
+        let (text, s) = read(window, "s0000f212", &cut, true, true);
+        assert_eq!(s["since_status"], "diff", "{text}");
+        assert!(text.contains("+ [1] label \"Find\""), "{text}");
+        assert!(
+            !text.contains("Settings") && !text.contains("Help"),
+            "{text}"
+        );
+        assert_eq!(s["diff_counts"]["removed"], 0, "{text}");
+        assert!(text.contains("this read stops at row [44]"), "{text}");
+    }
+
+    #[test]
+    fn rows_past_a_cut_baseline_are_not_called_added() {
+        // A/B fixes-1: run_steps took its baseline with a walk that timed out
+        // before the menu bar's last items; its end read reached them and
+        // listed "+ [53] menu item \"Settings\"" as added.
+        let window = 7106;
+        let cut = cut_at(&kate_rows(false), "\"Edit\"");
+        read(window, "s0000f221", &cut, true, false);
+        let full = kate_rows(false).join("\n");
+        let (text, s) = read(window, "s0000f222", &full, false, true);
+        assert!(
+            !text.contains("+ [44]") && !text.contains("+ [45]"),
+            "{text}"
+        );
+        assert_eq!(s["diff_counts"]["added"], 0, "{text}");
+        // The caller never saw them, so they are listed, as first reads.
+        assert!(text.contains("[44] menu item \"Settings\""), "{text}");
+        assert!(text.contains("s0000f221 stopped at row [43]"), "{text}");
     }
 
     #[test]
@@ -1644,7 +1844,7 @@ mod tests {
         // Open Menu moved from [1] to [2] (desc-test round 1, item 6).
         let old = "- [0] W \"Doc\"\n  - push button = \"Undo\" (disabled)\n  - [1] push button \"Open Menu\" [actions=[]]";
         let new = "- [0] W \"Doc\"\n  - [1] push button \"Undo\" [actions=[Press]]\n  - [2] push button \"Open Menu\" [actions=[]]";
-        let report = diff_markdown(old, new).unwrap();
+        let report = diff_markdown(old, new, false, false).unwrap();
         let text = report.render("s1", Some("s2"), None);
         assert!(
             text.contains("reindexed: [1] push button \"Open Menu\" -> [2]"),

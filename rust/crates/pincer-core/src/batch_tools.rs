@@ -602,8 +602,9 @@ impl Plan {
             self.session.clone(),
             started + Duration::from_millis(MAX_BATCH_MS),
         );
-        // A default diff observation gets a baseline from the batch's first
-        // read of each window it looks in.
+        // A default diff observation diffs against the caller's last read of
+        // the window; a window the caller never read gets a baseline from
+        // the batch's first read of it.
         if let Some(observe) = &self.observe {
             let plain_view = observe.get("query").is_none()
                 && observe.get("max_depth").is_none()
@@ -1149,12 +1150,20 @@ fn observation_summary(state: &Value) -> String {
     match status {
         Some("diff") => {
             let counts = &state["diff_counts"];
-            format!(
+            let mut line = format!(
                 "changed since {since}: {} added, {} changed, {} removed",
                 counts["added"].as_u64().unwrap_or(0),
                 counts["changed"].as_u64().unwrap_or(0),
                 counts["removed"].as_u64().unwrap_or(0)
-            )
+            );
+            // Rows a cut read hid are neither added nor removed.
+            if let Some(n) = counts["first_read"].as_u64() {
+                line.push_str(&format!(", {n} read for the first time"));
+            }
+            if let Some(n) = counts["not_reached"].as_u64() {
+                line.push_str(&format!(", {n} not reached"));
+            }
+            line
         }
         Some("no_change") => format!("no change since {since}"),
         Some(_) => "full read (no usable earlier read of this window to diff against)".to_owned(),

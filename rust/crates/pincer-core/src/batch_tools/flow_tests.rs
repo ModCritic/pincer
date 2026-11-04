@@ -499,7 +499,7 @@ async fn a_check_only_step_names_the_window_to_observe() {
 }
 
 #[tokio::test]
-async fn the_end_observation_diffs_against_the_batch_start() {
+async fn a_window_the_caller_never_read_gets_a_baseline_read() {
     let harness = Harness::new();
     let result = harness
         .run(json!({"steps": [
@@ -508,8 +508,9 @@ async fn the_end_observation_diffs_against_the_batch_start() {
         .await;
     assert_ne!(result.is_error, Some(true), "{}", text(&result));
     let reads = harness.calls("get_window_state");
-    // First a plain read with the observation's budget (remembered by
-    // `since`), then the full lookup read, then the end diff.
+    // No earlier read of window 7 is remembered: first a plain read with the
+    // observation's budget (remembered by `since`), then the full lookup
+    // read, then the end diff.
     assert_eq!(reads[0]["max_elements"], 250);
     assert!(reads[0].get("full_output").is_none());
     assert_eq!(reads[1]["full_output"], true);
@@ -524,6 +525,30 @@ async fn the_end_observation_diffs_against_the_batch_start() {
         .run(json!({"steps": [{"click": {"app": "Demo", "role": "button", "name": "Next"}}]}))
         .await;
     assert_eq!(harness.calls("get_window_state").len(), before + 1);
+}
+
+#[tokio::test]
+async fn the_end_observation_diffs_against_the_callers_last_read() {
+    // The caller read window 9 with the observation's view: that read is the
+    // baseline, so the batch takes none of its own and the end diff names a
+    // snapshot the caller has seen (A/B test, 2026-11-03).
+    crate::window_state_view::remember_for_test(
+        "s0000f301",
+        42,
+        9,
+        "- [0] AXWindow \"Bookmark added\"\n  - [1] AXButton \"Done\"\n",
+    );
+    let harness = Harness::new();
+    let result = harness
+        .run(json!({"steps": [
+            {"click": {"pid": 42, "window_id": 9, "role": "button", "name": "Done"}}
+        ], "observe": true}))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let reads = harness.calls("get_window_state");
+    assert_eq!(reads.len(), 2, "lookup and end read only: {reads:?}");
+    assert_eq!(reads[0]["full_output"], true);
+    assert_eq!(reads[1]["since"], "latest");
 }
 
 #[tokio::test]

@@ -400,7 +400,10 @@ async fn a_menu_bar_item_token_runs_as_invoke_menu() {
 // ── stale element targets ────────────────────────────────────────────────
 
 /// A window whose list re-renders on every click: element handles from an
-/// older snapshot are dead, as in Chromium/Electron web content.
+/// older snapshot are dead, as in Chromium/Electron web content. It is pid
+/// 43, window 70: the tests below remember reads of it in the global `since`
+/// store, and on the flow tests' pid 42, window 7 those reads would stand in
+/// for the baseline read those tests count.
 struct Rerender {
     def: ToolDef,
     state: Arc<Mutex<RerenderState>>,
@@ -441,7 +444,7 @@ impl Tool for Rerender {
                     })
                     .collect();
                 ToolResult::text("read").with_structured(json!({
-                    "pid": 42, "window_id": 7, "snapshot_id": snapshot,
+                    "pid": 43, "window_id": 70, "snapshot_id": snapshot,
                     "elements": elements, "tree_markdown": "",
                 }))
             }
@@ -454,7 +457,7 @@ impl Tool for Rerender {
                 if !token.starts_with(&current) {
                     return ToolResult::error(
                         "Background input refused (element_outside_target_window): the addressed \
-                         element could not be proven to belong to window 7; take a fresh \
+                         element could not be proven to belong to window 70; take a fresh \
                          get_window_state snapshot and re-address it",
                     );
                 }
@@ -464,7 +467,7 @@ impl Tool for Rerender {
                 ToolResult::text(format!("clicked {label}"))
             }
             "list_windows" => ToolResult::text("windows").with_structured(json!({"windows": [{
-                "pid": 42, "window_id": 7, "app_name": "Daymark", "title": "Daymark",
+                "pid": 43, "window_id": 70, "app_name": "Daymark", "title": "Daymark",
                 "z_index": 1, "is_on_screen": true,
                 "bounds": {"x": 0.0, "y": 0.0, "width": 800.0, "height": 600.0}
             }]})),
@@ -516,14 +519,14 @@ async fn a_stale_element_token_is_found_again_by_its_role_and_label() {
     // remembered as get_window_state remembers every read.
     crate::window_state_view::remember_for_test(
         "s0000002c",
-        42,
-        7,
+        43,
+        70,
         "- [0] AXWindow \"Daymark\"\n  - [14] AXButton \"Cinder decision LHP-CINDER\" [actions=[press]]\n",
     );
     let result = registry
         .invoke(
             super::super::RUN_STEPS_TOOL,
-            json!({"steps": [{"tool": "click", "args": {"pid": 42, "window_id": 7, "element_token": "s0000002c:14"}}]}),
+            json!({"steps": [{"tool": "click", "args": {"pid": 43, "window_id": 70, "element_token": "s0000002c:14"}}]}),
         )
         .await;
     assert_ne!(result.is_error, Some(true), "{}", text(&result));
@@ -539,15 +542,15 @@ async fn a_stale_token_is_not_retried_when_its_label_is_ambiguous_or_unknown() {
     let (registry, state) = rerender_registry(vec![("AXButton", "OK"), ("AXButton", "OK")]);
     crate::window_state_view::remember_for_test(
         "s0000002d",
-        42,
-        7,
+        43,
+        70,
         "- [3] AXButton \"OK\"\n- [4] AXStaticText = \"no label\"\n",
     );
     for token in ["s0000002d:3", "s0000002d:4", "s0000002d:99", "s0000777f:3"] {
         let result = registry
             .invoke(
                 super::super::RUN_STEPS_TOOL,
-                json!({"steps": [{"tool": "click", "args": {"pid": 42, "window_id": 7, "element_token": token}}]}),
+                json!({"steps": [{"tool": "click", "args": {"pid": 43, "window_id": 70, "element_token": token}}]}),
             )
             .await;
         assert_eq!(result.is_error, Some(true), "{token}");
