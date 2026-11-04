@@ -156,6 +156,23 @@ pub(crate) fn cached_element(pid: u32, xid: Option<u64>, idx: usize) -> Option<C
     snapshot_for(pid, xid)?.get(&idx).cloned()
 }
 
+/// D-Bus addresses of the cached elements of (pid, xid) with role `role`,
+/// in index order.
+pub(crate) fn cached_refs_with_role(pid: u32, xid: u64, role: &str) -> Vec<ObjectRef> {
+    let Some(elements) = snapshot_for(pid, Some(xid)) else {
+        return Vec::new();
+    };
+    let mut matching: Vec<(&usize, &CachedElement)> = elements
+        .iter()
+        .filter(|(_, element)| element.role.trim().eq_ignore_ascii_case(role))
+        .collect();
+    matching.sort_by_key(|(idx, _)| **idx);
+    matching
+        .into_iter()
+        .filter_map(|(_, element)| element.object_ref.clone())
+        .collect()
+}
+
 /// Hit-test a *screen* point against the cached frames of (pid, xid): the
 /// smallest covering real actuator wins, then a passive label. Returns the
 /// element index and its cached identity.

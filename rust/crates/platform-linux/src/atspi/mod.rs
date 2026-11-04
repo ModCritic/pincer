@@ -336,6 +336,16 @@ pub fn focus_element(pid: u32, idx: usize) -> Result<bool> {
 
 pub use native::ScrollProgress;
 
+/// `(current, minimum, maximum)` of every scroll bar the last snapshot of
+/// (pid, xid) indexed, read live; empty when no snapshot knows one.
+pub fn scroll_bar_ranges(pid: u32, xid: u64) -> Vec<Option<(f64, f64, f64)>> {
+    let refs = cache::cached_refs_with_role(pid, xid, "scroll bar");
+    if refs.is_empty() {
+        return Vec::new();
+    }
+    native::value_ranges(&refs)
+}
+
 pub fn scroll_element(
     pid: u32,
     idx: usize,
@@ -384,6 +394,10 @@ pub fn perform_action_at_point_in(
     win_y: i32,
     skip_focus_roles: bool,
 ) -> Result<Option<AtPointHit>> {
+    // A click addressed to a popup window (a Qt context menu, which has no
+    // AT-SPI frame of its own) must not reach the frame-based tiers below:
+    // they would hit-test popup-local pixels against the main window.
+    let target_is_popup = xid != 0 && crate::input::popup_window_info(xid).is_some();
     if xid != 0 {
         if let Some((ox, oy)) = native::x11_window_origin(xid) {
             if let Some(popup) = crate::input::popup_under_screen_point(win_x + ox, win_y + oy) {
@@ -416,22 +430,34 @@ pub fn perform_action_at_point_in(
                         element.role
                     );
                 } else if let Some(object_ref) = element.object_ref {
-                    match native::perform_action_ref(&object_ref) {
-                        Ok((action, _, _)) => {
-                            return Ok(Some(AtPointHit::fired(
-                                action,
-                                element.role.clone(),
-                                String::new(),
-                                object_ref.path.clone(),
-                            )))
+                    let (sx, sy) = (win_x + ox, win_y + oy);
+                    match native::cached_hit_live(&object_ref) {
+                        Some(live) if native::cached_hit_fires(&live, sx, sy, target_is_popup) => {
+                            match native::perform_action_ref(&object_ref) {
+                                Ok((action, _, _)) => {
+                                    return Ok(Some(AtPointHit::fired(
+                                        action,
+                                        element.role.clone(),
+                                        live.name,
+                                        object_ref.path.clone(),
+                                    )))
+                                }
+                                Err(error) => tracing::debug!(
+                                    "cached hit-test element {idx} (pid {pid}) failed: {error:#}"
+                                ),
+                            }
                         }
-                        Err(error) => tracing::debug!(
-                            "cached hit-test element {idx} (pid {pid}) failed: {error:#}"
+                        live => tracing::debug!(
+                            "cached hit-test element {idx} (pid {pid}) is not on screen at \
+                             ({sx}, {sy}) now ({live:?}); not firing it"
                         ),
                     }
                 }
             }
         }
+    }
+    if target_is_popup {
+        return Ok(None);
     }
     match native::perform_action_at_point_in(pid, xid, win_x, win_y, skip_focus_roles) {
         Ok(Some(hit)) => return Ok(Some(hit)),

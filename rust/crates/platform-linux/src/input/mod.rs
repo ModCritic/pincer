@@ -1916,15 +1916,47 @@ pub fn mapped_popup_windows() -> Vec<PopupWindow> {
 /// `_NET_WM_WINDOW_TYPE` says the popup is a tooltip / notification / DND
 /// icon: mapped and override-redirect, but nobody's grab.
 fn popup_is_passive(display: *mut x11::xlib::Display, window: x11::xlib::Window) -> bool {
+    window_type_is_one_of(
+        display,
+        window,
+        &[
+            "_NET_WM_WINDOW_TYPE_TOOLTIP",
+            "_NET_WM_WINDOW_TYPE_NOTIFICATION",
+            "_NET_WM_WINDOW_TYPE_DND",
+        ],
+    )
+}
+
+/// `xid` says it is a popup or dropdown menu (`_NET_WM_WINDOW_TYPE`), as Qt
+/// and GTK menus do; a combo list says COMBO instead.
+pub fn popup_is_menu(xid: u64) -> bool {
+    let Ok(display) = open_display() else {
+        return false;
+    };
+    let menu = window_type_is_one_of(
+        display,
+        xid as x11::xlib::Window,
+        &[
+            "_NET_WM_WINDOW_TYPE_POPUP_MENU",
+            "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU",
+        ],
+    );
+    unsafe {
+        x11::xlib::XCloseDisplay(display);
+    }
+    menu
+}
+
+fn window_type_is_one_of(
+    display: *mut x11::xlib::Display,
+    window: x11::xlib::Window,
+    names: &[&str],
+) -> bool {
     let type_atom = intern_atom(display, "_NET_WM_WINDOW_TYPE");
-    let passive: Vec<x11::xlib::Atom> = [
-        "_NET_WM_WINDOW_TYPE_TOOLTIP",
-        "_NET_WM_WINDOW_TYPE_NOTIFICATION",
-        "_NET_WM_WINDOW_TYPE_DND",
-    ]
-    .iter()
-    .map(|name| intern_atom(display, name))
-    .collect();
+    let passive: Vec<x11::xlib::Atom> = names
+        .iter()
+        .map(|name| intern_atom(display, name))
+        .collect();
     let mut actual_type: x11::xlib::Atom = 0;
     let mut actual_format: std::os::raw::c_int = 0;
     let mut nitems: std::os::raw::c_ulong = 0;
@@ -3180,6 +3212,81 @@ pub fn send_click(xid: u64, x: i32, y: i32, count: usize, button: u8) -> Result<
     send_click_with_modifiers(xid, x, y, count, button, &[])
 }
 
+/// Timestamps for synthetic button events. Every event used to carry
+/// `CurrentTime` (0); a toolkit that pairs presses into a double-click by
+/// their timestamps then sees no time pass between them. This reads the X
+/// server's clock once and advances it with the wall clock, so the events
+/// carry the times real input would. Falls back to `CurrentTime` when the
+/// server time cannot be read.
+struct SyntheticClock {
+    base: u32,
+    started: std::time::Instant,
+}
+
+impl SyntheticClock {
+    fn start(conn: &RustConnection, root: Window) -> Self {
+        Self {
+            base: server_time(conn, root).unwrap_or(x11rb::CURRENT_TIME),
+            started: std::time::Instant::now(),
+        }
+    }
+
+    fn now(&self) -> u32 {
+        if self.base == x11rb::CURRENT_TIME {
+            return x11rb::CURRENT_TIME;
+        }
+        self.base
+            .wrapping_add(self.started.elapsed().as_millis() as u32)
+            .max(1)
+    }
+}
+
+/// The X server's current time: the timestamp of a `PropertyNotify` on a
+/// throwaway input-only window, bounded at 200 ms.
+fn server_time(conn: &RustConnection, root: Window) -> Option<u32> {
+    let probe = conn.generate_id().ok()?;
+    let aux = CreateWindowAux::new().event_mask(EventMask::PROPERTY_CHANGE);
+    conn.create_window(
+        x11rb::COPY_DEPTH_FROM_PARENT,
+        probe,
+        root,
+        -1,
+        -1,
+        1,
+        1,
+        0,
+        WindowClass::INPUT_ONLY,
+        0,
+        &aux,
+    )
+    .ok()?;
+    use x11rb::wrapper::ConnectionExt as _;
+    let _ = conn.change_property8(
+        PropMode::REPLACE,
+        probe,
+        AtomEnum::WM_NAME,
+        AtomEnum::STRING,
+        b"pincer-time",
+    );
+    let _ = conn.flush();
+    let deadline = std::time::Instant::now() + Duration::from_millis(200);
+    let mut time = None;
+    while std::time::Instant::now() < deadline {
+        match conn.poll_for_event() {
+            Ok(Some(x11rb::protocol::Event::PropertyNotify(event))) if event.window == probe => {
+                time = Some(event.time);
+                break;
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) => sleep(Duration::from_millis(2)),
+            Err(_) => break,
+        }
+    }
+    let _ = conn.destroy_window(probe);
+    let _ = conn.flush();
+    time.filter(|t| *t != x11rb::CURRENT_TIME)
+}
+
 /// Send a target-addressed X11 click whose event-state mask carries the named
 /// modifiers. Unlike a plain AT-SPI action, this preserves multi-selection
 /// semantics without changing the X input focus.
@@ -3194,6 +3301,7 @@ pub fn send_click_with_modifiers(
     let (conn, _) = connect_x11_for_input()?;
     let root = conn.setup().roots[0].root;
     let modifier_state = modifiers_to_state(modifiers);
+    let clock = SyntheticClock::start(&conn, root);
 
     for _ in 0..count {
         let target = resolve_click_event_target(&conn, xid, x, y)?;
@@ -3201,7 +3309,7 @@ pub fn send_click_with_modifiers(
             response_type: BUTTON_PRESS_EVENT,
             detail: button,
             sequence: 0,
-            time: x11rb::CURRENT_TIME,
+            time: clock.now(),
             root,
             event: target.window,
             child: x11rb::NONE,
@@ -3213,11 +3321,17 @@ pub fn send_click_with_modifiers(
             same_screen: true,
         };
 
+        // The event mask selects recipients independently of the payload type.
+        // Select the press client for both payloads so a press-only toolkit
+        // binding (such as Tk's <Button-1>) receives one coherent click.
+        conn.send_event(false, target.window, EventMask::BUTTON_PRESS, press)?
+            .check()?;
+        sleep(Duration::from_millis(CLICK_DELAY_MS));
         let release = ButtonReleaseEvent {
             response_type: BUTTON_RELEASE_EVENT,
             detail: button,
             sequence: 0,
-            time: x11rb::CURRENT_TIME,
+            time: clock.now(),
             root,
             event: target.window,
             child: x11rb::NONE,
@@ -3230,13 +3344,6 @@ pub fn send_click_with_modifiers(
             ),
             same_screen: true,
         };
-
-        // The event mask selects recipients independently of the payload type.
-        // Select the press client for both payloads so a press-only toolkit
-        // binding (such as Tk's <Button-1>) receives one coherent click.
-        conn.send_event(false, target.window, EventMask::BUTTON_PRESS, press)?
-            .check()?;
-        sleep(Duration::from_millis(CLICK_DELAY_MS));
         conn.send_event(false, target.window, EventMask::BUTTON_PRESS, release)?
             .check()?;
 

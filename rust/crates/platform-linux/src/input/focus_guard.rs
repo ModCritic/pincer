@@ -186,12 +186,13 @@ impl X {
             .unwrap_or_default()
     }
 
-    /// Mapped override-redirect children of the root: menus, combo popups,
-    /// tooltips. Requests are pipelined so a busy desktop costs one round trip.
-    fn mapped_popups(&self) -> HashSet<Window> {
+    /// Mapped override-redirect children of the root, bottom to top: menus,
+    /// combo popups, tooltips, and the window manager's own input-only
+    /// helpers. Requests are pipelined so a busy desktop costs one round trip.
+    fn mapped_popups(&self) -> Vec<Window> {
         let tree = match self.conn.query_tree(self.root).map(|c| c.reply()) {
             Ok(Ok(tree)) => tree,
-            _ => return HashSet::new(),
+            _ => return Vec::new(),
         };
         let cookies: Vec<_> = tree
             .children
@@ -205,6 +206,109 @@ impl X {
             .map(|(w, _)| w)
             .collect()
     }
+
+    /// `_NET_WM_WINDOW_TYPE` marks a tooltip, notification or drag icon:
+    /// mapped and override-redirect, but nobody's keyboard grab.
+    fn is_passive_popup(&self, window: Window) -> bool {
+        let Ok(type_atom) = self.intern(b"_NET_WM_WINDOW_TYPE") else {
+            return false;
+        };
+        let passive: Vec<u32> = [
+            &b"_NET_WM_WINDOW_TYPE_TOOLTIP"[..],
+            b"_NET_WM_WINDOW_TYPE_NOTIFICATION",
+            b"_NET_WM_WINDOW_TYPE_DND",
+        ]
+        .iter()
+        .filter_map(|name| self.intern(name).ok())
+        .collect();
+        self.window_property(window, type_atom, 8)
+            .iter()
+            .any(|atom| passive.contains(atom))
+    }
+
+    fn intern(&self, name: &[u8]) -> Result<u32> {
+        Ok(self.conn.intern_atom(true, name)?.reply()?.atom)
+    }
+
+    /// The pid behind a popup: its own `_NET_WM_PID`, else a child's, else
+    /// the target's when the same X client created one of the target's
+    /// managed windows (resource ids share the client's base).
+    fn popup_owner_pid(&self, window: Window, target_pid: Option<u32>) -> Option<u32> {
+        if let Some(pid) = self.window_pid(window) {
+            return Some(pid);
+        }
+        let children = self
+            .conn
+            .query_tree(window)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .map(|tree| tree.children)
+            .unwrap_or_default();
+        if let Some(pid) = children.iter().find_map(|child| self.window_pid(*child)) {
+            return Some(pid);
+        }
+        let target = target_pid?;
+        let mask = self.conn.setup().resource_id_mask;
+        self.client_list()
+            .into_iter()
+            .any(|client| client & !mask == window & !mask && self.owner_pid(client) == Some(target))
+            .then_some(target)
+    }
+
+    /// `window` as a popup the target application opened, else `None`
+    /// (see [`is_grab_popup`]).
+    fn grab_popup(&self, window: Window, target_pid: Option<u32>) -> Option<super::PopupWindow> {
+        let attrs = self.conn.get_window_attributes(window).ok()?.reply().ok()?;
+        let geometry = self.conn.get_geometry(window).ok()?.reply().ok()?;
+        let input_only = attrs.class == WindowClass::INPUT_ONLY;
+        if input_only || geometry.width <= 1 || geometry.height <= 1 {
+            return None;
+        }
+        let owner = self.popup_owner_pid(window, target_pid);
+        let passive = self.is_passive_popup(window);
+        is_grab_popup(
+            input_only,
+            geometry.width,
+            geometry.height,
+            passive,
+            owner,
+            target_pid,
+        )
+        .then(|| super::PopupWindow {
+            window: u64::from(window),
+            x: i32::from(geometry.x),
+            y: i32::from(geometry.y),
+            width: u32::from(geometry.width),
+            height: u32::from(geometry.height),
+            title: self.window_title(window),
+            pid: owner,
+        })
+    }
+}
+
+/// Whether a newly mapped override-redirect window is a popup (menu, combo
+/// list) of the action's target, whose toolkit then holds the keyboard grab.
+/// KWin maps input-only edge windows and 1x1 helpers, tooltips come and go
+/// under the user's own pointer, and other applications open popups of their
+/// own while an action runs; none of those is the target's grab ("A popup
+/// menu is open" after a Kate tab click, desc-test round 4).
+pub(crate) fn is_grab_popup(
+    input_only: bool,
+    width: u16,
+    height: u16,
+    passive: bool,
+    owner_pid: Option<u32>,
+    target_pid: Option<u32>,
+) -> bool {
+    !input_only
+        && width > 1
+        && height > 1
+        && !passive
+        && owner_pid.is_some()
+        && owner_pid == target_pid
+}
+
+impl X {
 
     /// Current server time (PropertyNotify round trip), bounded at 300 ms;
     /// `CurrentTime` (0) would lose to focus-stealing prevention.
@@ -353,6 +457,8 @@ pub struct FocusGuardReport {
     /// toolkit now holds a keyboard grab that cannot be released without
     /// closing it; the pid that owns it (falls back to the action's target).
     pub grab_held_by: Option<u32>,
+    /// The popup behind `grab_held_by`, so the caller can read its items.
+    pub popup: Option<super::PopupWindow>,
     /// The target application opened (and possibly focused) one of its own
     /// windows; the guard left it alone.
     pub same_app_window: Option<SameAppWindow>,
@@ -398,6 +504,9 @@ impl FocusGuardReport {
         if let Some(pid) = self.grab_held_by {
             v["grab_held_by"] = serde_json::json!(pid);
         }
+        if let Some(popup) = &self.popup {
+            v["popup"] = popup.to_json();
+        }
         if let Some(closed) = self.closed_window {
             v["focus_window_closed"] = serde_json::json!(closed);
         }
@@ -442,6 +551,12 @@ impl FocusGuardReport {
 
     /// One sentence for the tool's text content; empty when nothing moved.
     pub fn summary(&self) -> String {
+        self.summary_with_popup(true)
+    }
+
+    /// [`Self::summary`] for a route that already names the popup it saw
+    /// (the MPX pointer route), so it is not described twice.
+    pub fn summary_with_popup(&self, describe_popup: bool) -> String {
         let mut s = String::new();
         match (&self.same_app_window, self.changed) {
             _ if self.closed_window.is_some() => s.push_str(&format!(
@@ -479,10 +594,19 @@ impl FocusGuardReport {
             )),
             _ => {}
         }
-        if let Some(pid) = self.grab_held_by {
-            s.push_str(&format!(
+        match (&self.popup, self.grab_held_by) {
+            (Some(popup), Some(pid)) if describe_popup => s.push_str(&format!(
+                " It opened a popup menu, {}, so pid {pid} holds a keyboard grab until it \
+                 closes. Read its items with get_window_state(pid={pid}, window_id={}), or \
+                 press Escape on the window to close it.",
+                popup.describe(),
+                popup.window
+            )),
+            (Some(_), Some(_)) => {}
+            (_, Some(pid)) => s.push_str(&format!(
                 " A popup menu is open, so pid {pid} holds a keyboard grab until it closes."
-            ));
+            )),
+            _ => {}
         }
         s
     }
@@ -503,7 +627,7 @@ impl FocusSnapshot {
             revert_to,
             active,
             stacking_top: x.stacking_top(),
-            popups: x.mapped_popups(),
+            popups: x.mapped_popups().into_iter().collect(),
             clients: x.client_list().into_iter().collect(),
             previous_owner,
         })
@@ -617,17 +741,16 @@ impl FocusSnapshot {
             }
         }
 
-        // Popups opened by the action: an open GTK/VCL menu grabs the keyboard.
-        let new_popups: Vec<Window> = x
+        // Popups the action opened: an open Qt/GTK/VCL menu grabs the keyboard.
+        if let Some(popup) = x
             .mapped_popups()
-            .difference(&self.popups)
-            .copied()
-            .collect();
-        if !new_popups.is_empty() {
-            report.grab_held_by = new_popups
-                .iter()
-                .find_map(|w| x.window_pid(*w))
-                .or(target_pid);
+            .into_iter()
+            .rev()
+            .filter(|w| !self.popups.contains(w))
+            .find_map(|w| x.grab_popup(w, target_pid))
+        {
+            report.grab_held_by = popup.pid;
+            report.popup = Some(popup);
         }
 
         if changes.is_empty() {
@@ -812,6 +935,7 @@ mod tests {
             restored: true,
             changes: vec!["focus 0x1->0x2".into()],
             grab_held_by: Some(42),
+            popup: None,
             same_app_window: None,
             closed_window: None,
             elapsed_ms: 7,
@@ -846,6 +970,7 @@ mod tests {
             restored: false,
             changes: vec!["active 0x1->0x2".into()],
             grab_held_by: None,
+            popup: None,
             same_app_window: Some(SameAppWindow {
                 window: 2,
                 title: "Brightness-Contrast".into(),
@@ -961,6 +1086,7 @@ mod grab_tests {
             restored: false,
             changes: vec!["active 0x1->0x2".into()],
             grab_held_by: Some(77),
+            popup: None,
             same_app_window: None,
             closed_window: None,
             elapsed_ms: 40,
@@ -973,6 +1099,49 @@ mod grab_tests {
             summary.contains("pid 77 holds a keyboard grab"),
             "{summary}"
         );
+    }
+
+    #[test]
+    fn only_the_targets_own_drawable_popup_is_its_grab() {
+        // Kate's Projects menu: 523x258, _NET_WM_PID = Kate.
+        assert!(is_grab_popup(false, 523, 258, false, Some(62856), Some(62856)));
+        // KWin's input-only screen-edge strips and 1x1 helpers.
+        assert!(!is_grab_popup(true, 2560, 16, false, None, Some(62856)));
+        assert!(!is_grab_popup(false, 1, 1, false, Some(62856), Some(62856)));
+        // A tooltip under the user's own pointer.
+        assert!(!is_grab_popup(false, 200, 30, true, Some(62856), Some(62856)));
+        // Another application's popup, or one nobody can be named for.
+        assert!(!is_grab_popup(false, 300, 200, false, Some(1234), Some(62856)));
+        assert!(!is_grab_popup(false, 300, 200, false, None, Some(62856)));
+        assert!(!is_grab_popup(false, 300, 200, false, None, None));
+    }
+
+    #[test]
+    fn a_named_popup_tells_the_caller_how_to_read_it() {
+        let report = FocusGuardReport {
+            grab_held_by: Some(62856),
+            popup: Some(crate::input::PopupWindow {
+                window: 98566169,
+                x: 312,
+                y: 56,
+                width: 523,
+                height: 258,
+                title: String::new(),
+                pid: Some(62856),
+            }),
+            ..FocusGuardReport::default()
+        };
+        let json = report.to_json();
+        assert_eq!(json["popup"]["window_id"], 98566169);
+        assert_eq!(json["popup"]["bounds"]["width"], 523);
+        let summary = report.summary();
+        assert!(
+            summary.contains("get_window_state(pid=62856, window_id=98566169)"),
+            "{summary}"
+        );
+        assert!(summary.contains("Escape"), "{summary}");
+        // A route that already described the popup does not repeat it.
+        assert_eq!(report.summary_with_popup(false), "");
     }
 
     #[test]

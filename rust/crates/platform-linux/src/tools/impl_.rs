@@ -756,6 +756,93 @@ fn popup_item_role(role: &str) -> bool {
         || role == "option"
 }
 
+/// The rows of an open popup menu out of an application-wide tree: the
+/// subtree holding the item-role elements drawn inside the popup's
+/// rectangle, de-indented, with the application-wide indices kept so their
+/// element tokens resolve. A read of Kate's open Projects menu used to print
+/// the whole main window instead (desc-test rounds 2 and 3). `None` when no
+/// item of the walk lies inside the popup: Qt publishes no accessible for a
+/// context menu at all (KWrite, 2026-11-03).
+fn popup_tree_markdown(
+    md: &str,
+    nodes: &[crate::atspi::AtspiNode],
+    bounds: &[(usize, i32, i32, u32, u32)],
+    popup: &crate::input::PopupWindow,
+    is_menu: bool,
+) -> Option<(String, std::collections::HashSet<usize>)> {
+    let frames: std::collections::HashMap<usize, (i32, i32, u32, u32)> = bounds
+        .iter()
+        .map(|(idx, x, y, w, h)| (*idx, (*x, *y, *w, *h)))
+        .collect();
+    // A menu popup holds menu entries only: Kate's breadcrumb list items lie
+    // under the open Projects menu's rectangle but are the main window's.
+    let entries: Vec<serde_json::Value> = nodes
+        .iter()
+        .filter(|node| !is_menu || node.role.to_ascii_lowercase().contains("menu"))
+        .filter_map(|node| {
+            let idx = node.element_index?;
+            let (x, y, w, h) = frames.get(&idx)?;
+            Some(json!({
+                "element_index": idx,
+                "parent_index": node.parent_element_index,
+                "role": node.role,
+                "frame": {"x": x, "y": y, "w": w, "h": h},
+            }))
+        })
+        .collect();
+    let (px, py) = (i64::from(popup.x), i64::from(popup.y));
+    let (pw, ph) = (i64::from(popup.width), i64::from(popup.height));
+    let drawn_inside = |entry: &serde_json::Value| {
+        let frame = &entry["frame"];
+        let x = frame["x"].as_i64().unwrap_or(i64::MIN) - px;
+        let y = frame["y"].as_i64().unwrap_or(i64::MIN) - py;
+        x >= -2
+            && y >= -2
+            && x + frame["w"].as_i64().unwrap_or(0) <= pw + 2
+            && y + frame["h"].as_i64().unwrap_or(0) <= ph + 2
+    };
+    let kept = popup_menu_elements(entries, (popup.x, popup.y), popup.width, popup.height);
+    // `popup_menu_elements` hands back its whole input when nothing matched.
+    if kept.is_empty() || !kept.iter().all(drawn_inside) {
+        return None;
+    }
+    let inside: std::collections::HashSet<usize> = kept
+        .iter()
+        .filter_map(|entry| entry["element_index"].as_u64())
+        .map(|idx| idx as usize)
+        .collect();
+    let row_index = |line: &str| -> Option<usize> {
+        let rest = line.trim_start().strip_prefix("- [")?;
+        rest.split_once(']')?.0.parse().ok()
+    };
+    let indent = |line: &str| line.len() - line.trim_start().len();
+    let lines: Vec<&str> = md.lines().collect();
+    let first = lines
+        .iter()
+        .position(|line| row_index(line).is_some_and(|idx| inside.contains(&idx)))?;
+    // The container the first item hangs under (`popup menu = "Kate"`).
+    let item_indent = indent(lines[first]);
+    let root = (0..first)
+        .rev()
+        .find(|&pos| indent(lines[pos]) < item_indent)
+        .unwrap_or(first);
+    let root_indent = indent(lines[root]);
+    let mut out = String::new();
+    for (pos, line) in lines.iter().enumerate().skip(root) {
+        if pos > root && indent(line) <= root_indent {
+            break;
+        }
+        // An indexed row outside the popup (the menubar item that owns the
+        // menu) is not one of its items.
+        if row_index(line).is_some_and(|idx| !inside.contains(&idx)) {
+            continue;
+        }
+        out.push_str(&line[root_indent.min(indent(line))..]);
+        out.push('\n');
+    }
+    Some((out, inside))
+}
+
 /// The entries drawn inside a popup of `width`x`height` (frames are
 /// popup-local here). When an indexed container (Qt exposes the combo list
 /// under the combo box inside the dialog) fills the popup, its subtree is
@@ -1263,6 +1350,13 @@ impl Tool for GetWindowStateTool {
         let popup_meta = (!crate::wayland::is_wayland())
             .then(|| crate::input::popup_window_info(xid))
             .flatten();
+        let popup_is_menu = popup_meta.is_some() && crate::input::popup_is_menu(xid);
+        // A popup read prints only the popup's rows, so a small node budget
+        // would only cut the walk before it reaches the open menu.
+        let max_elements = match &popup_meta {
+            Some(_) => max_elements.map(|n| n.max(LINUX_DEFAULT_MAX_ELEMENTS)),
+            None => max_elements,
+        };
         let window_meta = crate::wayland::list_windows_dispatch(Some(pid))
             .into_iter()
             .find(|w| w.xid == xid)
@@ -1458,11 +1552,32 @@ impl Tool for GetWindowStateTool {
                 if let Some(tr) = tree_opt {
                     let source_trusted = tr.trusted;
                     let source_degraded_reason = tr.degraded_reason.clone();
-                    let count = tr
-                        .nodes
-                        .iter()
-                        .filter(|n| n.element_index.is_some())
-                        .count();
+                    // A popup without an AT-SPI frame of its own: print its
+                    // rows only, or say that it has none.
+                    let popup_view = match (&popup_meta, tr.window_scoped) {
+                        (Some(popup), false) => Some(popup_tree_markdown(
+                            &tr.tree_markdown,
+                            &tr.nodes,
+                            &tr.bounds,
+                            popup,
+                            popup_is_menu,
+                        )),
+                        _ => None,
+                    };
+                    let tree_markdown = match &popup_view {
+                        Some(Some((md, _))) => md.clone(),
+                        Some(None) => String::new(),
+                        None => tr.tree_markdown.clone(),
+                    };
+                    let count = match &popup_view {
+                        Some(Some((_, rows))) => rows.len(),
+                        Some(None) => 0,
+                        None => tr
+                            .nodes
+                            .iter()
+                            .filter(|n| n.element_index.is_some())
+                            .count(),
+                    };
                     let mut header = format!(
                         "window_id={xid} pid={pid} elements={count} walk_ms={}\n",
                         tr.elapsed_ms
@@ -1484,8 +1599,19 @@ impl Tool for GetWindowStateTool {
                     }
                     header.push('\n');
                     content.push(pincer_core::protocol::Content::text(
-                        header + &tr.tree_markdown,
+                        header + &tree_markdown,
                     ));
+                    if let (Some(None), Some(popup)) = (&popup_view, &popup_meta) {
+                        let note = format!(
+                            "This popup's items are not in the accessibility tree (Qt publishes \
+                             no accessible for a context menu). Read them in this screenshot \
+                             and click one with click(pid={pid}, window_id={}, x, y) using its \
+                             pixels, or press Escape on the window to close the popup.",
+                            popup.window
+                        );
+                        structured["popup_items_unavailable"] = json!(true);
+                        content.push(pincer_core::protocol::Content::text(note));
+                    }
                     structured["element_count"] = json!(count);
                     // `elements_complete` is a real claim now: a native walk that
                     // finished without hitting the deadline / node budget saw
@@ -1501,7 +1627,7 @@ impl Tool for GetWindowStateTool {
                     structured["bounds_complete"] = json!(tr.bounds_complete);
                     structured["walk_elapsed_ms"] = json!(tr.elapsed_ms as u64);
                     structured["timeout_ms"] = json!(timeout_ms);
-                    structured["tree_markdown"] = json!(tr.tree_markdown);
+                    structured["tree_markdown"] = json!(tree_markdown);
 
                     let target_scoped = !(crate::wayland::is_wayland()
                         && crate::wayland::hyprland::is_session())
@@ -1570,7 +1696,7 @@ impl Tool for GetWindowStateTool {
                     let elements = pincer_core::element_query::project_elements_for_query(
                         elements,
                         query.as_deref(),
-                        &tr.tree_markdown,
+                        &tree_markdown,
                     );
                     let elements = framed_elements_first(elements);
                     // Screenshot pixels: the capture is the window's own X11
@@ -1590,14 +1716,17 @@ impl Tool for GetWindowStateTool {
                     // VCL menus live under the menubar's `menu` node): return
                     // the open menu's items, the ones drawn inside the popup,
                     // instead of the whole application.
-                    let elements = match (&popup_meta, tr.window_scoped) {
-                        (Some(popup), false) => popup_menu_elements(
-                            elements,
-                            (popup.x, popup.y),
-                            popup.width,
-                            popup.height,
-                        ),
-                        _ => elements,
+                    let elements = match &popup_view {
+                        Some(Some((_, rows))) => elements
+                            .into_iter()
+                            .filter(|entry| {
+                                entry["element_index"]
+                                    .as_u64()
+                                    .is_some_and(|idx| rows.contains(&(idx as usize)))
+                            })
+                            .collect(),
+                        Some(None) => Vec::new(),
+                        None => elements,
                     };
                     structured["total_element_count"] = json!(count);
                     structured["returned_element_count"] = json!(elements.len());
@@ -3037,6 +3166,22 @@ fn synthetic_pointer_is_dropped(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
+/// Toolkits that ignore a synthetic (`send_event`) X11 button press: GTK3/4
+/// and LibreOffice VCL. Qt5/6 handle a core press as a "legacy" mouse event:
+/// a synthetic right-click opens Kate's context menu and a synthetic press
+/// moves KWrite's caret (checked 2026-11-03). Qt does drop core wheel
+/// buttons, and synthetic drags are unproven there, so those routes keep
+/// [`maps_indicate_synthetic_pointer_dropped`].
+fn maps_indicate_synthetic_press_dropped(maps: &str) -> bool {
+    maps_indicate_gtk(maps) || maps.contains("libvcl") || maps.contains("libmergedlo")
+}
+
+fn synthetic_press_is_dropped(pid: u32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/maps"))
+        .map(|maps| maps_indicate_synthetic_press_dropped(&maps))
+        .unwrap_or(false)
+}
+
 /// Qt5 maps its own GUI library; only then is the synthetic-FocusIn bridge
 /// workaround in `type_text` worth two extra AT-SPI walks.
 fn is_qt5_process(pid: u32) -> bool {
@@ -3558,8 +3703,9 @@ enum PointerRoute {
     /// A background pixel click resolved to an accessible under the point and
     /// fired its action (or selected it through its container).
     Atspi(crate::atspi::AtPointHit),
-    /// Target-addressed synthetic `XSendEvent` (core-only toolkits).
-    Synthetic,
+    /// Target-addressed synthetic `XSendEvent` (core-only toolkits), with
+    /// the focus guard's report when the press ran under one.
+    Synthetic(Option<crate::input::FocusGuardReport>),
     /// Activated the window first and used XTest (delivery_mode=foreground).
     Foreground,
     /// Native Wayland pointer route.
@@ -3572,7 +3718,7 @@ impl PointerRoute {
         match self {
             Self::Mpx(_) => Some(crate::input::MPX_POINTER_PATH),
             Self::Atspi(_) => Some("x11_atspi"),
-            Self::Synthetic => Some("x11_xsendevent"),
+            Self::Synthetic(_) => Some("x11_xsendevent"),
             Self::Foreground => Some("x11_xtest_fg"),
             Self::Wayland => None,
         }
@@ -3618,6 +3764,14 @@ impl PointerRoute {
                 })
             };
             v["evidence"] = json!([evidence]);
+        }
+        if let Self::Synthetic(Some(guard)) = self {
+            for (key, value) in guard.to_json().as_object().into_iter().flatten() {
+                v[key] = value.clone();
+            }
+            if let Some(item) = guard.evidence_item() {
+                push_evidence(&mut v, item);
+            }
         }
         if let Self::Mpx(effect) = self {
             v["focus_unchanged"] = json!(effect.focus_unchanged);
@@ -3743,8 +3897,11 @@ impl PointerRoute {
                 text.push_str(&foreign.describe());
             }
             if let Some(guard) = &effect.focus_guard {
-                text.push_str(&guard.summary());
+                text.push_str(&guard.summary_with_popup(effect.popups.is_empty()));
             }
+        }
+        if let Self::Synthetic(Some(guard)) = self {
+            text.push_str(&guard.summary());
         }
         text
     }
@@ -3928,7 +4085,7 @@ fn x11_pixel_click_no_focus_steal(
                 // report the real-input failure instead of a click that
                 // changed nothing.
                 Err(error)
-                    if crate::x11::window_pid(xid).is_some_and(synthetic_pointer_is_dropped) =>
+                    if crate::x11::window_pid(xid).is_some_and(synthetic_press_is_dropped) =>
                 {
                     tracing::warn!("MPX click failed on a toolkit that drops synthetic pointer events: {error:#}");
                     return Err(BackgroundPointerFailed {
@@ -3940,7 +4097,14 @@ fn x11_pixel_click_no_focus_steal(
             }
         }
     }
-    crate::input::send_click(xid, lx, ly, count, button).map(|()| PointerRoute::Synthetic)
+    // Qt asks the window manager to activate a window that gets a press, and
+    // a press can open a menu: run it under the focus guard, which restores
+    // the focus and names the popup.
+    let target_pid = crate::x11::window_pid(xid);
+    let ((), guard) = crate::input::focus_guard::guarded(target_pid, || {
+        crate::input::send_click(xid, lx, ly, count, button)
+    })?;
+    Ok(PointerRoute::Synthetic(guard))
 }
 
 /// Typed tool error for a Linux input failure: uinput permission, an occluded
@@ -7142,7 +7306,7 @@ impl Tool for ClickTool {
                         button,
                         &modifier_refs,
                     )
-                    .map(|()| PointerRoute::Synthetic)
+                    .map(|()| PointerRoute::Synthetic(None))
                 }
             })
             .await;
@@ -7422,7 +7586,7 @@ impl Tool for ClickTool {
                 }
                 if !fg
                     && !crate::input::real_pointer_input_available()
-                    && synthetic_pointer_is_dropped(pid)
+                    && synthetic_press_is_dropped(pid)
                 {
                     // No accessible actuator covers the point and the only
                     // route left is a synthetic XSendEvent that this toolkit
@@ -9922,10 +10086,11 @@ impl Tool for ScrollTool {
             name: "scroll".into(),
             description: "Scroll a window without stealing focus: real wheel steps from the \
                 session's virtual pointer over the element_token or x,y point, else the window's \
-                center. direction required; by defaults to line, amount defaults to 3. Success \
-                means the wheel events were sent: some apps ignore background wheel events \
-                without an error (Qt on X11, for example), so verify with a screenshot or a \
-                scroll bar value, and if nothing moved, retry with delivery_mode foreground.".into(),
+                center. direction required; by defaults to line, amount defaults to 3 (on X11 a \
+                page is 3 wheel steps). On X11 the result compares the window's scroll bars from \
+                the last get_window_state: an error with code no_change when nothing moved (Qt \
+                ignores background wheel events; use set_value on the scroll bar row instead), \
+                unverifiable when no scroll bar is known.".into(),
             input_schema: json!({
                 // `pid` is conditionally required (validated in code), so only
                 // `direction` is pinned — matches the scroll→["direction"] canon
@@ -10370,25 +10535,42 @@ impl Tool for ScrollTool {
         };
 
         // X11 scroll buttons: 4=up, 5=down, 6=left, 7=right
-        // Note: "page" scroll is still per-click on X11; send more ticks for page.
         let button: u8 = match direction.as_str() {
             "up" => 4,
             "left" => 6,
             "right" => 7,
             _ => 5,
         };
+        // X11 has no page step: a page is WHEEL_STEPS_PER_PAGE wheel steps,
+        // the approximation the Hyprland route documents.
+        let steps = match by {
+            pincer_contract::ScrollBy::Page => amount * WHEEL_STEPS_PER_PAGE,
+            _ => amount,
+        };
+        // The window's scroll bars as the last snapshot indexed them, read
+        // before and after: the only way to tell a scroll from wheel events
+        // the toolkit ignored.
+        let before = if crate::wayland::wayland_input_enabled() {
+            Vec::new()
+        } else {
+            tokio::task::spawn_blocking(move || crate::atspi::scroll_bar_ranges(pid, xid))
+                .await
+                .unwrap_or_default()
+        };
         let cursor_id_for_task = cursor_id.clone();
         let direction_for_wayland = direction.clone();
-        let amount_u32 = amount as u32;
-        let result = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let steps_u32 = steps as u32;
+        let result = tokio::task::spawn_blocking(move || -> anyhow::Result<&'static str> {
             if crate::wayland::wayland_input_enabled() {
-                return crate::wayland::scroll(xid, &direction_for_wayland, amount_u32);
+                return crate::wayland::scroll(xid, &direction_for_wayland, steps_u32)
+                    .map(|()| "wayland");
             }
             // foreground: activate the window, then scroll, then restore — for
             // surfaces that only route wheel events to the active window.
-            let x11_scroll = || -> anyhow::Result<()> {
+            let x11_scroll = || -> anyhow::Result<&'static str> {
                 // X11: synthetic Button4-7 XSendEvents are dropped by XInput2
-                // toolkits (GTK never scrolls). On a real Xorg host, drive a real
+                // toolkits (GTK never scrolls, Qt ignores core wheel buttons
+                // once XInput 2.1 is up). On a real Xorg host, drive a real
                 // wheel detent through the MPX uinput pointer over the window's
                 // center — libinput turns it into the XI2 smooth-scroll GTK reads —
                 // without stealing focus. Falls back to the legacy XSendEvent
@@ -10402,8 +10584,8 @@ impl Tool for ScrollTool {
                     if let Some((cx, cy)) = pointer_point {
                         let horizontal = matches!(button, 6 | 7);
                         let ticks = match button {
-                            4 | 7 => amount as i32,
-                            _ => -(amount as i32), // 5 (down) and 6 (left)
+                            4 | 7 => steps as i32,
+                            _ => -(steps as i32), // 5 (down) and 6 (left)
                         };
                         match crate::input::send_virtual_pointer_scroll(
                             &cursor_id_for_task,
@@ -10415,7 +10597,7 @@ impl Tool for ScrollTool {
                                 ticks,
                             },
                         ) {
-                            Ok(()) => return Ok(()),
+                            Ok(()) => return Ok(crate::input::MPX_POINTER_PATH),
                             Err(error) if crate::input::is_uinput_unavailable(&error) => {
                                 return Err(error)
                             }
@@ -10423,9 +10605,18 @@ impl Tool for ScrollTool {
                         }
                     }
                 }
-                let (local_x, local_y) =
-                    element_point.map(|(local, _)| local).unwrap_or((0.0, 0.0));
-                crate::input::send_click(xid, local_x as i32, local_y as i32, amount, button)
+                // Over the element or point, else the window's center (the
+                // window's top-left corner is usually its menu bar).
+                let (local_x, local_y) = element_point
+                    .map(|(local, _)| local)
+                    .or_else(|| {
+                        window_screen_center(xid).ok().and_then(|(cx, cy)| {
+                            desktop_to_window_local(xid, f64::from(cx), f64::from(cy)).ok()
+                        })
+                    })
+                    .unwrap_or((0.0, 0.0));
+                crate::input::send_click(xid, local_x as i32, local_y as i32, steps, button)
+                    .map(|()| "x11_xsendevent")
             };
             if delivery.is_foreground() {
                 let point = element_point
@@ -10441,9 +10632,10 @@ impl Tool for ScrollTool {
                         point.0 as i32,
                         point.1 as i32,
                         button,
-                        amount,
+                        steps,
                     )
                 })
+                .map(|()| "x11_xtest_fg")
             } else {
                 x11_scroll()
             }
@@ -10455,12 +10647,167 @@ impl Tool for ScrollTool {
             "background"
         };
         match result {
-            Ok(Ok(())) => ToolResult::text(format!(
-                "Scrolled {direction} {amount} ticks (delivery_mode={mode_label})."
-            ))
-            .with_structured(json!({ "verified": false, "delivery_mode": mode_label })),
+            Ok(Ok(path)) => {
+                let after = if before.is_empty() {
+                    Vec::new()
+                } else {
+                    // Let the toolkit apply the events before reading back.
+                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                    tokio::task::spawn_blocking(move || crate::atspi::scroll_bar_ranges(pid, xid))
+                        .await
+                        .unwrap_or_default()
+                };
+                let synthetic_wheel_ignored =
+                    path == "x11_xsendevent" && synthetic_pointer_is_dropped(pid);
+                scroll_outcome_result(
+                    &direction,
+                    amount,
+                    by,
+                    steps,
+                    path,
+                    mode_label,
+                    scroll_movement(&before, &after, &direction),
+                    synthetic_wheel_ignored,
+                )
+            }
             Ok(Err(e)) => input_error_result(e),
             Err(e) => ToolResult::error(format!("Task error: {e}")),
+        }
+    }
+}
+
+/// Wheel steps for one `by: "page"` step on X11 (Hyprland's documented
+/// approximation).
+const WHEEL_STEPS_PER_PAGE: usize = 3;
+
+/// What a wheel scroll did to the window's scroll bars.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ScrollMovement {
+    /// No scroll bar of the window was readable: nothing to compare.
+    Unknown,
+    /// A scroll bar moved from the first value to the second.
+    Moved(f64, f64),
+    /// No scroll bar moved. `at_end`: one already sat at the end the wheel
+    /// pushes toward, so there was nowhere to go.
+    Still { value: f64, at_end: bool },
+}
+
+fn scroll_movement(
+    before: &[Option<(f64, f64, f64)>],
+    after: &[Option<(f64, f64, f64)>],
+    direction: &str,
+) -> ScrollMovement {
+    let pairs: Vec<((f64, f64, f64), (f64, f64, f64))> = before
+        .iter()
+        .zip(after)
+        .filter_map(|(b, a)| Some(((*b)?, (*a)?)))
+        .collect();
+    let Some(first) = pairs.first() else {
+        return ScrollMovement::Unknown;
+    };
+    if let Some((b, a)) = pairs.iter().find(|(b, a)| (b.0 - a.0).abs() > f64::EPSILON) {
+        return ScrollMovement::Moved(b.0, a.0);
+    }
+    let toward_max = matches!(direction, "down" | "right");
+    let at_end = pairs.iter().any(|((current, minimum, maximum), _)| {
+        if toward_max {
+            current >= maximum
+        } else {
+            current <= minimum
+        }
+    });
+    ScrollMovement::Still {
+        value: (first.0).0,
+        at_end,
+    }
+}
+
+/// The scroll result, told from what the scroll bars did. A wheel scroll
+/// that Qt ignored used to read "Scrolled down 10 ticks" while nothing
+/// moved (desc-test rounds 2 and 3).
+#[allow(clippy::too_many_arguments)]
+fn scroll_outcome_result(
+    direction: &str,
+    amount: usize,
+    by: pincer_contract::ScrollBy,
+    steps: usize,
+    path: &str,
+    mode_label: &str,
+    movement: ScrollMovement,
+    synthetic_wheel_ignored: bool,
+) -> ToolResult {
+    let what = match by {
+        pincer_contract::ScrollBy::Page => format!(
+            "{amount} page{} ({steps} wheel steps)",
+            if amount == 1 { "" } else { "s" }
+        ),
+        _ => format!("{steps} wheel step{}", if steps == 1 { "" } else { "s" }),
+    };
+    let route = format!("delivery_mode={mode_label}, path={path}");
+    match movement {
+        ScrollMovement::Moved(from, to) => ToolResult::text(format!(
+            "Scrolled {direction} {what} ({route}); the scroll bar moved from {from} to {to}."
+        ))
+        .with_structured(json!({
+            "verified": true,
+            "effect": "confirmed",
+            "delivery_mode": mode_label,
+            "path": path,
+            "scroll_bar": {"before": from, "after": to},
+            "evidence": [{
+                "kind": "accessibility_readback",
+                "detail": format!("scroll bar value {from} -> {to}"),
+            }],
+        })),
+        ScrollMovement::Still { value, at_end: true } => ToolResult::text(format!(
+            "Sent {what} {direction} ({route}), but the view is already at its end: the \
+             scroll bar stays at {value}."
+        ))
+        .with_structured(json!({
+            "verified": true,
+            "effect": "suspected_noop",
+            "delivery_mode": mode_label,
+            "path": path,
+            "scroll_bar": {"before": value, "after": value},
+        })),
+        ScrollMovement::Still { value, at_end: false } => {
+            let why = if synthetic_wheel_ignored {
+                "this toolkit (Qt, GTK or LibreOffice) ignores synthetic wheel events"
+            } else {
+                "the application ignored the wheel events"
+            };
+            ToolResult::error(format!(
+                "Nothing scrolled: sent {what} {direction} ({route}), but the window's scroll \
+                 bar stayed at {value}; {why}. In background, set the scroll position with \
+                 set_value on the `scroll bar` row's element_token, or press_key page_down / \
+                 page_up on the window; otherwise retry with delivery_mode:\"foreground\"."
+            ))
+            .with_structured(json!({
+                "code": "no_change",
+                "verified": true,
+                "effect": "no_change",
+                "delivery_mode": mode_label,
+                "path": path,
+                "scroll_bar": {"before": value, "after": value},
+            }))
+        }
+        ScrollMovement::Unknown => {
+            let mut text = format!(
+                "Sent {what} {direction} ({route}); not verified: no scroll bar of this \
+                 window is known (get_window_state indexes them), so check a screenshot."
+            );
+            if synthetic_wheel_ignored {
+                text.push_str(
+                    " This toolkit (Qt, GTK or LibreOffice) ignores synthetic wheel events, so \
+                     this most likely did nothing.",
+                );
+            }
+            ToolResult::text(text).with_structured(json!({
+                "verified": false,
+                "effect": "unverifiable",
+                "delivery_mode": mode_label,
+                "path": path,
+            }))
         }
     }
 }
@@ -10485,8 +10832,8 @@ impl Tool for DoubleClickTool {
             name: "double_click".into(),
             description: "Double-click at (x,y) or at the center of an element_token's bounds. \
                 Background delivery on X11 uses the session's virtual pointer (path mpx_pointer) \
-                when it can, else synthetic XSendEvent (path x11_xsendevent), which some apps, \
-                Qt included, treat as a single click: check `path` and verify the result. A \
+                when it can, else synthetic XSendEvent (path x11_xsendevent), which some \
+                toolkits read as a single click: check `path` and verify the result. A \
                 point covered by another application's window is refused \
                 (target_occluded), one covered by this app's own dialog is retargeted to it \
                 (retargeted_to). No focus steal. Pass pid + window_id + x,y, or an element_token \
@@ -11785,7 +12132,7 @@ impl Tool for DragTool {
             }
         }
 
-        let route = PointerRoute::Synthetic;
+        let route = PointerRoute::Synthetic(None);
         match result {
             Ok(()) => ToolResult::text(format!(
                 "Posted drag ({button_str}) to pid {pid} \
@@ -14794,6 +15141,19 @@ impl Tool for TypeTextCharsTool {
 
 // ── kill_app ──────────────────────────────────────────────────────────────────
 
+/// Plain words for a `kill_app` observation a caller could misread: a
+/// "zombie" reads as "not dead", but it has exited and only waits for its
+/// parent to collect its exit status (desc-test round 1).
+fn kill_observation_note(observation: &str) -> &'static str {
+    match observation {
+        "zombie" => {
+            "; the process has exited and only waits for its parent to reap it, so ps may \
+             list it as <defunct> for a moment"
+        }
+        _ => "",
+    }
+}
+
 pub struct KillAppTool;
 static KILL_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
@@ -14914,7 +15274,8 @@ impl Tool for KillAppTool {
                 .and_then(|now| crate::proc_fs::process_exit_observation(before, *now))
             {
                 return ToolResult::text(format!(
-                    "✅ Terminated pid {pid_i} with SIGKILL (confirmed: {observation})."
+                    "✅ Terminated pid {pid_i} with SIGKILL (confirmed: {observation}){}.",
+                    kill_observation_note(observation)
                 ))
                 .with_structured(json!({
                     "status": "terminated",
@@ -15735,6 +16096,9 @@ mod background_keyboard_route_tests;
 
 #[cfg(test)]
 mod visibility_tests;
+
+#[cfg(test)]
+mod result_wording_tests;
 
 #[cfg(test)]
 mod cursor_hook_emission_tests {

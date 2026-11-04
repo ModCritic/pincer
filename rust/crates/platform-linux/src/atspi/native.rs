@@ -1229,10 +1229,12 @@ async fn resolve_window_frame(
             .collect::<Vec<_>>();
         return correlate_hyprland_frame(&frames, &clients, target);
     }
-    if seeds.len() == 1 {
+    if seeds.len() == 1 && crate::input::popup_window_info(xid).is_none() {
         // One top-level: the caller's window is the only thing this
         // application could be showing, and no geometry round-trip can make
-        // that more certain.
+        // that more certain. A popup is the exception: Qt publishes no frame
+        // for its menus, so Kate's open Projects menu resolved to the main
+        // window and its read printed the whole main tree (2026-11-03).
         return Some(0);
     }
     // A popup menu / popover is an override-redirect window the WM's client
@@ -3711,6 +3713,139 @@ pub fn perform_action_ref(object_ref: &ObjectRef) -> Result<(String, bool, bool)
     )
 }
 
+/// Budget for re-reading one cached element before a pixel click fires it.
+const CACHED_HIT_CHECK_BUDGET: Duration = Duration::from_millis(400);
+
+/// What the toolkit says now about a snapshot-cached element that a
+/// background pixel click is about to fire.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CachedHitLive {
+    /// `Showing` (or, when the state set could not be read, assumed).
+    pub showing: bool,
+    /// Screen extents, when the toolkit's answer is trustworthy.
+    pub extents: Option<(i32, i32, i32, i32)>,
+    /// The element's parent is a `popup menu` or `menu`: it is drawn in a
+    /// popup window, never in the window under it.
+    pub in_popup_menu: bool,
+    pub name: String,
+}
+
+/// The cached-hit rule. A snapshot remembers where an element was; Qt keeps
+/// a closed menu's item extents but clears its `Showing`, so a click on plain
+/// editor text fired "Reload All Projects" from a snapshot read while the
+/// Projects menu was open (Kate, 2026-11-03). Fire a cached element only
+/// when it is showing now, still covers the point, and lives in the kind of
+/// window the click targets: a popup menu's item only for a click on that
+/// popup, and nothing else there.
+pub(crate) fn cached_hit_fires(
+    live: &CachedHitLive,
+    sx: i32,
+    sy: i32,
+    target_is_popup: bool,
+) -> bool {
+    if !live.showing {
+        return false;
+    }
+    if let Some((x, y, w, h)) = live.extents {
+        if w <= 0 || h <= 0 || sx < x || sy < y || sx >= x + w || sy >= y + h {
+            return false;
+        }
+    }
+    live.in_popup_menu == target_is_popup
+}
+
+/// Re-read a snapshot-cached element for [`cached_hit_fires`]: its state,
+/// screen extents, parent role and name. `None` when it is gone or did not
+/// answer in time; the caller then leaves the point to the live hit-test.
+pub fn cached_hit_live(object_ref: &ObjectRef) -> Option<CachedHitLive> {
+    let display = (!crate::wayland::is_wayland())
+        .then(x11_display_size)
+        .flatten();
+    bounded_for(
+        CACHED_HIT_CHECK_BUDGET,
+        async {
+            let conn = shared_connection().await?;
+            let (acc, _role) = live_accessible(conn, object_ref).await?;
+            let showing = match call(acc.get_state()).await {
+                Some(Ok(state)) => state.contains(State::Showing),
+                Some(Err(_)) => true,
+                None => return Err(anyhow!("state read timed out")),
+            };
+            let extents = match call(acc.proxies()).await {
+                Some(Ok(proxies)) => match call(proxies.component()).await {
+                    Some(Ok(component)) => call(component.get_extents(CoordType::Screen))
+                        .await
+                        .and_then(Result::ok)
+                        .filter(|raw| screen_extents_trusted(*raw, display)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let parent_role = match call(acc.parent()).await {
+                Some(Ok(parent)) => match RawObjectRef::from_atspi(&parent) {
+                    Some(parent) => match call(accessible_for(conn, &parent)).await {
+                        Some(Ok(parent)) => call(parent.get_role_name())
+                            .await
+                            .and_then(Result::ok)
+                            .unwrap_or_default(),
+                        _ => String::new(),
+                    },
+                    None => String::new(),
+                },
+                _ => String::new(),
+            };
+            let name = call(acc.name())
+                .await
+                .and_then(Result::ok)
+                .unwrap_or_default();
+            Ok(Some(CachedHitLive {
+                showing,
+                extents,
+                in_popup_menu: matches!(
+                    parent_role.trim().to_ascii_lowercase().as_str(),
+                    "popup menu" | "menu"
+                ),
+                name,
+            }))
+        },
+        || Ok(None),
+    )
+    .ok()
+    .flatten()
+}
+
+/// `(current, minimum, maximum)` of each object's `Value` interface, `None`
+/// where it has none or did not answer; one bounded pass, no walk.
+pub fn value_ranges(refs: &[ObjectRef]) -> Vec<Option<(f64, f64, f64)>> {
+    let refs = refs.to_vec();
+    let count = refs.len();
+    bounded_for(
+        CACHED_HIT_CHECK_BUDGET,
+        async move {
+            let conn = shared_connection().await?;
+            let mut out = Vec::with_capacity(refs.len());
+            for object_ref in &refs {
+                let range = async {
+                    let acc = call(accessible_for(conn, &raw_ref(object_ref)))
+                        .await?
+                        .ok()?;
+                    let proxies = call(acc.proxies()).await?.ok()?;
+                    let value = call(proxies.value()).await?.ok()?;
+                    let current = call(value.current_value()).await?.ok()?;
+                    let minimum = call(value.minimum_value()).await?.ok()?;
+                    let maximum = call(value.maximum_value()).await?.ok()?;
+                    Some((current, minimum, maximum))
+                }
+                .await;
+                out.push(range);
+            }
+            Ok(out)
+        },
+        || Ok(vec![None; count]),
+    )
+    .unwrap_or_else(|_| vec![None; count])
+}
+
 /// Screen bounds of a snapshot-cached element identity: one `GetExtents`
 /// round-trip, no tree re-walk. `Err` when the object is gone or does not
 /// answer within [`REF_ACTION_BUDGET`]; the caller decides whether to re-walk.
@@ -4075,6 +4210,71 @@ pub(crate) fn at_point_toolkit_coords(
         return (x, y);
     }
     (x + dx, y + dy)
+}
+
+#[cfg(test)]
+mod cached_hit_tests {
+    use super::{cached_hit_fires, CachedHitLive};
+
+    /// Kate's "Reload All Projects" after Escape closed the Projects menu:
+    /// Qt cleared `Showing` but kept the item's extents (2026-11-03).
+    fn closed_menu_item() -> CachedHitLive {
+        CachedHitLive {
+            showing: false,
+            extents: Some((312, 240, 523, 36)),
+            in_popup_menu: true,
+            name: "Reload All Projects".into(),
+        }
+    }
+
+    #[test]
+    fn closed_menu_item_never_fires() {
+        let item = closed_menu_item();
+        assert!(!cached_hit_fires(&item, 573, 258, false));
+        assert!(!cached_hit_fires(&item, 573, 258, true));
+    }
+
+    #[test]
+    fn open_menu_item_fires_only_for_a_click_on_its_popup() {
+        let item = CachedHitLive {
+            showing: true,
+            ..closed_menu_item()
+        };
+        assert!(cached_hit_fires(&item, 573, 258, true));
+        // A click on the main window under the popup is not a click on the
+        // menu (the real pointer press is the caller's to send).
+        assert!(!cached_hit_fires(&item, 573, 258, false));
+    }
+
+    #[test]
+    fn a_window_control_needs_to_still_cover_the_point() {
+        let button = CachedHitLive {
+            showing: true,
+            extents: Some((100, 50, 80, 30)),
+            in_popup_menu: false,
+            name: "Save".into(),
+        };
+        assert!(cached_hit_fires(&button, 120, 60, false));
+        assert!(!cached_hit_fires(&button, 300, 60, false));
+        // Never from inside a popup window either.
+        assert!(!cached_hit_fires(&button, 120, 60, true));
+    }
+
+    #[test]
+    fn untrusted_extents_leave_the_showing_check() {
+        let hidden = CachedHitLive {
+            showing: false,
+            extents: None,
+            in_popup_menu: false,
+            name: String::new(),
+        };
+        assert!(!cached_hit_fires(&hidden, 10, 10, false));
+        let shown = CachedHitLive {
+            showing: true,
+            ..hidden
+        };
+        assert!(cached_hit_fires(&shown, 10, 10, false));
+    }
 }
 
 #[cfg(test)]
@@ -5005,7 +5205,11 @@ pub fn perform_action_at_point(
             // children, but the area/role split is what actually disambiguates.
             let mut frames: Vec<(usize, i32, i32, u32, u32, bool)> = Vec::new();
             for (i, v) in visited.iter().enumerate() {
+                // Hidden nodes keep stale extents (a closed Qt menu's items),
+                // so only what is on screen can be under the point.
                 if v.actions.is_empty()
+                    || !v.showing
+                    || v.offscreen
                     || !v.has_component
                     || is_container_role(&v.role)
                     || crate::at_point_policy::is_top_level_shell_role(&v.role)

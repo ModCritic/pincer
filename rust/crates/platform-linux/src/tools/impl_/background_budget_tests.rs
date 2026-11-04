@@ -26,6 +26,29 @@ fn synthetic_pointer_drop_detection_covers_gtk_vcl_and_qt() {
 }
 
 #[test]
+fn synthetic_presses_reach_qt_but_not_gtk_or_vcl() {
+    // Kate and KWrite took a synthetic press (caret moved) and a synthetic
+    // right-click (context menu opened) on 2026-11-03; the left click was
+    // refused before only because Qt was on the wheel/drag list.
+    assert!(!maps_indicate_synthetic_press_dropped(
+        "7f /usr/lib/libQt6Gui.so.6\n"
+    ));
+    assert!(!maps_indicate_synthetic_press_dropped(
+        "7f /usr/lib/libQt5Gui.so.5\n"
+    ));
+    assert!(maps_indicate_synthetic_press_dropped(
+        "7f /usr/lib/libgtk-3.so.0\n"
+    ));
+    assert!(maps_indicate_synthetic_press_dropped(
+        "7f /opt/libreoffice/program/libmergedlo.so\n"
+    ));
+    // Qt still drops core wheel buttons.
+    assert!(maps_indicate_synthetic_pointer_dropped(
+        "7f /usr/lib/libQt6Gui.so.6\n"
+    ));
+}
+
+#[test]
 fn desktop_window_lines_expose_pid_and_window_id() {
     let windows = vec![crate::x11::WindowInfo {
         xid: 0x2e00003,

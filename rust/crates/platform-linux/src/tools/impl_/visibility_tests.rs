@@ -133,3 +133,108 @@ fn a_cross_process_dialog_names_its_real_owning_pid_in_the_follow_up() {
         "{note}"
     );
 }
+
+fn popup_test_node(index: usize, role: &str, parent: Option<usize>) -> crate::atspi::AtspiNode {
+    crate::atspi::AtspiNode {
+        element_index: Some(index),
+        role: role.into(),
+        name: None,
+        value: None,
+        checked: None,
+        enabled: None,
+        selected: None,
+        description: None,
+        actions: Vec::new(),
+        element_key: index as u64,
+        identity: None,
+        depth: 0,
+        parent_element_index: parent,
+        in_web_content: false,
+        object_ref: None,
+    }
+}
+
+fn kate_projects_popup() -> crate::input::PopupWindow {
+    crate::input::PopupWindow {
+        window: 98566169,
+        x: 312,
+        y: 56,
+        width: 523,
+        height: 258,
+        title: String::new(),
+        pid: Some(62856),
+    }
+}
+
+#[test]
+fn a_popup_read_prints_the_open_menu_not_the_main_window() {
+    // Kate with its Projects menu open (2026-11-03): the walk is
+    // application-wide, the popup's items hang under the menubar item.
+    let md = "- frame = \"kate-scratch.txt  — Kate\"\n\
+              \x20   - [17] list item \"\" [actions=[Toggle]]\n\
+              \x20   - [25] text \"kate-scratch.txt\" value=\"alpha\" [actions=[]]\n\
+              \x20 - menu bar = \"\"\n\
+              \x20   - [51] menu item \"Projects\" [actions=[Show Menu]]\n\
+              \x20     - popup menu = \"Kate\"\n\
+              \x20       - menu item = \"Close All Projects\" (disabled)\n\
+              \x20       - [52] menu item \"Reload All Projects\" [actions=[Press]]\n\
+              \x20       - [53] menu item \"Project TODOs\" [actions=[Press]]\n\
+              \x20   - [54] menu item \"LSP Client\" [actions=[Show Menu]]\n\
+              \x20 - [57] push button \"New\" [actions=[Press,Set Focus]]\n";
+    let nodes = vec![
+        popup_test_node(17, "list item", None),
+        popup_test_node(25, "text", None),
+        popup_test_node(51, "menu item", None),
+        popup_test_node(52, "menu item", Some(51)),
+        popup_test_node(53, "menu item", Some(51)),
+        popup_test_node(54, "menu item", None),
+        popup_test_node(57, "push button", None),
+    ];
+    let bounds = vec![
+        // A breadcrumb separator of the main window, under the menu.
+        (17, 520, 120, 20, 30),
+        (25, 100, 169, 2359, 1170),
+        (51, 312, 22, 87, 34),
+        (52, 312, 240, 523, 36),
+        (53, 312, 278, 523, 36),
+        (54, 405, 22, 106, 34),
+        (57, 6, 56, 80, 30),
+    ];
+    let (popup_md, rows) =
+        popup_tree_markdown(md, &nodes, &bounds, &kate_projects_popup(), true)
+            .expect("popup rows");
+    assert_eq!(
+        popup_md,
+        "- popup menu = \"Kate\"\n\
+         \x20 - menu item = \"Close All Projects\" (disabled)\n\
+         \x20 - [52] menu item \"Reload All Projects\" [actions=[Press]]\n\
+         \x20 - [53] menu item \"Project TODOs\" [actions=[Press]]\n"
+    );
+    let mut rows: Vec<usize> = rows.into_iter().collect();
+    rows.sort_unstable();
+    assert_eq!(rows, vec![52, 53]);
+}
+
+#[test]
+fn a_popup_with_no_accessible_items_is_reported_as_such() {
+    // KWrite's text-area context menu: Qt publishes no node for it, so
+    // nothing of the walk is drawn inside the popup.
+    let md = "- frame = \"kwrite-scratch.txt  — KWrite\"\n\
+              \x20 - [0] text \"kwrite-scratch.txt\" [actions=[]]\n\
+              \x20 - [16] push button \"New\" [actions=[Press,Set Focus]]\n";
+    let nodes = vec![
+        popup_test_node(0, "text", None),
+        popup_test_node(16, "push button", None),
+    ];
+    let bounds = vec![(0, 960, 538, 600, 360), (16, 966, 491, 80, 30)];
+    let popup = crate::input::PopupWindow {
+        window: 102760480,
+        x: 1160,
+        y: 747,
+        width: 532,
+        height: 366,
+        title: "KWrite".into(),
+        pid: Some(93219),
+    };
+    assert!(popup_tree_markdown(md, &nodes, &bounds, &popup, true).is_none());
+}
