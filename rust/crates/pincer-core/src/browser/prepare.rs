@@ -843,6 +843,51 @@ impl BrowserEngine {
         })
     }
 
+    /// Collect the exit of the isolated browser rooted at `pid` after
+    /// something outside the engine killed it (`kill_app`), and end it as a
+    /// session end would: kill the rest of its process group and remove its
+    /// driver-owned profile. Returns true when `pid` was such a browser and
+    /// its exit was collected within `wait`.
+    ///
+    /// The engine holds the browser's `Child` until the session ends, so the
+    /// killed root stayed a zombie under the server for minutes (A/B test,
+    /// 2026-11-03). It is reaped through that handle, not by a bare
+    /// `waitpid`, which would leave the handle naming a pid the system can
+    /// reuse. `wait` matters for Chromium: in a live check its killed root
+    /// already read as a zombie in /proc while `try_wait` could not collect
+    /// it yet, presumably while its other threads were still exiting.
+    pub fn release_exited_browser(&self, pid: i64, wait: Duration) -> bool {
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let released = {
+                let mut browsers = self.managed_browsers.lock().unwrap();
+                let Some(at) = browsers
+                    .iter()
+                    .position(|browser| i64::from(browser.child.id()) == pid)
+                else {
+                    return false;
+                };
+                match browsers[at].child.try_wait() {
+                    Ok(Some(_)) => Some(browsers.remove(at)),
+                    Ok(None) => None,
+                    Err(error) => {
+                        tracing::debug!(pid, "isolated browser exit not collected: {error}");
+                        return false;
+                    }
+                }
+            };
+            if let Some(browser) = released {
+                // Dropped outside the lock: it kills, waits and deletes files.
+                drop(browser);
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     pub(crate) fn cleanup_prepared_session(&self, session: &str) {
         self.protected_resource_ownership.remove_session(session);
         self.managed_browsers
@@ -1549,6 +1594,69 @@ mod tests {
         loopback_tcp_reachable()
             .await
             .expect("127.0.0.1 is reachable outside a fresh network namespace");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_killed_isolated_browser_is_reaped_and_released() {
+        let f = super::super::v2_tests::fixture().await;
+        let mut stand_in = Command::new("sleep");
+        stand_in.arg("30");
+        std::os::unix::process::CommandExt::process_group(&mut stand_in, 0);
+        let child = stand_in.spawn().unwrap();
+        let pid = i64::from(child.id());
+        f.engine
+            .managed_browsers
+            .lock()
+            .unwrap()
+            .push(ManagedBrowser {
+                child: Box::new(child),
+                owned_pid: pid,
+                profile: PathBuf::from("/nonexistent/pincer-release-test"),
+                delete_profile: false,
+                marker: ProfileMarker {
+                    schema: PROFILE_SCHEMA.into(),
+                    mode: PrepareProfileMode::IsolatedNew,
+                    name: None,
+                },
+                owner_sessions: vec!["kill-test".into()],
+            });
+        let no_wait = Duration::ZERO;
+        assert!(
+            !f.engine.release_exited_browser(pid, no_wait),
+            "still running"
+        );
+        assert!(f.engine.is_driver_owned_pid_for_session("kill-test", pid));
+
+        // kill_app's SIGKILL, from outside the engine: the root turns into a
+        // zombie that only its parent, this process, can collect.
+        assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
+        let stat = format!("/proc/{pid}/stat");
+        let zombie = |text: &str| {
+            text.rsplit_once(')')
+                .is_some_and(|(_, rest)| rest.trim_start().starts_with('Z'))
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !fs::read_to_string(&stat).is_ok_and(|text| zombie(&text)) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "never became a zombie"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let wait = Duration::from_secs(2);
+        assert!(
+            !f.engine.release_exited_browser(pid + 1_000_000, wait),
+            "unknown pid"
+        );
+        assert!(f.engine.release_exited_browser(pid, wait));
+        assert!(!Path::new(&stat).exists(), "reaped");
+        assert!(!f.engine.is_driver_owned_pid_for_session("kill-test", pid));
+        assert!(
+            !f.engine.release_exited_browser(pid, wait),
+            "already released"
+        );
     }
 
     #[tokio::test]

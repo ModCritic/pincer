@@ -201,8 +201,7 @@ fn a_popup_read_prints_the_open_menu_not_the_main_window() {
         (57, 6, 56, 80, 30),
     ];
     let (popup_md, rows) =
-        popup_tree_markdown(md, &nodes, &bounds, &kate_projects_popup(), true)
-            .expect("popup rows");
+        popup_tree_markdown(md, &nodes, &bounds, &kate_projects_popup(), true).expect("popup rows");
     assert_eq!(
         popup_md,
         "- popup menu = \"Kate\"\n\

@@ -10697,7 +10697,7 @@ fn scroll_movement(
     after: &[Option<(f64, f64, f64)>],
     direction: &str,
 ) -> ScrollMovement {
-    let pairs: Vec<((f64, f64, f64), (f64, f64, f64))> = before
+    let pairs: Vec<_> = before
         .iter()
         .zip(after)
         .filter_map(|(b, a)| Some(((*b)?, (*a)?)))
@@ -10759,7 +10759,10 @@ fn scroll_outcome_result(
                 "detail": format!("scroll bar value {from} -> {to}"),
             }],
         })),
-        ScrollMovement::Still { value, at_end: true } => ToolResult::text(format!(
+        ScrollMovement::Still {
+            value,
+            at_end: true,
+        } => ToolResult::text(format!(
             "Sent {what} {direction} ({route}), but the view is already at its end: the \
              scroll bar stays at {value}."
         ))
@@ -10770,7 +10773,10 @@ fn scroll_outcome_result(
             "path": path,
             "scroll_bar": {"before": value, "after": value},
         })),
-        ScrollMovement::Still { value, at_end: false } => {
+        ScrollMovement::Still {
+            value,
+            at_end: false,
+        } => {
             let why = if synthetic_wheel_ignored {
                 "this toolkit (Qt, GTK or LibreOffice) ignores synthetic wheel events"
             } else {
@@ -11443,7 +11449,7 @@ impl Tool for DragTool {
                 "session": pincer_core::tool_schema::session_schema(),
                 "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
                 "pid":{"type":"integer","description":"Target process ID. Required unless scope is \"desktop\"."},
-                "window_id":{"type":"integer","description":"Target window XID. Required."},
+                "window_id":{"type":"integer","description":"Target window XID. Required unless scope is \"desktop\"."},
                 "from_x":{"type":"number","description":"Start X in the window's get_window_state screenshot pixels; pass scope:\"desktop\" for get_desktop_state pixels."},
                 "from_y":{"type":"number","description":"Drag start Y (same frame as from_x)."},
                 "to_x":{"type":"number","description":"Drag end X (same frame as from_x)."},
@@ -15154,7 +15160,17 @@ fn kill_observation_note(observation: &str) -> &'static str {
     }
 }
 
-pub struct KillAppTool;
+/// What `kill_app` adds after it ended an isolated browser that
+/// `browser_prepare` launched.
+const KILLED_PREPARED_BROWSER_NOTE: &str = "; it was the isolated browser browser_prepare \
+     launched, so Pincer collected its exit and ended that browser (call browser_prepare \
+     again for a new one)";
+
+pub struct KillAppTool {
+    /// Holds the isolated browsers `browser_prepare` launched, whose exit
+    /// only the engine's own child handle may collect.
+    browsers: Arc<pincer_core::browser::BrowserEngine>,
+}
 static KILL_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
 #[async_trait]
@@ -15268,14 +15284,31 @@ impl Tool for KillAppTool {
         let deadline = tokio::time::Instant::now() + KILL_CONFIRM_TIMEOUT;
         loop {
             let now = crate::proc_fs::read_process_stat(pid_i as u32);
-            if let Some(observation) = now
+            if let Some(mut observation) = now
                 .as_ref()
                 .ok()
                 .and_then(|now| crate::proc_fs::process_exit_observation(before, *now))
             {
+                let mut note = kill_observation_note(observation);
+                // An isolated browser from browser_prepare is this server's
+                // child: it stays a zombie until the browser engine reaps it.
+                if observation == "zombie" {
+                    let browsers = self.browsers.clone();
+                    let released = tokio::task::spawn_blocking(move || {
+                        browsers.release_exited_browser(i64::from(pid_i), KILL_CONFIRM_TIMEOUT)
+                    })
+                    .await
+                    .unwrap_or(false);
+                    if released {
+                        if let Ok(after) = crate::proc_fs::read_process_stat(pid_i as u32) {
+                            observation = crate::proc_fs::process_exit_observation(before, after)
+                                .unwrap_or(observation);
+                        }
+                        note = KILLED_PREPARED_BROWSER_NOTE;
+                    }
+                }
                 return ToolResult::text(format!(
-                    "✅ Terminated pid {pid_i} with SIGKILL (confirmed: {observation}){}.",
-                    kill_observation_note(observation)
+                    "✅ Terminated pid {pid_i} with SIGKILL (confirmed: {observation}){note}."
                 ))
                 .with_structured(json!({
                     "status": "terminated",
@@ -15920,7 +15953,16 @@ pub fn build_registry_with_provider(
         )),
     )));
     r.register(Box::new(LaunchAppTool));
-    r.register(Box::new(KillAppTool));
+    let browser_engine = pincer_core::browser::BrowserEngine::new_with_runtime_services(
+        Arc::new(crate::browser_platform::LinuxBrowserPlatform::new(
+            state.cursor_registry.clone(),
+        )),
+        r.approval_broker(),
+        r.protected_resource_ownership(),
+    );
+    r.register(Box::new(KillAppTool {
+        browsers: browser_engine.clone(),
+    }));
     let pid_window_candidates: PidWindowGuardParts = (
         Arc::new(pid_window_target_candidates),
         desktop_point_window_resolver(),
@@ -16056,13 +16098,6 @@ pub fn build_registry_with_provider(
     // `type_text_chars` is a deprecated invoke-time alias for `type_text`.
     // Keep it out of tools/list, matching the macOS and Windows registries.
     let _: &TypeTextCharsTool = &TypeTextCharsTool;
-    let browser_engine = pincer_core::browser::BrowserEngine::new_with_runtime_services(
-        Arc::new(crate::browser_platform::LinuxBrowserPlatform::new(
-            state.cursor_registry.clone(),
-        )),
-        r.approval_broker(),
-        r.protected_resource_ownership(),
-    );
     pincer_core::browser::register_browser_tools(&browser_engine, &mut r);
     r.register_recording_tools();
     r.register_session_tools();

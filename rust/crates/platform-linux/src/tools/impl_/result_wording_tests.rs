@@ -90,10 +90,7 @@ fn a_view_at_its_end_and_an_unknown_window_are_said_plainly() {
             at_end: false
         }
     );
-    assert_eq!(
-        scroll_movement(&[], &[], "down"),
-        ScrollMovement::Unknown
-    );
+    assert_eq!(scroll_movement(&[], &[], "down"), ScrollMovement::Unknown);
     assert_eq!(
         scroll_movement(&[None], &[None], "down"),
         ScrollMovement::Unknown
