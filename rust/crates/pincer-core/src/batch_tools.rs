@@ -184,7 +184,10 @@ impl Tool for RunStepsTool {
                 steps inherit the window. Several matches fail with the candidates listed; add \
                 `nth` or a fuller name.\n\n\
                 Checks: `wait_for` runs before a step's action, `expect` after it; both poll \
-                until they hold or time out. `text` matches any tree row, static text included; \
+                until they hold or time out. Each check names its own element with role, name \
+                or text, since it does not reuse the step's target; value, value_contains, \
+                enabled and selected then test that element. `text` matches any tree row, \
+                static text included; \
                 `gone:true` waits for it to disappear. A failed step is reported with its phase \
                 (wait_for, find, action, expect) and what was found. A step refused because its \
                 app ignores background input says how to re-send it. After a failure caused by \
@@ -208,8 +211,8 @@ impl Tool for RunStepsTool {
                             "properties": {
                                 "tool": { "type": "string", "enum": BATCHABLE_TOOLS, "description": "Action tool to run." },
                                 "args": { "type": "object", "description": "That tool's arguments, optionally with role/name/nth/app/window in place of pid/window_id/element_token." },
-                                "wait_for": { "type": "object", "description": "Check that must hold before the action: {role?, name?, text?, gone?, app?, window?, timeout_ms?}. Default timeout 5000 ms." },
-                                "expect": { "type": "array", "maxItems": 4, "items": {"type": "object"}, "description": "Up to 4 checks that must hold after the action: {role?, name?, text?, gone?, value?, value_contains?, enabled?, selected?, app?, window?, timeout_ms?}. Default timeout 2000 ms." },
+                                "wait_for": { "type": "object", "description": "Check that must hold before the action: {role?, name?, text?, gone?, app?, window?, timeout_ms?}, with at least one of role, name or text to pick the element. Default timeout 5000 ms." },
+                                "expect": { "type": "array", "maxItems": 4, "items": {"type": "object"}, "description": "Up to 4 checks that must hold after the action: {role?, name?, text?, gone?, value?, value_contains?, enabled?, selected?, app?, window?, timeout_ms?}. Each needs at least one of role, name or text to pick its element; the step's target is not reused. Default timeout 2000 ms." },
                                 "timeout_ms": { "type": "integer", "minimum": 0, "maximum": 10000, "description": "How long a named target may take to appear. Default 3000." }
                             },
                             "additionalProperties": true
