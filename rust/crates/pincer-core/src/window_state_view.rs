@@ -318,7 +318,10 @@ pub fn apply(
 
     let body;
     match outcome {
-        Some(SinceOutcome::Diff(report)) => {
+        Some(SinceOutcome::Diff(mut report)) => {
+            if structured.get("truncated").and_then(Value::as_bool) == Some(true) {
+                report.mark_cut(parse_rows(&md).iter().filter_map(|row| row.index).max());
+            }
             let since = since_resolved.as_deref().unwrap_or_default();
             let focus = if report.is_empty() {
                 ctx.focus_probe.and_then(|probe| probe())
@@ -412,8 +415,90 @@ pub fn apply(
         }
     }
 
+    // Long values (an editor's whole document) are cut in what the caller
+    // reads; the remembered `since` baseline keeps them whole, so an edit
+    // past the cut still shows up as a changed row.
+    let mut cut = false;
+    for key in ["tree_markdown", "tree_diff"] {
+        if let Some(text) = structured.get(key).and_then(Value::as_str) {
+            if let std::borrow::Cow::Owned(short) = shorten_long_values(text) {
+                structured[key] = json!(short);
+                cut = true;
+            }
+        }
+    }
+    let short_body = match shorten_long_values(&body) {
+        std::borrow::Cow::Owned(short) => Some(short),
+        std::borrow::Cow::Borrowed(_) => None,
+    };
+    let body = match short_body {
+        Some(short) => {
+            cut = true;
+            short
+        }
+        None => body,
+    };
+    if cut {
+        header_extra.push_str(&format!(
+            "\nvalues longer than {VALUE_PREVIEW_CHARS} characters are cut (`...\" (N chars)`); \
+             full_output:true returns them whole"
+        ));
+    }
     rewrite_tree_block(content, &md, &header_extra, &body);
     drop_walk_diagnostics(opts, structured);
+}
+
+/// Characters of a row's `value="..."` shown before it is cut.
+pub const VALUE_PREVIEW_CHARS: usize = 200;
+
+/// Cut every `value="..."` longer than [`VALUE_PREVIEW_CHARS`] to its start
+/// plus `..." (N chars)`. A text area's value is its whole document: a
+/// 300-line file cost about 2,500 tokens on every read (desc-test round 3).
+/// The value ends at the last `" [actions=[` of the row (values are not
+/// quote-escaped), else at the row's last quote.
+pub fn shorten_long_values(md: &str) -> std::borrow::Cow<'_, str> {
+    const OPEN: &str = " value=\"";
+    if !md.lines().any(|line| {
+        line.find(OPEN).is_some_and(|start| {
+            value_end(line, start + OPEN.len())
+                .is_some_and(|end| line[start + OPEN.len()..end].chars().count() > VALUE_PREVIEW_CHARS)
+        })
+    }) {
+        return std::borrow::Cow::Borrowed(md);
+    }
+    let mut out = String::with_capacity(md.len().min(64 * 1024));
+    for (i, line) in md.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let cut = line.find(OPEN).and_then(|start| {
+            let from = start + OPEN.len();
+            let end = value_end(line, from)?;
+            let value = &line[from..end];
+            let chars = value.chars().count();
+            (chars > VALUE_PREVIEW_CHARS).then(|| {
+                let keep: String = value.chars().take(VALUE_PREVIEW_CHARS).collect();
+                format!(
+                    "{}{keep}...\" ({chars} chars){}",
+                    &line[..from],
+                    &line[end + 1..]
+                )
+            })
+        });
+        match cut {
+            Some(short) => out.push_str(&short),
+            None => out.push_str(line),
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// Byte offset of the quote that closes a value starting at `from`.
+fn value_end(line: &str, from: usize) -> Option<usize> {
+    let tail = &line[from..];
+    tail.rfind("\" [actions=[")
+        .or_else(|| tail.rfind('"'))
+        .map(|end| from + end)
 }
 
 /// Walk diagnostics cost every read context and no caller acts on them:
@@ -798,8 +883,11 @@ fn resolve_since(
     match diff_markdown(&old.markdown, md) {
         Err(DiffError::TooLarge) => SinceOutcome::Fallback("diff_too_large"),
         Ok(report) => {
-            if !report.is_empty() && report.render_len() * 100 > md.len() * DIFF_MAX_PERCENT_OF_FULL
-            {
+            // Both sides as the caller would read them, long values cut: an
+            // edit to a long document is one short changed row, not a reason
+            // to resend the whole tree.
+            let shown = shorten_long_values(md).len();
+            if !report.is_empty() && report.render_len() * 100 > shown * DIFF_MAX_PERCENT_OF_FULL {
                 SinceOutcome::Fallback("too_much_changed")
             } else {
                 SinceOutcome::Diff(report)
@@ -829,6 +917,14 @@ pub struct DiffReport {
     changed: Vec<Row>,
     removed: Vec<Row>,
     reindexed: Vec<(u64, u64, i64)>,
+    /// `role "name"` of the first old row of each `reindexed` run, so the
+    /// line says which element moved.
+    reindexed_labels: std::collections::HashMap<u64, String>,
+    /// The new read was cut after this row: old rows past it were not
+    /// reached, which says nothing about whether they still exist.
+    cut_after: Option<u64>,
+    /// Old rows past `cut_after` left out of `removed`.
+    unreached: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -944,6 +1040,7 @@ fn diff_markdown(old_md: &str, new_md: &str) -> Result<DiffReport, DiffError> {
                             }
                             if delta != 0 {
                                 run = Some((oi, oi, delta));
+                                report.reindexed_labels.insert(oi, row_label(&old[o].key));
                             }
                         }
                     }
@@ -956,6 +1053,17 @@ fn diff_markdown(old_md: &str, new_md: &str) -> Result<DiffReport, DiffError> {
         report.reindexed.push(done);
     }
     Ok(report)
+}
+
+/// `push button "Open Menu"` out of a row key (role, then its first quoted
+/// string).
+fn row_label(key: &str) -> String {
+    let role = key.split('"').next().unwrap_or("").trim();
+    let role = role.split(" [").next().unwrap_or(role).trim();
+    match key.split('"').nth(1) {
+        Some(name) if !name.is_empty() => format!("{role} \"{name}\""),
+        _ => role.to_owned(),
+    }
 }
 
 enum Op {
@@ -1040,14 +1148,32 @@ impl DiffReport {
             .iter()
             .chain(&self.changed)
             .chain(&self.removed)
-            .map(|r| r.text.len() + 3)
+            .map(|r| shorten_long_values(&r.text).len() + 3)
             .sum()
+    }
+
+    /// The new read stopped after row `last`: old rows past it were not
+    /// reached, so they are not reported as removed (a cut `since` re-read
+    /// listed "- [54] menu item \"Settings\"" for a menu that was still
+    /// there, desc-test round 1 redo).
+    fn mark_cut(&mut self, last: Option<u64>) {
+        self.cut_after = last;
+        let Some(last) = last else { return };
+        let before = self.removed.len();
+        self.removed
+            .retain(|row| row.index.is_none_or(|index| index <= last));
+        self.unreached = before - self.removed.len();
     }
 
     fn render(&self, since: &str, snapshot_id: Option<&str>, focus: Option<&str>) -> String {
         let new_id = snapshot_id.unwrap_or("the new snapshot");
         if self.is_empty() {
-            let mut out = format!("no change since {since}");
+            let mut out = match self.cut_after {
+                Some(last) => format!(
+                    "no change since {since} among the rows this read reached (it stops at row [{last}])"
+                ),
+                None => format!("no change since {since}"),
+            };
             if let Some(focus) = focus {
                 out.push_str(&format!("; focused element is {focus}"));
             }
@@ -1071,13 +1197,32 @@ impl DiffReport {
         for row in &self.removed {
             out.push_str(&format!("- {}\n", row.text));
         }
+        if self.unreached > 0 {
+            out.push_str(&format!(
+                "{} row(s) past [{}] were not reached by this cut read; they are not removed.\n",
+                self.unreached,
+                self.cut_after.unwrap_or_default()
+            ));
+        }
         const MAX_RUNS: usize = 20;
         for (first_old, last_old, delta) in self.reindexed.iter().take(MAX_RUNS) {
-            out.push_str(&format!(
-                "reindexed: [{first_old}-{last_old}] -> [{}-{}]\n",
-                *first_old as i64 + delta,
-                *last_old as i64 + delta
-            ));
+            let label = self
+                .reindexed_labels
+                .get(first_old)
+                .map(String::as_str)
+                .unwrap_or("");
+            if first_old == last_old {
+                out.push_str(&format!(
+                    "reindexed: [{first_old}] {label} -> [{}]\n",
+                    *first_old as i64 + delta
+                ));
+            } else {
+                out.push_str(&format!(
+                    "reindexed: [{first_old}-{last_old}] -> [{}-{}] (from {label})\n",
+                    *first_old as i64 + delta,
+                    *last_old as i64 + delta
+                ));
+            }
         }
         if self.reindexed.len() > MAX_RUNS {
             out.push_str("reindexed: more shifted ranges not listed; pass full_output or omit since for a fresh index.\n");
@@ -1399,6 +1544,112 @@ mod tests {
         assert_eq!(s["_note"], before["_note"]);
         assert_eq!(s["background_input"], before["background_input"]);
         assert_eq!(s["tree_markdown"], OLD);
+    }
+
+    fn long_value_tree(doc: &str) -> String {
+        format!(
+            "- [0] frame \"KWrite\" [actions=[]]\n  - [1] text \"f.txt\" value=\"{doc}\" [actions=[]]\n  - [2] push button \"Save\" [actions=[Press,Set Focus]]\n  - [3] push button \"Open\" [actions=[Press]]\n  - [4] push button \"New\" [actions=[Press]]"
+        )
+    }
+
+    #[test]
+    fn long_values_are_cut_in_reads_but_diffed_whole() {
+        // A 300-line KWrite document as its text area's value (one_line
+        // escapes the newlines).
+        let doc: String = (1..=300)
+            .map(|i| format!("scroll test line {i} november words\\n"))
+            .collect();
+        let chars = doc.chars().count();
+        let md = long_value_tree(&doc);
+        let (mut content, mut s) = payload("s0000f101", &md);
+        apply(&opts(json!({})), &ctx(7101), &mut content, &mut s);
+        let text = text_of(&content);
+        assert!(
+            text.contains(&format!("...\" ({chars} chars) [actions=[]]")),
+            "{text}"
+        );
+        assert!(text.contains("full_output:true returns them whole"), "{text}");
+        assert!(text.len() < 1200, "{}", text.len());
+        let shown = s["tree_markdown"].as_str().unwrap();
+        assert!(shown.len() < 1000, "{}", shown.len());
+        assert!(shown.contains("[2] push button \"Save\""));
+
+        // An edit near the end of the document is a changed row in a short
+        // diff, not a full re-read.
+        let edited = long_value_tree(&doc.replace("line 299 ", "line 2x9 "));
+        let (mut content, mut s) = payload("s0000f102", &edited);
+        apply(
+            &opts(json!({"since": "s0000f101"})),
+            &ctx(7101),
+            &mut content,
+            &mut s,
+        );
+        assert_eq!(s["since_status"], "diff", "{s}");
+        assert_eq!(s["diff_counts"]["changed"], 1);
+        assert!(s["tree_diff"].as_str().unwrap().len() < 1000);
+        assert!(text_of(&content).len() < 1200);
+
+        // full_output returns the value whole.
+        let (mut content, mut s) = payload("s0000f103", &md);
+        apply(
+            &opts(json!({"full_output": true})),
+            &ctx(7102),
+            &mut content,
+            &mut s,
+        );
+        assert!(text_of(&content).contains(&doc));
+        assert_eq!(s["tree_markdown"], md);
+    }
+
+    #[test]
+    fn short_values_and_quotes_inside_values_are_left_alone() {
+        let md = "- [1] text \"a\" value=\"say \"hi\" [actions=[x]] twice\" [actions=[]]";
+        assert!(matches!(
+            shorten_long_values(md),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        let long = format!("- [1] entry \"q\" value=\"{}\" [actions=[]]", "\"x\" ".repeat(80));
+        let short = shorten_long_values(&long);
+        assert!(short.ends_with("...\" (320 chars) [actions=[]]"), "{short}");
+    }
+
+    #[test]
+    fn a_cut_read_does_not_call_unreached_rows_removed() {
+        let old = "- [0] W \"Doc\"\n  - [1] push button \"A\" [actions=[Press]]\n  - [2] push button \"B\" [actions=[Press]]\n  - [3] menu item \"Settings\" [actions=[Show Menu]]";
+        let new = "- [0] W \"Doc\"\n  - [1] push button \"A\" [actions=[Press]]";
+        let mut report = diff_markdown(old, new).unwrap();
+        assert_eq!(report.removed.len(), 2);
+        report.mark_cut(Some(1));
+        assert!(report.removed.is_empty());
+        let text = report.render("s1", Some("s2"), None);
+        assert!(
+            text.starts_with("no change since s1 among the rows this read reached (it stops at row [1])"),
+            "{text}"
+        );
+
+        // A real removal before the cut is still reported, with the count
+        // of rows the cut read did not reach.
+        let new = "- [0] W \"Doc\"\n  - [2] push button \"B\" [actions=[Press]]";
+        let mut report = diff_markdown(old, new).unwrap();
+        report.mark_cut(Some(2));
+        let text = report.render("s1", Some("s2"), None);
+        assert!(text.contains("- [1] push button \"A\""), "{text}");
+        assert!(!text.contains("Settings"), "{text}");
+        assert!(text.contains("1 row(s) past [2] were not reached"), "{text}");
+    }
+
+    #[test]
+    fn a_reindexed_row_is_named() {
+        // Kate's toolbar after typing: Undo became enabled and indexed, so
+        // Open Menu moved from [1] to [2] (desc-test round 1, item 6).
+        let old = "- [0] W \"Doc\"\n  - push button = \"Undo\" (disabled)\n  - [1] push button \"Open Menu\" [actions=[]]";
+        let new = "- [0] W \"Doc\"\n  - [1] push button \"Undo\" [actions=[Press]]\n  - [2] push button \"Open Menu\" [actions=[]]";
+        let report = diff_markdown(old, new).unwrap();
+        let text = report.render("s1", Some("s2"), None);
+        assert!(
+            text.contains("reindexed: [1] push button \"Open Menu\" -> [2]"),
+            "{text}"
+        );
     }
 
     #[test]
