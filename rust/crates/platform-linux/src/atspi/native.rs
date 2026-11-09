@@ -6,11 +6,12 @@
 //! small shared Tokio runtime via `block_on` (callers already invoke these
 //! from `tokio::task::spawn_blocking`, so blocking here is safe).
 //!
-//! Element indices match the markdown produced by [`walk_tree`]: a depth-first,
-//! pre-order traversal of the target application's windows, numbering the
-//! nodes accepted by the shared [`is_indexable`] capability predicate.
-//! `perform_action`, `set_value`, and `get_element_bounds` index into that same
-//! ordered set.
+//! Element indices match the markdown produced by [`walk_tree_bounded`] for
+//! one window: a depth-first, pre-order traversal of that window, numbering
+//! the nodes accepted by the shared [`is_indexable`] capability predicate.
+//! `perform_action`, `set_value`, `scroll_element`, `focus_element` and
+//! `get_element_bounds_for_window` index into that same ordered set, so they
+//! always take the window an index belongs to.
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
@@ -948,23 +949,13 @@ async fn resolve_app_for_pid<'a>(
     }
 }
 
-/// Depth-first, pre-order walk of an application's windows. Mirrors the old
-/// pyatspi `walk`/`collect` traversal so element indices stay stable.
-#[allow(dead_code)]
-async fn collect_visited<'a>(
-    conn: &'a AccessibilityConnection,
-    pid: u32,
-) -> Result<Option<Vec<Visited<'a>>>> {
-    collect_visited_bounded(conn, pid, 0, None, None)
-        .await
-        .map(|walked| walked.map(|collected| collected.visited))
-}
-
-/// [`collect_visited`] for one window: the walk a `get_window_state` read of
-/// `xid` numbers its elements by, so an element index from that read names
-/// the same element here. The application-wide walk numbers from the
-/// application's first top-level instead, where index 8 of a dialog's read is
-/// some control of the main window.
+/// Depth-first, pre-order walk of window `xid` (`0`: every window of the
+/// application). Mirrors the old pyatspi `walk`/`collect` traversal, and is
+/// the walk a `get_window_state` read of `xid` numbers its elements by, so an
+/// element index from that read names the same element here. There is no
+/// application-wide variant for indices: it numbered from the application's
+/// first top-level, where index 8 of a dialog's read is some control of the
+/// main window.
 async fn collect_window_visited<'a>(
     conn: &'a AccessibilityConnection,
     pid: u32,
@@ -2692,7 +2683,7 @@ fn is_enabled_state(state: &StateSet) -> bool {
 ///
 /// This predicate is the single source of truth for the element-index space and
 /// MUST be applied identically in `render` and in every `action_nodes` filter
-/// (`perform_action`, `set_value`, `get_element_bounds`, snapshot bounds);
+/// (`perform_action`, `set_value`, `get_element_bounds_for_window`, snapshot bounds);
 /// any divergence would desync indices between the snapshot and the operations.
 fn is_indexable(v: &Visited) -> bool {
     v.showing
@@ -2737,11 +2728,6 @@ fn first_application_walk(pid: u32) -> bool {
         .lock()
         .unwrap()
         .insert(pid)
-}
-
-pub fn walk_tree(pid: u32) -> Result<Option<(String, Vec<AtspiNode>)>> {
-    walk_tree_bounded(pid, 0, None, None)
-        .map(|snapshot| snapshot.map(|walked| (walked.markdown, walked.nodes)))
 }
 
 /// One accessibility snapshot, plus whether it was provably narrowed to the
@@ -3223,22 +3209,22 @@ async fn write_through_editable_proxies(
     Ok(false)
 }
 
-/// Write into the best editable exposed by the current AT-SPI tree without
-/// falling through to synthetic X11 input.
-pub fn type_into_editable(pid: u32, text: &str) -> Result<()> {
+/// Write into the best editable of window `xid` (0: any window of the app)
+/// without falling through to synthetic X11 input.
+pub fn type_into_editable(pid: u32, xid: u64, text: &str) -> Result<()> {
     bounded_for(
         INPUT_QUERY_BUDGET,
         async {
             let conn = shared_connection().await?;
             // Focused editable known from the event log: write there directly.
-            if let Some(true) = write_into_focused_editable(conn, pid, text).await {
+            if let Some(true) = write_into_focused_editable(conn, pid, xid, text).await {
                 return Ok(());
             }
             let Collected {
                 visited,
                 truncation,
                 ..
-            } = collect_visited_bounded(conn, pid, 0, None, None)
+            } = collect_visited_bounded(conn, pid, xid, None, None)
                 .await?
                 .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
             if write_into_editable(&visited, truncation.is_none(), text).await? {
@@ -3299,19 +3285,21 @@ pub fn type_into_editable_at(pid: u32, xid: u64, idx: usize, text: &str) -> Resu
     )
 }
 
-pub fn insert_text(pid: u32, text: &str) -> Result<bool> {
+/// Insert `text` into the focused editable of window `xid`, else the best
+/// editable a walk of that window finds (`xid == 0`: any window of the app).
+pub fn insert_text(pid: u32, xid: u64, text: &str) -> Result<bool> {
     bounded_for(
         INPUT_QUERY_BUDGET,
         async {
             let conn = shared_connection().await?;
-            if let Some(true) = write_into_focused_editable(conn, pid, text).await {
+            if let Some(true) = write_into_focused_editable(conn, pid, xid, text).await {
                 return Ok(true);
             }
             let Collected {
                 visited,
                 truncation,
                 ..
-            } = match collect_visited_bounded(conn, pid, 0, None, None).await? {
+            } = match collect_visited_bounded(conn, pid, xid, None, None).await? {
                 Some(v) => v,
                 None => return Ok(false),
             };
@@ -3427,18 +3415,24 @@ pub fn insert_text(pid: u32, text: &str) -> Result<bool> {
 ///                   the focused widget instead.
 ///   `None`        — nothing is focused (or the app is unreachable): fall back to
 ///                   the focus-free "first editable" path for background typing.
-pub fn focused_is_editable(pid: u32) -> Result<Option<bool>> {
+/// What holds the keyboard focus in window `xid` (0: any window of the app):
+/// `Some(true)` an editable, `Some(false)` a non-editable input, `None`
+/// nothing found, including a focus that is in another window of the app.
+pub fn focused_is_editable(pid: u32, xid: u64) -> Result<Option<bool>> {
     bounded_for(
         INPUT_QUERY_BUDGET,
         async {
             let conn = shared_connection().await?;
             // O(1) answer from the focus-event log when available.
-            if let Some((acc, _)) = focused_accessible_via_events(conn, pid).await {
+            if let Some((acc, oref)) = focused_accessible_via_events(conn, pid).await {
+                if object_in_window(conn, pid, xid, &oref).await == Some(false) {
+                    return Ok(None);
+                }
                 if let Some(Ok(ifaces)) = call(acc.get_interfaces()).await {
                     return Ok(Some(ifaces.contains(Interface::EditableText)));
                 }
             }
-            let visited = match collect_visited(conn, pid).await? {
+            let visited = match collect_window_visited(conn, pid, xid).await? {
                 Some(v) => v,
                 None => return Ok(None),
             };
@@ -3816,17 +3810,13 @@ fn exact_menu_path_matches(visited: &[Visited<'_>], path: &[String]) -> Vec<usiz
         .collect()
 }
 
-/// Resolve and invoke an application menu one live hierarchy level at a time.
-/// Every hop re-walks AT-SPI after the preceding menu has materialized; no
-/// snapshot index is retained across mutations.
-pub fn invoke_menu_path(pid: u32, path: &[String]) -> Result<()> {
-    invoke_menu_path_in(pid, 0, path)
-}
-
-/// [`invoke_menu_path`] scoped to the caller's native window: when the same
-/// menu path exists under several top-levels of the process (LibreOffice
-/// publishes every document window's menubar in one AT-SPI application),
-/// the hop under `xid`'s frame wins instead of the path being ambiguous.
+/// Resolve and invoke an application menu one live hierarchy level at a time,
+/// scoped to the caller's native window. Every hop re-walks AT-SPI after the
+/// preceding menu has materialized; no snapshot index is retained across
+/// mutations. When the same menu path exists under several top-levels of the
+/// process (LibreOffice publishes every document window's menubar in one
+/// AT-SPI application), the hop under `xid`'s frame wins instead of the path
+/// being ambiguous.
 pub fn invoke_menu_path_in(pid: u32, xid: u64, path: &[String]) -> Result<()> {
     bounded(
         async {
@@ -3927,12 +3917,14 @@ fn dedupe_menu_matches(visited: &[Visited<'_>], matches: Vec<usize>) -> Vec<usiz
     candidates
 }
 
-pub fn perform_action(pid: u32, idx: usize) -> Result<(String, bool, bool)> {
+/// Perform the first action of element `idx` of window `xid`, resolved
+/// against a fresh walk of that window (the index space of its snapshot).
+pub fn perform_action(pid: u32, xid: u64, idx: usize) -> Result<(String, bool, bool)> {
     bounded_for(
         INDEX_RESOLVE_BUDGET,
         async {
             let conn = shared_connection().await?;
-            let visited = collect_visited(conn, pid)
+            let visited = collect_window_visited(conn, pid, xid)
                 .await?
                 .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
             let action_nodes: Vec<&Visited> = visited.iter().filter(|v| is_indexable(v)).collect();
@@ -4404,9 +4396,19 @@ pub fn type_into_editable_ref(object_ref: &ObjectRef, text: &str) -> Result<()> 
 async fn write_into_focused_editable(
     conn: &AccessibilityConnection,
     pid: u32,
+    xid: u64,
     text: &str,
 ) -> Option<bool> {
     let (acc, oref) = focused_accessible_via_events(conn, pid).await?;
+    // The application's focus can be in another of its windows than the one
+    // the caller addressed; typing there would land in the wrong window.
+    if object_in_window(conn, pid, xid, &oref).await == Some(false) {
+        dlog!(
+            "focused object {} is in another window than {xid:#x}",
+            oref.path
+        );
+        return Some(false);
+    }
     let ifaces = call(acc.get_interfaces()).await?.ok()?;
     if !ifaces.contains(Interface::EditableText) {
         dlog!("focused object {} is not editable", oref.path);
@@ -4419,6 +4421,48 @@ async fn write_into_focused_editable(
             Some(false)
         }
     }
+}
+
+/// Whether the accessible `object` belongs to window `xid`: its parent chain
+/// reaches the top-level `xid` resolves to (`Some(true)`) or another
+/// top-level of the application (`Some(false)`). `None` when it can't be
+/// told: no window (`xid == 0`), a window no top-level corresponds to (a Qt
+/// popup), or a chain that breaks off.
+async fn object_in_window(
+    conn: &AccessibilityConnection,
+    pid: u32,
+    xid: u64,
+    object: &ObjectRef,
+) -> Option<bool> {
+    if xid == 0 {
+        return None;
+    }
+    let app = app_for_pid(conn, pid).await.ok()??;
+    let seeds: Vec<RawObjectRef> = call(app.get_children())
+        .await?
+        .ok()?
+        .iter()
+        .filter_map(RawObjectRef::from_atspi)
+        .collect();
+    let frame = seeds
+        .get(resolve_window_frame(conn, pid, xid, &seeds).await?)?
+        .clone();
+    let mut current = raw_ref(object);
+    for _ in 0..64 {
+        if current == frame {
+            return Some(true);
+        }
+        if seeds.contains(&current) {
+            return Some(false);
+        }
+        let acc = call(accessible_for(conn, &current)).await?.ok()?;
+        let parent = RawObjectRef::from_atspi(&call(acc.parent()).await?.ok()?)?;
+        if parent == current || parent.path.ends_with("/null") {
+            return None;
+        }
+        current = parent;
+    }
+    None
 }
 
 // ── Point hit-testing without a walk ─────────────────────────────────────────
@@ -5335,8 +5379,12 @@ async fn sample_page_probes(
 /// Invoke the original target's semantic actions, pacing multi-page requests
 /// with descendant motion. `Err` means no mutation was attempted; an incomplete
 /// `ScrollProgress` preserves uncertainty after an attempted mutation.
+///
+/// `idx` is an element of the caller's snapshot of window `xid`, resolved
+/// against a fresh walk of that window.
 pub fn scroll_element(
     pid: u32,
+    xid: u64,
     idx: usize,
     direction: &str,
     amount: usize,
@@ -5347,7 +5395,7 @@ pub fn scroll_element(
     let result = bounded(
         async {
             let conn = shared_connection().await?;
-            let visited = collect_visited(conn, pid)
+            let visited = collect_window_visited(conn, pid, xid)
                 .await?
                 .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
             let target = visited
@@ -5595,6 +5643,7 @@ pub fn focus_element(pid: u32, xid: u64, idx: usize) -> Result<bool> {
 /// point (the caller then falls back to the synthetic X11 path).
 pub fn perform_action_at_point(
     pid: u32,
+    xid: u64,
     win_x: i32,
     win_y: i32,
     skip_focus_roles: bool,
@@ -5603,7 +5652,10 @@ pub fn perform_action_at_point(
         INPUT_QUERY_BUDGET,
         async {
             let conn = shared_connection().await?;
-            let visited = match collect_visited(conn, pid).await? {
+            // Only window `xid`'s elements: a window-local point compared with
+            // every window's frames can hit another window's control that sits
+            // at the same window coordinates (the main window under a dialog).
+            let visited = match collect_window_visited(conn, pid, xid).await? {
                 Some(v) => v,
                 None => return Ok(None),
             };
@@ -5941,12 +5993,14 @@ async fn set_value_on(
     ))
 }
 
-pub fn set_value(pid: u32, idx: usize, value: &str) -> Result<()> {
+/// Set the value of element `idx` of window `xid`, resolved against a fresh
+/// walk of that window (the index space of its snapshot).
+pub fn set_value(pid: u32, xid: u64, idx: usize, value: &str) -> Result<()> {
     bounded_for(
         INDEX_RESOLVE_BUDGET,
         async {
             let conn = shared_connection().await?;
-            let visited = collect_visited(conn, pid)
+            let visited = collect_window_visited(conn, pid, xid)
                 .await?
                 .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
             let action_nodes: Vec<&Visited> = visited.iter().filter(|v| is_indexable(v)).collect();
@@ -6317,15 +6371,6 @@ pub fn read_value_ref(object_ref: &ObjectRef) -> Result<Option<String>> {
         },
         || Err(anyhow!("read_value (cached element) timed out")),
     )
-}
-
-pub fn get_element_bounds(pid: u32, idx: usize) -> Result<(i32, i32, u32, u32)> {
-    if crate::wayland::is_wayland() && crate::wayland::hyprland::is_session() {
-        let window = crate::wayland::hyprland::window_for_pid(pid)
-            .context("Hyprland bounds require an exact window for multi-window apps")?;
-        return get_element_bounds_for_window(pid, window.address, idx);
-    }
-    element_bounds_by_walk(pid, 0, idx)
 }
 
 /// Resolve element `idx` against a fresh walk and read its screen bounds.

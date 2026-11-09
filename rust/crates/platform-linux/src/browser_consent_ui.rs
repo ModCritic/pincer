@@ -238,7 +238,7 @@ pub fn dismiss(pid: u32, window_id: u64) -> Result<bool, BrowserRefusal> {
                 "the exact remote-debugging consent prompt exposed no semantic cancel action",
             )
         })?;
-        crate::atspi::perform_action(pid, index).map_err(|error| {
+        crate::atspi::perform_action_walked(&tree.nodes, index).map_err(|error| {
             refusal(
                 BrowserRefusalCode::BrowserWrongTargetRefused,
                 format!("the exact browser consent cancel action failed: {error}"),
@@ -326,8 +326,9 @@ pub async fn handle(
         saw_prompt |= prompt_present;
         match exact_allow_button(&tree.nodes, &tree.bounds)? {
             Some(index) if accessibility_action_at.is_none() => {
+                let nodes = tree.nodes.clone();
                 consent_action(&request.action, deadline, move || {
-                    crate::atspi::perform_action(pid, index)
+                    crate::atspi::perform_action_walked(&nodes, index)
                 })
                 .await?;
                 accessibility_action_at = Some(Instant::now());

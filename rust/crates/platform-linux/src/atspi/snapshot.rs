@@ -138,28 +138,22 @@ pub(crate) fn forget_window(pid: u32, xid: u64) {
     store().lock().unwrap().remove(&CacheKey { pid, xid });
 }
 
-fn snapshot_for(pid: u32, xid: Option<u64>) -> Option<Arc<HashMap<usize, CachedElement>>> {
-    let store = store().lock().unwrap();
-    match xid {
-        Some(xid) => store.get(&CacheKey { pid, xid }).cloned(),
-        // Callers that lack an xid get the first snapshot found for the pid.
-        None => store
-            .iter()
-            .find(|(key, _)| key.pid == pid)
-            .map(|(_, elements)| elements.clone()),
-    }
+/// The snapshot of window `xid` of `pid`. Always by window: element indices
+/// are per window, and a lookup by pid alone took whichever window's snapshot
+/// the map listed first, so the same index named another window's control.
+fn snapshot_for(pid: u32, xid: u64) -> Option<Arc<HashMap<usize, CachedElement>>> {
+    store().lock().unwrap().get(&CacheKey { pid, xid }).cloned()
 }
 
-/// The cached element at `idx` for (pid, xid); with `xid == None`, the first
-/// snapshot recorded for `pid`.
-pub(crate) fn cached_element(pid: u32, xid: Option<u64>, idx: usize) -> Option<CachedElement> {
+/// The cached element at `idx` in the last snapshot of window `xid` of `pid`.
+pub(crate) fn cached_element(pid: u32, xid: u64, idx: usize) -> Option<CachedElement> {
     snapshot_for(pid, xid)?.get(&idx).cloned()
 }
 
 /// D-Bus addresses of the cached elements of (pid, xid) with role `role`,
 /// in index order.
 pub(crate) fn cached_refs_with_role(pid: u32, xid: u64, role: &str) -> Vec<ObjectRef> {
-    let Some(elements) = snapshot_for(pid, Some(xid)) else {
+    let Some(elements) = snapshot_for(pid, xid) else {
         return Vec::new();
     };
     let mut matching: Vec<(&usize, &CachedElement)> = elements
@@ -177,7 +171,7 @@ pub(crate) fn cached_refs_with_role(pid: u32, xid: u64, role: &str) -> Vec<Objec
 /// smallest covering real actuator wins, then a passive label. Returns the
 /// element index and its cached identity.
 pub(crate) fn hit_test(pid: u32, xid: u64, sx: i32, sy: i32) -> Option<(usize, CachedElement)> {
-    let elements = snapshot_for(pid, Some(xid))?;
+    let elements = snapshot_for(pid, xid)?;
     let mut indexed: Vec<(&usize, &CachedElement)> = elements.iter().collect();
     indexed.sort_by_key(|(idx, _)| **idx);
     let frames: Vec<(usize, i32, i32, u32, u32, bool)> = indexed
@@ -384,10 +378,10 @@ mod tests {
             Some("/node/1")
         );
         assert!(hit_test(pid, 77, 900, 900).is_none());
-        // Index lookup without an xid falls back to any snapshot for the pid.
-        assert_eq!(cached_element(pid, None, 2).unwrap().role, "label");
-        assert!(cached_element(pid, Some(78), 2).is_none());
+        // An index is looked up in its own window's snapshot only.
+        assert_eq!(cached_element(pid, 77, 2).unwrap().role, "label");
+        assert!(cached_element(pid, 78, 2).is_none());
         forget_window(pid, 77);
-        assert!(cached_element(pid, None, 0).is_none());
+        assert!(cached_element(pid, 77, 0).is_none());
     }
 }

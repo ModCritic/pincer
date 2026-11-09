@@ -313,25 +313,21 @@ fn lists_rows_below_the_window(markdown: &str) -> bool {
     markdown.lines().any(|line| line.starts_with(' '))
 }
 
-/// Perform the first advertised action on element `idx` within pid's app tree.
-/// Returns `Ok((action_name, suspected_noop, unacknowledged))` on success —
+/// Perform the first advertised action on element `idx` of the last
+/// `get_window_state` snapshot of window `xid`: the cached object first (no
+/// re-walk), a fresh walk of that window (the snapshot's index space) when
+/// the cached object is gone.
+/// Returns `Ok((action_name, suspected_noop, unacknowledged))` on success:
 /// `suspected_noop` is true when the actuated node looked like a silent
 /// no-op (a passive display role, or no advertised action), so the caller
 /// can surface `effect: "suspected_noop"`. `unacknowledged` is true when the
 /// `doAction` D-Bus reply never arrived in time: the toolkit may still be
 /// processing the request (e.g. behind a nested dialog loop), so neither
-/// acceptance nor effect is known — the caller must report this as
+/// acceptance nor effect is known, and the caller must report this as
 /// `unverifiable` with an explicit note, never as a plain confirmed/dispatched
 /// success.
-pub fn perform_action(pid: u32, idx: usize) -> Result<(String, bool, bool)> {
-    perform_action_in(pid, None, idx)
-}
-
-/// [`perform_action`] that first tries the element identity cached by the last
-/// `get_window_state` snapshot of (pid, xid) — no re-walk — and only resolves
-/// the index against a fresh walk when the cached object is gone.
-pub fn perform_action_in(pid: u32, xid: Option<u64>, idx: usize) -> Result<(String, bool, bool)> {
-    if let Some(object_ref) = cache::cached_element(pid, xid, idx).and_then(|e| e.object_ref) {
+pub fn perform_action_in(pid: u32, xid: u64, idx: usize) -> Result<(String, bool, bool)> {
+    if let Some(object_ref) = cached_ref(pid, xid, idx) {
         match native::perform_action_ref(&object_ref) {
             Ok(done) => return Ok(done),
             Err(error) => tracing::debug!(
@@ -339,7 +335,36 @@ pub fn perform_action_in(pid: u32, xid: Option<u64>, idx: usize) -> Result<(Stri
             ),
         }
     }
-    native::perform_action(pid, idx)
+    native::perform_action(pid, xid, idx)
+}
+
+/// [`perform_action_in`] on element `idx` of a tree the caller walked itself
+/// ([`walk_tree`]): that walked object, never a `get_window_state` snapshot,
+/// which may be of another window or of this one before it changed.
+pub fn perform_action_walked(nodes: &[AtspiNode], idx: usize) -> Result<(String, bool, bool)> {
+    let node = walked_node(nodes, idx)
+        .ok_or_else(|| anyhow::anyhow!("element {idx} is not in the walk"))?;
+    let Some(object_ref) = node.object_ref.as_ref() else {
+        anyhow::bail!("walked element {idx} has no D-Bus address");
+    };
+    native::perform_action_ref(object_ref)
+}
+
+/// The node of a walked tree that carries element index `idx`.
+fn walked_node(nodes: &[AtspiNode], idx: usize) -> Option<&AtspiNode> {
+    nodes.iter().find(|node| node.element_index == Some(idx))
+}
+
+/// The screen frame a walk ([`walk_tree`]) resolved for its element `idx`,
+/// when it resolved one with a real size.
+pub fn walked_bounds(
+    bounds: &[(usize, i32, i32, u32, u32)],
+    idx: usize,
+) -> Option<(i32, i32, u32, u32)> {
+    bounds
+        .iter()
+        .find(|(index, _, _, width, height)| *index == idx && *width > 0 && *height > 0)
+        .map(|&(_, x, y, width, height)| (x, y, width, height))
 }
 
 /// [`perform_action`] on the exact object a snapshot observed. Never re-walks
@@ -371,7 +396,7 @@ pub fn element_showing_observed(element: &cache::CachedElement) -> Result<bool> 
 /// whichever window's snapshot the cache listed first, and typed into a main
 /// window's list item instead of a dialog's field).
 fn cached_ref(pid: u32, xid: u64, idx: usize) -> Option<native::ObjectRef> {
-    cache::cached_element(pid, Some(xid), idx).and_then(|e| e.object_ref)
+    cache::cached_element(pid, xid, idx).and_then(|e| e.object_ref)
 }
 
 /// Give element `idx` of the caller's snapshot of window `xid` keyboard focus
@@ -400,14 +425,17 @@ pub fn scroll_bar_ranges(pid: u32, xid: u64) -> Vec<Option<(f64, f64, f64)>> {
     native::value_ranges(&refs)
 }
 
+/// Scroll element `idx` of the caller's snapshot of window `xid`, resolved
+/// against a fresh walk of that window.
 pub fn scroll_element(
     pid: u32,
+    xid: u64,
     idx: usize,
     direction: &str,
     amount: usize,
     by: pincer_contract::ScrollBy,
 ) -> Result<ScrollProgress> {
-    native::scroll_element(pid, idx, direction, amount, by)
+    native::scroll_element(pid, xid, idx, direction, amount, by)
 }
 
 /// Enumerate top-level windows from the AT-SPI registry. The window-listing
@@ -419,20 +447,15 @@ pub fn list_windows(filter_pid: Option<u32>) -> Vec<crate::x11::WindowInfo> {
     native::list_windows(filter_pid)
 }
 
-/// Resolve a window-local pixel to the actionable AT-SPI element at that point
-/// and perform its primary action — the no-focus-steal way to land a *pixel*
-/// click on toolkits (GTK) that drop synthetic X11 pointer events. Returns
-/// `Ok(Some(action))` when an element was actuated, `Ok(None)` when no
-/// actionable element covers the point (caller falls back to the X11 path).
-pub fn perform_action_at_point(pid: u32, win_x: i32, win_y: i32) -> Result<Option<AtPointHit>> {
-    perform_action_at_point_in(pid, 0, win_x, win_y, false)
-}
-
 pub use native::is_focus_taking_role;
 pub use native::AtPointHit;
 
-/// [`perform_action_at_point`] for a known window, in three rungs that never
-/// re-walk the tree first:
+/// Resolve a pixel of window `xid` to the actionable AT-SPI element at that
+/// point and perform its primary action: the no-focus-steal way to land a
+/// *pixel* click on toolkits (GTK) that drop synthetic X11 pointer events.
+/// Returns `Ok(Some(hit))` when an element was actuated, `Ok(None)` when no
+/// actionable element covers the point (caller falls back to the X11 path).
+/// Three rungs that never re-walk the tree first:
 /// 1. the frames cached by the last `get_window_state` snapshot of (pid, xid);
 /// 2. the toolkit's own `Component.GetAccessibleAtPoint` descent (O(depth));
 /// 3. the historical bounded full-walk hit-test (last resort, short budget).
@@ -518,7 +541,7 @@ pub fn perform_action_at_point_in(
         Ok(None) => {}
         Err(error) => tracing::debug!("GetAccessibleAtPoint hit-test failed: {error:#}"),
     }
-    native::perform_action_at_point(pid, win_x, win_y, skip_focus_roles)
+    native::perform_action_at_point(pid, xid, win_x, win_y, skip_focus_roles)
 }
 
 /// Resolve a *screen* pixel to the indexable element whose reconstructed screen
@@ -535,12 +558,14 @@ pub fn perform_action_at_screen_point(
     native::perform_action_at_screen_point(pid, xid, screen_x, screen_y)
 }
 
-/// Try to type text into any editable field in the window via AT-SPI EditableText.
+/// Try to type text into an editable field of window `xid` (0: any window of
+/// the app) via AT-SPI EditableText: the focused editable when it is in that
+/// window, else the best editable a walk of the window finds.
 /// This works for unfocused windows if the toolkit exposes EditableText (Qt6, some GTK).
 /// For Qt5, which doesn't expose widgets when unfocused, this will return Err.
 /// Returns Ok if an editable was found and text was set, Err otherwise.
-pub fn type_into_editable(pid: u32, text: &str) -> Result<()> {
-    native::type_into_editable(pid, text)
+pub fn type_into_editable(pid: u32, xid: u64, text: &str) -> Result<()> {
+    native::type_into_editable(pid, xid, text)
 }
 
 /// Type into the exact indexed editable from the caller's accessibility
@@ -557,20 +582,15 @@ pub fn type_into_editable_at(pid: u32, xid: u64, idx: usize, text: &str) -> Resu
     native::type_into_editable_at(pid, xid, idx, text)
 }
 
-/// Set the text value of element `idx` within pid's app tree via AT-SPI.
-/// Tries `EditableText.set_text_contents(value)` first, then
-/// `Value.set_current_value(float)`.
-pub fn set_value(pid: u32, idx: usize, value: &str) -> Result<()> {
-    native::set_value(pid, idx, value)
-}
-
-/// [`set_value`] on the exact object the caller's snapshot indexed, when the
-/// snapshot cache still knows it; a fresh walk (same index space as the
-/// snapshot of `xid`) otherwise. `Err` messages starting with
+/// Set the value of element `idx` of the caller's snapshot of window `xid`
+/// through AT-SPI (`EditableText.set_text_contents`, then
+/// `Value.set_current_value`): on the exact object the snapshot indexed when
+/// the cache still knows it; a fresh walk of that window (the snapshot's
+/// index space) otherwise. `Err` messages starting with
 /// [`native::NO_VALUE_ROUTE`] mean the element has no accessibility write
 /// route at all.
-pub fn set_value_in(pid: u32, xid: Option<u64>, idx: usize, value: &str) -> Result<()> {
-    if let Some(object_ref) = cache::cached_element(pid, xid, idx).and_then(|e| e.object_ref) {
+pub fn set_value_in(pid: u32, xid: u64, idx: usize, value: &str) -> Result<()> {
+    if let Some(object_ref) = cached_ref(pid, xid, idx) {
         match native::set_value_ref(&object_ref, value) {
             Ok(()) => return Ok(()),
             Err(error) if native::is_no_value_route(&error) => {
@@ -581,7 +601,7 @@ pub fn set_value_in(pid: u32, xid: Option<u64>, idx: usize, value: &str) -> Resu
             ),
         }
     }
-    native::set_value(pid, idx, value)
+    native::set_value(pid, xid, idx, value)
 }
 
 /// A combo box or list without an editable value: pick the option `value`
@@ -605,12 +625,7 @@ fn no_such_option(value: &str, options: &[String]) -> anyhow::Error {
 
 /// The open popup of a snapshot-cached combo box: activate the option
 /// `value` names. `Ok(None)` when the popup lists no options yet.
-pub fn activate_option_in(
-    pid: u32,
-    xid: Option<u64>,
-    idx: usize,
-    value: &str,
-) -> Result<Option<String>> {
+pub fn activate_option_in(pid: u32, xid: u64, idx: usize, value: &str) -> Result<Option<String>> {
     let object_ref = cache::cached_element(pid, xid, idx)
         .and_then(|e| e.object_ref)
         .ok_or_else(|| anyhow::anyhow!("element {idx} is no longer in the snapshot cache"))?;
@@ -622,21 +637,21 @@ pub fn activate_option_in(
 }
 
 /// Whether the popup of a snapshot-cached combo box is open.
-pub fn options_showing_in(pid: u32, xid: Option<u64>, idx: usize) -> bool {
+pub fn options_showing_in(pid: u32, xid: u64, idx: usize) -> bool {
     cache::cached_element(pid, xid, idx)
         .and_then(|e| e.object_ref)
         .is_some_and(|object_ref| native::options_showing_ref(&object_ref))
 }
 
 /// AT-SPI role of a snapshot-cached element (`combo box`, `text`, ...).
-pub fn cached_role_in(pid: u32, xid: Option<u64>, idx: usize) -> Option<String> {
+pub fn cached_role_in(pid: u32, xid: u64, idx: usize) -> Option<String> {
     cache::cached_element(pid, xid, idx).map(|e| e.role)
 }
 
 /// Whether a snapshot-cached element is a password field, whose text reads
 /// back as mask characters. The cached role name settles it when it says so
 /// (GTK); otherwise the live numeric role is asked (Qt names the role "text").
-pub fn is_password_in(pid: u32, xid: Option<u64>, idx: usize) -> bool {
+pub fn is_password_in(pid: u32, xid: u64, idx: usize) -> bool {
     let Some(element) = cache::cached_element(pid, xid, idx) else {
         return false;
     };
@@ -651,27 +666,29 @@ pub fn is_password_in(pid: u32, xid: Option<u64>, idx: usize) -> bool {
 /// Read the current value/text of a snapshot-cached element (for the
 /// read-back after `set_value`). `None` when the cache has no live object
 /// for it or the element exposes neither `Value` nor `Text`.
-pub fn read_value_in(pid: u32, xid: Option<u64>, idx: usize) -> Option<String> {
+pub fn read_value_in(pid: u32, xid: u64, idx: usize) -> Option<String> {
     let object_ref = cache::cached_element(pid, xid, idx)?.object_ref?;
     native::read_value_ref(&object_ref).ok().flatten()
 }
 
-/// Insert `text` into a GUI app's editable field via AT-SPI EditableText —
-/// focus-free and toolkit-agnostic, unlike X11 key injection which only reaches
-/// the *focused* toplevel's focused widget. Targets the focused editable element
-/// if the toolkit exposes one, else the first editable element in the tree.
-/// Returns Ok(true) if text was inserted, Ok(false) if the app exposes no
+/// Insert `text` into an editable field of window `xid` (0: any window of
+/// the app) via AT-SPI EditableText, focus-free and toolkit-agnostic, unlike
+/// X11 key injection which only reaches the *focused* toplevel's focused
+/// widget. Targets the focused editable element when it is in that window,
+/// else the first editable element of the window's tree.
+/// Returns Ok(true) if text was inserted, Ok(false) if the window exposes no
 /// editable element (so the caller can fall back), Err on an AT-SPI failure.
-pub fn insert_text(pid: u32, text: &str) -> Result<bool> {
-    native::insert_text(pid, text)
+pub fn insert_text(pid: u32, xid: u64, text: &str) -> Result<bool> {
+    native::insert_text(pid, xid, text)
 }
 
-/// Classify what holds keyboard focus so `type_text` can target the focused
-/// widget (the thing just clicked) instead of the first editable anywhere:
+/// Classify what holds keyboard focus in window `xid` so `type_text` can
+/// target the focused widget (the thing just clicked) instead of the first
+/// editable anywhere:
 /// `Some(true)` = focused editable, `Some(false)` = focused non-editable input
 /// (spreadsheet cell, terminal, canvas), `None` = nothing focused / unreachable.
-pub fn focused_is_editable(pid: u32) -> Result<Option<bool>> {
-    native::focused_is_editable(pid)
+pub fn focused_is_editable(pid: u32, xid: u64) -> Result<Option<bool>> {
+    native::focused_is_editable(pid, xid)
 }
 
 /// `(role, name)` of the accessible holding the widget focus, from the
@@ -680,19 +697,12 @@ pub fn focused_control(pid: u32) -> Option<(String, String)> {
     native::focused_control(pid)
 }
 
-pub fn get_element_bounds(pid: u32, idx: usize) -> Result<(i32, i32, u32, u32)> {
-    if let Some(bounds) = cached_bounds(pid, None, idx) {
-        return Ok(bounds);
-    }
-    native::get_element_bounds(pid, idx)
-}
-
 pub fn get_element_bounds_for_window(
     pid: u32,
     xid: u64,
     idx: usize,
 ) -> Result<(i32, i32, u32, u32)> {
-    if let Some(bounds) = cached_bounds(pid, Some(xid), idx) {
+    if let Some(bounds) = cached_bounds(pid, xid, idx) {
         return Ok(bounds);
     }
     native::get_element_bounds_for_window(pid, xid, idx)
@@ -703,13 +713,13 @@ pub fn get_element_bounds_for_window(
 /// one `GetExtents` on the cached object identity. `None` only when the
 /// snapshot never saw the element (or the object is gone), in which case the
 /// caller re-walks.
-fn cached_bounds(pid: u32, xid: Option<u64>, idx: usize) -> Option<(i32, i32, u32, u32)> {
+fn cached_bounds(pid: u32, xid: u64, idx: usize) -> Option<(i32, i32, u32, u32)> {
     let element = cache::cached_element(pid, xid, idx)?;
     if let Some(bounds) = element.bounds {
         return Some(bounds);
     }
     let object_ref = element.object_ref.as_ref()?;
-    match native::element_bounds_ref(object_ref, pid, xid.unwrap_or(0), element.in_web_content) {
+    match native::element_bounds_ref(object_ref, pid, xid, element.in_web_content) {
         Ok(bounds) => Some(bounds),
         Err(error) => {
             tracing::debug!(
@@ -1072,5 +1082,59 @@ mod element_window_tests {
         assert!(cached_ref(pid, 0x560_0099, 8).is_none());
         cache::forget_window(pid, main);
         cache::forget_window(pid, dialog);
+    }
+
+    #[test]
+    fn no_index_lookup_reaches_another_windows_element() {
+        // Both read orders of the probe's main window and its dialog. Every
+        // index-addressed entry point (actions, values, focus, typing, roles,
+        // bounds) answers from the window it is given, and an index only the
+        // other window has is not found instead of being acted on there.
+        let pid = 525_252;
+        let (main, dialog) = (0x560_0007, 0x560_0011);
+        let main_nodes = [
+            field(8, "list item", "/main/8"),
+            field(30, "cell", "/main/30"),
+        ];
+        let dialog_nodes = [field(8, "text", "/dialog/8")];
+        let main_bounds = [(8, 786, 521, 191, 36), (30, 900, 700, 80, 20)];
+        let dialog_bounds = [(8, 1150, 650, 300, 30)];
+        for main_first in [true, false] {
+            if main_first {
+                cache::update_snapshot(pid, main, &main_nodes, &main_bounds);
+                cache::update_snapshot(pid, dialog, &dialog_nodes, &dialog_bounds);
+            } else {
+                cache::update_snapshot(pid, dialog, &dialog_nodes, &dialog_bounds);
+                cache::update_snapshot(pid, main, &main_nodes, &main_bounds);
+            }
+            assert_eq!(cached_ref(pid, dialog, 8).unwrap().path, "/dialog/8");
+            assert_eq!(cached_role_in(pid, dialog, 8).as_deref(), Some("text"));
+            assert_eq!(cached_bounds(pid, dialog, 8), Some((1150, 650, 300, 30)));
+            assert_eq!(cached_role_in(pid, main, 8).as_deref(), Some("list item"));
+            assert_eq!(cached_bounds(pid, main, 8), Some((786, 521, 191, 36)));
+            // Element 30 exists only in the main window.
+            assert!(cached_ref(pid, dialog, 30).is_none());
+            assert!(cached_role_in(pid, dialog, 30).is_none());
+            assert!(cached_bounds(pid, dialog, 30).is_none());
+            assert!(!options_showing_in(pid, dialog, 30));
+            cache::forget_window(pid, main);
+            cache::forget_window(pid, dialog);
+        }
+    }
+
+    #[test]
+    fn a_walked_tree_is_acted_on_by_its_own_nodes() {
+        let nodes = [
+            field(3, "push button", "/w/3"),
+            field(4, "check box", "/w/4"),
+        ];
+        assert_eq!(walked_node(&nodes, 4).unwrap().role, "check box");
+        assert!(walked_node(&nodes, 5).is_none());
+        assert!(perform_action_walked(&nodes, 5).is_err());
+        let bounds = [(3, 10, 20, 30, 40), (4, 0, 0, 0, 0)];
+        assert_eq!(walked_bounds(&bounds, 3), Some((10, 20, 30, 40)));
+        // An empty frame or a missing one is no frame.
+        assert_eq!(walked_bounds(&bounds, 4), None);
+        assert_eq!(walked_bounds(&bounds, 5), None);
     }
 }

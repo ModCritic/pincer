@@ -3076,29 +3076,13 @@ fn resolve_element_local_coords(
     idx: usize,
     xid_hint: Option<u64>,
 ) -> anyhow::Result<(u64, f64, f64)> {
-    let (bx, by, bw, bh) = if let Some(xid) = xid_hint {
-        crate::atspi::get_element_bounds_for_window(pid, xid, idx)?
-    } else {
-        crate::atspi::get_element_bounds(pid, idx)?
-    };
+    // An element index is a position in one window's snapshot; without that
+    // window it names nothing (a pid-wide lookup reached another window's
+    // element with the same index).
+    let xid = xid_hint.ok_or_else(|| element_without_window(idx))?;
+    let (bx, by, bw, bh) = crate::atspi::get_element_bounds_for_window(pid, xid, idx)?;
     let screen_cx = bx as f64 + bw as f64 / 2.0;
     let screen_cy = by as f64 + bh as f64 / 2.0;
-
-    let xid = if let Some(x) = xid_hint {
-        x
-    } else if crate::wayland::wayland_input_enabled() {
-        crate::wayland::list_windows_dispatch(Some(pid))
-            .into_iter()
-            .next()
-            .map(|window| window.xid)
-            .ok_or_else(|| anyhow::anyhow!("No Wayland windows for pid {pid}"))?
-    } else {
-        crate::x11::list_windows(Some(pid))
-            .into_iter()
-            .next()
-            .map(|w| w.xid)
-            .ok_or_else(|| anyhow::anyhow!("No windows for pid {pid}"))?
-    };
 
     if crate::wayland::wayland_input_enabled() {
         let (window_x, window_y, window_width, window_height) =
@@ -3177,6 +3161,14 @@ fn checked_element_local_coords(
     Ok((xid, lx, ly))
 }
 
+/// The error for an element index that comes without the window whose
+/// snapshot it indexes.
+fn element_without_window(idx: usize) -> anyhow::Error {
+    anyhow::anyhow!(
+        "element [{idx}] has no window: an element index belongs to one window's snapshot"
+    )
+}
+
 fn element_screen_center(pid: u32, idx: usize, xid: Option<u64>) -> anyhow::Result<(f64, f64)> {
     element_screen_center_and_rect(pid, idx, xid).map(|(center, _)| center)
 }
@@ -3188,10 +3180,8 @@ fn element_screen_center_and_rect(
     idx: usize,
     xid: Option<u64>,
 ) -> anyhow::Result<((f64, f64), [f64; 4])> {
-    let (bx, by, bw, bh) = match xid {
-        Some(xid) => crate::atspi::get_element_bounds_for_window(pid, xid, idx)?,
-        None => crate::atspi::get_element_bounds(pid, idx)?,
-    };
+    let xid = xid.ok_or_else(|| element_without_window(idx))?;
+    let (bx, by, bw, bh) = crate::atspi::get_element_bounds_for_window(pid, xid, idx)?;
     let rect = [bx as f64, by as f64, bw as f64, bh as f64];
     Ok(((rect[0] + rect[2] / 2.0, rect[1] + rect[3] / 2.0), rect))
 }
@@ -3613,7 +3603,7 @@ fn type_text_structured_electron(text_len: usize) -> Value {
 /// `value_readback` evidence item instead of `unverifiable`.
 async fn type_text_ax_result_verified(
     pid: u32,
-    xid_opt: Option<u64>,
+    xid: u64,
     idx: usize,
     text: &str,
     route: &str,
@@ -3623,11 +3613,10 @@ async fn type_text_ax_result_verified(
     if is_chromium_embedder(pid) {
         return type_text_ax_result(pid, text_len, route);
     }
-    let readback =
-        tokio::task::spawn_blocking(move || crate::atspi::read_value_in(pid, xid_opt, idx))
-            .await
-            .ok()
-            .flatten();
+    let readback = tokio::task::spawn_blocking(move || crate::atspi::read_value_in(pid, xid, idx))
+        .await
+        .ok()
+        .flatten();
     type_text_readback_result(pid, idx, text, route, readback, password_before)
 }
 
@@ -3635,15 +3624,15 @@ async fn type_text_ax_result_verified(
 /// `type_text` insert, so the read-back can be compared by length (its text
 /// is masked). `None` for any other element, and for a password field that
 /// shows its text in the clear (that one reads back normally).
-async fn password_length_before(pid: u32, xid_opt: Option<u64>, idx: usize) -> Option<usize> {
+async fn password_length_before(pid: u32, xid: u64, idx: usize) -> Option<usize> {
     if is_chromium_embedder(pid) {
         return None;
     }
     tokio::task::spawn_blocking(move || {
-        if !crate::atspi::is_password_in(pid, xid_opt, idx) {
+        if !crate::atspi::is_password_in(pid, xid, idx) {
             return None;
         }
-        let before = crate::atspi::read_value_in(pid, xid_opt, idx).unwrap_or_default();
+        let before = crate::atspi::read_value_in(pid, xid, idx).unwrap_or_default();
         masked_length(&before)
     })
     .await
@@ -8985,7 +8974,7 @@ impl Tool for TypeTextTool {
                 && !is_chromium_embedder(pid)
                 && !is_webkitgtk_embedder(pid)
         }) {
-            let password_before = password_length_before(pid, xid_opt, idx).await;
+            let password_before = password_length_before(pid, xid, idx).await;
             let text_at = text.clone();
             let targeted = tokio::task::spawn_blocking(move || {
                 crate::atspi::type_into_editable_at(pid, xid, idx, &text_at)
@@ -8994,7 +8983,7 @@ impl Tool for TypeTextTool {
             if let Ok(Ok(())) = targeted {
                 return type_text_ax_result_verified(
                     pid,
-                    xid_opt,
+                    xid,
                     idx,
                     &text,
                     "via targeted AT-SPI",
@@ -9105,7 +9094,7 @@ impl Tool for TypeTextTool {
         // before native Wayland keyboard injection, which can only target the
         // compositor's globally focused surface.
         if let Some(idx) = resolved_elem_idx {
-            let password_before = password_length_before(pid, xid_opt, idx).await;
+            let password_before = password_length_before(pid, xid, idx).await;
             let text_at = text.clone();
             let targeted = tokio::task::spawn_blocking(move || {
                 crate::atspi::type_into_editable_at(pid, xid, idx, &text_at)
@@ -9115,7 +9104,7 @@ impl Tool for TypeTextTool {
                 Ok(Ok(())) => {
                     return type_text_ax_result_verified(
                         pid,
-                        xid_opt,
+                        xid,
                         idx,
                         &text,
                         "via targeted AT-SPI",
@@ -9315,7 +9304,7 @@ impl Tool for TypeTextTool {
         // XSendEvent to the focused window. A focused *editable* (Some(true)) or
         // nothing focused (None) falls through to the existing AT-SPI-first flow.
         let focus_kind = tokio::task::spawn_blocking(move || {
-            crate::atspi::focused_is_editable(pid).ok().flatten()
+            crate::atspi::focused_is_editable(pid, xid).ok().flatten()
         })
         .await
         .ok()
@@ -9380,9 +9369,10 @@ impl Tool for TypeTextTool {
 
         // Try AT-SPI EditableText first (focus-free, works for Qt6/GTK4).
         let text_clone = text.clone();
-        let atspi_result =
-            tokio::task::spawn_blocking(move || crate::atspi::type_into_editable(pid, &text_clone))
-                .await;
+        let atspi_result = tokio::task::spawn_blocking(move || {
+            crate::atspi::type_into_editable(pid, xid, &text_clone)
+        })
+        .await;
 
         match atspi_result {
             Ok(Ok(())) => {
@@ -9410,7 +9400,7 @@ impl Tool for TypeTextTool {
             std::thread::sleep(std::time::Duration::from_millis(100));
 
             // Try AT-SPI again now that widgets should be exposed
-            let result = crate::atspi::type_into_editable(pid, &text_clone2);
+            let result = crate::atspi::type_into_editable(pid, xid, &text_clone2);
 
             // Restore state with FocusOut
             crate::input::send_focus_out(xid)?;
@@ -9449,7 +9439,7 @@ impl Tool for TypeTextTool {
             // focused widget, so background XSendEvent typing doesn't land. Fill
             // the editable field via AT-SPI instead — focus-free and toolkit-
             // agnostic. Fall back to Tk send or XSendEvent when no a11y field is exposed.
-            if crate::atspi::insert_text(pid, &text).unwrap_or(false) {
+            if crate::atspi::insert_text(pid, xid, &text).unwrap_or(false) {
                 return Ok(("ax", None));
             }
             // Tk apps: use Tk's `send` command (no AT-SPI bridge, so AT-SPI above
@@ -10553,12 +10543,12 @@ impl Tool for SetValueTool {
             .await;
         // 1. Focus-free accessibility write on the exact snapshot object.
         let ax = spawn_blocking_bounded("set_value", foreground_budget(0), move || {
-            crate::atspi::set_value_in(pid, xid_opt, idx, &value_for_task)
+            crate::atspi::set_value_in(pid, xid, idx, &value_for_task)
         })
         .await;
         let ax_error = match ax {
             Ok(Ok(())) => {
-                let (readback, password) = set_value_readback(pid, xid_opt, idx, &value).await;
+                let (readback, password) = set_value_readback(pid, xid, idx, &value).await;
                 return set_value_result(idx, &value, "ax", readback, password, None);
             }
             Ok(Err(error)) if crate::atspi::native::is_no_value_route(&error) => error,
@@ -10573,7 +10563,7 @@ impl Tool for SetValueTool {
         //    act while it is open), then the popup is closed. Anything else is
         //    typed like a user would: click the field (real pointer), select
         //    all, type, commit with Tab.
-        let is_combo = crate::atspi::cached_role_in(pid, xid_opt, idx)
+        let is_combo = crate::atspi::cached_role_in(pid, xid, idx)
             .is_some_and(|role| role.eq_ignore_ascii_case("combo box"));
         let wayland = crate::wayland::wayland_input_enabled();
         let background_route = !delivery.is_foreground()
@@ -10615,7 +10605,7 @@ impl Tool for SetValueTool {
                     return pick_from_popup(
                         &cursor_id,
                         pid,
-                        xid_opt,
+                        xid,
                         idx,
                         (win, lx, ly),
                         &value_for_keys,
@@ -10658,7 +10648,7 @@ impl Tool for SetValueTool {
             Ok(Ok(guard)) => {
                 // Let the toolkit commit on focus-out before reading back.
                 tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-                let (readback, password) = set_value_readback(pid, xid_opt, idx, &value).await;
+                let (readback, password) = set_value_readback(pid, xid, idx, &value).await;
                 set_value_result(
                     idx,
                     &value,
@@ -10709,7 +10699,7 @@ const POPUP_OPTIONS_WAIT: std::time::Duration = std::time::Duration::from_millis
 fn pick_from_popup(
     cursor_id: &str,
     pid: u32,
-    xid: Option<u64>,
+    xid: u64,
     idx: usize,
     (win, lx, ly): (u64, f64, f64),
     value: &str,
@@ -10784,19 +10774,14 @@ fn values_agree(wanted: &str, observed: &str) -> bool {
 /// The `set_value` read-back, and whether the element is a password field.
 /// The role is only asked for when the read-back is not the value itself,
 /// so a matching read-back costs no extra call.
-async fn set_value_readback(
-    pid: u32,
-    xid_opt: Option<u64>,
-    idx: usize,
-    value: &str,
-) -> (Option<String>, bool) {
+async fn set_value_readback(pid: u32, xid: u64, idx: usize, value: &str) -> (Option<String>, bool) {
     let value = value.to_owned();
     tokio::task::spawn_blocking(move || {
-        let readback = crate::atspi::read_value_in(pid, xid_opt, idx);
+        let readback = crate::atspi::read_value_in(pid, xid, idx);
         let password = readback
             .as_deref()
             .is_some_and(|seen| !values_agree(&value, seen) && masked_length(seen).is_some())
-            && crate::atspi::is_password_in(pid, xid_opt, idx);
+            && crate::atspi::is_password_in(pid, xid, idx);
         (readback, password)
     })
     .await
@@ -11256,7 +11241,7 @@ impl Tool for ScrollTool {
             if !(crate::wayland::wayland_input_enabled() && is_webkitgtk_embedder(pid)) {
                 let direction_for_ax = direction.clone();
                 let ax_result = tokio::task::spawn_blocking(move || {
-                    crate::atspi::scroll_element(pid, idx, &direction_for_ax, amount, by)
+                    crate::atspi::scroll_element(pid, xid, idx, &direction_for_ax, amount, by)
                 })
                 .await;
                 match ax_result {

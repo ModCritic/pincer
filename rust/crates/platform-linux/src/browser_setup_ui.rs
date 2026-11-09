@@ -379,7 +379,9 @@ impl SetupUiHandle {
                 .flatten()
                 .filter(|node| node.checked == Some(true))
                 .and_then(|node| node.element_index)
-                .is_some_and(|index| crate::atspi::perform_action(self.pid, index).is_ok());
+                .is_some_and(|index| {
+                    crate::atspi::perform_action_walked(&tree.nodes, index).is_ok()
+                });
         if restored {
             self.enabled_remote_debugging = false;
         }
@@ -558,7 +560,7 @@ fn set_remote_debugging(
                 }
                 Some(_) if !handle.enable_attempted => {
                     let index = node.element_index.expect("actionable checkbox index");
-                    if let Err(error) = crate::atspi::perform_action(pid, index) {
+                    if let Err(error) = crate::atspi::perform_action_walked(&tree.nodes, index) {
                         return Err(handle.abort(refusal(
                             BrowserRefusalCode::BrowserWrongTargetRefused,
                             format!("the exact checkbox action failed: {error}"),
@@ -596,7 +598,12 @@ fn set_remote_debugging(
                             );
                         }
                         let index = checkbox.element_index.expect("actionable checkbox index");
-                        let (x, y, width, height) = crate::atspi::get_element_bounds(pid, index)?;
+                        let (x, y, width, height) =
+                            crate::atspi::walked_bounds(&tree.bounds, index).ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "the exact Microsoft Edge remote-debugging checkbox had no screen bounds"
+                                )
+                            })?;
                         if width <= 1 || height <= 1 {
                             anyhow::bail!(
                                 "the exact Microsoft Edge remote-debugging checkbox had empty screen bounds"
