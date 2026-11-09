@@ -616,11 +616,13 @@ fn select_option(object_ref: &native::ObjectRef, value: &str) -> Option<Result<(
     }
 }
 
-fn no_such_option(value: &str, options: &[String]) -> anyhow::Error {
-    anyhow::anyhow!(
-        "{}: no option {value:?}; options: {options:?}",
-        native::NO_SUCH_OPTION
-    )
+/// The error for a `value` that names none of `options`.
+pub fn no_such_option(value: &str, options: &[String]) -> anyhow::Error {
+    native::NoSuchOption {
+        value: value.to_owned(),
+        options: options.to_vec(),
+    }
+    .into()
 }
 
 /// The open popup of a snapshot-cached combo box: activate the option
@@ -641,6 +643,25 @@ pub fn options_showing_in(pid: u32, xid: u64, idx: usize) -> bool {
     cache::cached_element(pid, xid, idx)
         .and_then(|e| e.object_ref)
         .is_some_and(|object_ref| native::options_showing_ref(&object_ref))
+}
+
+/// The option names a snapshot-cached combo box or list publishes now (see
+/// `native::option_names_ref`); empty when it lists none or is gone.
+pub fn option_names_in(pid: u32, xid: u64, idx: usize) -> Vec<String> {
+    cached_ref(pid, xid, idx)
+        .map(|object_ref| native::option_names_ref(&object_ref))
+        .unwrap_or_default()
+}
+
+/// The live accessible name of a snapshot-cached element (see
+/// `native::name_ref`); `None` when the cache has no live object for it.
+pub fn live_name_in(pid: u32, xid: u64, idx: usize) -> Option<String> {
+    native::name_ref(&cached_ref(pid, xid, idx)?).ok()
+}
+
+/// The object identity a snapshot cached for element `idx` of window `xid`.
+pub fn cached_object_ref(pid: u32, xid: u64, idx: usize) -> Option<native::ObjectRef> {
+    cached_ref(pid, xid, idx)
 }
 
 /// AT-SPI role of a snapshot-cached element (`combo box`, `text`, ...).

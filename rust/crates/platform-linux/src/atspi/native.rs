@@ -6100,6 +6100,43 @@ pub fn is_no_such_option(error: &anyhow::Error) -> bool {
     error.to_string().starts_with(NO_SUCH_OPTION)
 }
 
+/// Most options a [`NoSuchOption`] error names.
+pub const OPTIONS_LISTED: usize = 20;
+
+/// `set_value` named an option the combo box or list does not have. Its
+/// text starts with [`NO_SUCH_OPTION`] and names the options there are, at
+/// most [`OPTIONS_LISTED`] of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoSuchOption {
+    pub value: String,
+    pub options: Vec<String>,
+}
+
+impl NoSuchOption {
+    /// The options the error names, in order, and how many more there are.
+    pub fn listed(&self) -> (&[String], usize) {
+        let shown = self.options.len().min(OPTIONS_LISTED);
+        (&self.options[..shown], self.options.len() - shown)
+    }
+}
+
+impl std::fmt::Display for NoSuchOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (shown, more) = self.listed();
+        write!(
+            f,
+            "{NO_SUCH_OPTION}: no option {:?}; options: {shown:?}",
+            self.value
+        )?;
+        if more > 0 {
+            write!(f, " and {more} more")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for NoSuchOption {}
+
 /// Options scanned under one combo box or list.
 const OPTION_SCAN_CAP: usize = 200;
 
@@ -6336,6 +6373,177 @@ pub fn options_showing_ref(object_ref: &ObjectRef) -> bool {
         || Ok(false),
     )
     .unwrap_or(false)
+}
+
+/// How [`match_option`] matched `value` to the option `name`: its text
+/// exactly, or only after ignoring case and surrounding space.
+pub fn option_match_kind(name: &str, value: &str) -> &'static str {
+    if name == value {
+        "exact"
+    } else {
+        "case-insensitive"
+    }
+}
+
+/// The option names of a snapshot-cached combo box or list, in order: item
+/// children, or the items of its menu or list child. Qt lists a combo box's
+/// rows while it is closed too; GTK and VCL build them only while it is open,
+/// so empty says nothing about the options.
+pub fn option_names_ref(object_ref: &ObjectRef) -> Vec<String> {
+    bounded_for(
+        REF_ACTION_BUDGET,
+        async {
+            let conn = shared_connection().await?;
+            Ok(list_options(conn, &raw_ref(object_ref))
+                .await
+                .into_iter()
+                .map(|option| option.name)
+                .collect())
+        },
+        || Ok(Vec::new()),
+    )
+    .unwrap_or_default()
+}
+
+/// The live accessible name of a snapshot-cached element. Qt names a
+/// non-editable combo box by its current text on Linux, even when the app set
+/// an accessible name (checked on Qt 6.12 with `setAccessibleName`,
+/// 2026-11-09), and exposes no Value, Text or Selection on it, so its name is
+/// the only read-back of the option it shows.
+pub fn name_ref(object_ref: &ObjectRef) -> Result<String> {
+    bounded_for(
+        REF_ACTION_BUDGET,
+        async {
+            let conn = shared_connection().await?;
+            let (acc, _) = live_accessible(conn, object_ref).await?;
+            match call(acc.name()).await {
+                Some(Ok(name)) => Ok(name),
+                Some(Err(e)) => Err(anyhow!("name unavailable: {e}")),
+                None => Err(anyhow!("cached element did not answer in time")),
+            }
+        },
+        || Err(anyhow!("name (cached element) timed out")),
+    )
+}
+
+/// Whether `pid`'s application is one whose popups [`qt_popup_items`] can
+/// read: its toolkit is Qt ([`is_collection_toolkit_app`]).
+pub fn is_qt_application(pid: u32) -> bool {
+    bounded_for(
+        REF_ACTION_BUDGET,
+        async {
+            let conn = shared_connection().await?;
+            match app_for_pid(conn, pid).await? {
+                Some(app) => Ok(is_collection_toolkit_app(&app).await),
+                None => Ok(false),
+            }
+        },
+        || Ok(false),
+    )
+    .unwrap_or(false)
+}
+
+/// One row of an open Qt popup (a combo box's option), with what a real
+/// press on it needs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PopupItem {
+    pub name: String,
+    pub role: String,
+    /// Screen `(x, y, width, height)` as the toolkit reports it (a Qt combo
+    /// row can be wider than its popup); `None` when it answered none.
+    pub rect: Option<(i32, i32, i32, i32)>,
+    pub object_ref: ObjectRef,
+}
+
+/// The rows of an open Qt popup and the accessible that owns them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PopupItems {
+    /// Parent of the container the rows hang under: the combo box whose
+    /// list the popup shows (`combo box > list > list item`).
+    pub owner: Option<ObjectRef>,
+    pub items: Vec<PopupItem>,
+}
+
+/// The rows of the open popup `popup_xid` of Qt application `pid`, in order:
+/// the option rows of the container that fills the popup, found the way a
+/// read of the popup finds it ([`qt_popup_item_container`]). `Ok(None)` when
+/// no showing container fills the popup (Qt marks a combo's list showing a
+/// moment after the popup maps) or the application is not Qt.
+pub fn qt_popup_items(pid: u32, popup_xid: u64) -> Result<Option<PopupItems>> {
+    bounded_for(
+        REF_ACTION_BUDGET,
+        async {
+            let conn = shared_connection().await?;
+            let Some(ResolvedApp { app, children }) = resolve_app_for_pid(conn, pid).await? else {
+                return Ok(None);
+            };
+            let seeds: Vec<RawObjectRef> = match children {
+                Some(children) => children
+                    .iter()
+                    .filter_map(RawObjectRef::from_atspi)
+                    .collect(),
+                None => match call(app.get_children()).await {
+                    Some(Ok(children)) => children
+                        .iter()
+                        .filter_map(RawObjectRef::from_atspi)
+                        .collect(),
+                    _ => return Ok(None),
+                },
+            };
+            let Some((_, container)) = qt_popup_item_container(conn, &app, &seeds, popup_xid).await
+            else {
+                return Ok(None);
+            };
+            let zconn = conn.connection();
+            let owner = match call(accessible_for(conn, &container)).await {
+                Some(Ok(acc)) => match call(acc.parent()).await {
+                    Some(Ok(parent)) => RawObjectRef::from_atspi(&parent).map(|parent| ObjectRef {
+                        bus: parent.name,
+                        path: parent.path,
+                    }),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some(Ok(rows)) = call(raw_children(zconn, &container)).await else {
+                return Ok(None);
+            };
+            let mut items = Vec::new();
+            for row in rows.into_iter().take(OPTION_SCAN_CAP) {
+                let Some(Ok(acc)) = call(accessible_for(conn, &row)).await else {
+                    continue;
+                };
+                let role = call(acc.get_role_name())
+                    .await
+                    .and_then(|r| r.ok())
+                    .unwrap_or_default();
+                if !is_option_role(&role) {
+                    continue;
+                }
+                let name = call(acc.name())
+                    .await
+                    .and_then(|r| r.ok())
+                    .unwrap_or_default();
+                let rect = match call(raw_component(zconn, &row)).await {
+                    Some(Ok(component)) => call(component.get_extents(CoordType::Screen))
+                        .await
+                        .and_then(|r| r.ok()),
+                    _ => None,
+                };
+                items.push(PopupItem {
+                    name,
+                    role,
+                    rect,
+                    object_ref: ObjectRef {
+                        bus: row.name,
+                        path: row.path,
+                    },
+                });
+            }
+            Ok(Some(PopupItems { owner, items }))
+        },
+        || Ok(None),
+    )
 }
 
 /// Whether a cached element is a password field by its numeric AT-SPI role
@@ -7435,6 +7643,21 @@ mod window_walk_tests {
         assert!(!window_index_space_is_gone(Some(WindowPresence::Exists)));
         // No answer from the server: unchanged.
         assert!(!window_index_space_is_gone(None));
+    }
+
+    #[test]
+    fn a_missing_option_lists_twenty_options_and_counts_the_rest() {
+        let options: Vec<String> = (1..=23).map(|n| format!("Row {n}")).collect();
+        let missing = NoSuchOption {
+            value: "Row 99".into(),
+            options,
+        };
+        let (shown, more) = missing.listed();
+        assert_eq!(shown.len(), OPTIONS_LISTED);
+        assert_eq!(more, 3);
+        let text = missing.to_string();
+        assert!(text.starts_with(NO_SUCH_OPTION), "{text}");
+        assert!(text.ends_with("\"Row 20\"] and 3 more"), "{text}");
     }
 
     #[test]

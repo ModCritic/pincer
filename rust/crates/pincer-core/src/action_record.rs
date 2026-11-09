@@ -787,7 +787,9 @@ fn transport_from_legacy(
             ActionTransport::LinuxX11MpxUinput
         }
         "click_type_fg" | "click_select_fg" => ActionTransport::LinuxXTest,
-        "x11_xsendevent" => ActionTransport::LinuxXSendEvent,
+        // set_value on a Qt combo box in the background: the popup row is
+        // pressed with a synthetic XSendEvent click when no uinput exists.
+        "x11_xsendevent" | "click_select_xsendevent" => ActionTransport::LinuxXSendEvent,
         "x11_pixel" | "x11_pixel_fg" | "x11_xtest_fg" | "xtest" | "xtest_desktop"
         | "xtest_core_grab" => ActionTransport::LinuxXTest,
         "wayland_activate" | "wayland_focused" => ActionTransport::LinuxLibei,
@@ -1716,6 +1718,12 @@ mod tests {
                 "click_select_mpx",
                 "background",
                 ActionTransport::LinuxX11MpxUinput,
+                ActualDelivery::Background,
+            ),
+            (
+                "click_select_xsendevent",
+                "background",
+                ActionTransport::LinuxXSendEvent,
                 ActualDelivery::Background,
             ),
         ] {

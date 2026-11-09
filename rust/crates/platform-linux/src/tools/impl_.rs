@@ -10508,7 +10508,7 @@ impl Tool for SetValueTool {
                     "pid":{"type":"integer","description":"Target process ID. Optional with element_token (the token carries the pid)."},
                     "window_id":{"type":"integer","description":"Omit when element_token is supplied (the token carries it)."},
                     "element_token": pincer_core::tool_schema::element_token_schema(),
-                    "value":{"type":"string","description":"New value. Written through AT-SPI EditableText/Value when the element exposes them; otherwise (GTK2 spin scales, VCL spin buttons) the field is clicked with the session's real pointer, its text selected and replaced through the virtual keyboard and committed with Tab, then read back."},
+                    "value":{"type":"string","description":"New value. Written through AT-SPI EditableText/Value when the element exposes them; otherwise (GTK2 spin scales, VCL spin buttons) the field is clicked with the session's real pointer, its text selected and replaced through the virtual keyboard and committed with Tab, then read back. A combo box gets the option with this text (exact, else ignoring case), picked from its popup and read back."},
                     "delivery_mode": crate::input::delivery::delivery_mode_schema()
                 },"additionalProperties":false
             }),
@@ -10577,6 +10577,27 @@ impl Tool for SetValueTool {
         let is_combo = crate::atspi::cached_role_in(pid, xid, idx)
             .is_some_and(|role| role.eq_ignore_ascii_case("combo box"));
         let wayland = crate::wayland::wayland_input_enabled();
+        // A Qt combo box selects only on a real press of a popup row: the
+        // rows' accessible Toggle marks the row in the popup's view without
+        // changing the combo box. Both modes press the row, so this route
+        // needs no writable /dev/uinput.
+        if is_combo && !wayland {
+            let qt =
+                tokio::task::spawn_blocking(move || crate::atspi::native::is_qt_application(pid))
+                    .await
+                    .unwrap_or(false);
+            if qt {
+                return qt_combo_set_value(
+                    cursor_id,
+                    pid,
+                    xid,
+                    idx,
+                    value,
+                    delivery.is_foreground(),
+                )
+                .await;
+            }
+        }
         let background_route = !delivery.is_foreground()
             && !wayland
             && crate::input::real_pointer_input_available()
@@ -10691,10 +10712,18 @@ fn no_such_option_result(idx: usize, error: &anyhow::Error) -> ToolResult {
         .map(|rest| rest.trim_start_matches(':').trim())
         .unwrap_or(&detail)
         .to_owned();
+    let mut structured = json!({ "code": "option_not_found", "detail": detail, "effect": "none" });
+    if let Some(missing) = error.downcast_ref::<crate::atspi::native::NoSuchOption>() {
+        let (shown, more) = missing.listed();
+        structured["options"] = json!(shown);
+        if more > 0 {
+            structured["options_not_listed"] = json!(more);
+        }
+    }
     ToolResult::error(format!(
         "set_value: element [{idx}] has {detail}; nothing was changed."
     ))
-    .with_structured(json!({ "code": "option_not_found", "detail": detail, "effect": "none" }))
+    .with_structured(structured)
 }
 
 /// How long `set_value` waits for an opened combo box popup to list its
@@ -10767,6 +10796,405 @@ fn pick_from_popup(
         open_and_pick()
     })?;
     Ok(guard)
+}
+
+/// Error prefix and result code: another popup of the app (a menu) is open,
+/// so a combo box cannot be opened under its grab.
+const OTHER_POPUP_OPEN: &str = "other_popup_open";
+
+/// What [`pick_from_qt_popup`] did.
+#[derive(Debug)]
+struct QtComboPick {
+    /// The option whose row was pressed, and how its text matched the value
+    /// (`exact` or `case-insensitive`).
+    option: String,
+    matched: &'static str,
+    /// `click_select_fg` (XTest), `click_select_mpx` or
+    /// `click_select_xsendevent` (the background press on the row).
+    path: &'static str,
+    popup: u64,
+    /// The popup closed after the press, as a press on a row closes it.
+    popup_closed: bool,
+    /// What the focus guards of the background open and press saw, when
+    /// something moved.
+    guards: Vec<crate::input::FocusGuardReport>,
+}
+
+/// Where to press a popup row: the middle of the part of its rectangle that
+/// lies inside the popup (a Qt combo row can be wider than its popup).
+/// `None` when less than half the row's height is inside it (a row scrolled
+/// out of the popup's view), so a press could land on its neighbor.
+fn popup_row_point(row: (i32, i32, i32, i32), popup: (i32, i32, u32, u32)) -> Option<(i32, i32)> {
+    let (rx, ry, rw, rh) = row;
+    let (px, py, pw, ph) = popup;
+    let left = rx.max(px);
+    let top = ry.max(py);
+    let right = (rx + rw).min(px + pw as i32);
+    let bottom = (ry + rh).min(py + ph as i32);
+    if rw <= 0 || rh <= 0 || right - left < 2 || bottom - top < (rh / 2).max(2) {
+        return None;
+    }
+    Some(((left + right) / 2, (top + bottom) / 2))
+}
+
+/// The popup of `pid` that opened after `before` (the pid's popups mapped
+/// before the open), waiting up to [`POPUP_OPTIONS_WAIT`]. Qt maps the same
+/// popup window again each time, so "new" means not mapped before.
+fn wait_for_new_popup(pid: u32, before: &[u64]) -> Option<crate::input::PopupWindow> {
+    let deadline = std::time::Instant::now() + POPUP_OPTIONS_WAIT;
+    loop {
+        if let Some(popup) = crate::input::mapped_popup_windows()
+            .into_iter()
+            .rev()
+            .find(|popup| popup.pid == Some(pid) && !before.contains(&popup.window))
+        {
+            return Some(popup);
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(40));
+    }
+}
+
+/// The rows of the open popup `popup`, waiting up to [`POPUP_OPTIONS_WAIT`]
+/// for Qt to mark its list showing.
+fn wait_for_popup_rows(pid: u32, popup: u64) -> Option<crate::atspi::native::PopupItems> {
+    let deadline = std::time::Instant::now() + POPUP_OPTIONS_WAIT;
+    loop {
+        if let Ok(Some(rows)) = crate::atspi::native::qt_popup_items(pid, popup) {
+            if !rows.items.is_empty() {
+                return Some(rows);
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(40));
+    }
+}
+
+/// Close a Qt combo box's popup that is still open. The combo box's own
+/// accessible action toggles its popup (Qt opens or closes it, checked on the
+/// probe 2026-11-09), focus-free; an Escape sent after the popup had already
+/// closed would reach the dialog under it and reject the dialog.
+fn close_qt_combo_popup(combo: &crate::atspi::native::ObjectRef, popup: u64) {
+    if crate::input::popup_window_info(popup).is_none() {
+        return;
+    }
+    if let Err(error) = crate::atspi::native::perform_action_ref(combo) {
+        tracing::debug!("closing combo box popup {popup} failed: {error:#}");
+        return;
+    }
+    crate::input::foreground::wait_for_popup_close(popup);
+}
+
+/// `set_value` on a Qt combo box: open its popup (a real click in the
+/// foreground; the combo box's accessible action in the background), find
+/// the row named `value` among the popup's rows (exact text first, then
+/// ignoring case), and press it (XTest in the foreground; the background
+/// pointer route on the popup otherwise), as a user picks an option. A value
+/// the combo box does not list is refused before anything opens when Qt
+/// lists the rows while closed, and otherwise after the popup is closed
+/// again. Blocking.
+fn pick_from_qt_popup(
+    cursor_id: &str,
+    pid: u32,
+    xid: u64,
+    idx: usize,
+    value: &str,
+    foreground: bool,
+) -> anyhow::Result<QtComboPick> {
+    use crate::atspi::native::match_option;
+    // Act on the object the snapshot named and nothing else: an index walk of
+    // a window that has closed would number another window's elements.
+    let combo = crate::atspi::cached_object_ref(pid, xid, idx)
+        .ok_or_else(|| anyhow::anyhow!("element [{idx}] is no longer in the snapshot cache"))?;
+    if let Err(error) = crate::atspi::native::name_ref(&combo) {
+        if error.is::<crate::atspi::native::CachedElementGone>() {
+            anyhow::bail!(
+                "{STALE_ELEMENT_TOKEN}: combo box element [{idx}] is no longer present \
+                 ({error}); nothing was opened. Re-snapshot with get_window_state"
+            );
+        }
+    }
+    let listed = crate::atspi::option_names_in(pid, xid, idx);
+    if !listed.is_empty() && match_option(&listed, value).is_none() {
+        return Err(crate::atspi::no_such_option(value, &listed));
+    }
+    let pid_popups = || -> Vec<crate::input::PopupWindow> {
+        crate::input::mapped_popup_windows()
+            .into_iter()
+            .filter(|popup| popup.pid == Some(pid))
+            .collect()
+    };
+    let mut guards = Vec::new();
+    let open = pid_popups();
+    // The combo box's popup may be open already (a click opened it).
+    let already = open.iter().rev().find_map(|popup| {
+        crate::atspi::native::qt_popup_items(pid, popup.window)
+            .ok()
+            .flatten()
+            .filter(|rows| rows.owner.as_ref() == Some(&combo))
+            .map(|rows| (popup.clone(), rows))
+    });
+    let (popup, rows) = match already {
+        Some(found) => found,
+        None => {
+            if let Some(other) = open.last() {
+                anyhow::bail!(
+                    "{OTHER_POPUP_OPEN}: {} of pid {pid} is open and is not this combo box's \
+                     list; nothing was opened or pressed. Close it first (press_key Escape), \
+                     then retry",
+                    other.describe()
+                );
+            }
+            let before: Vec<u64> = open.iter().map(|popup| popup.window).collect();
+            if foreground {
+                let (win, lx, ly) = resolve_element_local_coords(pid, idx, Some(xid))?;
+                let (sx, sy) = window_local_to_screen(win, lx, ly)?;
+                let (sx, sy) = (sx.round() as i32, sy.round() as i32);
+                crate::input::with_x11_foreground_opts(
+                    win,
+                    crate::input::ForegroundOptions::pointer()
+                        .for_pid(pid)
+                        .at_point(sx, sy),
+                    || crate::input::send_click_xtest_desktop(sx, sy, 1, 1),
+                )?;
+            } else {
+                // Qt's showPopup grabs the pointer and keyboard; the guard
+                // puts back a focus or activation the open moved.
+                let (_, guard) = crate::input::focus_guard::guarded(Some(pid), || {
+                    crate::atspi::native::perform_action_ref(&combo)
+                })?;
+                guards.extend(guard.filter(|guard| guard.changed));
+            }
+            let popup = wait_for_new_popup(pid, &before).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "the combo box's popup did not open within {POPUP_OPTIONS_WAIT:?}; nothing \
+                     was selected"
+                )
+            })?;
+            let Some(rows) = wait_for_popup_rows(pid, popup.window) else {
+                close_qt_combo_popup(&combo, popup.window);
+                anyhow::bail!(
+                    "the combo box's {} listed no rows within {POPUP_OPTIONS_WAIT:?}; it was \
+                     closed again and nothing was selected",
+                    popup.describe()
+                );
+            };
+            if rows.owner.as_ref() != Some(&combo) {
+                close_qt_combo_popup(&combo, popup.window);
+                anyhow::bail!(
+                    "{} opened, but its rows do not belong to combo box element [{idx}]; it \
+                     was closed again and nothing was selected",
+                    popup.describe()
+                );
+            }
+            (popup, rows)
+        }
+    };
+    let abandon = |error: anyhow::Error| -> anyhow::Error {
+        close_qt_combo_popup(&combo, popup.window);
+        error
+    };
+    let names: Vec<String> = rows.items.iter().map(|row| row.name.clone()).collect();
+    let Some(found) = match_option(&names, value) else {
+        return Err(abandon(crate::atspi::no_such_option(value, &names)));
+    };
+    let row = &rows.items[found];
+    let popup_rect = (popup.x, popup.y, popup.width, popup.height);
+    let Some((mut sx, mut sy)) = row.rect.and_then(|rect| popup_row_point(rect, popup_rect)) else {
+        return Err(abandon(anyhow::anyhow!(
+            "option {:?} is listed but its row is not shown inside {} (scrolled out of \
+             view); it was closed again and nothing was selected",
+            row.name,
+            popup.describe()
+        )));
+    };
+    match crate::atspi::native::hit_test::point_ownership(
+        pid,
+        popup.window,
+        &row.object_ref,
+        sx,
+        sy,
+    ) {
+        crate::atspi::native::hit_test::PointOwnership::Mismatch { owner } => {
+            return Err(abandon(anyhow::anyhow!(
+                "the middle ({sx}, {sy}) of option {:?}'s row is owned by {}; nothing was \
+                 pressed and the popup was closed again",
+                row.name,
+                owner.describe()
+            )));
+        }
+        crate::atspi::native::hit_test::PointOwnership::Redirect { screen_point, .. } => {
+            (sx, sy) = screen_point;
+        }
+        _ => {}
+    }
+    let (path, popup_closed) = if foreground {
+        let ((), report) = crate::input::with_x11_foreground_opts(
+            popup.window,
+            crate::input::ForegroundOptions::pointer()
+                .for_pid(pid)
+                .at_point(sx, sy),
+            || crate::input::send_click_xtest_desktop(sx, sy, 1, 1),
+        )
+        .map_err(abandon)?;
+        let closed =
+            report.popup_closed || crate::input::foreground::wait_for_popup_close(popup.window);
+        ("click_select_fg", closed)
+    } else {
+        let route = x11_pixel_click_no_focus_steal(
+            cursor_id,
+            popup.window,
+            sx - popup.x,
+            sy - popup.y,
+            1,
+            1,
+        )
+        .map_err(abandon)?;
+        let (path, guard) = match route {
+            PointerRoute::Mpx(effect) => ("click_select_mpx", effect.focus_guard),
+            PointerRoute::Synthetic(guard) => ("click_select_xsendevent", guard),
+            _ => ("click_select_xsendevent", None),
+        };
+        guards.extend(guard.filter(|guard| guard.changed));
+        (
+            path,
+            crate::input::foreground::wait_for_popup_close(popup.window),
+        )
+    };
+    if !popup_closed {
+        close_qt_combo_popup(&combo, popup.window);
+    }
+    Ok(QtComboPick {
+        option: row.name.clone(),
+        matched: crate::atspi::native::option_match_kind(&row.name, value),
+        path,
+        popup: popup.window,
+        popup_closed,
+        guards,
+    })
+}
+
+/// [`pick_from_qt_popup`] plus the read-back: the combo box's name, which Qt
+/// keeps equal to the option it shows.
+async fn qt_combo_set_value(
+    cursor_id: String,
+    pid: u32,
+    xid: u64,
+    idx: usize,
+    value: String,
+    foreground: bool,
+) -> ToolResult {
+    let value_for_task = value.clone();
+    let picked = spawn_blocking_bounded("set_value combo box", foreground_budget(0), move || {
+        pick_from_qt_popup(&cursor_id, pid, xid, idx, &value_for_task, foreground)
+    })
+    .await;
+    let pick = match picked {
+        Ok(Ok(pick)) => pick,
+        Ok(Err(error)) if crate::atspi::native::is_no_such_option(&error) => {
+            return no_such_option_result(idx, &error)
+        }
+        Ok(Err(error))
+            if [STALE_ELEMENT_TOKEN, OTHER_POPUP_OPEN]
+                .iter()
+                .any(|code| error.to_string().starts_with(code)) =>
+        {
+            let text = error.to_string();
+            let code = text.split(':').next().unwrap_or_default().to_owned();
+            return ToolResult::error(format!("set_value: {text}"))
+                .with_structured(json!({ "code": code, "effect": "none" }));
+        }
+        Ok(Err(error)) => return input_error_result(error),
+        Err(error) => return ToolResult::error(format!("Task error: {error}")),
+    };
+    // Qt changes the current item on the press's release, before the popup
+    // closes; a short wait covers a slow event loop.
+    let option = pick.option.clone();
+    let readback = tokio::task::spawn_blocking(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        loop {
+            let name = crate::atspi::live_name_in(pid, xid, idx);
+            if name.as_deref() == Some(option.as_str()) || std::time::Instant::now() >= deadline {
+                return name;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    })
+    .await
+    .ok()
+    .flatten();
+    let mut result = qt_combo_pick_result(idx, &value, &pick, readback);
+    for guard in &pick.guards {
+        result = attach_focus_guard(result, Some(guard));
+    }
+    result
+}
+
+/// The `set_value` result for a Qt combo box: `effect: confirmed` only when
+/// the combo box reads back the option whose row was pressed.
+fn qt_combo_pick_result(
+    idx: usize,
+    value: &str,
+    pick: &QtComboPick,
+    readback: Option<String>,
+) -> ToolResult {
+    let QtComboPick {
+        option,
+        matched,
+        path,
+        popup,
+        popup_closed,
+        ..
+    } = pick;
+    let verified = readback.as_deref() == Some(option.as_str());
+    let mut structured = json!({
+        "path": path,
+        "verified": verified,
+        "effect": if verified { "confirmed" } else if readback.is_some() { "suspected_noop" } else { "unverifiable" },
+        "option": option,
+        "matched": matched,
+        "readback": readback,
+        "popup_window": popup,
+        "popup_closed": popup_closed,
+    });
+    let how = if option == value {
+        "its text matched exactly".to_owned()
+    } else if value.trim() == value {
+        format!("'{value}' matched it ignoring case")
+    } else {
+        format!("'{value}' matched it ignoring case and surrounding space")
+    };
+    let mut text = format!(
+        "Selected option '{option}' of combo box element [{idx}] ({how}; path={path}): pressed \
+         its row in popup window {popup}"
+    );
+    text.push_str(if *popup_closed {
+        ", which closed"
+    } else {
+        ", which stayed open and was closed again"
+    });
+    match readback.as_deref() {
+        Some(seen) if verified => {
+            structured["evidence"] = json!([{
+                "kind": "value_readback",
+                "detail": format!("combo box element [{idx}] reads back '{seen}'"),
+            }]);
+            text.push_str(&format!("; the combo box reads back '{seen}'."));
+        }
+        Some(seen) => text.push_str(&format!(
+            "; but the combo box reads back '{seen}', so the selection did not commit. Check \
+             it with get_window_state."
+        )),
+        None => text.push_str(
+            "; the combo box could not be read back, so this is not verified. Check it with \
+             get_window_state.",
+        ),
+    }
+    ToolResult::text(text).with_structured(structured)
 }
 
 /// Numeric-aware equality for the `set_value` read-back ("40" == "40.0").

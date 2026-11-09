@@ -128,6 +128,136 @@ fn masks_in_a_field_that_is_not_a_password_field_still_disagree() {
     assert_eq!(plain.structured_content.unwrap()["effect"], "confirmed");
 }
 
+fn combo_pick(option: &str, matched: &'static str, popup_closed: bool) -> QtComboPick {
+    QtComboPick {
+        option: option.to_owned(),
+        matched,
+        path: "click_select_fg",
+        popup: 90177563,
+        popup_closed,
+        guards: Vec::new(),
+    }
+}
+
+#[test]
+fn a_combo_pick_is_confirmed_only_when_the_combo_reads_back_the_option() {
+    let pick = combo_pick("Invoice", "exact", true);
+    let ok = qt_combo_pick_result(0, "Invoice", &pick, Some("Invoice".into()));
+    let text = result_text(&ok);
+    let s = ok.structured_content.unwrap();
+    assert_eq!(s["effect"], "confirmed");
+    assert_eq!(s["verified"], true);
+    assert_eq!(s["option"], "Invoice");
+    assert_eq!(s["matched"], "exact");
+    assert_eq!(s["popup_closed"], true);
+    assert_eq!(s["evidence"][0]["kind"], "value_readback");
+    assert!(text.contains("its text matched exactly"), "{text}");
+    assert!(text.contains("reads back 'Invoice'"), "{text}");
+
+    // The press went through but the combo box still shows the old option:
+    // the bug this route replaced reported that as a plain success.
+    let stale = qt_combo_pick_result(0, "Invoice", &pick, Some("Receipt".into()));
+    let text = result_text(&stale);
+    let s = stale.structured_content.unwrap();
+    assert_eq!(s["effect"], "suspected_noop");
+    assert_eq!(s["verified"], false);
+    assert_eq!(s["readback"], "Receipt");
+    assert!(text.contains("did not commit"), "{text}");
+
+    let blind = qt_combo_pick_result(0, "Invoice", &pick, None);
+    let s = blind.structured_content.unwrap();
+    assert_eq!(s["effect"], "unverifiable");
+    assert_eq!(s["verified"], false);
+}
+
+#[test]
+fn a_case_insensitive_match_is_named_and_verified_against_the_option() {
+    let names: Vec<String> = ["invoice", "Invoice", "Pay stub"]
+        .map(String::from)
+        .to_vec();
+    // Exact text wins over an earlier row that differs only in case.
+    let exact = crate::atspi::native::match_option(&names, "Invoice").unwrap();
+    assert_eq!(exact, 1);
+    assert_eq!(
+        crate::atspi::native::option_match_kind(&names[exact], "Invoice"),
+        "exact"
+    );
+    let loose = crate::atspi::native::match_option(&names, "PAY STUB").unwrap();
+    assert_eq!(loose, 2);
+    assert_eq!(
+        crate::atspi::native::option_match_kind(&names[loose], "PAY STUB"),
+        "case-insensitive"
+    );
+    let pick = combo_pick("Pay stub", "case-insensitive", true);
+    // The read-back is compared with the option, not the value as typed.
+    let result = qt_combo_pick_result(0, "PAY STUB", &pick, Some("Pay stub".into()));
+    let text = result_text(&result);
+    let s = result.structured_content.unwrap();
+    assert_eq!(s["effect"], "confirmed");
+    assert_eq!(s["matched"], "case-insensitive");
+    assert!(
+        text.contains("'PAY STUB' matched it ignoring case"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_popup_that_stayed_open_is_said_and_not_confirmed_without_the_read_back() {
+    let pick = combo_pick("Invoice", "exact", false);
+    let result = qt_combo_pick_result(0, "Invoice", &pick, Some("Receipt".into()));
+    let text = result_text(&result);
+    assert!(text.contains("stayed open and was closed again"), "{text}");
+    assert_eq!(result.structured_content.unwrap()["popup_closed"], false);
+}
+
+#[test]
+fn a_missing_option_names_the_options_there_are_capped() {
+    let options: Vec<String> = (1..=25).map(|n| format!("Item {n}")).collect();
+    let error = crate::atspi::no_such_option("Payslip", &options);
+    assert!(crate::atspi::native::is_no_such_option(&error));
+    let result = no_such_option_result(0, &error);
+    assert_eq!(result.is_error, Some(true));
+    let text = result_text(&result);
+    assert!(text.contains("no option \"Payslip\""), "{text}");
+    assert!(text.contains("\"Item 20\""), "{text}");
+    assert!(!text.contains("\"Item 21\""), "{text}");
+    assert!(text.contains("and 5 more"), "{text}");
+    assert!(text.contains("nothing was changed"), "{text}");
+    let s = result.structured_content.unwrap();
+    assert_eq!(s["code"], "option_not_found");
+    assert_eq!(s["effect"], "none");
+    assert_eq!(s["options"].as_array().unwrap().len(), 20);
+    assert_eq!(s["options_not_listed"], 5);
+
+    let few = ["Receipt", "Invoice"].map(String::from).to_vec();
+    let result = no_such_option_result(0, &crate::atspi::no_such_option("Payslip", &few));
+    let s = result.structured_content.unwrap();
+    assert_eq!(s["options"], json!(["Receipt", "Invoice"]));
+    assert!(s.get("options_not_listed").is_none());
+}
+
+#[test]
+fn a_popup_row_is_pressed_inside_the_popup() {
+    // The probe's Category popup: 126x290 at (785, 340); its rows start at
+    // x 786 and are 191 px wide, so their own middle is near the right edge.
+    let popup = (785, 340, 126, 290);
+    assert_eq!(
+        popup_row_point((786, 341, 191, 36), popup),
+        Some((848, 359))
+    );
+    // A row below the popup's bottom (scrolled out of view) is not pressed.
+    assert_eq!(popup_row_point((786, 640, 191, 36), popup), None);
+    // Less than half of the row inside: its neighbor would take the press.
+    assert_eq!(popup_row_point((786, 615, 191, 36), popup), None);
+    // More than half inside: pressed in the visible part.
+    assert_eq!(
+        popup_row_point((786, 600, 191, 36), popup),
+        Some((848, 615))
+    );
+    // A row with no size is never pressed.
+    assert_eq!(popup_row_point((786, 341, 0, 0), popup), None);
+}
+
 #[test]
 fn an_index_of_a_closed_window_is_a_stale_token() {
     let error: anyhow::Error = crate::atspi::native::WindowClosed { xid: 90177604 }.into();
@@ -140,4 +270,16 @@ fn an_index_of_a_closed_window_is_a_stale_token() {
     assert_eq!(s["code"], "stale_element_token");
     assert_eq!(s["effect"], "none");
     assert_eq!(s["window_id"], 90177604);
+}
+
+#[test]
+fn a_loose_match_with_surrounding_space_says_so() {
+    let pick = combo_pick("Health", "case-insensitive", true);
+    let result = qt_combo_pick_result(0, "  health ", &pick, Some("Health".into()));
+    let text = result_text(&result);
+    assert!(
+        text.contains("matched it ignoring case and surrounding space"),
+        "{text}"
+    );
+    assert_eq!(result.structured_content.unwrap()["effect"], "confirmed");
 }

@@ -174,6 +174,20 @@ closed (`popup_closed`), which a click on an item does. Qt runs a menu item's
 accessible action without closing its menu, so a background click that ran
 one says the menu is still open; close it with `press_key` Escape.
 
+**Combo boxes.** `set_value` on a Qt combo box picks the option as a user
+does: it opens the popup (a real click in the foreground, the combo box's
+accessible action in the background, so no uinput is needed), presses the row
+whose text is the value (exact text first, then ignoring case and surrounding
+space; `matched` says which) and reads the combo box back by its name, which
+Qt keeps equal to the option it shows. `effect: confirmed` only when it shows
+that option. A value it does not list is refused with
+`code: "option_not_found"` and the options there are (`options`, at most 20),
+before anything opens. Another open popup of the app (a menu) is refused with
+`code: "other_popup_open"`. A Qt row's own accessible Toggle only marks the
+row in the popup's list and never changes the combo box, so it is not used.
+Other toolkits keep AT-SPI Selection, and without it the click-and-activate
+fallback.
+
 **Tokens of a closed window.** When a token's object is gone, its index is
 looked up again in a fresh walk of its window. A window that has closed
 (destroyed, or a popup that closed) gets no such walk: the call is refused
