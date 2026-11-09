@@ -961,9 +961,54 @@ async fn collect_window_visited<'a>(
     pid: u32,
     xid: u64,
 ) -> Result<Option<Vec<Visited<'a>>>> {
+    // A window that has closed has no index space left, but the walk would
+    // still find one: with a single top-level left it resolves any window id
+    // to that one, and otherwise walks every top-level. An index from the
+    // closed window's read then named another window's element (a closed
+    // dialog's [8] resolved to the main window's list item "Health" on the
+    // Qt probe, 2026-11-09).
+    if xid != 0 && !crate::wayland::is_wayland() {
+        let presence = bounded_blocking(move || crate::x11::window_presence(xid))
+            .await
+            .flatten();
+        if window_index_space_is_gone(presence) {
+            return Err(WindowClosed { xid }.into());
+        }
+    }
     collect_visited_bounded(conn, pid, xid, None, None)
         .await
         .map(|walked| walked.map(|collected| collected.visited))
+}
+
+/// An element index named a window that has closed: its read's indices name
+/// nothing now. Tools report it as a stale element token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowClosed {
+    pub xid: u64,
+}
+
+impl std::fmt::Display for WindowClosed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "window {} has closed, so element indices from its read name nothing; nothing \
+             was done. Read the window that is open now with get_window_state",
+            self.xid
+        )
+    }
+}
+
+impl std::error::Error for WindowClosed {}
+
+/// Whether an index walk of a window must be refused: the X server says the
+/// window was destroyed, or it is a popup that closed. A window that still
+/// exists (even minimized), or one the server could not be asked about,
+/// keeps the walk.
+fn window_index_space_is_gone(presence: Option<crate::x11::WindowPresence>) -> bool {
+    matches!(
+        presence,
+        Some(crate::x11::WindowPresence::Gone | crate::x11::WindowPresence::ClosedPopup)
+    )
 }
 
 /// Whether an AT-SPI role name is a top-level window's. Qt's `GetRoleName`
@@ -7376,6 +7421,21 @@ mod stacking_z_index_tests {
 #[cfg(test)]
 mod window_walk_tests {
     use super::*;
+
+    #[test]
+    fn a_closed_window_has_no_index_space_left() {
+        use crate::x11::WindowPresence;
+        // A destroyed dialog or a closed popup: an index walk of it is
+        // refused instead of numbering another window's elements.
+        assert!(window_index_space_is_gone(Some(WindowPresence::Gone)));
+        assert!(window_index_space_is_gone(Some(
+            WindowPresence::ClosedPopup
+        )));
+        // A window that still exists (a minimized one is unmapped) keeps it.
+        assert!(!window_index_space_is_gone(Some(WindowPresence::Exists)));
+        // No answer from the server: unchanged.
+        assert!(!window_index_space_is_gone(None));
+    }
 
     #[test]
     fn a_resolved_window_is_walked_alone_unless_the_caller_wants_every_window() {

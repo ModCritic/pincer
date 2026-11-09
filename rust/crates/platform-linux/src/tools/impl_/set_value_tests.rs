@@ -127,3 +127,17 @@ fn masks_in_a_field_that_is_not_a_password_field_still_disagree() {
     let plain = set_value_result(8, "hunter22", "ax", Some("hunter22".into()), true, None);
     assert_eq!(plain.structured_content.unwrap()["effect"], "confirmed");
 }
+
+#[test]
+fn an_index_of_a_closed_window_is_a_stale_token() {
+    let error: anyhow::Error = crate::atspi::native::WindowClosed { xid: 90177604 }.into();
+    let result = input_error_result(error);
+    assert_eq!(result.is_error, Some(true));
+    let text = result_text(&result);
+    assert!(text.contains("window 90177604 has closed"), "{text}");
+    assert!(text.contains("nothing was done"), "{text}");
+    let s = result.structured_content.unwrap();
+    assert_eq!(s["code"], "stale_element_token");
+    assert_eq!(s["effect"], "none");
+    assert_eq!(s["window_id"], 90177604);
+}

@@ -4872,6 +4872,10 @@ fn x11_pixel_click_no_focus_steal(
     Ok(PointerRoute::Synthetic(guard))
 }
 
+/// Error prefix and result code for an element token whose object or window
+/// is gone.
+const STALE_ELEMENT_TOKEN: &str = "stale_element_token";
+
 /// Typed tool error for a Linux input failure: uinput permission, an occluded
 /// target, or a real-pointer delivery that did not go through. Everything
 /// else keeps its full error chain in the text.
@@ -4955,6 +4959,13 @@ fn linux_input_error(error: anyhow::Error) -> ToolResult {
             "window_point": [outside.window_x, outside.window_y],
             "window_bounds": { "x": bx, "y": by, "width": bw, "height": bh },
             "hint": hint,
+        }));
+    }
+    if let Some(closed) = error.downcast_ref::<crate::atspi::native::WindowClosed>() {
+        return ToolResult::error(closed.to_string()).with_structured(json!({
+            "code": STALE_ELEMENT_TOKEN,
+            "effect": "none",
+            "window_id": closed.xid,
         }));
     }
     if let Some(unusable) = error.downcast_ref::<ElementBoundsUnusable>() {

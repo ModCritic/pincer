@@ -174,6 +174,12 @@ closed (`popup_closed`), which a click on an item does. Qt runs a menu item's
 accessible action without closing its menu, so a background click that ran
 one says the menu is still open; close it with `press_key` Escape.
 
+**Tokens of a closed window.** When a token's object is gone, its index is
+looked up again in a fresh walk of its window. A window that has closed
+(destroyed, or a popup that closed) gets no such walk: the call is refused
+with "window N has closed ..." (`code: "stale_element_token"`) and never reads
+the index in another window.
+
 **Alt+F4.** In background mode `hotkey` / `press_key` alt+F4 on a window
 target sends the window manager `_NET_CLOSE_WINDOW` (a virtual-keyboard
 Alt+F4 never reaches the WM's grab) and watches the window unmap for 2 s:

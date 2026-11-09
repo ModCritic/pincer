@@ -114,6 +114,37 @@ pub fn window_exists(xid: u64) -> bool {
         .is_some()
 }
 
+/// What the X server says about a window id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowPresence {
+    /// No such window: it was destroyed (a dialog that closed).
+    Gone,
+    /// An override-redirect window that is not mapped: a popup that closed
+    /// (Qt keeps its popup window and maps it again on the next open).
+    ClosedPopup,
+    /// Any other window that exists, mapped or not (a minimized window).
+    Exists,
+}
+
+/// [`WindowPresence`] of `xid`, or `None` when the server could not be asked.
+pub fn window_presence(xid: u64) -> Option<WindowPresence> {
+    let Ok(xid) = u32::try_from(xid) else {
+        return Some(WindowPresence::Gone);
+    };
+    let (conn, _) = RustConnection::connect(None).ok()?;
+    let reply = conn.get_window_attributes(xid).ok()?.reply();
+    match reply {
+        Ok(attributes)
+            if attributes.override_redirect && attributes.map_state != MapState::VIEWABLE =>
+        {
+            Some(WindowPresence::ClosedPopup)
+        }
+        Ok(_) => Some(WindowPresence::Exists),
+        Err(x11rb::errors::ReplyError::X11Error(_)) => Some(WindowPresence::Gone),
+        Err(_) => None,
+    }
+}
+
 /// Verify that an X11 window still exists and belongs to the requested process.
 ///
 /// Checking `/proc/<pid>` alone is insufficient because Linux may recycle the
