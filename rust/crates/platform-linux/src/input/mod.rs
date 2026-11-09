@@ -3176,6 +3176,7 @@ pub fn send_focus_in(xid: u64) -> Result<()> {
 
     conn.send_event(false, window, EventMask::FOCUS_CHANGE, focus_in)?;
     conn.flush()?;
+    settle_synthetic_events(&conn);
     Ok(())
 }
 
@@ -3194,6 +3195,7 @@ pub fn send_focus_out(xid: u64) -> Result<()> {
 
     conn.send_event(false, window, EventMask::FOCUS_CHANGE, focus_out)?;
     conn.flush()?;
+    settle_synthetic_events(&conn);
     Ok(())
 }
 

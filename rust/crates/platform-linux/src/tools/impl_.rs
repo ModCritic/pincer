@@ -4642,7 +4642,7 @@ async fn close_window_background(pid: u32, xid: u64, display: &str) -> ToolResul
         let mut text = format!(
             "Pressed {display} on pid {pid} as a window-manager close request \
              (_NET_CLOSE_WINDOW -> WM_DELETE_WINDOW; a virtual-keyboard Alt+F4 never reaches \
-             mutter): window {xid}{quoted} closed."
+             the window manager): window {xid}{quoted} closed."
         );
         if let Some(w) = new_windows.first() {
             text.push_str(&format!(

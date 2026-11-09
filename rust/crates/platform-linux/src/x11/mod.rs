@@ -507,8 +507,8 @@ pub fn window_info(xid: u64) -> Option<WindowInfo> {
 
 /// Ask the window manager to close `xid` (EWMH `_NET_CLOSE_WINDOW`, which
 /// the WM turns into `WM_DELETE_WINDOW` for a cooperating client): what
-/// Alt+F4 does through mutter's passive grab, which a virtual keyboard cannot
-/// reach. Only a window of `pid` is accepted.
+/// Alt+F4 does through the window manager's passive grab (mutter, KWin),
+/// which a virtual keyboard cannot reach. Only a window of `pid` is accepted.
 pub fn close_window(xid: u64, pid: u32) -> Result<()> {
     let window =
         u32::try_from(xid).map_err(|_| anyhow::anyhow!("window_id is out of X11 range"))?;
@@ -532,7 +532,11 @@ pub fn close_window(xid: u64, pid: u32) -> Result<()> {
         EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
         event,
     )?;
-    conn.flush()?;
+    // Round-trip before this short-lived connection drops: after a bare
+    // flush the X server can discard the request unprocessed when the socket
+    // closes right behind it (Xorg lost 6 of 8 Alt+F4 presses on KDE, and
+    // the short_connection_x11 test saw Xvfb lose 38 of 40).
+    conn.get_input_focus()?.reply()?;
     Ok(())
 }
 
