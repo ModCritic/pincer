@@ -546,8 +546,9 @@ mod tests {
         assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("session label for multi-call work"));
         assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("repeat it on every call"));
         assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("connection's default session"));
-        assert!(MULTI_CALL_SESSION_DESCRIPTION
-            .contains("After 30 min idle, the next call restarts it fresh"));
+        // The idle restart is start_session's to explain (and the restarted
+        // call's own result), not every tool's session argument.
+        assert!(!MULTI_CALL_SESSION_DESCRIPTION.contains("idle"));
     }
 
     #[test]

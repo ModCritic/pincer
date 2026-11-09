@@ -88,10 +88,12 @@ fn element_token_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({ "type": "string", "pattern": "^s[0-9a-f]{8}:[0-9]+$" })
 }
 
+/// The `session` argument of every multi-call tool. What happens after an
+/// idle end is said once, in start_session's description, and by the
+/// restarted call's own result: on 51 tools it cost about 4 KB of tools/list.
 pub const MULTI_CALL_SESSION_DESCRIPTION: &str =
     "Short session label for multi-call work; repeat it on every call. Omit to use the \
-     connection's default session. After 30 min idle, the next call restarts it fresh (old \
-     element tokens are gone).";
+     connection's default session.";
 
 fn string_list_schema(generator: &mut SchemaGenerator) -> Schema {
     Vec::<String>::json_schema(generator)

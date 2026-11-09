@@ -4708,8 +4708,7 @@ export type VerifyStateInput = {
     expect: Array<StatePredicate>,
     /**
      * Short session label for multi-call work; repeat it on every call. Omit to use the
-     * connection's default session. After 30 min idle, the next call restarts it fresh (old
-     * element tokens are gone). This field never selects capture modality or authorization.
+     * connection's default session. This field never selects capture modality or authorization.
      */
     session?: string,
     /**
