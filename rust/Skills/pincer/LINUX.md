@@ -63,11 +63,14 @@ alone does not prove which permission or backend failed.
 
 ## X11 observation and input details
 
-**What is open over the window.** `get_window_state` lists the pid's transient
-dialogs (`dialogs: [{window_id, title, transient_for, modal, bounds}]`) and
-override-redirect popups (`popups: [...]`) that are mapped, with a `follow_up`
-sentence naming the call that targets each one
-(`get_window_state(pid, window_id=<that id>)`). When one overlaps the window
+**What is open over the window.** `get_window_state` lists the dialogs open
+over the window (`dialogs: [{window_id, title, transient_for, modal, bounds}]`):
+transient windows above it in `_NET_CLIENT_LIST_STACKING` whose
+`WM_TRANSIENT_FOR` chain reaches it, so a window opened from a modal dialog is
+never told that dialog is over it. Mapped override-redirect popups are listed
+as `popups: [...]`. A `follow_up` sentence names the call that targets each one
+(`get_window_state(pid, window_id=<that id>)`), and only the dialog that
+pid-only keys go to is said to receive them. When one overlaps the window
 the screenshot is taken from the screen (`screenshot_composited:true`) so the
 menu or dialog is visible; the window's own drawable never shows them. The
 payload states its frame (`coordinate_frame:"window"`, plus `frame_note` with `verbose:true`): `x`/`y`

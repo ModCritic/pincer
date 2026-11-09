@@ -957,6 +957,18 @@ async fn collect_visited<'a>(
         .map(|walked| walked.map(|collected| collected.visited))
 }
 
+/// Whether an AT-SPI role name is a top-level window's. Qt's `GetRoleName`
+/// answers "alert message" (its name for QAccessible::AlertMessage) for a
+/// QMessageBox, where libatspi and GTK say "alert"; without it a message box
+/// never correlated with its X window and its read walked the whole
+/// application (seen on the Qt probe, 2026-11-09).
+pub(crate) fn is_window_role(role: &str) -> bool {
+    matches!(
+        role.to_ascii_lowercase().as_str(),
+        "frame" | "window" | "dialog" | "alert" | "alert message" | "file chooser"
+    )
+}
+
 /// Screen-space distance between an AT-SPI frame's extents and a native
 /// window's geometry. Lower is a better correspondence; `None` when the frame
 /// reports no usable extents.
@@ -999,27 +1011,66 @@ const FRAME_MATCH_MARGIN_PX: u64 = 24;
 /// An AT-SPI frame ordinal and its screen extents (x, y, width, height).
 type FrameExtents = (usize, (i32, i32, i32, i32));
 
+///
+/// One exception to the tie rule: Qt publishes a QMessageBox as two top-level
+/// accessibles with the same name and extents, both driving the one dialog
+/// (pressing Cancel in either closed it, checked 2026-11-09). When the tied
+/// frames report identical extents and the process has no other native
+/// window of that geometry (`native_twins` is 0), they are one window
+/// published twice, and the first is as good as the other. Two real windows
+/// stacked exactly still refuse, because each one is a native twin of the
+/// other.
 fn correlate_frame_to_window(
     candidates: &[FrameExtents],
     window: &crate::x11::WindowInfo,
+    native_twins: usize,
 ) -> Option<usize> {
-    let mut scored: Vec<(u64, usize)> = candidates
+    // Each candidate with usable extents, with its distance to the window.
+    let mut scored: Vec<(u64, FrameExtents)> = candidates
         .iter()
-        .filter_map(|(ordinal, extents)| {
-            frame_geometry_distance(*extents, window).map(|distance| (distance, *ordinal))
+        .filter_map(|candidate| {
+            frame_geometry_distance(candidate.1, window).map(|distance| (distance, *candidate))
         })
         .collect();
-    scored.sort_by_key(|(distance, ordinal)| (*distance, *ordinal));
-    let (best_distance, best_ordinal) = *scored.first()?;
+    scored.sort_by_key(|(distance, (ordinal, _))| (*distance, *ordinal));
+    let (best_distance, (best_ordinal, best_extents)) = *scored.first()?;
     if best_distance > FRAME_MATCH_TOLERANCE_PX {
         return None;
     }
-    if let Some((runner_up, _)) = scored.get(1) {
-        if runner_up.saturating_sub(best_distance) < FRAME_MATCH_MARGIN_PX {
-            return None;
-        }
+    let tied: Vec<&(u64, FrameExtents)> = scored
+        .iter()
+        .skip(1)
+        .filter(|(distance, _)| distance.saturating_sub(best_distance) < FRAME_MATCH_MARGIN_PX)
+        .collect();
+    let published_twice = native_twins == 0
+        && tied
+            .iter()
+            .all(|(_, (_, extents))| *extents == best_extents);
+    if !tied.is_empty() && !published_twice {
+        return None;
     }
     Some(best_ordinal)
+}
+
+/// How many of `windows` other than `window` have its geometry (within the
+/// tie margin): real windows a duplicate frame could also belong to.
+fn native_twins(window: &crate::x11::WindowInfo, windows: &[crate::x11::WindowInfo]) -> usize {
+    windows
+        .iter()
+        .filter(|other| other.xid != window.xid)
+        .filter(|other| {
+            frame_geometry_distance(
+                (
+                    other.x,
+                    other.y,
+                    i32::try_from(other.width).unwrap_or(i32::MAX),
+                    i32::try_from(other.height).unwrap_or(i32::MAX),
+                ),
+                window,
+            )
+            .is_some_and(|distance| distance < FRAME_MATCH_MARGIN_PX)
+        })
+        .count()
 }
 
 #[derive(Debug)]
@@ -1191,10 +1242,7 @@ async fn resolve_window_frame(
         for (ordinal, oref) in seeds.iter().enumerate() {
             let acc = call(accessible_for(conn, oref)).await?.ok()?;
             let role = call(acc.get_role_name()).await?.ok()?;
-            if !matches!(
-                role.as_str(),
-                "frame" | "window" | "dialog" | "alert" | "file chooser"
-            ) {
+            if !is_window_role(&role) {
                 continue;
             }
             let title = call(acc.name()).await?.ok()?;
@@ -1241,9 +1289,11 @@ async fn resolve_window_frame(
     // list never carries: describe it from the server directly, and let it
     // correlate with the toolkit's popup toplevels (role `window` for GTK
     // menus, `menu` / `popup menu` elsewhere).
-    let (window, popup) = match crate::x11::list_windows(Some(pid))
-        .into_iter()
+    let pid_windows = crate::x11::list_windows(Some(pid));
+    let (window, popup) = match pid_windows
+        .iter()
         .find(|candidate| candidate.xid == xid)
+        .cloned()
     {
         Some(window) => (window, false),
         None => (
@@ -1251,6 +1301,7 @@ async fn resolve_window_frame(
             true,
         ),
     };
+    let twins = native_twins(&window, &pid_windows);
     let mut candidates: Vec<(usize, (i32, i32, i32, i32))> = Vec::new();
     for (ordinal, oref) in seeds.iter().enumerate() {
         let Some(Ok(acc)) = call(accessible_for(conn, oref)).await else {
@@ -1262,10 +1313,7 @@ async fn resolve_window_frame(
             Some(Ok(role)) => role,
             _ => continue,
         };
-        let real_window = matches!(
-            role.as_str(),
-            "frame" | "window" | "dialog" | "alert" | "file chooser"
-        );
+        let real_window = is_window_role(&role);
         let popup_toplevel = matches!(role.as_str(), "window" | "menu" | "popup menu");
         if !(real_window || (popup && popup_toplevel)) {
             continue;
@@ -1280,7 +1328,7 @@ async fn resolve_window_frame(
             candidates.push((ordinal, extents));
         }
     }
-    let resolved = correlate_frame_to_window(&candidates, &window);
+    let resolved = correlate_frame_to_window(&candidates, &window, twins);
     if resolved.is_none() {
         dlog!(
             "could not correlate xid {xid} to one of pid {pid}'s {} top-level frame(s); \
@@ -2621,10 +2669,7 @@ fn list_windows_blocking(filter_pid: Option<u32>) -> Vec<crate::x11::WindowInfo>
                         .await
                         .and_then(|r| r.ok())
                         .unwrap_or_default();
-                    if !matches!(
-                        role.as_str(),
-                        "frame" | "window" | "dialog" | "alert" | "file chooser"
-                    ) {
+                    if !is_window_role(&role) {
                         continue;
                     }
                     let title = call(frame.name())
@@ -6521,12 +6566,8 @@ async fn element_bounds_for_visited(
     // window resolves, `offset` is None and we keep the legacy Screen path
     // so non-X11 behaviour is unchanged.
     let window_title = visited.iter().find_map(|node| {
-        (scoped_frame.is_none_or(|scope| node.frame_ordinal == scope)
-            && matches!(
-                node.role.to_ascii_lowercase().as_str(),
-                "frame" | "window" | "dialog" | "alert" | "file chooser"
-            ))
-        .then_some(node.name.as_str())
+        (scoped_frame.is_none_or(|scope| node.frame_ordinal == scope) && is_window_role(&node.role))
+            .then_some(node.name.as_str())
     });
     // Wayland's `window_to_screen_offset` path never touches X11 (it reads
     // compositor IPC / AT-SPI state instead), so only the X11 branch risks an
@@ -6570,10 +6611,7 @@ async fn element_bounds_for_visited(
         let frame = visited.iter().find(|node| {
             scoped_frame.is_none_or(|scope| node.frame_ordinal == scope)
                 && node.has_component
-                && matches!(
-                    node.role.to_ascii_lowercase().as_str(),
-                    "frame" | "window" | "dialog" | "alert" | "file chooser"
-                )
+                && is_window_role(&node.role)
         });
         if let (Some(origin), Some(frame)) = (x11_origin, frame) {
             let accessible_frame = match call(frame.acc.proxies()).await {
@@ -6605,10 +6643,7 @@ async fn element_bounds_for_visited(
         let frame = visited.iter().find(|node| {
             scoped_frame.is_none_or(|scope| node.frame_ordinal == scope)
                 && node.has_component
-                && matches!(
-                    node.role.to_ascii_lowercase().as_str(),
-                    "frame" | "window" | "dialog" | "alert" | "file chooser"
-                )
+                && is_window_role(&node.role)
         });
         if let Some(frame) = frame {
             match call(frame.acc.proxies()).await {
@@ -6906,7 +6941,9 @@ mod stacking_z_index_tests {
 
 #[cfg(test)]
 mod frame_correlation_tests {
-    use super::{correlate_frame_to_window, FRAME_MATCH_TOLERANCE_PX};
+    use super::{
+        correlate_frame_to_window, is_window_role, native_twins, FRAME_MATCH_TOLERANCE_PX,
+    };
     use crate::x11::WindowInfo;
 
     fn window(x: i32, y: i32, width: u32, height: u32) -> WindowInfo {
@@ -6934,11 +6971,11 @@ mod frame_correlation_tests {
             (2, (550, 225, 500, 584)),
         ];
         assert_eq!(
-            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953)),
+            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953), 0),
             Some(1)
         );
         assert_eq!(
-            correlate_frame_to_window(&candidates, &window(550, 225, 500, 584)),
+            correlate_frame_to_window(&candidates, &window(550, 225, 500, 584), 0),
             Some(2)
         );
     }
@@ -6949,7 +6986,7 @@ mod frame_correlation_tests {
     fn tolerates_decoration_offsets() {
         let candidates = [(0usize, (440, 108, 1050, 925)), (1, (144, 51, 1244, 953))];
         assert_eq!(
-            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953)),
+            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953), 0),
             Some(0)
         );
     }
@@ -6958,18 +6995,78 @@ mod frame_correlation_tests {
     /// caller needs a refusal rather than a coin flip.
     #[test]
     fn refuses_when_two_frames_are_equally_plausible() {
+        // Two real windows stacked exactly: each is the other's native twin.
         let candidates = [(0usize, (438, 80, 1050, 953)), (1, (438, 80, 1050, 953))];
         assert_eq!(
-            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953)),
+            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953), 1),
             None
         );
+        // Close but not identical frames are two windows, twins or not.
+        let near = [(0usize, (438, 80, 1050, 953)), (1, (440, 84, 1050, 953))];
+        assert_eq!(
+            correlate_frame_to_window(&near, &window(438, 80, 1050, 953), 0),
+            None
+        );
+    }
+
+    /// Qt publishes a QMessageBox as two "alert message" accessibles with the
+    /// same extents (the probe's "Probe warning", 452x113 at 1046,597, next to
+    /// the main frame and the Import dialog). With one native window of that
+    /// geometry they are the same window: the first one is taken.
+    #[test]
+    fn a_window_published_twice_resolves_to_its_first_frame() {
+        let candidates = [
+            (0usize, (680, 297, 1200, 800)),
+            (1, (1016, 545, 520, 260)),
+            (2, (1046, 597, 452, 113)),
+            (3, (1046, 597, 452, 113)),
+        ];
+        assert_eq!(
+            correlate_frame_to_window(&candidates, &window(1046, 597, 452, 113), 0),
+            Some(2)
+        );
+        let message_box = window(1046, 597, 452, 113);
+        let import = WindowInfo {
+            xid: 4243,
+            ..window(1016, 545, 520, 260)
+        };
+        let twin = WindowInfo {
+            xid: 4244,
+            ..window(1046, 597, 452, 113)
+        };
+        assert_eq!(
+            native_twins(&message_box, &[message_box.clone(), import.clone()]),
+            0
+        );
+        assert_eq!(
+            native_twins(&message_box, &[message_box.clone(), import, twin]),
+            1
+        );
+    }
+
+    #[test]
+    fn qt_message_boxes_are_window_roles() {
+        for role in [
+            "frame",
+            "window",
+            "dialog",
+            "alert",
+            "alert message",
+            "Alert Message",
+            "file chooser",
+        ] {
+            assert!(is_window_role(role), "{role}");
+        }
+        for role in ["menu", "popup menu", "panel", "push button"] {
+            assert!(!is_window_role(role), "{role}");
+        }
     }
 
     #[test]
     fn refuses_when_no_frame_is_close_enough() {
         let candidates = [(0usize, (0, 0, 200, 200))];
         assert_eq!(
-            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953)),
+            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953), 0),
             None
         );
     }
@@ -6977,7 +7074,7 @@ mod frame_correlation_tests {
     #[test]
     fn refuses_when_the_application_publishes_no_frame_extents() {
         assert_eq!(
-            correlate_frame_to_window(&[], &window(438, 80, 1050, 953)),
+            correlate_frame_to_window(&[], &window(438, 80, 1050, 953), 0),
             None
         );
     }
@@ -6988,7 +7085,7 @@ mod frame_correlation_tests {
     fn ignores_frames_without_usable_extents() {
         let candidates = [(0usize, (0, 0, 0, 0)), (1, (438, 80, 1050, 953))];
         assert_eq!(
-            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953)),
+            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953), 0),
             Some(1)
         );
     }
@@ -7001,7 +7098,7 @@ mod frame_correlation_tests {
         let far_away = i32::try_from(FRAME_MATCH_TOLERANCE_PX).unwrap() + 500;
         let candidates = [(0usize, (far_away, far_away, 1050, 953))];
         assert_eq!(
-            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953)),
+            correlate_frame_to_window(&candidates, &window(438, 80, 1050, 953), 0),
             None
         );
     }

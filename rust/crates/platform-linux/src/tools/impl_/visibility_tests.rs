@@ -90,10 +90,15 @@ fn overlays_name_the_follow_up_call_per_dialog_and_popup() {
         })],
         covers_window: true,
         window_rect: Some((0, 0, 800, 600)),
+        key_window: Some(71),
     };
     let note = overlays.follow_up(5).unwrap();
     assert!(
         note.contains("dialog \"Position and Size\" (window_id 71, transient of window 3, modal)"),
+        "{note}"
+    );
+    assert!(
+        note.contains("act there (pid-only keys go to it)."),
         "{note}"
     );
     assert!(
@@ -122,6 +127,7 @@ fn a_cross_process_dialog_names_its_real_owning_pid_in_the_follow_up() {
         popups: vec![],
         covers_window: false,
         window_rect: Some((0, 0, 800, 600)),
+        key_window: Some(10),
     };
     let note = overlays.follow_up(5).unwrap();
     assert!(
@@ -136,6 +142,85 @@ fn a_cross_process_dialog_names_its_real_owning_pid_in_the_follow_up() {
     );
     assert!(
         note.contains("pid-only keys for pid 5 do not reach it"),
+        "{note}"
+    );
+}
+
+/// The probe's windows, bottom to top in `_NET_CLIENT_LIST_STACKING`: main
+/// window M (z 6), modal "Import scans" I (z 7, transient for M), "Receipt
+/// viewer" R (z 8, no WM_TRANSIENT_FOR), message box W (z 9, transient for I).
+fn probe_transient_for(window: u64) -> Option<u64> {
+    match window {
+        7 => Some(6),
+        9 => Some(7),
+        _ => None,
+    }
+}
+
+/// The tested app's "stacking backwards": reading the receipt viewer or a
+/// message box opened from the modal Import dialog said the Import dialog
+/// was open over it. Only a dialog of the read window that sits above it is.
+#[test]
+fn only_dialogs_above_the_read_window_and_of_it_are_over_it() {
+    let over = |target: u64, target_z: usize, dialog: u64, dialog_z: usize| {
+        dialog_is_over_target(
+            Some(target_z),
+            false,
+            Some(dialog_z),
+            transient_chain_reaches(dialog, target, probe_transient_for),
+        )
+    };
+    // Reading the main window: the Import dialog and its message box.
+    assert!(over(6, 6, 7, 7));
+    assert!(over(6, 6, 9, 9));
+    // Reading the Import dialog: its message box, not itself.
+    assert!(over(7, 7, 9, 9));
+    // Reading the receipt viewer or the message box: the Import dialog is
+    // below them and not their dialog.
+    assert!(!over(8, 8, 7, 7));
+    assert!(!over(9, 9, 7, 7));
+    // A dialog of the window that the stacking puts below it is not over it.
+    assert!(!over(6, 9, 7, 7));
+    // A popup is above every managed window.
+    assert!(!dialog_is_over_target(None, true, Some(7), true));
+    // A window with no stacking position: the transient chain decides.
+    assert!(dialog_is_over_target(None, false, Some(7), true));
+    assert!(!dialog_is_over_target(None, false, Some(7), false));
+}
+
+#[test]
+fn a_transient_chain_is_followed_and_bounded() {
+    assert!(transient_chain_reaches(9, 6, probe_transient_for));
+    assert!(!transient_chain_reaches(8, 7, probe_transient_for));
+    // A cycle a misbehaving client could create ends without a match.
+    assert!(!transient_chain_reaches(1, 5, |w| Some(if w == 1 {
+        2
+    } else {
+        1
+    })));
+}
+
+/// Pid-only keys go to one window: only that dialog is told so.
+#[test]
+fn only_the_key_window_is_said_to_receive_pid_only_keys() {
+    let dialog = |id: u64, title: &str, parent: u64| {
+        json!({
+            "window_id": id, "title": title, "transient_for": parent, "modal": true,
+            "bounds": {"x": 0, "y": 0, "width": 300, "height": 200}
+        })
+    };
+    let overlays = WindowOverlays {
+        dialogs: vec![dialog(7, "Import scans", 6), dialog(9, "Probe warning", 7)],
+        popups: vec![],
+        covers_window: true,
+        window_rect: Some((0, 0, 1200, 800)),
+        key_window: Some(9),
+    };
+    let note = overlays.follow_up(5).unwrap();
+    let import = note.split("dialog \"Probe warning\"").next().unwrap();
+    assert!(!import.contains("pid-only keys"), "{note}");
+    assert!(
+        note.contains("get_window_state(pid=5, window_id=9) to index it and act there (pid-only keys go to it)."),
         "{note}"
     );
 }

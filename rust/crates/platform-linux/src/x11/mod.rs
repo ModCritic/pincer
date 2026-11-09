@@ -388,6 +388,15 @@ pub fn list_cross_pid_transient_windows(pid: u32) -> Vec<WindowInfo> {
     list_cross_pid_transient_windows_with(pid, list_windows(None), transient_for)
 }
 
+/// [`list_cross_pid_transient_windows`] over a window list the caller already
+/// read with `list_windows(None)`.
+pub fn cross_pid_transient_windows_among(
+    pid: u32,
+    all_windows: Vec<WindowInfo>,
+) -> Vec<WindowInfo> {
+    list_cross_pid_transient_windows_with(pid, all_windows, transient_for)
+}
+
 fn list_cross_pid_transient_windows_with(
     pid: u32,
     all_windows: Vec<WindowInfo>,

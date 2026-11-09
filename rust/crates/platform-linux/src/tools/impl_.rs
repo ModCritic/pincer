@@ -977,6 +977,9 @@ struct WindowOverlays {
     popups: Vec<serde_json::Value>,
     covers_window: bool,
     window_rect: Option<(i32, i32, u32, u32)>,
+    /// The pid's window that pid-only keys go to (see
+    /// `pid_fallback_window_resolver`), so only that dialog is told so.
+    key_window: Option<u64>,
 }
 
 impl WindowOverlays {
@@ -993,15 +996,19 @@ impl WindowOverlays {
                 Some(owner) => (
                     owner,
                     format!(
-                        "act on it with pid {owner}; pid-only keys for pid {pid} do not reach it"
+                        " (act on it with pid {owner}; pid-only keys for pid {pid} do not \
+                         reach it)"
                     ),
                 ),
-                None => (u64::from(pid), "pid-only keys go to it".to_owned()),
+                None if self.key_window == Some(id) => {
+                    (u64::from(pid), " (pid-only keys go to it)".to_owned())
+                }
+                None => (u64::from(pid), String::new()),
             };
             parts.push(format!(
                 "dialog \"{}\" (window_id {id}, transient of window {}{}{}) is open over this \
                  window: call get_window_state(pid={read_pid}, window_id={id}) to index it and \
-                 act there ({keys}).",
+                 act there{keys}.",
                 dialog["title"].as_str().unwrap_or(""),
                 dialog["transient_for"].as_u64().unwrap_or(0),
                 if dialog["modal"].as_bool() == Some(true) {
@@ -1092,6 +1099,46 @@ fn capture_window_png(xid: u64, pid: u32, overlays: &WindowOverlays) -> anyhow::
     }
 }
 
+/// Whether a transient window is open over the window being read: it sits
+/// above it in the window manager's stacking order (`_NET_CLIENT_LIST_STACKING`,
+/// bottom to top) and its `WM_TRANSIENT_FOR` chain reaches it, so it is a
+/// dialog of that window (or of one of its dialogs). Every other transient of
+/// the application is somewhere else: a window opened from a modal dialog
+/// (the tested app's receipt viewer, message boxes and input dialog) sits on top
+/// of that dialog, which is not "open over" it. A target with no stacking
+/// position is a popup, which is above every managed window, or a window the
+/// list does not carry; the chain alone decides for the latter.
+fn dialog_is_over_target(
+    target_z: Option<usize>,
+    target_is_popup: bool,
+    dialog_z: Option<usize>,
+    chain_reaches_target: bool,
+) -> bool {
+    let above = match (target_z, dialog_z) {
+        (Some(target), Some(dialog)) => dialog > target,
+        (Some(_), None) => true,
+        (None, _) => !target_is_popup,
+    };
+    above && chain_reaches_target
+}
+
+/// Whether `window`'s `WM_TRANSIENT_FOR` chain (bounded) reaches `target`.
+fn transient_chain_reaches(
+    window: u64,
+    target: u64,
+    transient_for: impl Fn(u64) -> Option<u64>,
+) -> bool {
+    let mut current = window;
+    for _ in 0..8 {
+        match transient_for(current) {
+            Some(parent) if parent == target => return true,
+            Some(parent) if parent != current => current = parent,
+            _ => return false,
+        }
+    }
+    false
+}
+
 fn window_overlays(pid: u32, xid: u64) -> WindowOverlays {
     let mut out = WindowOverlays {
         window_rect: crate::x11::window_info(xid).map(|w| (w.x, w.y, w.width, w.height)),
@@ -1102,13 +1149,41 @@ fn window_overlays(pid: u32, xid: u64) -> WindowOverlays {
             .is_some_and(|target| rects_intersect(rect, target))
     };
     let mut covers = false;
-    for window in crate::x11::list_windows(Some(pid)) {
+    let all_windows = crate::x11::list_windows(None);
+    let target_z = all_windows
+        .iter()
+        .find(|w| w.xid == xid)
+        .and_then(|w| w.z_index);
+    let target_is_popup = target_z.is_none() && crate::input::popup_window_info(xid).is_some();
+    let own: Vec<crate::x11::WindowInfo> = all_windows
+        .iter()
+        .filter(|w| w.pid == Some(pid))
+        .cloned()
+        .collect();
+    // The window pid-only keys go to (the same choice the pid-only target
+    // resolver makes): only that dialog is told it receives them.
+    let own_ids: Vec<u64> = own.iter().map(|w| w.xid).collect();
+    out.key_window = crate::x11::pick_pid_window(
+        &own,
+        crate::x11::focused_window_among(&own_ids),
+        crate::x11::transient_for,
+        crate::x11::active_window(),
+    );
+    for window in &own {
         if window.xid == xid || !window.is_on_screen || window.width == 0 || window.height == 0 {
             continue;
         }
         let Some(owner) = crate::x11::transient_for(window.xid) else {
             continue;
         };
+        if !dialog_is_over_target(
+            target_z,
+            target_is_popup,
+            window.z_index,
+            transient_chain_reaches(window.xid, xid, crate::x11::transient_for),
+        ) {
+            continue;
+        }
         covers |= over((window.x, window.y, window.width, window.height));
         out.dialogs.push(json!({
             "window_id": window.xid,
@@ -1120,19 +1195,28 @@ fn window_overlays(pid: u32, xid: u64) -> WindowOverlays {
     }
     // A dialog/plugin window can legitimately run as a DIFFERENT process than
     // the application it belongs to (GIMP's separate-process export dialogs,
-    // LibreOffice's Document Recovery dialog under a distinct soffice.bin).
-    // Exact-pid matching above would make such a window invisible even though
-    // it is unambiguously this application's own popup. WM_TRANSIENT_FOR
-    // resolving to one of pid's own windows is the correlation signal (see
-    // `list_cross_pid_transient_windows`); such entries are tagged with
-    // `owning_pid` so callers can tell it apart from a same-process dialog.
-    for window in crate::x11::list_cross_pid_transient_windows(pid) {
+    // LibreOffice's Document Recovery dialog under a distinct soffice.bin, a
+    // portal file dialog). Exact-pid matching above would make such a window
+    // invisible even though it is unambiguously this application's own popup.
+    // WM_TRANSIENT_FOR resolving to one of pid's own windows is the
+    // correlation signal (see `list_cross_pid_transient_windows`); such
+    // entries are tagged with `owning_pid` so callers can tell it apart from a
+    // same-process dialog.
+    for window in crate::x11::cross_pid_transient_windows_among(pid, all_windows) {
         if window.xid == xid || !window.is_on_screen || window.width == 0 || window.height == 0 {
             continue;
         }
         let Some(owner) = crate::x11::transient_for(window.xid) else {
             continue;
         };
+        if !dialog_is_over_target(
+            target_z,
+            target_is_popup,
+            window.z_index,
+            transient_chain_reaches(window.xid, xid, crate::x11::transient_for),
+        ) {
+            continue;
+        }
         covers |= over((window.x, window.y, window.width, window.height));
         out.dialogs.push(json!({
             "window_id": window.xid,
