@@ -182,6 +182,15 @@ pub fn point_ownership(
                 _ => return Ok(PointOwnership::Unknown),
             };
             let scoped = resolve_window_frame(conn, pid, xid, &seeds).await;
+            // A Qt popup has no top-level of its own: ask the container its
+            // items hang under, the one its read walked. The point is already
+            // relative to the popup, the window Qt measures them from.
+            let popup_root = match scoped {
+                Some(_) => None,
+                None => qt_popup_item_container(conn, &app, &seeds, xid)
+                    .await
+                    .map(|(_, container)| container),
+            };
             let (hit_x, hit_y) = match scoped {
                 Some(ordinal) => {
                     let frame_origin = decoration_frame_origin(conn, &app, &seeds[ordinal]).await;
@@ -189,9 +198,10 @@ pub fn point_ownership(
                 }
                 None => (win_x, win_y),
             };
-            let ordered: Vec<RawObjectRef> = match scoped {
-                Some(ordinal) => seeds.get(ordinal).cloned().into_iter().collect(),
-                None => seeds,
+            let ordered: Vec<RawObjectRef> = match (scoped, popup_root) {
+                (_, Some(container)) => vec![container],
+                (Some(ordinal), None) => seeds.get(ordinal).cloned().into_iter().collect(),
+                (None, None) => seeds,
             };
             for seed in ordered {
                 let chain = descend_at_point(conn, seed, hit_x, hit_y).await;

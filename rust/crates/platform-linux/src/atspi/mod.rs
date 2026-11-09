@@ -93,6 +93,10 @@ pub struct AtspiTreeResult {
     pub bounds_complete: bool,
     /// Wall time the native snapshot took (walk + bounds), in milliseconds.
     pub elapsed_ms: u128,
+    /// The query named roles and the toolkit searched the window for them
+    /// (AT-SPI Collection): `nodes` are the matches, nothing was walked, and
+    /// names were not searched.
+    pub searched_roles: bool,
 }
 
 /// Total budget for callers that did not ask for one (browser flows,
@@ -102,9 +106,11 @@ pub const DEFAULT_WALK_TIMEOUT: std::time::Duration = std::time::Duration::from_
 
 impl AtspiTreeResult {
     fn from_walked(walked: native::WalkedTree, query: Option<&str>) -> Self {
+        // A role search's rows are its matches already; the role name a row
+        // shows is the toolkit's own and need not contain the query's words.
         let md = match query {
-            Some(q) => filter_tree(&walked.markdown, q),
-            None => walked.markdown,
+            Some(q) if !walked.searched_roles => filter_tree(&walked.markdown, q),
+            _ => walked.markdown,
         };
         let (truncated, truncation_reason, nodes_visited, nodes_pending) = match &walked.truncation
         {
@@ -124,6 +130,7 @@ impl AtspiTreeResult {
             nodes_pending,
             bounds_complete: walked.bounds_complete,
             elapsed_ms: walked.elapsed.as_millis(),
+            searched_roles: walked.searched_roles,
         }
     }
 }
@@ -145,7 +152,8 @@ pub(crate) fn walk_tree_for_recording(
     xid: u64,
     timeout: std::time::Duration,
 ) -> AtspiTreeResult {
-    if let Ok(Some(walked)) = native::walk_tree_bounded_with_timeout(pid, xid, None, None, timeout)
+    if let Ok(Some(walked)) =
+        native::walk_tree_bounded_with_timeout(pid, xid, None, None, None, timeout)
     {
         if !walked.markdown.is_empty() {
             return AtspiTreeResult::from_walked(walked, None);
@@ -200,23 +208,47 @@ pub fn walk_tree_bounded_within(
     let started = std::time::Instant::now();
     let mut native_failure = None;
     let mut last_partial: Option<native::WalkedTree> = None;
+    // A query made of role words ("button", "combo box") is searched for
+    // directly where the toolkit can (Qt), instead of walking the window and
+    // filtering the rows. A depth cap asks for a walk, so it keeps one.
+    let mut role_search = query
+        .filter(|_| max_depth.is_none())
+        .and_then(native::role_search_for);
     for attempt in 0..MAX_ATTEMPTS {
         let remaining = timeout.saturating_sub(started.elapsed());
         if remaining.is_zero() {
             break;
         }
-        match native::walk_tree_bounded_with_timeout(pid, xid, max_elements, max_depth, remaining) {
+        match native::walk_tree_bounded_with_timeout(
+            pid,
+            xid,
+            max_elements,
+            max_depth,
+            role_search.as_ref(),
+            remaining,
+        ) {
+            Ok(Some(walked)) if walked.searched_roles => {
+                if lists_rows_below_the_window(&walked.markdown) || walked.truncation.is_some() {
+                    return AtspiTreeResult::from_walked(walked, query);
+                }
+                // Nothing in the window has those roles. The words may be a
+                // name ("File", "Text"), which only a walk can find.
+                role_search = None;
+                continue;
+            }
             Ok(Some(walked)) => {
-                // `nodes.len() <= 1` == only the root window resolved: the
+                // Only the root window resolved, with no children: the
                 // cold-registry symptom. Accept any real tree immediately; only
                 // keep waiting on the degenerate case, and accept it anyway on the
                 // final attempt rather than discarding a (minimal) valid result.
                 // A truncated walk is never the cold-registry symptom — retrying
-                // it would only burn the budget again.
+                // it would only burn the budget again. A window with a single
+                // control (a receipt viewer's Close button, a one-item menu) is
+                // not the symptom either: it used to be retried four times.
                 let is_last = attempt == MAX_ATTEMPTS - 1
                     || timeout.saturating_sub(started.elapsed()) <= RETRY_BACKOFF;
                 if !walked.markdown.is_empty()
-                    && (walked.nodes.len() > 1 || walked.truncation.is_some() || is_last)
+                    && (!only_the_root(&walked) || walked.truncation.is_some() || is_last)
                 {
                     return AtspiTreeResult::from_walked(walked, query);
                 }
@@ -267,6 +299,18 @@ pub fn walk_tree_bounded_within(
     fallback.elapsed_ms = started.elapsed().as_millis();
     fallback.degraded_reason = native_failure.map(|error| format!("atspi_walk_failed: {error}"));
     fallback
+}
+
+/// Whether a walk resolved only its starting node and nothing below it: what a
+/// freshly launched Qt or GTK application answers before its bridge has
+/// registered the window's contents (#1927).
+fn only_the_root(walked: &native::WalkedTree) -> bool {
+    walked.visited <= 1
+}
+
+/// Whether a window's rendered tree lists anything below its top-level line.
+fn lists_rows_below_the_window(markdown: &str) -> bool {
+    markdown.lines().any(|line| line.starts_with(' '))
 }
 
 /// Perform the first advertised action on element `idx` within pid's app tree.
@@ -687,6 +731,7 @@ fn walk_via_x11_properties(xid: u64, query: Option<&str>) -> AtspiTreeResult {
                 nodes_pending: 0,
                 bounds_complete: true,
                 elapsed_ms: 0,
+                searched_roles: false,
             }
         }
     };
@@ -756,6 +801,7 @@ fn walk_via_x11_properties(xid: u64, query: Option<&str>) -> AtspiTreeResult {
         nodes_pending: 0,
         bounds_complete: true,
         elapsed_ms: 0,
+        searched_roles: false,
     }
 }
 
@@ -873,9 +919,48 @@ mod budget_tests {
             bounds: vec![(1, 10, 10, 50, 20)],
             window_scoped: true,
             truncation,
+            searched_roles: false,
+            visited: 2,
             bounds_complete: false,
             elapsed: std::time::Duration::from_millis(1234),
         }
+    }
+
+    #[test]
+    fn a_window_with_one_control_is_not_a_cold_registry() {
+        // The probe's receipt viewer: frame, panels, a label and one button.
+        let mut tree = walked(None);
+        tree.nodes.truncate(1);
+        tree.visited = 4;
+        assert!(!only_the_root(&tree));
+        // A freshly launched app answering with its bare frame.
+        tree.visited = 1;
+        assert!(only_the_root(&tree));
+    }
+
+    #[test]
+    fn a_role_search_keeps_its_matches_unfiltered_and_says_so() {
+        // Qt names a table cell "cell": a "table cell" query searched that
+        // role, and its rows must not be dropped for not containing the words.
+        let mut tree = walked(None);
+        tree.markdown = "- frame = \"Ledger\"\n  - [0] cell \"Jan 1.1\"\n".into();
+        tree.searched_roles = true;
+        let result = AtspiTreeResult::from_walked(tree, Some("table cell"));
+        assert!(result.searched_roles);
+        assert!(result.tree_markdown.contains("[0] cell \"Jan 1.1\""));
+        // A walk's rows are still filtered by the query text.
+        let result = AtspiTreeResult::from_walked(walked(None), Some("table cell"));
+        assert!(!result.searched_roles);
+        assert_eq!(result.tree_markdown, "");
+    }
+
+    #[test]
+    fn only_rows_below_the_top_level_count_as_found() {
+        assert!(!lists_rows_below_the_window(""));
+        assert!(!lists_rows_below_the_window("- frame = \"Ledger\"\n"));
+        assert!(lists_rows_below_the_window(
+            "- frame = \"Ledger\"\n  - [0] push button \"OK\"\n"
+        ));
     }
 
     #[test]
@@ -915,6 +1000,7 @@ mod budget_tests {
     #[test]
     fn x11_fallback_is_never_truncated_or_trusted() {
         let result = walk_via_x11_properties(0, None);
+        assert!(!result.searched_roles);
         assert!(!result.trusted);
         assert!(!result.truncated);
         assert_eq!(result.nodes_visited, 0);

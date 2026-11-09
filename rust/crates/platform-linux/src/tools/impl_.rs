@@ -756,6 +756,30 @@ fn popup_item_role(role: &str) -> bool {
         || role == "option"
 }
 
+/// What a `query` read's header says about how the query was applied: that
+/// its role words were searched across the window instead of walked, or
+/// that it matched nothing on a walk that stopped early (`stopped` carries
+/// the truncation reason), where "no match" proves nothing. `None` otherwise.
+fn query_note(
+    query: Option<&str>,
+    searched_roles: bool,
+    stopped: Option<Option<&str>>,
+    tree_markdown: &str,
+) -> Option<String> {
+    let query = query.map(str::trim).filter(|query| !query.is_empty())?;
+    if searched_roles {
+        return Some(format!(
+            "Searched by role: query {query:?} names roles, so AT-SPI listed every match in \
+             this window without a walk (names were not searched)."
+        ));
+    }
+    let reason = stopped?;
+    tree_markdown
+        .trim()
+        .is_empty()
+        .then(|| pincer_core::walk_budget::unsearched_query_note(query, reason))
+}
+
 /// The rows of an open popup menu out of an application-wide tree: the
 /// subtree holding the item-role elements drawn inside the popup's
 /// rectangle, de-indented, with the application-wide indices kept so their
@@ -1288,7 +1312,7 @@ impl Tool for GetWindowStateTool {
             description: "Read a window: its AT-SPI element tree as compact Markdown, plus a \
                 screenshot. Each actionable row is tagged `[N]`; its element_token is \
                 `<snapshot_id>:N`, with snapshot_id in the response header and returned in the \
-                result. Re-read with `since` to get only the changes; narrow with `query`.\n\n\
+                result. Re-read with `since` to get only the changes; filter rows with `query`.\n\n\
                 Screenshot: returned by default, but a `since` tree read returns none unless \
                 include_screenshot:true. The tree is wrong on some surfaces, so cross-check it \
                 against the screenshot: act by element_token where the tree is right, by pixel \
@@ -1298,10 +1322,10 @@ impl Tool for GetWindowStateTool {
                 1.15 megapixels (long edge 1568 by default); element `screenshot_frame`s and \
                 pointer-tool x/y are pixels of this image, `frame` stays in screen \
                 coordinates, and `frame_scale` < 1 reports the downscale.\n\n\
-                Limits: `max_elements` and `timeout_ms` (when omitted, 2000 ms for a window's \
-                first read and 1000 ms after; pass more for big apps) bound the walk. A cut tree says `truncated: true`; listed elements are \
-                real, later ones are missing. Raise the limit or narrow with `query`/`max_depth`. \
-                The focused element is not reported on Linux yet.\n\n\
+                Limits: `timeout_ms` (when omitted, 2000 ms for a window's first read and 1000 ms \
+                after), `max_elements` and `max_depth` bound the walk of the window; `query` only \
+                filters its rows. A cut tree says `truncated: true`; listed elements are real, later \
+                ones are missing. The focused element is not reported on Linux yet.\n\n\
                 Popup menus (context menus, popovers, combo lists) never appear in list_windows. \
                 A click or right_click that opens one returns `popup: {window_id, bounds, \
                 title}`; pass that window_id here to get element indices for its items.".into(),
@@ -1315,7 +1339,7 @@ impl Tool for GetWindowStateTool {
                     "description":"Default true, except with `since`, where the default is false. True returns a grounding screenshot alongside the tree; false skips the grab and returns the tree only (the cheap path for re-indexing before an element ax action)."},
                 "screenshot_out_file":{"type":"string",
                     "description":"Write the PNG to this path (~ expanded) instead of embedding it; the result gives screenshot_file_path."},
-                "query":{"type":"string","description":"Case-insensitive substring. Returns only matching rows plus their ancestors, keeping original indices; compare total_element_count with returned_element_count."},
+                "query":{"type":"string","description":"Case-insensitive substring: matching rows plus their ancestors, original indices kept. Filters the walked rows; does not shorten the walk. In Qt apps, role words (\"button\", \"combo box\") instead search the whole window directly, by role only."},
                 "max_elements":{"type":"integer","minimum":1,"description":"Cap on AT-SPI nodes walked. Default 250 (5000 with full_output). The response says when the tree was cut; raise it to read further."},
                 "max_depth":{"type":"integer","minimum":1,"description":"Cap on tree walk depth. Default uncapped."},
                 "timeout_ms": pincer_core::tool_schema::timeout_ms_schema(),
@@ -1721,6 +1745,18 @@ impl Tool for GetWindowStateTool {
                              (element_token clicks still work; pixel targeting may not). \
                              Retry with a larger timeout_ms if you need frames.\n",
                         );
+                    }
+                    if let Some(note) = query_note(
+                        query.as_deref(),
+                        tr.searched_roles,
+                        tr.truncated.then_some(tr.truncation_reason.as_deref()),
+                        &tree_markdown,
+                    ) {
+                        header.push_str(&note);
+                        header.push('\n');
+                    }
+                    if tr.searched_roles {
+                        structured["searched_by_role"] = json!(true);
                     }
                     header.push('\n');
                     content.push(pincer_core::protocol::Content::text(

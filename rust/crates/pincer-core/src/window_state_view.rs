@@ -689,7 +689,7 @@ fn truncation_line(structured: &Value, key: &ViewKey) -> Option<String> {
         .and_then(Value::as_u64)
         .unwrap_or(0);
     Some(format!(
-        "Tree truncated at max_elements={} ({pending} more node(s) not shown). Pass a larger max_elements, or query/max_depth to reach the rest.",
+        "Tree truncated at max_elements={} ({pending} more node(s) not shown). Pass a larger max_elements, or a smaller max_depth, to reach the rest.",
         key.max_elements
     ))
 }

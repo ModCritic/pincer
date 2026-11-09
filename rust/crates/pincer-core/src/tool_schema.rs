@@ -123,7 +123,8 @@ pub fn timeout_ms_schema() -> Value {
             "Time budget in ms for the whole accessibility-tree walk (default \
              {TIMEOUT_MS_DEFAULT}, {TIMEOUT_MS_MIN}..{TIMEOUT_MS_MAX}). When it runs out, the \
              partial tree returns with `truncated: true` and `elements_complete: false`; retry \
-             with a larger value (e.g. 5000) or narrow with `query`/`max_depth`."
+             with a larger value (e.g. 5000) or a smaller `max_depth` (`query` does not shorten \
+             the walk)."
         )
     })
 }

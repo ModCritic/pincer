@@ -150,7 +150,14 @@ into a Qt file dialog opens its completer after the first `/`; prefer
 
 **Popup walks, labels, descriptions.** `get_window_state(pid, window_id=<popup>)`
 returns the popup's own rows (list / tree / menu items), never the main
-window's menubar. Elements carry `description` when the toolkit publishes one
+window's menubar. A window read walks only that window: a dialog or a message
+box no longer costs a walk of the whole application. A Qt popup has no
+top-level of its own, so Pincer asks Qt (AT-SPI Collection) for the shown list
+or menu that fills the popup and walks only that. In a Qt app a `query` made of
+role words ("button", "combo box") is also answered by Collection: every
+showing element with that role in the window, without a walk, by role only
+(names are not searched, rows are numbered for that read); other queries, and
+any query when nothing has the role, filter a walk. Elements carry `description` when the toolkit publishes one
 (Qt keeps a button's tooltip there: `push button "" (description "Pause")`;
 `label` falls back to it). A control's `label` is never its value: a spin
 button or slider nobody names is `unlabelled: true` with its place in

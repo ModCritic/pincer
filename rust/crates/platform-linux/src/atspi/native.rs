@@ -551,6 +551,9 @@ struct Collected<'a> {
     visited: Vec<Visited<'a>>,
     scoped_frame: Option<usize>,
     truncation: Option<Truncation>,
+    /// The visited nodes are a role search's matches under the scoped
+    /// top-level, not a walk of it.
+    searched_roles: bool,
 }
 
 /// Role names that denote embedded web/document content. An editable beneath
@@ -1339,6 +1342,282 @@ async fn resolve_window_frame(
     resolved
 }
 
+/// The nodes a walk starts from, in visiting order, as (node, depth,
+/// top-level ordinal).
+///
+/// The caller's window comes FIRST when it resolved (`scope`): under a short
+/// budget an application-wide pre-order (main window, then dialogs) could
+/// exhaust the budget before ever reaching the dialog the caller asked
+/// about. Ordinals stay the application's own, so `render` still scopes by
+/// the same identity, and the window's element indices are the same whether
+/// or not the other top-levels follow. They follow only with
+/// `other_windows`. A popup's item container (`popup_root`) replaces its
+/// top-level; a role search's `matches` are visited one level below it.
+fn walk_seeds<T: Clone>(
+    seeds: &[T],
+    scope: Option<usize>,
+    popup_root: Option<T>,
+    matches: Option<Vec<T>>,
+    other_windows: bool,
+) -> Vec<(T, usize, usize)> {
+    let mut ordered: Vec<(T, usize, usize)> = seeds
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(ordinal, seed)| (seed, 0, ordinal))
+        .collect();
+    let Some(scope) = scope else {
+        return ordered;
+    };
+    if let Some(container) = popup_root {
+        return vec![(container, 0, scope)];
+    }
+    if let Some(position) = ordered.iter().position(|(_, _, ordinal)| *ordinal == scope) {
+        let scoped = ordered.remove(position);
+        ordered.insert(0, scoped);
+    }
+    if let Some(matches) = matches {
+        ordered.truncate(1);
+        ordered.extend(matches.into_iter().map(|found| (found, 1, scope)));
+    } else if !other_windows {
+        ordered.truncate(1);
+    }
+    ordered
+}
+
+/// The roles a `get_window_state` query names, searched through AT-SPI
+/// Collection instead of filtering a walk ([`role_search_for`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoleSearch {
+    /// AT-SPI role numbers.
+    roles: Vec<u32>,
+}
+
+/// Role names Qt's `GetRoleName` gives where libatspi's differ (read with
+/// GetRole and GetRoleName over D-Bus on Qt 6.12, 2026-11-09). Rows show the
+/// application's own name, so a query may use either.
+const QT_ROLE_NAMES: &[(atspi::Role, &str)] = &[
+    (atspi::Role::Alert, "alert message"),
+    (atspi::Role::Image, "graphic"),
+    (atspi::Role::Button, "push button"),
+    (atspi::Role::TableCell, "cell"),
+    (atspi::Role::TableColumnHeader, "column header"),
+    (atspi::Role::TableRowHeader, "row header"),
+];
+
+/// The roles `query` names: those with a name of which the query is a run of
+/// whole words ("button" names push, toggle and radio buttons; "combo box"
+/// names the combo box). `None` when the query is not role words, so it
+/// filters a walk instead.
+pub fn role_search_for(query: &str) -> Option<RoleSearch> {
+    let query = query
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>();
+    if query.is_empty() {
+        return None;
+    }
+    let names_a_role = |name: &str| {
+        let words: Vec<&str> = name.split(' ').collect();
+        words
+            .windows(query.len())
+            .any(|run| run == query.as_slice())
+    };
+    let roles: Vec<u32> = (1u32..256)
+        .map_while(|number| atspi::Role::try_from(number).ok())
+        .filter(|role| {
+            names_a_role(role.name())
+                || QT_ROLE_NAMES
+                    .iter()
+                    .any(|(qt_role, name)| qt_role == role && names_a_role(name))
+        })
+        .map(|role| role as u32)
+        .collect();
+    (!roles.is_empty()).then_some(RoleSearch { roles })
+}
+
+/// A Collection match rule's role set: a bitset of five int32 words, the
+/// form libatspi sends.
+fn role_bitset(roles: &[u32]) -> Vec<i32> {
+    let mut words = vec![0u32; 5];
+    for &role in roles {
+        if let Some(word) = words.get_mut(role as usize / 32) {
+            *word |= 1 << (role % 32);
+        }
+    }
+    words.into_iter().map(|word| word as i32).collect()
+}
+
+/// A Collection match rule's state set: a bitset of two int32 words.
+fn state_bitset(states: StateSet) -> Vec<i32> {
+    let bits = states.bits();
+    vec![bits as u32 as i32, (bits >> 32) as u32 as i32]
+}
+
+/// `org.a11y.atspi.Collection.GetMatches` below `oref`: every descendant with
+/// one of `roles` that is showing or visible, in canonical (walk) order. The
+/// rule has libatspi's wire form, as dbus-monitor showed it: role and state
+/// bitsets, and match type ALL with empty attribute and interface sets (Qt
+/// 6.12 matches nothing when a match type is INVALID, checked 2026-11-09).
+/// A rule cannot match names: Collection has no name criterion.
+async fn get_matches(
+    conn: &atspi::zbus::Connection,
+    oref: &RawObjectRef,
+    roles: &[u32],
+) -> Result<Vec<RawObjectRef>> {
+    const MATCH_ALL: i32 = 1;
+    const MATCH_ANY: i32 = 2;
+    const SORT_CANONICAL: u32 = 1;
+    let proxy = atspi::zbus::Proxy::new(
+        conn,
+        oref.name.as_str(),
+        oref.path.as_str(),
+        "org.a11y.atspi.Collection",
+    )
+    .await
+    .map_err(|e| anyhow!("Collection proxy unavailable: {e}"))?;
+    let rule = (
+        state_bitset(StateSet::new(State::Showing | State::Visible)),
+        MATCH_ANY,
+        std::collections::HashMap::<String, String>::new(),
+        MATCH_ALL,
+        role_bitset(roles),
+        MATCH_ANY,
+        Vec::<String>::new(),
+        MATCH_ALL,
+        false,
+    );
+    let refs: Vec<(String, atspi::zbus::zvariant::OwnedObjectPath)> = proxy
+        .call("GetMatches", &(rule, SORT_CANONICAL, 0i32, true))
+        .await
+        .map_err(|e| anyhow!("Collection.GetMatches failed: {e}"))?;
+    Ok(refs
+        .into_iter()
+        .map(|(name, path)| RawObjectRef {
+            name,
+            path: path.as_str().to_owned(),
+        })
+        .collect())
+}
+
+/// Whether the application's toolkit answers Collection searches the way
+/// Pincer uses them. Only Qt is checked (Qt 6.12, 2026-11-09: matches by role
+/// and state in about a millisecond for a 2,300-node window); other toolkits
+/// keep the walk.
+async fn is_collection_toolkit_app(app: &AccessibleProxy<'_>) -> bool {
+    let Some(Ok(proxies)) = call(app.proxies()).await else {
+        return false;
+    };
+    let Some(Ok(application)) = call(proxies.application()).await else {
+        return false;
+    };
+    let Some(Ok(name)) = call(application.toolkit_name()).await else {
+        return false;
+    };
+    name.trim().eq_ignore_ascii_case("qt")
+}
+
+/// When `xid` is a popup of a Qt application, the container its items hang
+/// under and the ordinal of the top-level that holds it
+/// ([`popup_item_container`]); `None` for anything else.
+async fn qt_popup_item_container(
+    conn: &AccessibilityConnection,
+    app: &AccessibleProxy<'_>,
+    seeds: &[RawObjectRef],
+    xid: u64,
+) -> Option<(usize, RawObjectRef)> {
+    let popup = crate::input::popup_window_info(xid)?;
+    if !is_collection_toolkit_app(app).await {
+        return None;
+    }
+    popup_item_container(conn.connection(), seeds, &popup).await
+}
+
+/// The container a Qt popup's items hang under (a combo box's list, an open
+/// menu) and the ordinal of the top-level it belongs to: a showing container
+/// whose screen rectangle is the popup's. Qt publishes no top-level for a
+/// popup, so this is what a popup read walks.
+async fn popup_item_container(
+    conn: &atspi::zbus::Connection,
+    seeds: &[RawObjectRef],
+    popup: &crate::input::PopupWindow,
+) -> Option<(usize, RawObjectRef)> {
+    let roles = [
+        atspi::Role::List,
+        atspi::Role::Menu,
+        atspi::Role::PopupMenu,
+        atspi::Role::Tree,
+        atspi::Role::Table,
+        atspi::Role::TreeTable,
+    ]
+    .map(|role| role as u32);
+    let mut candidates = Vec::new();
+    for (ordinal, seed) in seeds.iter().enumerate() {
+        let Some(Ok(found)) = call(get_matches(conn, seed, &roles)).await else {
+            continue;
+        };
+        for container in found {
+            let Some(Ok(proxy)) = call(raw_component(conn, &container)).await else {
+                continue;
+            };
+            let Some(Ok(extents)) = call(proxy.get_extents(CoordType::Screen)).await else {
+                continue;
+            };
+            candidates.push((ordinal, container, extents));
+        }
+    }
+    let rects: Vec<_> = candidates.iter().map(|(_, _, extents)| *extents).collect();
+    let rect = (popup.x, popup.y, popup.width as i32, popup.height as i32);
+    let pick = pick_popup_container(&rects, rect)?;
+    let (ordinal, container, _) = candidates.swap_remove(pick);
+    Some((ordinal, container))
+}
+
+/// The candidate whose screen rectangle is the popup's: every edge within a
+/// few pixels (Qt's combo list sits one pixel inside its popup's border),
+/// the closest one when several are.
+fn pick_popup_container(
+    candidates: &[(i32, i32, i32, i32)],
+    popup: (i32, i32, i32, i32),
+) -> Option<usize> {
+    const EDGE_SLACK: i32 = 4;
+    let edges = |(x, y, w, h): (i32, i32, i32, i32)| [x, y, x + w, y + h];
+    let target = edges(popup);
+    candidates
+        .iter()
+        .enumerate()
+        .filter_map(|(index, rect)| {
+            let distances = edges(*rect)
+                .iter()
+                .zip(target)
+                .map(|(edge, wanted)| (edge - wanted).abs())
+                .collect::<Vec<_>>();
+            distances
+                .iter()
+                .all(|distance| *distance <= EDGE_SLACK)
+                .then(|| (distances.iter().sum::<i32>(), index))
+        })
+        .min()
+        .map(|(_, index)| index)
+}
+
+/// A Component proxy for an arbitrary (bus name, path), uncached like every
+/// other proxy the walk builds.
+async fn raw_component<'a>(
+    conn: &atspi::zbus::Connection,
+    oref: &RawObjectRef,
+) -> Result<atspi::proxy::component::ComponentProxy<'a>> {
+    atspi::proxy::component::ComponentProxy::builder(conn)
+        .cache_properties(atspi::zbus::proxy::CacheProperties::No)
+        .destination(oref.name.clone())
+        .map_err(|e| anyhow!("bad a11y destination: {e}"))?
+        .path(oref.path.clone())
+        .map_err(|e| anyhow!("bad a11y path: {e}"))?
+        .build()
+        .await
+        .map_err(|e| anyhow!("Component proxy unavailable: {e}"))
+}
+
 /// `collect_visited` with caller-supplied caps.
 /// - `max_elements = None` keeps the historical 5 000-node budget.
 /// - `max_depth = None` keeps depth uncapped (the historical behaviour);
@@ -1353,21 +1632,45 @@ async fn collect_visited_bounded<'a>(
     max_elements: Option<usize>,
     max_depth: Option<usize>,
 ) -> Result<Option<Collected<'a>>> {
-    collect_visited_bounded_opts(conn, pid, xid, max_elements, max_depth, false).await
+    collect_visited_bounded_opts(
+        conn,
+        pid,
+        xid,
+        max_elements,
+        max_depth,
+        WalkOptions::default(),
+    )
+    .await
 }
 
-/// [`collect_visited_bounded`] with `walk_closed_menus`: a targeted walk
-/// (invoke_menu resolving a path segment by segment) descends into menus
-/// the snapshot walk keeps collapsed, since a toolkit that never marks its
-/// entries SHOWING (gail) cannot show the walk that a `doAction` opened one.
+/// How a walk for a native window reaches into the application.
+#[derive(Clone, Copy, Debug, Default)]
+struct WalkOptions<'s> {
+    /// Descend into menus the snapshot walk keeps collapsed: a targeted walk
+    /// (invoke_menu resolving a path segment by segment) needs them, since a
+    /// toolkit that never marks its entries SHOWING (gail) cannot show the
+    /// walk that a `doAction` opened one.
+    walk_closed_menus: bool,
+    /// Walk the application's other top-levels after the caller's window.
+    /// Off, a walk for a window whose top-level (or, for a Qt popup, whose
+    /// item container) resolves visits only that subtree. Its element indices
+    /// are the same either way: the caller's window is always walked first.
+    other_windows: bool,
+    /// Search these roles below the caller's top-level through AT-SPI
+    /// Collection instead of walking it, where the toolkit supports it.
+    role_search: Option<&'s RoleSearch>,
+}
+
+/// [`collect_visited_bounded`] with explicit [`WalkOptions`].
 async fn collect_visited_bounded_opts<'a>(
     conn: &'a AccessibilityConnection,
     pid: u32,
     xid: u64,
     max_elements: Option<usize>,
     max_depth: Option<usize>,
-    walk_closed_menus: bool,
+    options: WalkOptions<'_>,
 ) -> Result<Option<Collected<'a>>> {
+    let walk_closed_menus = options.walk_closed_menus;
     let ResolvedApp {
         app,
         children: probed,
@@ -1431,6 +1734,7 @@ async fn collect_visited_bounded_opts<'a>(
                 visited: 0,
                 pending: 0,
             }),
+            searched_roles: false,
         }));
     }
 
@@ -1438,34 +1742,51 @@ async fn collect_visited_bounded_opts<'a>(
     // child list the walk is about to seed from. Re-reading `get_children()`
     // later could observe a different window set, and an ordinal resolved
     // against one list but applied to another names the wrong window.
-    let scoped_frame = if xid == 0 {
+    let mut scoped_frame = if xid == 0 {
         None
     } else {
         resolve_window_frame(conn, pid, xid, &seeds).await
     };
 
-    // Walk the caller's window FIRST when it was resolved: under a short
-    // budget an application-wide pre-order (main window, then dialogs) could
-    // exhaust the budget before ever reaching the dialog the caller asked
-    // about. Ordinals stay the application's own, so `render` still scopes
-    // by the same identity; only the visiting order (and thus the index
-    // space of this snapshot) changes.
-    let mut ordered: Vec<(RawObjectRef, usize, bool, usize)> = seeds
-        .iter()
-        .cloned()
-        .enumerate()
-        .map(|(ordinal, r)| (r, 0usize, false, ordinal))
-        .collect();
-    if let Some(scope) = scoped_frame {
-        if let Some(position) = ordered
-            .iter()
-            .position(|(_, _, _, ordinal)| *ordinal == scope)
-        {
-            let scoped = ordered.remove(position);
-            ordered.insert(0, scoped);
+    // A Qt popup (a combo list, a menu) has no top-level of its own: its
+    // items hang under a container in the window that opened it, so without
+    // that container the read would walk the whole application to find them.
+    let mut popup_root = None;
+    if scoped_frame.is_none() && xid != 0 && !options.other_windows {
+        if let Some((ordinal, container)) = qt_popup_item_container(conn, &app, &seeds, xid).await {
+            scoped_frame = Some(ordinal);
+            popup_root = Some(container);
         }
     }
-    let mut stack: Vec<(RawObjectRef, usize, bool, usize)> = ordered.into_iter().rev().collect();
+
+    // A role search asks the toolkit for the matching elements below the
+    // caller's top-level (one Collection.GetMatches) instead of walking it.
+    // Any failure leaves the ordinary walk.
+    let mut search_matches = None;
+    if let (Some(search), Some(scope), None) = (options.role_search, scoped_frame, &popup_root) {
+        if is_collection_toolkit_app(&app).await {
+            match call(get_matches(zconn, &seeds[scope], &search.roles)).await {
+                Some(Ok(found)) => search_matches = Some(found),
+                Some(Err(error)) => dlog!("role search for pid {pid} failed: {error:#}"),
+                None => dlog!("role search for pid {pid} timed out"),
+            }
+        }
+    }
+
+    // A role search visits its matches without walking into them.
+    let flat = search_matches.is_some();
+    let ordered = walk_seeds(
+        &seeds,
+        scoped_frame,
+        popup_root,
+        search_matches,
+        options.other_windows,
+    );
+    let mut stack: Vec<(RawObjectRef, usize, bool, usize)> = ordered
+        .into_iter()
+        .rev()
+        .map(|(oref, depth, ordinal)| (oref, depth, false, ordinal))
+        .collect();
     // Direct children of a `menu bar`: a top-level menu whose popup is not
     // open keeps its child count but is not descended into.
     let mut menubar_children: std::collections::HashSet<(String, String)> =
@@ -1787,7 +2108,7 @@ async fn collect_visited_bounded_opts<'a>(
         // Enqueue children (fetched above) before moving `acc` into `visited`.
         // Honor max_depth (#22865): skip enqueueing descendants whose depth
         // would exceed the cap.
-        let descend = max_depth.map(|d| depth < d).unwrap_or(true);
+        let descend = !flat && max_depth.map(|d| depth < d).unwrap_or(true);
         // A menu that is not open (a menubar entry that is not expanded, or
         // any menu that is not showing) keeps its child count and is not
         // walked: its items are hidden, never indexed, and cost a round-trip
@@ -1964,6 +2285,7 @@ async fn collect_visited_bounded_opts<'a>(
         visited,
         scoped_frame,
         truncation,
+        searched_roles: flat,
     }))
 }
 
@@ -2419,6 +2741,11 @@ pub struct WalkedTree {
     pub window_scoped: bool,
     /// Set when the walk stopped before exhausting the tree.
     pub truncation: Option<Truncation>,
+    /// The nodes are a role search's matches ([`RoleSearch`]) below the
+    /// window's top-level, found through AT-SPI Collection instead of a walk.
+    pub searched_roles: bool,
+    /// Accessibles visited, listed or not (the starting top-level included).
+    pub visited: usize,
     /// False when the bounds phase ran out of time; some indexed elements
     /// then carry no frame even though they exist.
     pub bounds_complete: bool,
@@ -2435,14 +2762,18 @@ pub fn walk_tree_bounded(
     max_elements: Option<usize>,
     max_depth: Option<usize>,
 ) -> Result<Option<WalkedTree>> {
-    walk_tree_bounded_with_timeout(pid, xid, max_elements, max_depth, OP_TIMEOUT)
+    walk_tree_bounded_with_timeout(pid, xid, max_elements, max_depth, None, OP_TIMEOUT)
 }
 
+/// [`walk_tree_bounded`] within `timeout`. With `role_search`, a window whose
+/// toolkit supports it is searched for those roles instead of walked
+/// (`WalkedTree::searched_roles` says whether that happened).
 pub(super) fn walk_tree_bounded_with_timeout(
     pid: u32,
     xid: u64,
     max_elements: Option<usize>,
     max_depth: Option<usize>,
+    role_search: Option<&RoleSearch>,
     timeout: Duration,
 ) -> Result<Option<WalkedTree>> {
     runtime().block_on(async {
@@ -2459,7 +2790,11 @@ pub(super) fn walk_tree_bounded_with_timeout(
         let backstop = deadline + Duration::from_millis(500);
         let walk = OP_DEADLINE.scope(deadline, async {
             let conn = shared_connection().await?;
-            collect_visited_bounded(conn, pid, xid, max_elements, max_depth).await
+            let options = WalkOptions {
+                role_search,
+                ..WalkOptions::default()
+            };
+            collect_visited_bounded_opts(conn, pid, xid, max_elements, max_depth, options).await
         });
         let walked = match before_snapshot_deadline(backstop, walk).await {
             Ok(Ok(result)) => result,
@@ -2475,6 +2810,8 @@ pub(super) fn walk_tree_bounded_with_timeout(
                         visited: 0,
                         pending: 0,
                     }),
+                    searched_roles: false,
+                    visited: 0,
                     bounds_complete: false,
                     elapsed: walk_started.elapsed(),
                 }));
@@ -2492,6 +2829,8 @@ pub(super) fn walk_tree_bounded_with_timeout(
                         visited: 0,
                         pending: 0,
                     }),
+                    searched_roles: false,
+                    visited: 0,
                     bounds_complete: false,
                     elapsed: walk_started.elapsed(),
                 }));
@@ -2501,11 +2840,13 @@ pub(super) fn walk_tree_bounded_with_timeout(
             visited,
             scoped_frame,
             truncation,
+            searched_roles,
         }) = walked
         else {
             return Ok(None);
         };
         let walk_elapsed = walk_started.elapsed();
+        let visited_count = visited.len();
         let (markdown, nodes) = render(&visited, scoped_frame);
         let bounds_started = std::time::Instant::now();
         // Bounds resolution shares the deadline, but a walk that consumed the
@@ -2556,6 +2897,8 @@ pub(super) fn walk_tree_bounded_with_timeout(
             bounds,
             window_scoped: scoped_frame.is_some(),
             truncation,
+            searched_roles,
+            visited: visited_count,
             bounds_complete,
             elapsed: walk_started.elapsed(),
         }))
@@ -3473,7 +3816,14 @@ pub fn invoke_menu_path_in(pid: u32, xid: u64, path: &[String]) -> Result<()> {
         async {
             let conn = shared_connection().await?;
             for depth in 0..path.len() {
-                let collected = collect_visited_bounded_opts(conn, pid, xid, None, None, true)
+                // The whole application: a GTK menu opens as a top-level of
+                // its own, outside the caller's window.
+                let options = WalkOptions {
+                    walk_closed_menus: true,
+                    other_windows: true,
+                    role_search: None,
+                };
+                let collected = collect_visited_bounded_opts(conn, pid, xid, None, None, options)
                     .await?
                     .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
                 let visited = collected.visited;
@@ -6956,6 +7306,128 @@ mod stacking_z_index_tests {
         assert_eq!(z_index_from_stacking(&stacking, 9, "anything"), Some(3));
         assert_eq!(z_index_from_stacking(&stacking, 11, "anything"), None);
         assert_eq!(z_index_from_stacking(&[], 7, "anything"), None);
+    }
+}
+
+#[cfg(test)]
+mod window_walk_tests {
+    use super::*;
+
+    #[test]
+    fn a_resolved_window_is_walked_alone_unless_the_caller_wants_every_window() {
+        let seeds = ["main", "import", "warning"];
+        // The message box (ordinal 2): only its own subtree.
+        assert_eq!(
+            walk_seeds(&seeds, Some(2), None, None, false),
+            vec![("warning", 0, 2)]
+        );
+        // invoke_menu: the window first, then the others in their own order.
+        assert_eq!(
+            walk_seeds(&seeds, Some(2), None, None, true),
+            vec![("warning", 0, 2), ("main", 0, 0), ("import", 0, 1)]
+        );
+        // Unresolved: the whole application, as before.
+        assert_eq!(
+            walk_seeds(&seeds, None, None, None, false),
+            vec![("main", 0, 0), ("import", 0, 1), ("warning", 0, 2)]
+        );
+    }
+
+    #[test]
+    fn a_qt_popup_walks_only_its_item_container() {
+        let seeds = ["main", "import"];
+        assert_eq!(
+            walk_seeds(&seeds, Some(0), Some("combo list"), None, false),
+            vec![("combo list", 0, 0)]
+        );
+    }
+
+    #[test]
+    fn a_role_search_visits_the_top_level_then_its_matches_one_level_below() {
+        let seeds = ["main", "import"];
+        let matches = Some(vec!["Save", "Cancel"]);
+        let expected = vec![("import", 0, 1), ("Save", 1, 1), ("Cancel", 1, 1)];
+        assert_eq!(
+            walk_seeds(&seeds, Some(1), None, matches.clone(), false),
+            expected
+        );
+        assert_eq!(walk_seeds(&seeds, Some(1), None, matches, true), expected);
+    }
+
+    fn roles(query: &str) -> Vec<atspi::Role> {
+        role_search_for(query)
+            .map(|search| {
+                search
+                    .roles
+                    .into_iter()
+                    .map(|role| atspi::Role::try_from(role).unwrap())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_query_of_role_words_names_roles_and_anything_else_does_not() {
+        let buttons = roles("button");
+        assert!(buttons.contains(&atspi::Role::Button));
+        assert!(buttons.contains(&atspi::Role::ToggleButton));
+        assert!(buttons.contains(&atspi::Role::RadioButton));
+        assert!(!buttons.contains(&atspi::Role::Label));
+        assert_eq!(roles("combo"), vec![atspi::Role::ComboBox]);
+        assert_eq!(roles("  Combo   BOX "), vec![atspi::Role::ComboBox]);
+        // Qt's own role names count too.
+        assert_eq!(
+            roles("push button"),
+            vec![atspi::Role::Button, atspi::Role::PushButtonMenu]
+        );
+        assert!(roles("cell").contains(&atspi::Role::TableCell));
+        assert_eq!(roles("alert message"), vec![atspi::Role::Alert]);
+        // Names, fragments of words and empty queries filter a walk instead.
+        assert!(role_search_for("Save").is_none());
+        assert!(role_search_for("butt").is_none());
+        assert!(role_search_for("e").is_none());
+        assert!(role_search_for("  ").is_none());
+        assert!(role_search_for("button \"OK\"").is_none());
+    }
+
+    #[test]
+    fn match_rule_sets_have_libatspis_wire_form() {
+        // dbus-monitor of libatspi's GetMatches for push button (43) and for
+        // combo box (11): word 1 = 2048 and word 0 = 2048, five words.
+        let push_button = atspi::Role::Button as u32;
+        let combo_box = atspi::Role::ComboBox as u32;
+        assert_eq!((push_button, combo_box), (43, 11));
+        assert_eq!(role_bitset(&[push_button]), vec![0, 2048, 0, 0, 0]);
+        assert_eq!(role_bitset(&[combo_box]), vec![2048, 0, 0, 0, 0]);
+        assert_eq!(role_bitset(&[129]), vec![0, 0, 0, 0, 2]);
+        // ATSPI_STATE_SHOWING is 25 and ATSPI_STATE_VISIBLE 30.
+        assert_eq!(
+            state_bitset(StateSet::new(State::Showing)),
+            vec![1 << 25, 0]
+        );
+        assert_eq!(
+            state_bitset(StateSet::new(State::Showing | State::Visible)),
+            vec![(1 << 25) | (1 << 30), 0]
+        );
+    }
+
+    #[test]
+    fn the_popup_container_is_the_one_that_fills_the_popup() {
+        // Qt 6.12 on the probe: the combo popup was 126x290 at 785,340 and
+        // its list 124x288 at 786,341; the combo box itself sits at the top.
+        let popup = (785, 340, 126, 290);
+        let combo_box = (785, 340, 126, 37);
+        let list = (786, 341, 124, 288);
+        let table = (700, 300, 900, 600);
+        assert_eq!(
+            pick_popup_container(&[combo_box, table, list], popup),
+            Some(2)
+        );
+        // An exact match beats a near one.
+        assert_eq!(pick_popup_container(&[list, popup], popup), Some(1));
+        // Nothing fills it: no container, so the read walks the application.
+        assert_eq!(pick_popup_container(&[combo_box, table], popup), None);
+        assert_eq!(pick_popup_container(&[], popup), None);
     }
 }
 

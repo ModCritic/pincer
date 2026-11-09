@@ -217,15 +217,34 @@ pub fn truncation_note(
         Some(other) => other.to_owned(),
         None => "the walk stopped early".to_owned(),
     };
-    let remedy = if reason == Some("node_budget") {
-        "retry with a larger max_elements"
-    } else {
-        "retry with a larger timeout_ms (e.g. 5000)"
-    };
     format!(
         "⚠️ PARTIAL TREE: {why} after {visited} node(s) ({pending} discovered but not visited). \
          Every element listed is real; elements after the cut are missing. If the element you \
-         need is absent, {remedy} or narrow with query / max_depth."
+         need is absent, {}. {WALK_LIMITS_NOTE}",
+        walk_remedy(reason)
+    )
+}
+
+/// What bounds a walk, and what does not.
+pub const WALK_LIMITS_NOTE: &str =
+    "timeout_ms, max_elements and max_depth bound the walk; query only filters the rows it returns.";
+
+/// How to reach past a walk that stopped for `reason`.
+pub fn walk_remedy(reason: Option<&str>) -> &'static str {
+    if reason == Some("node_budget") {
+        "retry with a larger max_elements or a smaller max_depth"
+    } else {
+        "retry with a larger timeout_ms (e.g. 5000) or a smaller max_depth"
+    }
+}
+
+/// The note for a `query` that matched no row of a walk that stopped early:
+/// the rows past the cut were never searched, so "no match" proves nothing.
+pub fn unsearched_query_note(query: &str, reason: Option<&str>) -> String {
+    format!(
+        "No row matches query {query:?}, but the walk stopped early, so the rows past the cut \
+         were not searched: {}.",
+        walk_remedy(reason)
     )
 }
 
@@ -319,6 +338,16 @@ mod tests {
     }
 
     #[test]
+    fn a_query_with_no_match_on_a_cut_walk_says_the_rest_was_not_searched() {
+        let note = unsearched_query_note("combo", Some("timeout"));
+        assert!(note.contains("No row matches query \"combo\""));
+        assert!(note.contains("were not searched"));
+        assert!(note.contains("larger timeout_ms"));
+        let note = unsearched_query_note("combo", Some("node_budget"));
+        assert!(note.contains("larger max_elements"));
+    }
+
+    #[test]
     fn truncation_note_names_the_budget_and_the_remedy() {
         let note = truncation_note(Some("timeout"), 1000, 240, 88);
         assert!(note.contains("PARTIAL TREE"));
@@ -326,9 +355,11 @@ mod tests {
         assert!(note.contains("240 node(s)"));
         assert!(note.contains("88 discovered"));
         assert!(note.contains("timeout_ms"));
-        assert!(note.contains("query"));
+        assert!(note.contains("smaller max_depth"));
+        assert!(note.contains("query only filters the rows it returns"));
+        assert!(!note.contains("narrow with query"));
         let note = truncation_note(Some("node_budget"), 1000, 5000, 3);
-        assert!(note.contains("max_elements"));
+        assert!(note.contains("retry with a larger max_elements"));
         let note = truncation_note(Some("app_unresponsive"), 1000, 3, 0);
         assert!(note.contains("stopped answering"));
         let note = truncation_note(Some("app_lookup_timeout"), 250, 0, 0);
