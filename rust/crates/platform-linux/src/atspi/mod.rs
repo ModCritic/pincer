@@ -365,9 +365,19 @@ pub fn element_showing_observed(element: &cache::CachedElement) -> Result<bool> 
     native::element_showing_ref(object_ref)
 }
 
-/// Give an indexed AT-SPI element keyboard focus without activating its window.
-pub fn focus_element(pid: u32, idx: usize) -> Result<bool> {
-    if let Some(object_ref) = cache::cached_element(pid, None, idx).and_then(|e| e.object_ref) {
+/// The D-Bus address the snapshot of window `xid` recorded for element `idx`.
+/// Always by window: element indices are per window, so the same index in
+/// another window of the process is another control (a pid-only lookup took
+/// whichever window's snapshot the cache listed first, and typed into a main
+/// window's list item instead of a dialog's field).
+fn cached_ref(pid: u32, xid: u64, idx: usize) -> Option<native::ObjectRef> {
+    cache::cached_element(pid, Some(xid), idx).and_then(|e| e.object_ref)
+}
+
+/// Give element `idx` of the caller's snapshot of window `xid` keyboard focus
+/// without activating its window.
+pub fn focus_element(pid: u32, xid: u64, idx: usize) -> Result<bool> {
+    if let Some(object_ref) = cached_ref(pid, xid, idx) {
         match native::focus_element_ref(&object_ref) {
             Ok(done) => return Ok(done),
             Err(error) => tracing::debug!(
@@ -375,7 +385,7 @@ pub fn focus_element(pid: u32, idx: usize) -> Result<bool> {
             ),
         }
     }
-    native::focus_element(pid, idx)
+    native::focus_element(pid, xid, idx)
 }
 
 pub use native::ScrollProgress;
@@ -533,9 +543,10 @@ pub fn type_into_editable(pid: u32, text: &str) -> Result<()> {
     native::type_into_editable(pid, text)
 }
 
-/// Type into the exact indexed editable from the caller's accessibility snapshot.
-pub fn type_into_editable_at(pid: u32, idx: usize, text: &str) -> Result<()> {
-    if let Some(object_ref) = cache::cached_element(pid, None, idx).and_then(|e| e.object_ref) {
+/// Type into the exact indexed editable from the caller's accessibility
+/// snapshot of window `xid`.
+pub fn type_into_editable_at(pid: u32, xid: u64, idx: usize, text: &str) -> Result<()> {
+    if let Some(object_ref) = cached_ref(pid, xid, idx) {
         match native::type_into_editable_ref(&object_ref, text) {
             Ok(()) => return Ok(()),
             Err(error) => tracing::debug!(
@@ -543,7 +554,7 @@ pub fn type_into_editable_at(pid: u32, idx: usize, text: &str) -> Result<()> {
             ),
         }
     }
-    native::type_into_editable_at(pid, idx, text)
+    native::type_into_editable_at(pid, xid, idx, text)
 }
 
 /// Set the text value of element `idx` within pid's app tree via AT-SPI.
@@ -1005,5 +1016,61 @@ mod budget_tests {
         assert!(!result.truncated);
         assert_eq!(result.nodes_visited, 0);
         assert!(result.bounds_complete);
+    }
+}
+
+#[cfg(test)]
+mod element_window_tests {
+    use super::*;
+
+    fn field(index: usize, role: &str, path: &str) -> AtspiNode {
+        AtspiNode {
+            element_index: Some(index),
+            role: role.into(),
+            name: None,
+            value: None,
+            checked: None,
+            enabled: None,
+            selected: None,
+            description: None,
+            actions: Vec::new(),
+            element_key: 1,
+            identity: Some(AtspiIdentity {
+                bus_name: ":1.9".into(),
+                path: path.into(),
+                frame_bus_name: ":1.9".into(),
+                frame_path: "/frame".into(),
+            }),
+            depth: 1,
+            parent_element_index: None,
+            in_web_content: false,
+            object_ref: Some(native::ObjectRef {
+                bus: ":1.9".into(),
+                path: path.into(),
+            }),
+        }
+    }
+
+    #[test]
+    fn an_element_index_names_the_element_of_its_own_window() {
+        // The Qt probe: the main window and the Import scans dialog were both
+        // read, and both have an element 8. A token for the dialog's Password
+        // field must reach that field whichever window the cache lists first;
+        // the pid-only lookup reached the main window's list item, and
+        // type_text by token failed with "GrabFocus returned false".
+        let pid = 515_151;
+        let (main, dialog) = (0x560_0007, 0x560_0011);
+        cache::update_snapshot(pid, main, &[field(8, "list item", "/main/8")], &[]);
+        cache::update_snapshot(pid, dialog, &[field(8, "text", "/dialog/8")], &[]);
+        for _ in 0..2 {
+            assert_eq!(cached_ref(pid, dialog, 8).unwrap().path, "/dialog/8");
+            assert_eq!(cached_ref(pid, main, 8).unwrap().path, "/main/8");
+            // Reading the main window again must not change what the
+            // dialog's index names.
+            cache::update_snapshot(pid, main, &[field(8, "list item", "/main/8")], &[]);
+        }
+        assert!(cached_ref(pid, 0x560_0099, 8).is_none());
+        cache::forget_window(pid, main);
+        cache::forget_window(pid, dialog);
     }
 }

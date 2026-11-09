@@ -3992,7 +3992,7 @@ fn background_key_route(
         // GTK can raise/activate the toplevel for either, and the guard
         // restores the user's focus and reports it (see `focus_guard`).
         let delivered = crate::input::focus_guard::guarded(Some(pid), || {
-            grab_focus_for_background(pid, element_index)?;
+            grab_focus_for_background(pid, xid, element_index)?;
             background_virtual_key(cursor_id, pid, xid, key, modifiers)
         });
         match delivered {
@@ -4013,7 +4013,7 @@ fn background_key_route(
         }
     }
     if let Some(index) = element_index {
-        if !crate::atspi::focus_element(pid, index)? {
+        if !crate::atspi::focus_element(pid, xid, index)? {
             anyhow::bail!("AT-SPI Component.GrabFocus returned false for element {index}");
         }
     }
@@ -4029,11 +4029,15 @@ const GRAB_FOCUS_FAILURE_PREFIX: &str = "grab_focus_failed";
 /// AT-SPI `Component.GrabFocus` on the addressed element, for the background
 /// keyboard routes. Failures carry a prefix so the caller never mistakes them
 /// for a delivery failure worth a synthetic-event fallback.
-fn grab_focus_for_background(pid: u32, element_index: Option<usize>) -> anyhow::Result<()> {
+fn grab_focus_for_background(
+    pid: u32,
+    xid: u64,
+    element_index: Option<usize>,
+) -> anyhow::Result<()> {
     let Some(index) = element_index else {
         return Ok(());
     };
-    match crate::atspi::focus_element(pid, index) {
+    match crate::atspi::focus_element(pid, xid, index) {
         Ok(true) => Ok(()),
         Ok(false) => anyhow::bail!(
             "{GRAB_FOCUS_FAILURE_PREFIX}: AT-SPI Component.GrabFocus returned false for element {index}"
@@ -5518,7 +5522,9 @@ async fn focus_hyprland_foreground(
         if activation.is_error == Some(true) {
             return Err(activation);
         }
-        match tokio::task::spawn_blocking(move || crate::atspi::focus_element(pid, index)).await {
+        match tokio::task::spawn_blocking(move || crate::atspi::focus_element(pid, xid, index))
+            .await
+        {
             Ok(Ok(true)) => {}
             _ => return Err(foreground_hyprland_refusal("AT-SPI child focus failed")),
         }
@@ -8496,8 +8502,10 @@ async fn focus_nested_inject_target(
     pixel: Option<(f64, f64)>,
 ) -> Result<(), ToolResult> {
     if let Some(index) = element_index {
-        return match tokio::task::spawn_blocking(move || crate::atspi::focus_element(pid, index))
-            .await
+        return match tokio::task::spawn_blocking(move || {
+            crate::atspi::focus_element(pid, window_id, index)
+        })
+        .await
         {
             Ok(Ok(true)) => Ok(()),
             Ok(Ok(false)) => Err(ToolResult::error(format!(
@@ -8730,7 +8738,7 @@ impl Tool for TypeTextTool {
                     let text_ax = text.clone();
                     if matches!(
                         tokio::task::spawn_blocking(move || crate::atspi::type_into_editable_at(
-                            pid, index, &text_ax
+                            pid, xid, index, &text_ax
                         ))
                         .await,
                         Ok(Ok(()))
@@ -8840,7 +8848,7 @@ impl Tool for TypeTextTool {
             let password_before = password_length_before(pid, xid_opt, idx).await;
             let text_at = text.clone();
             let targeted = tokio::task::spawn_blocking(move || {
-                crate::atspi::type_into_editable_at(pid, idx, &text_at)
+                crate::atspi::type_into_editable_at(pid, xid, idx, &text_at)
             })
             .await;
             if let Ok(Ok(())) = targeted {
@@ -8929,7 +8937,7 @@ impl Tool for TypeTextTool {
                 let text_w = text.clone();
                 let result = tokio::task::spawn_blocking(move || {
                     crate::wayland::with_target_foreground(pid, xid, || {
-                        if !crate::atspi::focus_element(pid, idx)? {
+                        if !crate::atspi::focus_element(pid, xid, idx)? {
                             anyhow::bail!(
                                 "AT-SPI Component.GrabFocus returned false for element {idx}"
                             );
@@ -8960,7 +8968,7 @@ impl Tool for TypeTextTool {
             let password_before = password_length_before(pid, xid_opt, idx).await;
             let text_at = text.clone();
             let targeted = tokio::task::spawn_blocking(move || {
-                crate::atspi::type_into_editable_at(pid, idx, &text_at)
+                crate::atspi::type_into_editable_at(pid, xid, idx, &text_at)
             })
             .await;
             match targeted {
@@ -9000,7 +9008,7 @@ impl Tool for TypeTextTool {
             let result = tokio::task::spawn_blocking(move || {
                 crate::wayland::with_target_foreground(pid, xid, || {
                     if let Some(idx) = idx {
-                        if !crate::atspi::focus_element(pid, idx)? {
+                        if !crate::atspi::focus_element(pid, xid, idx)? {
                             anyhow::bail!(
                                 "AT-SPI Component.GrabFocus returned false for element {idx}"
                             );
@@ -9097,7 +9105,7 @@ impl Tool for TypeTextTool {
                         crate::input::ForegroundOptions::keyboard(),
                         || {
                             if let Some(idx) = idx {
-                                if !crate::atspi::focus_element(pid, idx)? {
+                                if !crate::atspi::focus_element(pid, xid, idx)? {
                                     anyhow::bail!(
                                         "AT-SPI Component.GrabFocus returned false for element {idx}"
                                     );
@@ -9787,7 +9795,7 @@ impl Tool for PressKeyTool {
             let result = tokio::task::spawn_blocking(move || {
                 crate::wayland::with_target_foreground(pid, xid, || {
                     if let Some(idx) = idx {
-                        if !crate::atspi::focus_element(pid, idx)? {
+                        if !crate::atspi::focus_element(pid, xid, idx)? {
                             anyhow::bail!(
                                 "AT-SPI Component.GrabFocus returned false for element {idx}"
                             );
@@ -9839,7 +9847,7 @@ impl Tool for PressKeyTool {
                     crate::input::ForegroundOptions::keyboard(),
                     || {
                         if let Some(element_index) = resolved_element_index {
-                            if !crate::atspi::focus_element(pid, element_index)? {
+                            if !crate::atspi::focus_element(pid, xid, element_index)? {
                                 anyhow::bail!(
                                     "AT-SPI Component.GrabFocus returned false for element {element_index}"
                                 );
@@ -10242,7 +10250,7 @@ impl Tool for HotkeyTool {
         // does it inside `background_key_route`, under the focus guard.
         if let Some(element_index) = resolved_element_index.filter(|_| delivery.is_foreground()) {
             let focused = tokio::task::spawn_blocking(move || {
-                crate::atspi::focus_element(pid, element_index)
+                crate::atspi::focus_element(pid, xid, element_index)
             })
             .await;
             match focused {

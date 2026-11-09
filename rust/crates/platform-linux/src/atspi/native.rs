@@ -960,6 +960,21 @@ async fn collect_visited<'a>(
         .map(|walked| walked.map(|collected| collected.visited))
 }
 
+/// [`collect_visited`] for one window: the walk a `get_window_state` read of
+/// `xid` numbers its elements by, so an element index from that read names
+/// the same element here. The application-wide walk numbers from the
+/// application's first top-level instead, where index 8 of a dialog's read is
+/// some control of the main window.
+async fn collect_window_visited<'a>(
+    conn: &'a AccessibilityConnection,
+    pid: u32,
+    xid: u64,
+) -> Result<Option<Vec<Visited<'a>>>> {
+    collect_visited_bounded(conn, pid, xid, None, None)
+        .await
+        .map(|walked| walked.map(|collected| collected.visited))
+}
+
 /// Whether an AT-SPI role name is a top-level window's. Qt's `GetRoleName`
 /// answers "alert message" (its name for QAccessible::AlertMessage) for a
 /// QMessageBox, where libatspi and GTK say "alert"; without it a message box
@@ -3236,13 +3251,14 @@ pub fn type_into_editable(pid: u32, text: &str) -> Result<()> {
     )
 }
 
-/// Write into the exact indexed editable exposed by the caller's snapshot.
-pub fn type_into_editable_at(pid: u32, idx: usize, text: &str) -> Result<()> {
+/// Write into the exact indexed editable exposed by the caller's snapshot of
+/// window `xid`, re-walking that window (the snapshot's index space).
+pub fn type_into_editable_at(pid: u32, xid: u64, idx: usize, text: &str) -> Result<()> {
     bounded_for(
         INDEX_RESOLVE_BUDGET,
         async {
             let conn = shared_connection().await?;
-            let visited = collect_visited(conn, pid)
+            let visited = collect_window_visited(conn, pid, xid)
                 .await?
                 .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
             let target = visited
@@ -3256,7 +3272,7 @@ pub fn type_into_editable_at(pid: u32, idx: usize, text: &str) -> Result<()> {
                 // GrabFocus can rebuild WebKitGTK's accessibility object. Walk
                 // the same index space again and retry only that exact element;
                 // never fall through to a different focused/first editable.
-                let refreshed = collect_visited(conn, pid)
+                let refreshed = collect_window_visited(conn, pid, xid)
                     .await?
                     .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
                 let refreshed_target = refreshed
@@ -5503,12 +5519,15 @@ pub fn scroll_element(
 /// after the acknowledgement can therefore split one string between the old
 /// and new controls. Wait for the target's Focused state to become observable;
 /// an acknowledgement without read-back is not sufficient for global input.
-pub fn focus_element(pid: u32, idx: usize) -> Result<bool> {
+///
+/// `idx` is an index of the caller's snapshot of window `xid`, so the walk
+/// that resolves it is that window's.
+pub fn focus_element(pid: u32, xid: u64, idx: usize) -> Result<bool> {
     bounded_for(
         INDEX_RESOLVE_BUDGET,
         async {
             let conn = shared_connection().await?;
-            let visited = collect_visited(conn, pid)
+            let visited = collect_window_visited(conn, pid, xid)
                 .await?
                 .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
             let target = visited
