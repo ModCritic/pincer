@@ -5870,6 +5870,26 @@ pub fn options_showing_ref(object_ref: &ObjectRef) -> bool {
     .unwrap_or(false)
 }
 
+/// Whether a cached element is a password field by its numeric AT-SPI role
+/// (`PasswordText`). Qt answers `GetRoleName` with "text" for a QLineEdit in
+/// Password echo mode while `GetRole` says 40, password text (seen on the Qt
+/// probe), so the role name cached by the walk cannot tell.
+pub fn is_password_ref(object_ref: &ObjectRef) -> bool {
+    bounded_for(
+        REF_ACTION_BUDGET,
+        async {
+            let conn = shared_connection().await?;
+            let (acc, _) = live_accessible(conn, object_ref).await?;
+            Ok(matches!(
+                call(acc.get_role()).await,
+                Some(Ok(atspi::Role::PasswordText))
+            ))
+        },
+        || Ok(false),
+    )
+    .unwrap_or(false)
+}
+
 /// Name of the selected child of a `Selection` element (a combo box's
 /// active option), for the `set_value` read-back.
 async fn selected_child_name(

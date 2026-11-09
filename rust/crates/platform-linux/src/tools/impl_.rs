@@ -3176,6 +3176,7 @@ async fn type_text_ax_result_verified(
     idx: usize,
     text: &str,
     route: &str,
+    password_before: Option<usize>,
 ) -> ToolResult {
     let text_len = text.chars().count();
     if is_chromium_embedder(pid) {
@@ -3186,7 +3187,50 @@ async fn type_text_ax_result_verified(
             .await
             .ok()
             .flatten();
-    type_text_readback_result(pid, idx, text, route, readback)
+    type_text_readback_result(pid, idx, text, route, readback, password_before)
+}
+
+/// For a password field, how many mask characters it holds before a
+/// `type_text` insert, so the read-back can be compared by length (its text
+/// is masked). `None` for any other element, and for a password field that
+/// shows its text in the clear (that one reads back normally).
+async fn password_length_before(pid: u32, xid_opt: Option<u64>, idx: usize) -> Option<usize> {
+    if is_chromium_embedder(pid) {
+        return None;
+    }
+    tokio::task::spawn_blocking(move || {
+        if !crate::atspi::is_password_in(pid, xid_opt, idx) {
+            return None;
+        }
+        let before = crate::atspi::read_value_in(pid, xid_opt, idx).unwrap_or_default();
+        masked_length(&before)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// The number of characters `seen` masks when it is a password field's
+/// masked text: empty (an empty field), or one repeated character that is
+/// neither alphanumeric nor whitespace (Qt's and GTK's "●", "•", "*").
+/// `None` for anything else, such as a password shown in the clear.
+fn masked_length(seen: &str) -> Option<usize> {
+    let mut chars = seen.chars();
+    let Some(first) = chars.next() else {
+        return Some(0);
+    };
+    if first.is_alphanumeric() || first.is_whitespace() {
+        return None;
+    }
+    chars.all(|c| c == first).then(|| seen.chars().count())
+}
+
+/// Whether `masks` mask characters stand for `text`. Qt masks each UTF-16
+/// unit ("a\u{1F600}b" read back as four masks on the Qt probe); GTK is
+/// assumed to mask each character, as its entry draws one invisible char per
+/// character (not checked against a GTK app here).
+fn mask_count_fits(masks: usize, text: &str) -> bool {
+    masks == text.chars().count() || masks == text.encode_utf16().count()
 }
 
 /// The typed text is confirmed when the element's fresh value contains it
@@ -3198,8 +3242,16 @@ fn type_text_readback_result(
     text: &str,
     route: &str,
     readback: Option<String>,
+    password_before: Option<usize>,
 ) -> ToolResult {
     let text_len = text.chars().count();
+    if let (Some(before), Some(seen)) = (password_before, readback.as_deref()) {
+        if !seen.contains(text) {
+            if let Some(after) = masked_length(seen) {
+                return type_text_masked_result(idx, text, route, before, after);
+            }
+        }
+    }
     match readback {
         Some(seen)
             if !text.trim().is_empty() && (seen.contains(text) || values_agree(text, &seen)) =>
@@ -3236,6 +3288,52 @@ fn type_text_readback_result(
         }
         None => type_text_ax_result(pid, text_len, route),
     }
+}
+
+/// `type_text` into a password field: its text reads back as mask
+/// characters, so only its length can be compared. The insert landed when the
+/// field grew by exactly the typed text's length (a masked-length match).
+fn type_text_masked_result(
+    idx: usize,
+    text: &str,
+    route: &str,
+    before: usize,
+    after: usize,
+) -> ToolResult {
+    let text_len = text.chars().count();
+    let grew_by_text = after
+        .checked_sub(before)
+        .is_some_and(|grown| mask_count_fits(grown, text));
+    let mut structured = json!({
+        "path": "ax",
+        "characters": text_len,
+        "verified": grew_by_text,
+        "effect": if grew_by_text { "confirmed" } else { "unverifiable" },
+        "readback_masked": true,
+        "masked_length_before": before,
+        "masked_length": after,
+    });
+    let text = if grew_by_text {
+        structured["evidence"] = json!([{
+            "kind": "value_readback",
+            "detail": format!(
+                "password field element [{idx}] grew from {before} to {after} mask characters, \
+                 the length of the typed text"
+            ),
+        }]);
+        format!(
+            "Typed {text_len} character(s) into password field element [{idx}] ({route}); it \
+             grew from {before} to {after} mask characters, the length of the typed text (a \
+             masked-length match: a password field shows only its length)."
+        )
+    } else {
+        format!(
+            "Typed {text_len} character(s) into password field element [{idx}] ({route}). The \
+             field is masked, so the typed text can't be read back: it holds {after} mask \
+             characters, {before} before typing. Not verified."
+        )
+    };
+    ToolResult::text(text).with_structured(structured)
 }
 
 #[cfg(test)]
@@ -8438,6 +8536,7 @@ impl Tool for TypeTextTool {
                 && !is_chromium_embedder(pid)
                 && !is_webkitgtk_embedder(pid)
         }) {
+            let password_before = password_length_before(pid, xid_opt, idx).await;
             let text_at = text.clone();
             let targeted = tokio::task::spawn_blocking(move || {
                 crate::atspi::type_into_editable_at(pid, idx, &text_at)
@@ -8450,6 +8549,7 @@ impl Tool for TypeTextTool {
                     idx,
                     &text,
                     "via targeted AT-SPI",
+                    password_before,
                 )
                 .await;
             }
@@ -8556,6 +8656,7 @@ impl Tool for TypeTextTool {
         // before native Wayland keyboard injection, which can only target the
         // compositor's globally focused surface.
         if let Some(idx) = resolved_elem_idx {
+            let password_before = password_length_before(pid, xid_opt, idx).await;
             let text_at = text.clone();
             let targeted = tokio::task::spawn_blocking(move || {
                 crate::atspi::type_into_editable_at(pid, idx, &text_at)
@@ -8569,6 +8670,7 @@ impl Tool for TypeTextTool {
                         idx,
                         &text,
                         "via targeted AT-SPI",
+                        password_before,
                     )
                     .await;
                 }
@@ -10007,13 +10109,8 @@ impl Tool for SetValueTool {
         .await;
         let ax_error = match ax {
             Ok(Ok(())) => {
-                let readback = tokio::task::spawn_blocking(move || {
-                    crate::atspi::read_value_in(pid, xid_opt, idx)
-                })
-                .await
-                .ok()
-                .flatten();
-                return set_value_result(idx, &value, "ax", readback, None);
+                let (readback, password) = set_value_readback(pid, xid_opt, idx, &value).await;
+                return set_value_result(idx, &value, "ax", readback, password, None);
             }
             Ok(Err(error)) if crate::atspi::native::is_no_value_route(&error) => error,
             Ok(Err(error)) if crate::atspi::native::is_no_such_option(&error) => {
@@ -10112,12 +10209,7 @@ impl Tool for SetValueTool {
             Ok(Ok(guard)) => {
                 // Let the toolkit commit on focus-out before reading back.
                 tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-                let readback = tokio::task::spawn_blocking(move || {
-                    crate::atspi::read_value_in(pid, xid_opt, idx)
-                })
-                .await
-                .ok()
-                .flatten();
+                let (readback, password) = set_value_readback(pid, xid_opt, idx, &value).await;
                 set_value_result(
                     idx,
                     &value,
@@ -10128,6 +10220,7 @@ impl Tool for SetValueTool {
                         (false, false) => "click_type_mpx",
                     },
                     readback,
+                    password,
                     guard.as_ref(),
                 )
             }
@@ -10239,15 +10332,46 @@ fn values_agree(wanted: &str, observed: &str) -> bool {
     }
 }
 
+/// The `set_value` read-back, and whether the element is a password field.
+/// The role is only asked for when the read-back is not the value itself,
+/// so a matching read-back costs no extra call.
+async fn set_value_readback(
+    pid: u32,
+    xid_opt: Option<u64>,
+    idx: usize,
+    value: &str,
+) -> (Option<String>, bool) {
+    let value = value.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let readback = crate::atspi::read_value_in(pid, xid_opt, idx);
+        let password = readback
+            .as_deref()
+            .is_some_and(|seen| !values_agree(&value, seen) && masked_length(seen).is_some())
+            && crate::atspi::is_password_in(pid, xid_opt, idx);
+        (readback, password)
+    })
+    .await
+    .unwrap_or((None, false))
+}
+
 /// `set_value` result with an honest verification: `verified` only when the
-/// element read back the requested value.
+/// element read back the requested value. A password field (`password`)
+/// reads back mask characters, so there only the length is compared.
 fn set_value_result(
     idx: usize,
     value: &str,
     path: &str,
     readback: Option<String>,
+    password: bool,
     guard: Option<&crate::input::FocusGuardReport>,
 ) -> ToolResult {
+    if let Some(masks) = readback
+        .as_deref()
+        .filter(|seen| password && !values_agree(value, seen))
+        .and_then(masked_length)
+    {
+        return attach_focus_guard(set_value_masked_result(idx, value, path, masks), guard);
+    }
     let normalised_path = readback
         .as_deref()
         .is_some_and(|seen| path_normalised_to_basename(value, seen));
@@ -10284,6 +10408,44 @@ fn set_value_result(
         }
     }
     attach_focus_guard(ToolResult::text(text).with_structured(structured), guard)
+}
+
+/// `set_value` into a password field whose text reads back as `masks` mask
+/// characters. The value is not repeated in the result. The same count as
+/// the value's length is evidence the write landed (a masked-length match);
+/// any other count only says the field can't be read back, never a no-op.
+fn set_value_masked_result(idx: usize, value: &str, path: &str, masks: usize) -> ToolResult {
+    let chars = value.chars().count();
+    let matched = mask_count_fits(masks, value);
+    let mut structured = json!({
+        "path": path,
+        "verified": matched,
+        "effect": if matched { "confirmed" } else { "unverifiable" },
+        "readback_masked": true,
+        "masked_length": masks,
+    });
+    let head = format!(
+        "Set password field element [{idx}] to a value of {chars} character(s) (path={path})"
+    );
+    let text = if matched {
+        structured["evidence"] = json!([{
+            "kind": "value_readback",
+            "detail": format!(
+                "password field element [{idx}] reads back {masks} mask characters, the \
+                 value's length"
+            ),
+        }]);
+        format!(
+            "{head}; it reads back {masks} mask characters, the value's length (a masked-length \
+             match: a password field shows only its length)."
+        )
+    } else {
+        format!(
+            "{head}. The field is masked, so the value can't be read back: it holds {masks} mask \
+             characters for a value of {chars}. Not verified."
+        )
+    };
+    ToolResult::text(text).with_structured(structured)
 }
 
 /// A Qt/GTK file chooser given an absolute path in its "File name" field

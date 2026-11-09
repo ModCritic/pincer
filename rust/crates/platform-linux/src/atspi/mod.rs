@@ -578,6 +578,21 @@ pub fn cached_role_in(pid: u32, xid: Option<u64>, idx: usize) -> Option<String> 
     cache::cached_element(pid, xid, idx).map(|e| e.role)
 }
 
+/// Whether a snapshot-cached element is a password field, whose text reads
+/// back as mask characters. The cached role name settles it when it says so
+/// (GTK); otherwise the live numeric role is asked (Qt names the role "text").
+pub fn is_password_in(pid: u32, xid: Option<u64>, idx: usize) -> bool {
+    let Some(element) = cache::cached_element(pid, xid, idx) else {
+        return false;
+    };
+    if element.role.to_ascii_lowercase().contains("password") {
+        return true;
+    }
+    element
+        .object_ref
+        .is_some_and(|object_ref| native::is_password_ref(&object_ref))
+}
+
 /// Read the current value/text of a snapshot-cached element (for the
 /// read-back after `set_value`). `None` when the cache has no live object
 /// for it or the element exposes neither `Value` nor `Text`.
