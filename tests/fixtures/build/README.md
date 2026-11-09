@@ -6,7 +6,7 @@ These host-specific scripts stage source-built harness apps into
 | Script | Host | Builds |
 | --- | --- | --- |
 | `macos.sh` | macOS | AppKit, SwiftUI, WKWebView, Electron, Tauri |
-| `linux.sh` | Linux | GTK3, Electron, Tauri |
+| `linux.sh` | Linux | GTK3, GTK4, Qt6, Electron, Tauri |
 | `windows.ps1` | Windows | WPF, WinUI3, WebView2, Electron, Tauri |
 
 Each script supports skipping one target while iterating locally:

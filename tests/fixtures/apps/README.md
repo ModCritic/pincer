@@ -9,6 +9,7 @@ share fixtures through `../shared/scenarios.json` and, for webview hosts,
 | `cross-platform/electron` | any | Electron/Chromium accessibility and CDP |
 | `cross-platform/tauri` | any | Tauri/native-webview accessibility |
 | `linux/gtk3` | Linux | GTK3/AT-SPI widgets |
+| `linux/qt6` | Linux | Qt 6 Widgets over AT-SPI: combo popups, a large table tree, stacked modal dialogs, a portal file dialog |
 | `macos/appkit` | macOS | AppKit controls and menus |
 | `macos/swiftui` | macOS | SwiftUI controls and popovers |
 | `macos/wkwebview` | macOS | WKWebView loading the shared DOM |

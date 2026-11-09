@@ -44,7 +44,7 @@ tests/fixtures/build/macos.sh
 tests/fixtures/build/macos.sh --skip electron
 tests/fixtures/build/macos.sh --only wkwebview
 
-# Linux: GTK3, Electron, Tauri
+# Linux: GTK3, GTK4, Qt6, Electron, Tauri
 tests/fixtures/build/linux.sh
 tests/fixtures/build/linux.sh --skip tauri
 ```
@@ -59,8 +59,8 @@ cd tests\fixtures
 Host requirements:
 
 - macOS: Xcode command line tools; Node.js/npm for Electron; Rust for Tauri.
-- Linux: GTK3/PyGObject/AT-SPI; Node.js/npm for Electron; Rust plus WebKitGTK
-  build/runtime deps for Tauri.
+- Linux: GTK3/PyGObject/AT-SPI; Qt 6 Widgets with qmake6 and a C++ compiler;
+  Node.js/npm for Electron; Rust plus WebKitGTK build/runtime deps for Tauri.
 - Windows: .NET 8 SDK; Node.js/npm for Electron; Rust for Tauri.
 
 ## Test Mapping
@@ -88,6 +88,7 @@ the shared Electron/Tauri harnesses through the public MCP interface.
 | WinUI3 | `apps/windows/winui3` | `harness-winui3` | UIA/XAML controls |
 | WebView2 | `apps/windows/webview2` | `harness-webview` | Chromium web UIA |
 | GTK3 | `apps/linux/gtk3` | `harness-gtk3` | AT-SPI/GTK controls |
+| Qt6 | `apps/linux/qt6` | `harness-qt6` | AT-SPI/Qt Widgets controls and dialogs |
 | Electron | `apps/cross-platform/electron` | `harness-electron` | Chromium web AX/UIA/AT-SPI |
 | Tauri | `apps/cross-platform/tauri` | `harness-tauri` | native webview AX/UIA/AT-SPI |
 

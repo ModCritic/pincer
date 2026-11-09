@@ -2,17 +2,20 @@
 # Stage Linux-runnable test fixture apps into rust/test-apps/harness-*/.
 #
 # GTK3 and GTK4 are PyGObject: real toolkit widget trees (identical AT-SPI
-# exposure to C apps), so there's no compile step. Electron and Tauri are
-# shared cross-platform harnesses built from apps/cross-platform/.
+# exposure to C apps), so there's no compile step. Qt6 is the C++ Pincer Qt
+# Probe, built with qmake6 against the system Qt 6 and linked dynamically.
+# Electron and Tauri are shared cross-platform harnesses built from
+# apps/cross-platform/.
 #
 # Runtime deps (NOT installed here): python3-gi, gir1.2-gtk-3.0,
-# gir1.2-gtk-4.0, at-spi2-core,
-# Node.js/npm for Electron, Rust + WebKitGTK build deps for Tauri.
+# gir1.2-gtk-4.0, at-spi2-core, Qt 6 Widgets development files (qmake6) and
+# a C++ compiler for Qt6, Node.js/npm for Electron, Rust + WebKitGTK build
+# deps for Tauri.
 #
 # Usage:
 #   ./linux.sh
-#   ./linux.sh --skip gtk3       # skip one target (gtk3|gtk4|electron|tauri)
-#   ./linux.sh --only electron,gtk3,gtk4
+#   ./linux.sh --skip gtk3       # skip one target (gtk3|gtk4|qt6|electron|tauri)
+#   ./linux.sh --only electron,gtk3,gtk4,qt6
 #   ./linux.sh --clean
 set -euo pipefail
 
@@ -23,8 +26,10 @@ GTK3_STAGE="$TEST_APPS_DIR/harness-gtk3"
 GTK3_SRC="$HARNESS_DIR/apps/linux/gtk3"
 GTK4_STAGE="$TEST_APPS_DIR/harness-gtk4"
 GTK4_SRC="$HARNESS_DIR/apps/linux/gtk4"
+QT6_STAGE="$TEST_APPS_DIR/harness-qt6"
+QT6_SRC="$HARNESS_DIR/apps/linux/qt6"
 SKIP="none"
-ONLY=",gtk3,gtk4,electron,tauri,"
+ONLY=",gtk3,gtk4,qt6,electron,tauri,"
 CLEAN=0
 
 while [[ $# -gt 0 ]]; do
@@ -42,14 +47,14 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         *)
-            echo "Usage: $0 [--skip gtk3|gtk4|electron|tauri] [--only comma-separated-targets] [--clean]" >&2
+            echo "Usage: $0 [--skip gtk3|gtk4|qt6|electron|tauri] [--only comma-separated-targets] [--clean]" >&2
             exit 2
             ;;
     esac
 done
 
 if [[ "$CLEAN" == "1" ]]; then
-    rm -rf "$TEST_APPS_DIR/harness-gtk3" "$TEST_APPS_DIR/harness-gtk4" "$TEST_APPS_DIR/harness-electron" "$TEST_APPS_DIR/harness-tauri"
+    rm -rf "$TEST_APPS_DIR/harness-gtk3" "$TEST_APPS_DIR/harness-gtk4" "$TEST_APPS_DIR/harness-qt6" "$TEST_APPS_DIR/harness-electron" "$TEST_APPS_DIR/harness-tauri"
 fi
 
 if [[ "$SKIP" != "gtk3" && "$ONLY" == *",gtk3,"* ]]; then
@@ -99,6 +104,16 @@ LAUNCHER
         echo "==> PyGObject/GTK4 present"
     else
         echo "WARNING: PyGObject/GTK4 not importable - install python3-gi gir1.2-gtk-4.0 at-spi2-core" >&2
+    fi
+fi
+
+if [[ "$SKIP" != "qt6" && "$ONLY" == *",qt6,"* ]]; then
+    if command -v qmake6 >/dev/null 2>&1 && command -v make >/dev/null 2>&1; then
+        mkdir -p "$QT6_STAGE"
+        (cd "$QT6_STAGE" && qmake6 "$QT6_SRC/qt6.pro" && make -j"$(nproc 2>/dev/null || echo 2)")
+        echo "==> Built Qt6 probe -> $QT6_STAGE/PincerTestHarness.Qt6"
+    else
+        echo "WARNING: qmake6 or make not found - install the Qt 6 base development package (qt6-base / qt6-base-dev) and a C++ toolchain" >&2
     fi
 fi
 
