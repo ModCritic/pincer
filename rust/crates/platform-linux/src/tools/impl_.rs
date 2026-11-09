@@ -16720,6 +16720,13 @@ pub fn build_registry_with_provider(
         snapshot_window_resolver(state.clone()),
         token_pid_resolver(state.clone()),
     );
+    // run_steps gives a step that carries only an element_token the window
+    // the token was read from.
+    let token_state = state.clone();
+    r.set_element_token_window_resolver(Arc::new(move |token| {
+        let (pid, window_id) = token_state.snapshots.window_for_token(token)?;
+        Some((i64::from(pid), window_id))
+    }));
     r.register(pid_window_guarded(BringToFrontTool, &pid_window_candidates));
     r.register(Box::new(SetWindowFrameTool));
     r.register(Box::new(InvokeMenuTool));

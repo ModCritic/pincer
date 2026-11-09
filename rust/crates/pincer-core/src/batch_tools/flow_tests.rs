@@ -25,6 +25,9 @@ struct Ui {
     snapshot: u32,
     /// Element labels of the latest read, by element index.
     last_labels: Vec<(String, String)>,
+    /// The window of each current snapshot, as a platform snapshot store
+    /// keeps it: a newer read of a window replaces its snapshot.
+    snapshot_windows: Vec<(String, u64)>,
     calls: Vec<(String, Value)>,
 }
 
@@ -104,6 +107,9 @@ impl Tool for Fake {
                 let window_id = args["window_id"].as_u64().unwrap_or(7);
                 ui.snapshot += 1;
                 let snapshot = ui.snapshot;
+                ui.snapshot_windows.retain(|(_, window)| *window != window_id);
+                ui.snapshot_windows
+                    .push((format!("s{snapshot:08x}"), window_id));
                 let rows = ui.elements(window_id);
                 let mut markdown = String::from("- [0] AXWindow \"Demo\"\n");
                 let mut elements = Vec::new();
@@ -170,8 +176,29 @@ struct Harness {
 
 impl Harness {
     fn new() -> Self {
+        Self::build(false)
+    }
+
+    /// A harness whose registry can say which window an element token
+    /// names, as the Linux platform's snapshot store does.
+    fn with_token_windows() -> Self {
+        Self::build(true)
+    }
+
+    fn build(token_windows: bool) -> Self {
         let ui = Arc::new(Mutex::new(Ui::default()));
         let mut registry = ToolRegistry::new();
+        if token_windows {
+            let ui = ui.clone();
+            registry.set_element_token_window_resolver(Arc::new(move |token| {
+                let (snapshot, _) = token.split_once(':')?;
+                let ui = ui.lock().unwrap();
+                ui.snapshot_windows
+                    .iter()
+                    .find(|(id, _)| id == snapshot)
+                    .map(|(_, window)| (42, *window))
+            }));
+        }
         for name in super::BATCHABLE_TOOLS.iter().copied().chain([
             "get_window_state",
             "list_windows",
@@ -568,4 +595,96 @@ async fn a_trailing_get_window_state_in_shorthand_is_the_observation() {
         harness.calls("get_window_state").last().unwrap()["window_id"],
         7
     );
+}
+
+/// A token-only step names the window its token was read from: the step's
+/// checks read that window, later steps inherit it, and `observe` reads it,
+/// with no pid/window_id or app anywhere in the batch.
+#[tokio::test]
+async fn a_token_only_step_acts_checks_and_observes_in_its_tokens_window() {
+    let harness = Harness::with_token_windows();
+    let read = harness
+        .registry
+        .invoke("get_window_state", json!({"pid": 42, "window_id": 7}))
+        .await;
+    let snapshot = read.structured_content.unwrap()["snapshot_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let result = harness
+        .run(json!({
+            "steps": [
+                {"set_value": {"element_token": format!("{snapshot}:1"), "value": "ada@example.com"},
+                 "expect": [{"role": "textfield", "name": "Email", "value": "ada@example.com"}]},
+                {"click": {"role": "button", "name": "Next"}, "expect": {"text": "Step 2"}}
+            ],
+            "observe": {}
+        }))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let set = harness.calls("set_value");
+    assert_eq!(
+        (set[0]["pid"].clone(), set[0]["window_id"].clone()),
+        (json!(42), json!(7))
+    );
+    assert_eq!(
+        harness.ui.lock().unwrap().screen,
+        1,
+        "the inherited window held Next"
+    );
+    let observed = harness.calls("get_window_state").last().cloned().unwrap();
+    assert_eq!(
+        (observed["pid"].clone(), observed["window_id"].clone()),
+        (json!(42), json!(7))
+    );
+    assert_eq!(observed["since"], "latest");
+}
+
+/// A token read from a dialog acts in that dialog even when the batch names
+/// the main window: the token is the step's own target, so it wins over the
+/// batch default like a step's own pid/window_id does.
+#[tokio::test]
+async fn a_tokens_own_window_beats_the_batch_window() {
+    let harness = Harness::with_token_windows();
+    harness.ui.lock().unwrap().dialog_open = true;
+    let read = harness
+        .registry
+        .invoke("get_window_state", json!({"pid": 42, "window_id": 8}))
+        .await;
+    let snapshot = read.structured_content.unwrap()["snapshot_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let result = harness
+        .run(json!({
+            "pid": 42, "window_id": 7,
+            "steps": [
+                {"click": {"element_token": format!("{snapshot}:2")},
+                 "expect": [{"role": "button", "name": "Discard"}]}
+            ]
+        }))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let click = harness.calls("click")[0].clone();
+    assert_eq!(click["window_id"], 8, "{click}");
+    assert!(
+        !harness.ui.lock().unwrap().dialog_open,
+        "Keep closed the dialog"
+    );
+}
+
+/// `wait_for` runs before the step's action, and looks in the window the
+/// step names, not only in one an earlier step named.
+#[tokio::test]
+async fn wait_for_looks_in_the_window_its_own_step_names() {
+    let harness = Harness::new();
+    harness.ui.lock().unwrap().dialog_open = true;
+    let result = harness
+        .run(json!({"steps": [
+            {"click": {"pid": 42, "window_id": 8, "role": "button", "name": "Keep"},
+             "wait_for": {"role": "button", "name": "Discard"}}
+        ]}))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    assert!(!harness.ui.lock().unwrap().dialog_open);
 }

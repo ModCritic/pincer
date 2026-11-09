@@ -657,6 +657,18 @@ impl<S: SnapshotPayload> SnapshotStore<S> {
             .map(|(pid, _)| *pid)
     }
 
+    /// The pid and window an `element_token` was minted for, while its
+    /// snapshot is current. `None` when the token is malformed, or its
+    /// snapshot was replaced by a newer read of the window or evicted.
+    pub fn window_for_token(&self, token: &str) -> Option<(i32, u64)> {
+        let (snapshot_id, _) = parse_token(token)?;
+        self.inner.lock().unwrap().iter().find_map(|(pid, lane)| {
+            lane.iter()
+                .find(|snapshot| snapshot.id == snapshot_id)
+                .map(|snapshot| (*pid, snapshot.window_id))
+        })
+    }
+
     pub fn resolve(
         &self,
         pid: i32,
@@ -805,6 +817,20 @@ mod tests {
         assert_eq!(cache.pid_for_token(&serde_json::json!({})), None);
         let unknown = serde_json::json!({ "element_token": token_for(id + 1000, 0) });
         assert_eq!(cache.pid_for_token(&unknown), None);
+    }
+
+    #[test]
+    fn window_for_token_names_the_snapshots_window_until_it_is_replaced() {
+        let cache = SnapshotStore::new();
+        let popup = cache.publish(42, 9, Payload(vec![1]));
+        let main = cache.publish(42, 7, Payload(vec![10, 20]));
+        assert_eq!(cache.window_for_token(&token_for(main, 1)), Some((42, 7)));
+        assert_eq!(cache.window_for_token(&token_for(popup, 0)), Some((42, 9)));
+        assert_eq!(cache.window_for_token("not a token"), None);
+        // A newer read of the window replaces its snapshot: the old token
+        // no longer names a window.
+        cache.publish(42, 7, Payload(vec![30]));
+        assert_eq!(cache.window_for_token(&token_for(main, 1)), None);
     }
 
     #[test]

@@ -365,6 +365,21 @@ fn focus_holder_and_row_parsing() {
         None,
         "a row without a label cannot be found again safely"
     );
+    // AT-SPI role names have several words.
+    assert_eq!(
+        super::super::row_role_and_label(
+            "    - [9] push button \"Save\" [actions=[Press,Set Focus]]"
+        ),
+        Some(("push button".to_owned(), "Save".to_owned()))
+    );
+    assert_eq!(
+        super::super::row_role_and_label("  - [6] text \"Scan file\" value=\"/tmp/x\""),
+        Some(("text".to_owned(), "Scan file".to_owned()))
+    );
+    assert_eq!(
+        super::super::row_role_and_label("  - label = \"Scan type\""),
+        None
+    );
 }
 
 #[tokio::test]
@@ -560,5 +575,81 @@ async fn a_stale_token_is_not_retried_when_its_label_is_ambiguous_or_unknown() {
             text(&result)
         );
     }
+    assert!(state.lock().unwrap().clicked.is_empty());
+}
+
+/// A token-only step whose snapshot the platform already replaced still
+/// names its window through the read it came from: the checks and the end
+/// read look there, and the element is found again by its label.
+#[tokio::test]
+async fn a_stale_token_alone_still_names_its_window_for_checks_and_observe() {
+    let (registry, state) = rerender_registry(vec![
+        ("AXButton", "Update event"),
+        ("AXButton", "Cinder decision LHP-CINDER"),
+    ]);
+    crate::window_state_view::remember_for_test(
+        "s0000003a",
+        43,
+        70,
+        "- [0] AXWindow \"Daymark\"\n  - [14] AXButton \"Cinder decision LHP-CINDER\" [actions=[press]]\n",
+    );
+    let result = registry
+        .invoke(
+            super::super::RUN_STEPS_TOOL,
+            json!({
+                "steps": [{"tool": "click", "args": {"element_token": "s0000003a:14"},
+                           "expect": [{"role": "button", "name": "Update event"}]}],
+                "observe": {}
+            }),
+        )
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    assert_eq!(
+        state.lock().unwrap().clicked,
+        vec!["Cinder decision LHP-CINDER"]
+    );
+    assert!(text(&result).contains("went stale"), "{}", text(&result));
+    let structured = result.structured_content.unwrap();
+    assert_eq!(structured["observation"]["ok"], true, "{structured}");
+}
+
+/// A token nothing knows (never minted, or its read is gone) names no window.
+/// A batch that needs one says the token is stale instead of asking for a
+/// window; one that needs none runs it, and the tool refuses it.
+#[tokio::test]
+async fn a_token_no_read_knows_is_refused_as_stale() {
+    let (registry, state) = rerender_registry(vec![("AXButton", "OK")]);
+    for batch in [
+        json!({"steps": [{"tool": "click", "args": {"element_token": "s0000eee1:3"},
+                          "expect": [{"role": "button", "name": "OK"}]}]}),
+        json!({"steps": [{"tool": "click", "args": {"element_token": "s0000eee1:3"}}],
+               "observe": {}}),
+    ] {
+        let result = registry
+            .invoke(super::super::RUN_STEPS_TOOL, batch.clone())
+            .await;
+        assert_eq!(result.is_error, Some(true), "{batch}");
+        let message = text(&result);
+        assert!(
+            message.contains("rejected before running anything: step 1 of the batch: element_token `s0000eee1:3` is stale or unknown"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("names an element but no window"),
+            "{message}"
+        );
+    }
+    let result = registry
+        .invoke(
+            super::super::RUN_STEPS_TOOL,
+            json!({"steps": [{"tool": "click", "args": {"element_token": "s0000eee1:3"}}]}),
+        )
+        .await;
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(
+        result.structured_content.unwrap()["executed"],
+        1,
+        "the step ran"
+    );
     assert!(state.lock().unwrap().clicked.is_empty());
 }

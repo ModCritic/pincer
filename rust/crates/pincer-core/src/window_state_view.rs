@@ -753,6 +753,18 @@ pub(crate) struct StoredRow {
 /// Row `[index]` of the read that produced `snapshot_id`, while that read is
 /// still remembered. Lets a caller holding a stale element token find the
 /// same element again by what it was.
+/// The pid and window of a read this process rendered, by its snapshot id.
+/// It outlives the platform snapshot (a newer read replaces that), so it
+/// also names the window of a token that has gone stale.
+pub(crate) fn snapshot_window(snapshot_id: &str) -> Option<(i64, u64)> {
+    let mut guard = store().lock().unwrap_or_else(|e| e.into_inner());
+    guard.retain(|s| s.at.elapsed() <= STORE_TTL);
+    guard
+        .iter()
+        .find(|s| s.snapshot_id == snapshot_id)
+        .map(|s| (s.pid, s.window_id))
+}
+
 pub(crate) fn snapshot_row(snapshot_id: &str, index: u64) -> Option<StoredRow> {
     let snapshot = {
         let mut guard = store().lock().unwrap_or_else(|e| e.into_inner());

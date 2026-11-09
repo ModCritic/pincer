@@ -171,10 +171,10 @@ impl Tool for RunStepsTool {
                 `observe`, a final zoom runs after it. Steps share the batch's session and get \
                 the same permission and approval checks as direct calls. All steps are \
                 validated before the first runs. At most 64 steps and 60 s per batch.\n\n\
-                Element tokens come from a read before the batch, and a step that changes the \
-                UI can make later tokens stale, so put token steps first or target later steps \
-                by name. A stale token is retried once on the single element with the same role \
-                and label.\n\n\
+                Element tokens come from a read before the batch; a token step acts in the \
+                window that read was of. A step that changes the UI can make later tokens \
+                stale, so put token steps first or target later steps by name. A stale token is \
+                retried once on the single element with the same role and label.\n\n\
                 Target by name (no earlier read needed): args may carry `role` (button, \
                 textfield, link, checkbox, menuitem, ...), `name` (label; exact match beats \
                 substring, case-insensitive), `nth` (0-based), and `app` (name or bundle id) \
@@ -291,6 +291,10 @@ struct Action {
     /// pixels or focus.
     element: ElementSpec,
     find_timeout: Duration,
+    /// The step's only target is this element token, and neither the
+    /// platform nor this process's reads know which window it names: its
+    /// snapshot was replaced or expired, or it never existed.
+    unknown_token: Option<String>,
 }
 
 struct Step {
@@ -497,6 +501,9 @@ impl Plan {
         // Whether some earlier step (or the batch itself) names a window a
         // later step can inherit.
         let mut has_window = !default_window.is_empty();
+        // The first token whose window could not be found, for the error
+        // when nothing else names a window.
+        let mut unknown_token: Option<(usize, String)> = None;
         // A batch of reads only is refused by parse_step, pointing at the
         // direct call; reads between actions are skipped.
         let acts = raw_steps.iter().any(|step| read_step(step).is_none());
@@ -542,11 +549,21 @@ impl Plan {
                     .iter()
                     .chain(step.expect.iter())
                     .any(|check| check.window.is_empty());
+            let step_token = step
+                .action
+                .as_ref()
+                .and_then(|action| action.unknown_token.clone());
             if needs_window && !names_window && !has_window {
                 return Err(PlanError::step(
                     index,
-                    "names an element but no window: add `app` (or pid and window_id) to this step or an earlier one",
+                    match &step_token {
+                        Some(token) => unknown_token_message(token),
+                        None => "names an element but no window: add `app` (or pid and window_id) to this step or an earlier one".to_owned(),
+                    },
                 ));
+            }
+            if let (Some(token), None) = (step_token, &unknown_token) {
+                unknown_token = Some((index, token));
             }
             has_window |= names_window;
             steps.push(step);
@@ -571,6 +588,7 @@ impl Plan {
                 registry,
                 value,
                 has_window,
+                unknown_token.as_ref(),
                 session.as_deref(),
             )?),
         };
@@ -828,8 +846,18 @@ async fn run_step(
         };
     }
 
+    // A step's checks look where its action acts: the window the step
+    // names (pid/window_id, app/window, or its element token's window),
+    // else the window the batch is in.
+    let own_window = step
+        .action
+        .as_ref()
+        .map(|action| &action.window)
+        .filter(|window| !window.is_empty())
+        .cloned();
     if let Some(check) = &step.wait_for {
-        match locator.check(check, context).await {
+        let fallback = own_window.clone().unwrap_or_else(|| context.clone());
+        match locator.check(check, &fallback).await {
             Ok(checked) => {
                 if !check.window.is_empty() {
                     *context = check.window.clone();
@@ -870,6 +898,7 @@ async fn run_step(
             window,
             element,
             find_timeout,
+            ..
         } = action;
         if !window.is_empty() {
             *context = window.clone();
@@ -1450,16 +1479,21 @@ fn menu_bar_route(args: &Value, result: &ToolResult) -> Option<(Value, String)> 
     Some((menu_args, note))
 }
 
-/// Role and label of one tree row: `[14] AXButton "Save"` or
-/// `[17] AXButton (Delete draft)`. None for a row without a label.
+/// Role and label of one tree row: `[14] AXButton "Save"`,
+/// `[17] AXButton (Delete draft)`, or an AT-SPI role of several words,
+/// `[9] push button "Save"`. None for a row without a label, such as a
+/// value row `[12] AXStaticText = "Total"`.
 fn row_role_and_label(line: &str) -> Option<(String, String)> {
     let rest = line.trim().strip_prefix("- ")?.trim_start();
     let rest = rest.strip_prefix('[')?;
     let (_, rest) = rest.split_once(']')?;
     let rest = rest.trim_start();
-    let role_end = rest.find(char::is_whitespace)?;
-    let role = rest[..role_end].to_owned();
-    let rest = rest[role_end..].trim_start();
+    let role_end = rest.find(['"', '('])?;
+    let role = rest[..role_end].trim().to_owned();
+    if role.is_empty() || role.contains('=') {
+        return None;
+    }
+    let rest = &rest[role_end..];
     let label = if let Some(quoted) = rest.strip_prefix('"') {
         quoted[..quoted.find('"')?].to_owned()
     } else {
@@ -1682,10 +1716,25 @@ fn parse_action(
         crate::tool::coerce_string_scalars(&schema, &mut args);
     }
     prepare_args(&mut args, session).map_err(|message| PlanError::step(index, message))?;
-    let (window, element) = locate::take_selector(args.as_object_mut().expect("object"))
+    let (mut window, element) = locate::take_selector(args.as_object_mut().expect("object"))
         .map_err(|message| PlanError::step(index, format!("{tool}: {message}")))?;
     crate::tool::normalize_argument_aliases(tool, &mut args)
         .map_err(|message| PlanError::step(index, format!("{tool}: {message}")))?;
+    // A step whose only target is an element token names the window that
+    // token was read from, as it does for the standalone tool: its checks
+    // look there, later steps inherit it, and `observe` reads it.
+    let mut unknown_token = None;
+    if window.is_empty() && element.is_empty() {
+        if let Some(token) = args.get("element_token").and_then(Value::as_str) {
+            match token_window(registry, token) {
+                Some((pid, window_id)) => {
+                    window.pid = Some(pid);
+                    window.window_id = Some(window_id);
+                }
+                None => unknown_token = Some(token.to_owned()),
+            }
+        }
+    }
     if !element.is_empty() {
         if tool == "drag" {
             return Err(PlanError::step(
@@ -1728,13 +1777,33 @@ fn parse_action(
         window,
         element,
         find_timeout: Duration::from_millis(find_timeout),
+        unknown_token,
     })
+}
+
+/// The pid and window an element token names: the platform's current
+/// snapshot first, then this process's record of the read it came from.
+/// That record outlives a replaced snapshot, so a token gone stale still
+/// names its window, and the step can find the element again by its label.
+fn token_window(registry: &ToolRegistry, token: &str) -> Option<(i64, u64)> {
+    registry.element_token_window(token).or_else(|| {
+        let (snapshot_id, _) = token.split_once(':')?;
+        crate::window_state_view::snapshot_window(snapshot_id)
+    })
+}
+
+fn unknown_token_message(token: &str) -> String {
+    format!(
+        "element_token `{token}` is stale or unknown, so it names no window: read the window \
+         again with get_window_state and use its tokens (or add pid and window_id)"
+    )
 }
 
 fn parse_observe(
     registry: &ToolRegistry,
     value: &Value,
     has_window: bool,
+    unknown_token: Option<&(usize, String)>,
     session: Option<&str>,
 ) -> Result<Value, PlanError> {
     let mut args = match value {
@@ -1756,9 +1825,18 @@ fn parse_observe(
     // "act, then look at the same window" case needs no repetition.
     let explicit = object.contains_key("pid") && object.contains_key("window_id");
     if !explicit && !has_window {
-        return Err(PlanError::batch(
-            "observe: `pid` and `window_id` are required (no step names a window to inherit from)",
-        ));
+        return Err(match unknown_token {
+            Some((index, token)) => PlanError::step(
+                *index,
+                format!(
+                    "{} (and `observe` has no other window to read)",
+                    unknown_token_message(token)
+                ),
+            ),
+            None => PlanError::batch(
+                "observe: `pid` and `window_id` are required (no step names a window to inherit from)",
+            ),
+        });
     }
     object
         .entry("include_screenshot")

@@ -1134,7 +1134,14 @@ pub struct ToolRegistry {
     approval_broker: Arc<crate::consent::ApprovalBroker>,
     protected_resource_grants: Arc<crate::consent::ProtectedResourceGrants>,
     protected_resource_ownership: Arc<crate::consent::ProtectedResourceOwnershipStore>,
+    /// The platform's answer to "which window does this element token
+    /// name?", so `run_steps` can give a token-only step its window.
+    element_token_windows: Option<ElementTokenWindowResolver>,
 }
+
+/// The pid and window an `element_token` was minted for, while its snapshot
+/// is current. Installed by the platform that owns the snapshot store.
+pub type ElementTokenWindowResolver = Arc<dyn Fn(&str) -> Option<(i64, u64)> + Send + Sync>;
 
 impl ToolRegistry {
     pub fn new() -> Self {
@@ -1204,7 +1211,22 @@ impl ToolRegistry {
             approval_broker,
             protected_resource_grants,
             protected_resource_ownership,
+            element_token_windows: None,
         }
+    }
+
+    /// Install the platform's element-token window lookup.
+    pub fn set_element_token_window_resolver(&mut self, resolver: ElementTokenWindowResolver) {
+        self.element_token_windows = Some(resolver);
+    }
+
+    /// The pid and window `token` was minted for, when the platform knows
+    /// it: `None` for a malformed, replaced or expired token, or when no
+    /// platform resolver is installed.
+    pub fn element_token_window(&self, token: &str) -> Option<(i64, u64)> {
+        self.element_token_windows
+            .as_ref()
+            .and_then(|resolver| resolver(token))
     }
 
     /// Return the runtime-owned broker for adapter construction.
