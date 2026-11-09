@@ -64,6 +64,9 @@ fn signal_name(signal: i32) -> Option<&'static str> {
 #[derive(Clone)]
 pub(super) struct LaunchedChild {
     pub pid: u32,
+    /// Set when an AppImage was started with `--appimage-extract-and-run`:
+    /// why FUSE could not mount it.
+    pub extract_and_run: Option<String>,
     exit: Arc<Mutex<Option<LaunchExit>>>,
     output: Option<Arc<OutputCapture>>,
 }
@@ -148,6 +151,7 @@ pub(super) fn spawn_watched_in(
     let child = command.spawn()?;
     let launched = LaunchedChild {
         pid: child.id(),
+        extract_and_run: None,
         exit: Arc::new(Mutex::new(None)),
         output,
     };
@@ -321,29 +325,40 @@ const HANDOFF_LAUNCHERS: &[&str] = &[
 /// The program a launch command runs: its first word, past an `env` prefix
 /// and its `NAME=value` assignments, as a file name.
 pub(super) fn launch_program(command: &str) -> String {
-    let mut words = command.split_whitespace().peekable();
-    if words
-        .peek()
-        .is_some_and(|first| std::path::Path::new(first).file_name() == Some("env".as_ref()))
-    {
-        words.next();
-        while let Some(word) = words.next_if(|word| word.starts_with('-') || word.contains('=')) {
-            // env's options that take a separate argument.
-            if matches!(word, "-u" | "--unset" | "-C" | "--chdir") {
-                words.next();
-            }
-        }
-    }
-    words
-        .next()
-        .map(|program| {
-            std::path::Path::new(program)
+    let words: Vec<&str> = command.split_whitespace().collect();
+    program_position(&words)
+        .map(|at| {
+            std::path::Path::new(words[at])
                 .file_name()
                 .and_then(|name| name.to_str())
-                .unwrap_or(program)
+                .unwrap_or(words[at])
                 .to_owned()
         })
         .unwrap_or_default()
+}
+
+/// Where the program sits in a launch command's words: the first word, or
+/// the first one after an `env` prefix, its options and its `NAME=value`
+/// assignments. `None` when there is none.
+pub(super) fn program_position<S: AsRef<str>>(words: &[S]) -> Option<usize> {
+    let mut at = 0;
+    if words.first().is_some_and(|first| {
+        std::path::Path::new(first.as_ref()).file_name() == Some("env".as_ref())
+    }) {
+        at = 1;
+        while let Some(word) = words.get(at).map(AsRef::as_ref) {
+            if !(word.starts_with('-') || word.contains('=')) {
+                break;
+            }
+            // env's options that take a separate argument.
+            at += if matches!(word, "-u" | "--unset" | "-C" | "--chdir") {
+                2
+            } else {
+                1
+            };
+        }
+    }
+    (at < words.len()).then_some(at)
 }
 
 /// Why a launch that exited without opening a new window counts as a

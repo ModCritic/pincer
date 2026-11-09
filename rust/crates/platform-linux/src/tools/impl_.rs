@@ -2125,6 +2125,7 @@ mod get_window_state_actions_tests;
 pub struct LaunchAppTool;
 static LAUNCH_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
+mod appimage;
 mod launch_child;
 use launch_child::{LaunchExit, LaunchedChild};
 
@@ -2135,13 +2136,19 @@ fn spawn_launch_command(
     cmd: &str,
     additional_arguments: &[String],
 ) -> std::io::Result<LaunchedChild> {
-    let mut parts = cmd.split_whitespace();
-    let prog = parts.next().unwrap_or(cmd);
-    let mut rest: Vec<String> = parts.map(str::to_owned).collect();
-    rest.extend(additional_arguments.iter().cloned());
+    let mut words: Vec<String> = cmd.split_whitespace().map(str::to_owned).collect();
+    words.extend(additional_arguments.iter().cloned());
+    // A type-2 AppImage that can't mount with FUSE here (root unmapped in a
+    // user namespace) unpacks and runs instead of failing with exit 127.
+    let extract_and_run = appimage::extract_and_run_needed(&words).map(|(at, reason)| {
+        words.insert(at + 1, appimage::EXTRACT_AND_RUN_FLAG.to_owned());
+        reason
+    });
+    let prog = words.first().map(String::as_str).unwrap_or(cmd);
+    let rest = words.get(1..).unwrap_or_default();
     let mut launch = std::process::Command::new(prog);
     launch
-        .args(&rest)
+        .args(rest)
         // The child must not inherit the driver's stdio: in private-worker mode
         // stdout is the JSON-RPC stream to the SDK, and a chatty app (Chromium's
         // zygote logs, GTK warnings) writing there corrupts a response and shuts
@@ -2160,7 +2167,39 @@ fn spawn_launch_command(
     {
         launch.arg("--force-renderer-accessibility");
     }
-    launch_child::spawn_watched(launch)
+    let mut child = launch_child::spawn_watched(launch)?;
+    child.extract_and_run = extract_and_run;
+    Ok(child)
+}
+
+/// The note a launch that unpacked an AppImage carries: why, and what it
+/// costs. The runtime unpacks to `$TMPDIR` (default /tmp); one tested
+/// AppImage's runtime left its 547 MB copy there after the app exited.
+fn appimage_extract_note(reason: &str) -> String {
+    format!(
+        "Started with {}: FUSE can't mount AppImages here ({reason}), so it unpacked itself \
+         to $TMPDIR (default /tmp) instead of mounting, which costs time and disk (RAM when \
+         /tmp is tmpfs) on every start and may leave the unpacked copy behind.",
+        appimage::EXTRACT_AND_RUN_FLAG
+    )
+}
+
+/// [`appimage_extract_note`] on a launch result, text and structured.
+fn with_appimage_note(mut result: ToolResult, reason: Option<&str>) -> ToolResult {
+    let Some(reason) = reason else {
+        return result;
+    };
+    let note = appimage_extract_note(reason);
+    result
+        .content
+        .push(pincer_core::protocol::Content::text(note));
+    if let Some(structured) = result.structured_content.as_mut() {
+        structured["appimage"] = json!({
+            "mode": "extract_and_run",
+            "reason": reason,
+        });
+    }
+    result
 }
 
 /// Collect a launched child's exit status in the background.
@@ -2428,6 +2467,12 @@ impl Tool for LaunchAppTool {
                         "windows": windows,
                         "launcher_pid": launcher_pid,
                     });
+                    if let Some(pid) = resolved.pid.filter(|_| resolved.child_of_launcher) {
+                        structured["launched_by"] = json!(launcher_pid);
+                        text.push_str(&format!(
+                            " Its window belongs to pid {pid}, a process the launcher started."
+                        ));
+                    }
                     if resolved.handed_off {
                         match resolved.pid {
                             Some(pid) => {
@@ -2452,7 +2497,7 @@ impl Tool for LaunchAppTool {
                                     exit.as_ref(),
                                     &resolved.running_instance,
                                 );
-                                return match handoff {
+                                let result = match handoff {
                                     Some(handoff) => launch_handoff_timeout_result(
                                         &name,
                                         launcher_pid,
@@ -2468,10 +2513,17 @@ impl Tool for LaunchAppTool {
                                         child.output_captured(),
                                     ),
                                 };
+                                return with_appimage_note(
+                                    result,
+                                    child.extract_and_run.as_deref(),
+                                );
                             }
                         }
                     }
-                    ToolResult::text(text).with_structured(structured)
+                    with_appimage_note(
+                        ToolResult::text(text).with_structured(structured),
+                        child.extract_and_run.as_deref(),
+                    )
                 } else {
                     ToolResult::text(message).with_structured(json!({
                         "pid": Value::Null,
@@ -2601,11 +2653,39 @@ struct LaunchedWindows {
     /// The window belongs to another process than the launcher, or the
     /// launcher exited without one.
     handed_off: bool,
+    /// The window belongs to a process the launcher started (`pid`).
+    child_of_launcher: bool,
     /// How the launcher exited, when it did.
     exit: Option<LaunchExit>,
     /// When the launcher exited without a new window: windows matching the
     /// launch that other processes own (an already-running instance).
     running_instance: Vec<crate::x11::WindowInfo>,
+}
+
+/// Whether `pid` descends from `ancestor`: a bounded walk up the parent
+/// chain in /proc. A child whose parent already exited was reparented and no
+/// longer counts.
+fn descends_from(pid: u32, ancestor: u32) -> bool {
+    let mut current = pid;
+    for _ in 0..32 {
+        let Some(parent) = std::fs::read_to_string(format!("/proc/{current}/stat"))
+            .ok()
+            .and_then(|stat| {
+                let (_, rest) = stat.rsplit_once(')')?;
+                rest.split_whitespace().nth(1)?.parse::<u32>().ok()
+            })
+        else {
+            return false;
+        };
+        if parent == ancestor {
+            return true;
+        }
+        if parent <= 1 {
+            return false;
+        }
+        current = parent;
+    }
+    false
 }
 
 /// Whether the launched process is gone or a zombie (already reaped or being
@@ -2699,9 +2779,24 @@ fn resolve_launched_windows(
             return LaunchedWindows {
                 pid: Some(launcher_pid),
                 windows: own,
-                handed_off: false,
-                exit: None,
-                running_instance: Vec::new(),
+                ..LaunchedWindows::default()
+            };
+        }
+        // A new window of a process the launcher started is the launch's
+        // own, whatever its class: an AppImage runtime forks its app (the
+        // window belongs to the app's pid), and so does a wrapper that
+        // does not exec.
+        if let Some(pid) = all
+            .iter()
+            .filter(|w| !before.contains(&w.xid))
+            .filter_map(|w| w.pid)
+            .find(|pid| descends_from(*pid, launcher_pid))
+        {
+            return LaunchedWindows {
+                pid: Some(pid),
+                windows: all.iter().filter(|w| w.pid == Some(pid)).cloned().collect(),
+                child_of_launcher: true,
+                ..LaunchedWindows::default()
             };
         }
         let fresh: Vec<_> = all
@@ -2717,7 +2812,7 @@ fn resolve_launched_windows(
                 windows,
                 handed_off: true,
                 exit: launcher.exit(),
-                running_instance: Vec::new(),
+                ..LaunchedWindows::default()
             };
         }
         let exit = launcher.exit();
@@ -2734,10 +2829,10 @@ fn resolve_launched_windows(
             };
             return LaunchedWindows {
                 pid: (!launcher_exited).then_some(launcher_pid),
-                windows: Vec::new(),
                 handed_off: launcher_exited,
                 exit,
                 running_instance,
+                ..LaunchedWindows::default()
             };
         }
         std::thread::sleep(std::time::Duration::from_millis(100));

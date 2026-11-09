@@ -197,3 +197,42 @@ fn a_failed_launcher_is_not_waited_on_for_the_handoff_budget() {
     assert_eq!(launch_window_budget(None, true), LAUNCH_HANDOFF_BUDGET);
     assert_eq!(launch_window_budget(None, false), LAUNCH_STARTING_BUDGET);
 }
+
+#[test]
+fn an_unpacked_appimage_launch_says_so_and_why() {
+    let reason = "/usr/bin/fusermount3 shows owner uid 65534 here because root is not mapped \
+                  in this user namespace, so it can't run setuid root";
+    let launched = with_appimage_note(
+        ToolResult::text("Launched TestApp-x86_64.AppImage (pid 7) in background.")
+            .with_structured(json!({ "pid": 7 })),
+        Some(reason),
+    );
+    let text = result_text(&launched);
+    assert!(text.contains("--appimage-extract-and-run"), "{text}");
+    assert!(text.contains("unpacked itself"), "{text}");
+    assert!(text.contains("root is not mapped"), "{text}");
+    let s = launched.structured_content.unwrap();
+    assert_eq!(s["appimage"]["mode"], "extract_and_run");
+    assert_eq!(s["appimage"]["reason"], reason);
+
+    let plain = with_appimage_note(
+        ToolResult::text("Launched x.").with_structured(json!({ "pid": 7 })),
+        None,
+    );
+    assert_eq!(result_text(&plain), "Launched x.");
+    assert!(plain.structured_content.unwrap().get("appimage").is_none());
+}
+
+#[test]
+fn a_child_process_descends_from_its_launcher_only() {
+    let mut child = std::process::Command::new("/bin/sh")
+        .args(["-c", "sleep 5"])
+        .spawn()
+        .expect("/bin/sh should spawn");
+    let me = std::process::id();
+    assert!(descends_from(child.id(), me));
+    assert!(!descends_from(me, child.id()));
+    assert!(!descends_from(u32::MAX - 1, me));
+    let _ = child.kill();
+    let _ = child.wait();
+}
