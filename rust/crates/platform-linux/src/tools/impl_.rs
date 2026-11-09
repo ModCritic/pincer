@@ -2522,8 +2522,9 @@ impl Tool for LaunchAppTool {
                     );
                     let name = name.split('\u{0}').next().unwrap_or("").to_owned();
                     let watched = child.clone();
+                    let program_w = program.clone();
                     let resolved = tokio::task::spawn_blocking(move || {
-                        resolve_launched_windows(&watched, &query, &windows_before)
+                        resolve_launched_windows(&watched, &query, &program_w, &windows_before)
                     })
                     .await
                     .unwrap_or_else(|_| LaunchedWindows::default());
@@ -2568,6 +2569,7 @@ impl Tool for LaunchAppTool {
                                     &program,
                                     exit.as_ref(),
                                     &resolved.running_instance,
+                                    &resolved.still_running,
                                 );
                                 let result = match handoff {
                                     Some(handoff) => launch_handoff_timeout_result(
@@ -2663,6 +2665,16 @@ fn launch_handoff_timeout_result(
                  only have raised its existing window. Act on pid {pid}, or call list_windows."
             )
         }
+        launch_child::Handoff::StartedProcess { pid } => {
+            structured["handoff"] = json!("started_process");
+            structured["started_pid"] = json!(pid);
+            format!(
+                "'{name}' (pid {launcher_pid}) exited cleanly{after}, but pid {pid}, a process \
+                 it started, is still running, and no window appeared within {waited_secs}s; \
+                 the launch could not be confirmed. Call list_windows to check whether pid \
+                 {pid} opens one later."
+            )
+        }
     };
     ToolResult::error(text).with_structured(structured)
 }
@@ -2726,9 +2738,12 @@ struct LaunchedWindows {
     child_of_launcher: bool,
     /// How the launcher exited, when it did.
     exit: Option<LaunchExit>,
-    /// When the launcher exited without a new window: windows matching the
-    /// launch that other processes own (an already-running instance).
+    /// When the launcher exited without a new window: windows of the
+    /// launched app that other processes own (an already-running instance).
     running_instance: Vec<crate::x11::WindowInfo>,
+    /// When the launcher exited without a new window: processes it started
+    /// that are still running.
+    still_running: Vec<u32>,
 }
 
 /// Whether `pid` descends from `ancestor`: a bounded walk up the parent
@@ -2897,13 +2912,25 @@ const LAUNCH_HANDOFF_BUDGET: std::time::Duration = std::time::Duration::from_sec
 /// the launch is still waited for: a failed start does not hand off, so its
 /// window is not coming.
 const LAUNCH_FAILED_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+/// After a clean exit with no sign of a hand-off, how long a late window is
+/// still waited for. `sleep 1` used to be reported 8 s after it started.
+const LAUNCH_CLEAN_EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// The window budget once the launcher's state is known: a failed exit waits
 /// only [`LAUNCH_FAILED_GRACE`] past the exit, a clean exit the hand-off
-/// budget, a running launcher the starting budget.
-fn launch_window_budget(exit: Option<&LaunchExit>, launcher_exited: bool) -> std::time::Duration {
+/// budget when there is a sign of a hand-off (`handoff_sign`, see
+/// [`launch_child::handoff_evidence`]) and [`LAUNCH_CLEAN_EXIT_GRACE`] past
+/// the exit when there is none, a running launcher the starting budget. An
+/// exit not yet recorded keeps the hand-off budget until it is (the reaper
+/// stores it right after the process is gone).
+fn launch_window_budget(
+    exit: Option<&LaunchExit>,
+    launcher_exited: bool,
+    handoff_sign: bool,
+) -> std::time::Duration {
     match exit {
         Some(exit) if !exit.status.success() => exit.after + LAUNCH_FAILED_GRACE,
+        Some(exit) if !handoff_sign => exit.after + LAUNCH_CLEAN_EXIT_GRACE,
         _ if launcher_exited => LAUNCH_HANDOFF_BUDGET,
         _ => LAUNCH_STARTING_BUDGET,
     }
@@ -2913,15 +2940,27 @@ fn launch_window_budget(exit: Option<&LaunchExit>, launcher_exited: bool) -> std
 /// otherwise adopts a newly mapped top-level whose WM_CLASS matches the
 /// launch, whoever owns it: a wrapper script that exec'd the real binary
 /// (`libreoffice` → `soffice.bin`), or the running D-Bus service GNOME apps
-/// hand their request to.
+/// hand their request to. `program` is the program the launch ran
+/// ([`launch_child::launch_program`]).
 fn resolve_launched_windows(
     launcher: &LaunchedChild,
     query: &str,
+    program: &str,
     before: &std::collections::HashSet<u64>,
 ) -> LaunchedWindows {
     let launcher_pid = launcher.pid;
     let started = std::time::Instant::now();
+    // Processes the launcher started, recorded while it runs: once it exits
+    // they are reparented and no longer descend from it.
+    let mut started_pids: Vec<u32> = Vec::new();
     loop {
+        if !process_exited(launcher_pid) {
+            for pid in launch_child::descendants(launcher_pid) {
+                if !started_pids.contains(&pid) {
+                    started_pids.push(pid);
+                }
+            }
+        }
         let all = crate::wayland::list_windows_dispatch(None);
         let own: Vec<_> = all
             .iter()
@@ -2938,12 +2977,12 @@ fn resolve_launched_windows(
         // A new window of a process the launcher started is the launch's
         // own, whatever its class: an AppImage runtime forks its app (the
         // window belongs to the app's pid), and so does a wrapper that
-        // does not exec.
+        // does not exec, or a CLI that starts its app detached and exits.
         if let Some(pid) = all
             .iter()
             .filter(|w| !before.contains(&w.xid))
             .filter_map(|w| w.pid)
-            .find(|pid| descends_from(*pid, launcher_pid))
+            .find(|pid| started_pids.contains(pid) || descends_from(*pid, launcher_pid))
         {
             return LaunchedWindows {
                 pid: Some(pid),
@@ -2970,21 +3009,38 @@ fn resolve_launched_windows(
         }
         let exit = launcher.exit();
         let launcher_exited = exit.is_some() || process_exited(launcher_pid);
-        if started.elapsed() >= launch_window_budget(exit.as_ref(), launcher_exited) {
-            let running_instance = if launcher_exited {
+        // After a clean exit, the evidence the result would cite for a
+        // hand-off decides how long a late window is waited for.
+        let (running_instance, still_running) = if launcher_exited {
+            (
                 all.iter()
                     .filter(|w| w.pid.is_some() && w.pid != Some(launcher_pid))
                     .filter(|w| window_is_launched_app(w, query))
                     .cloned()
-                    .collect()
-            } else {
-                Vec::new()
-            };
+                    .collect::<Vec<_>>(),
+                started_pids
+                    .iter()
+                    .copied()
+                    .filter(|pid| !process_exited(*pid))
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        let handoff_sign = launch_child::handoff_evidence(
+            program,
+            exit.as_ref(),
+            &running_instance,
+            &still_running,
+        )
+        .is_some();
+        if started.elapsed() >= launch_window_budget(exit.as_ref(), launcher_exited, handoff_sign) {
             return LaunchedWindows {
                 pid: (!launcher_exited).then_some(launcher_pid),
                 handed_off: launcher_exited,
                 exit,
                 running_instance,
+                still_running,
                 ..LaunchedWindows::default()
             };
         }

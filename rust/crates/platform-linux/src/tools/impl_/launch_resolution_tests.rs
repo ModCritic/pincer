@@ -265,16 +265,81 @@ fn a_process_that_exits_without_a_window_is_reported_as_it_ended() {
 #[test]
 fn a_failed_launcher_is_not_waited_on_for_the_handoff_budget() {
     use std::time::Duration;
+    for sign in [false, true] {
+        assert_eq!(
+            launch_window_budget(Some(&failed_exit(127, 40)), true, sign),
+            Duration::from_millis(40) + LAUNCH_FAILED_GRACE
+        );
+    }
     assert_eq!(
-        launch_window_budget(Some(&failed_exit(127, 40)), true),
-        Duration::from_millis(40) + LAUNCH_FAILED_GRACE
-    );
-    assert_eq!(
-        launch_window_budget(Some(&clean_exit(1000)), true),
+        launch_window_budget(Some(&clean_exit(1000)), true, true),
         LAUNCH_HANDOFF_BUDGET
     );
-    assert_eq!(launch_window_budget(None, true), LAUNCH_HANDOFF_BUDGET);
-    assert_eq!(launch_window_budget(None, false), LAUNCH_STARTING_BUDGET);
+    assert_eq!(
+        launch_window_budget(None, true, false),
+        LAUNCH_HANDOFF_BUDGET
+    );
+    assert_eq!(
+        launch_window_budget(None, false, false),
+        LAUNCH_STARTING_BUDGET
+    );
+}
+
+#[test]
+fn a_clean_exit_without_a_handoff_sign_is_reported_after_a_short_grace() {
+    use std::time::Duration;
+    // `sleep 1` exited cleanly at 1.0 s with no window: it was reported 8 s
+    // after the launch, the whole hand-off budget.
+    let budget = launch_window_budget(Some(&clean_exit(1000)), true, false);
+    assert_eq!(
+        budget,
+        Duration::from_millis(1000) + LAUNCH_CLEAN_EXIT_GRACE
+    );
+    assert!(budget < Duration::from_secs(3));
+    // A known launcher, a running instance or a process it left running is
+    // a sign, and keeps the hand-off budget.
+    let exit = clean_exit(77);
+    let calculator = {
+        let mut window = window("gnome-calculator");
+        window.pid = Some(900);
+        window
+    };
+    for (program, running, started) in [
+        ("xdg-open", vec![], vec![]),
+        ("gnome-calculator", vec![calculator], vec![]),
+        ("code", vec![], vec![5150]),
+    ] {
+        let sign =
+            launch_child::handoff_evidence(program, Some(&exit), &running, &started).is_some();
+        assert!(sign, "{program}");
+        assert_eq!(
+            launch_window_budget(Some(&exit), true, sign),
+            LAUNCH_HANDOFF_BUDGET
+        );
+    }
+    let sign = launch_child::handoff_evidence("sleep", Some(&exit), &[], &[]).is_some();
+    assert!(!sign);
+}
+
+#[test]
+fn a_process_left_running_is_named_when_no_window_came() {
+    let result = launch_handoff_timeout_result(
+        "code",
+        4242,
+        8,
+        Some(&clean_exit(400)),
+        &launch_child::Handoff::StartedProcess { pid: 5150 },
+    );
+    let text = result_text(&result);
+    assert!(
+        text.contains("pid 5150, a process it started, is still running"),
+        "{text}"
+    );
+    assert!(!text.contains("not running"), "{text}");
+    let s = result.structured_content.unwrap();
+    assert_eq!(s["code"], "launch_handoff_timeout");
+    assert_eq!(s["handoff"], "started_process");
+    assert_eq!(s["started_pid"], 5150);
 }
 
 #[test]

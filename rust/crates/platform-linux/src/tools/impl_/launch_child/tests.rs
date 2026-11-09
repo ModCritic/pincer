@@ -71,28 +71,63 @@ fn the_launch_program_skips_an_env_prefix() {
 fn only_a_clean_exit_with_evidence_is_a_handoff() {
     let other = [window(900, "gnome-calculator")];
     // A plain program that exits, cleanly or not: no hand-off.
-    assert!(handoff_evidence("sleep", Some(&exit(0, 1000)), &[]).is_none());
-    assert!(handoff_evidence("TestApp-x86_64.AppImage", Some(&exit(127, 40)), &[]).is_none());
+    assert!(handoff_evidence("sleep", Some(&exit(0, 1000)), &[], &[]).is_none());
+    assert!(handoff_evidence("TestApp-x86_64.AppImage", Some(&exit(127, 40)), &[], &[]).is_none());
     // A failed exit is never a hand-off, even from a launcher or with a
     // window of the app around.
-    assert!(handoff_evidence("xdg-open", Some(&exit(4, 100)), &[]).is_none());
-    assert!(handoff_evidence("gnome-calculator", Some(&exit(1, 100)), &other).is_none());
-    assert!(handoff_evidence("xdg-open", Some(&killed(libc::SIGSEGV)), &[]).is_none());
+    assert!(handoff_evidence("xdg-open", Some(&exit(4, 100)), &[], &[]).is_none());
+    assert!(handoff_evidence("gnome-calculator", Some(&exit(1, 100)), &other, &[]).is_none());
+    assert!(handoff_evidence("xdg-open", Some(&killed(libc::SIGSEGV)), &[], &[]).is_none());
     // No recorded exit: no evidence.
-    assert!(handoff_evidence("xdg-open", None, &[]).is_none());
+    assert!(handoff_evidence("xdg-open", None, &[], &[]).is_none());
     // A known launcher that exited cleanly.
-    match handoff_evidence("xdg-open", Some(&exit(0, 300)), &[]) {
+    match handoff_evidence("xdg-open", Some(&exit(0, 300)), &[], &[]) {
         Some(Handoff::Launcher(program)) => assert_eq!(program, "xdg-open"),
         other => panic!("expected a launcher hand-off, got {other:?}"),
     }
     // A clean exit while another process owns a window of the app.
-    match handoff_evidence("gnome-calculator", Some(&exit(0, 300)), &other) {
+    match handoff_evidence("gnome-calculator", Some(&exit(0, 300)), &other, &[]) {
         Some(Handoff::RunningInstance { pid, windows }) => {
             assert_eq!(pid, 900);
             assert_eq!(windows.len(), 1);
         }
         other => panic!("expected a running-instance hand-off, got {other:?}"),
     }
+    // A clean exit that left a process it started running (VS Code's `code`
+    // starts the app detached and returns).
+    match handoff_evidence("code", Some(&exit(0, 400)), &[], &[5150]) {
+        Some(Handoff::StartedProcess { pid }) => assert_eq!(pid, 5150),
+        other => panic!("expected a started-process hand-off, got {other:?}"),
+    }
+    // ...but not after a failed exit.
+    assert!(handoff_evidence("code", Some(&exit(1, 400)), &[], &[5150]).is_none());
+}
+
+#[test]
+fn the_processes_a_launcher_started_are_listed_while_they_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let launcher = script(dir.path(), "starts.sh", "sleep 30 &\nsleep 30 &\nwait");
+    let mut child = Command::new(&launcher).spawn().unwrap();
+    let pid = child.id();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut started = descendants(pid);
+    while started.len() < 2 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+        started = descendants(pid);
+    }
+    assert_eq!(started.len(), 2, "{started:?}");
+    for &sleeper in &started {
+        let comm = std::fs::read_to_string(format!("/proc/{sleeper}/comm")).unwrap();
+        assert_eq!(comm.trim(), "sleep");
+    }
+    for &sleeper in &started {
+        unsafe { libc::kill(sleeper as i32, libc::SIGTERM) };
+    }
+    let _ = child.wait();
+    assert!(descendants(pid).is_empty());
+    // A process with no children, and one that does not exist.
+    assert!(descendants(std::process::id()).iter().all(|&p| p != pid));
+    assert!(descendants(u32::MAX - 1).is_empty());
 }
 
 #[test]

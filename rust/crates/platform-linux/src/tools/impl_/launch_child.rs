@@ -399,18 +399,24 @@ pub(super) enum Handoff {
         pid: u32,
         windows: Vec<crate::x11::WindowInfo>,
     },
+    /// A process the launcher started is still running after the launcher
+    /// exited: a CLI that starts the app detached and returns (VS Code's
+    /// `code`), or a wrapper that forks.
+    StartedProcess { pid: u32 },
 }
 
 /// The hand-off rule for a launcher that exited and opened no new window.
 /// A hand-off needs a clean exit (code 0) and one more piece of evidence:
-/// the program is a known hand-off launcher ([`HANDOFF_LAUNCHERS`]), or a
-/// window matching the launch is owned by another process (`running`). A
-/// non-zero exit, a signal, an unknown exit, or a clean exit with neither is
-/// reported as what it was: the process ended without a window.
+/// the program is a known hand-off launcher ([`HANDOFF_LAUNCHERS`]), a
+/// window of the launched app is owned by another process (`running`), or a
+/// process the launcher started still runs (`started`, live pids). A
+/// non-zero exit, a signal, an unknown exit, or a clean exit with none of
+/// these is reported as what it was: the process ended without a window.
 pub(super) fn handoff_evidence(
     program: &str,
     exit: Option<&LaunchExit>,
     running: &[crate::x11::WindowInfo],
+    started: &[u32],
 ) -> Option<Handoff> {
     if !exit.is_some_and(|exit| exit.status.success()) {
         return None;
@@ -418,15 +424,65 @@ pub(super) fn handoff_evidence(
     if HANDOFF_LAUNCHERS.contains(&program) {
         return Some(Handoff::Launcher(program.to_owned()));
     }
-    let pid = running.iter().find_map(|window| window.pid)?;
-    Some(Handoff::RunningInstance {
-        pid,
-        windows: running
-            .iter()
-            .filter(|window| window.pid == Some(pid))
-            .cloned()
-            .collect(),
-    })
+    if let Some(pid) = running.iter().find_map(|window| window.pid) {
+        return Some(Handoff::RunningInstance {
+            pid,
+            windows: running
+                .iter()
+                .filter(|window| window.pid == Some(pid))
+                .cloned()
+                .collect(),
+        });
+    }
+    started.first().map(|&pid| Handoff::StartedProcess { pid })
+}
+
+/// Most processes [`descendants`] lists for one launch.
+const DESCENDANTS_CAP: usize = 64;
+
+/// The processes `pid` has started that still exist, children first, read
+/// from `/proc/<pid>/task/<tid>/children`: every thread's for `pid` itself,
+/// the main thread's for the processes below it (a launch polls this while
+/// its app starts, and a browser's tree has hundreds of threads). A process
+/// that has exited is reparented away and no longer listed, so a launch
+/// records them while its launcher runs.
+pub(super) fn descendants(pid: u32) -> Vec<u32> {
+    let mut found: Vec<u32> = Vec::new();
+    let mut next = 0;
+    let mut parent = Some(pid);
+    while let Some(current) = parent {
+        let lists: Vec<std::path::PathBuf> = if current == pid {
+            std::fs::read_dir(format!("/proc/{current}/task"))
+                .map(|tasks| {
+                    tasks
+                        .flatten()
+                        .map(|task| task.path().join("children"))
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            vec![format!("/proc/{current}/task/{current}/children").into()]
+        };
+        for list in lists {
+            let Ok(children) = std::fs::read_to_string(list) else {
+                continue;
+            };
+            for child in children
+                .split_whitespace()
+                .filter_map(|child| child.parse::<u32>().ok())
+            {
+                if found.len() >= DESCENDANTS_CAP {
+                    return found;
+                }
+                if child != pid && !found.contains(&child) {
+                    found.push(child);
+                }
+            }
+        }
+        parent = found.get(next).copied();
+        next += 1;
+    }
+    found
 }
 
 #[cfg(test)]
