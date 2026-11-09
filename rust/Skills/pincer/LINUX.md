@@ -167,6 +167,22 @@ closed (`popup_closed`), which a click on an item does. Qt runs a menu item's
 accessible action without closing its menu, so a background click that ran
 one says the menu is still open; close it with `press_key` Escape.
 
+**Alt+F4.** In background mode `hotkey` / `press_key` alt+F4 on a window
+target sends the window manager `_NET_CLOSE_WINDOW` (a virtual-keyboard
+Alt+F4 never reaches the WM's grab) and watches the window unmap for 2 s:
+`effect: confirmed` with `closed_window` when it closes, or the window the app
+opened instead (a save or confirm dialog). The request waits for the X server
+to process it before the connection closes.
+
+**Password fields.** A password field reads back as mask characters, one per
+character (Qt counts UTF-16 units, so an emoji is two). `set_value` and
+`type_text` recognize one by its role (Qt names it "text" but its numeric
+AT-SPI role is password text) and compare lengths instead of text: the same
+number of masks as the value (or, for `type_text`, growth by the typed length)
+is a masked-length match, `effect: confirmed`; any other count is
+`unverifiable` with `readback_masked: true`, never `suspected_noop`. The result
+does not repeat the value.
+
 **Grid presses.** After a click that lands on a table cell (LibreOffice Calc),
 the result appends `focus: cell D2` (`focused_cell`, evidence) read from the
 focus log, so a one-row miss is visible before you type.
@@ -212,6 +228,36 @@ action.
 application's window (a drag dropped onto VLC) reports that window's title
 change and the windows its pid opened as `foreign_window` / `window_change`
 evidence; the focus guard alone only watches the target pid.
+
+## Launching apps
+
+`launch_app` keeps the launched process's stdout and stderr in an anonymous
+file (O_TMPFILE under `~/.cache/pincer`, emptied past 1 MiB while the driver
+runs, freed when the app exits) and records how it exits. A window of the
+launcher, of a process it started (an AppImage's app, a forking wrapper), or a
+new window matching the launch is the launch's window. A process that ends
+without one is reported as it ended: `code: "launch_exited"`, "exited with
+code N after X" or the signal, and the last lines it printed. A failed exit is
+reported one second after it happens. It counts as a hand-off
+(`code: "launch_handoff_timeout"`) only after a clean exit with evidence: a
+program whose job is to pass a launch on (xdg-open, gio, gtk-launch,
+gapplication, kioclient, kde-open, kstart, exo-open, dex, dbus-send, gdbus,
+busctl), or a window of the app that another process already owns (the
+running instance of a single-instance app, named with its pid).
+
+**AppImages without FUSE.** When the driver runs in a user namespace that does
+not map root (the `unshare -rn ... --map-user=1000` no-network wrapper), the
+setuid-root `fusermount` shows up owned by the overflow uid (65534) and a
+type-2 AppImage can't mount itself (exit 127, "No suitable fusermount binary
+found on the $PATH"). `launch_app` checks for that the way the AppImage
+runtime does (a `fusermount` or `fusermountN` on `PATH` owned by root with the
+setuid bit, `/dev/fuse`, no_new_privs; `FUSERMOUNT_PROG` overrides) and starts
+an ELF with the "AI\x02" magic with `--appimage-extract-and-run` instead. The
+result says so (`appimage: {mode: "extract_and_run", reason}`): the image is
+unpacked to `$TMPDIR` (default /tmp, RAM when tmpfs) on each start, and the
+runtime in one tested AppImage (type2-runtime fedfad5) left its 547 MB
+copy there after the app exited. To avoid that, start the AppImage from a
+normal shell and drive it by pid.
 
 ## Native application menus
 
