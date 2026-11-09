@@ -103,6 +103,10 @@ pub enum FocusAfter {
     /// Inside another toplevel owned by the same process (a dialog opened or
     /// closed, a new document window, ...).
     SamePid,
+    /// Inside a window another process opened for the target: a dialog
+    /// whose `WM_TRANSIENT_FOR` chain reaches the target's windows (a portal
+    /// file dialog), or a new window that took the focus during the action.
+    Related,
     /// Somewhere else entirely.
     Elsewhere,
     /// Could not be determined before the post-check deadline.
@@ -114,6 +118,7 @@ impl FocusAfter {
         match self {
             Self::Target => "target",
             Self::SamePid => "same_pid",
+            Self::Related => "related_window",
             Self::Elsewhere => "elsewhere",
             Self::Unknown => "unknown",
         }
@@ -175,7 +180,10 @@ impl ForegroundReport {
     /// Focus is proven to have stayed inside the target process after the
     /// body ran (the target toplevel itself, or a dialog/popup it owns).
     pub fn focus_kept(&self) -> bool {
-        matches!(self.focus_after, FocusAfter::Target | FocusAfter::SamePid)
+        matches!(
+            self.focus_after,
+            FocusAfter::Target | FocusAfter::SamePid | FocusAfter::Related
+        )
     }
 
     /// The window change confirms the action wherever the focus ended up
@@ -196,6 +204,40 @@ struct WindowEntry {
     /// Positively attributed to the target pid (see
     /// [`ForegroundReport::window_change_owned`]).
     owned: bool,
+    /// Owned by another process but belonging to the target (see
+    /// [`FocusAfter::Related`]).
+    foreign: bool,
+}
+
+/// `window 48234668 "Choose a scan" owned by pid 1081 (xdg-desktop-portal-kde),
+/// a dialog of window 90177553; read it with get_window_state(pid=1081,
+/// window_id=48234668)`: a window of another process named with the call
+/// that reads it, since a read with the target's pid would not.
+fn describe_foreign_window(
+    window: u64,
+    title: &str,
+    pid: Option<u32>,
+    transient_for: Option<u64>,
+) -> String {
+    let mut s = format!("window {window}");
+    if !title.is_empty() {
+        s.push_str(&format!(" \"{title}\""));
+    }
+    if let Some(pid) = pid {
+        s.push_str(&format!(" owned by pid {pid}"));
+        if let Some(comm) = super::focus_guard::process_comm(pid) {
+            s.push_str(&format!(" ({comm})"));
+        }
+    }
+    if let Some(parent) = transient_for {
+        s.push_str(&format!(", a dialog of window {parent}"));
+    }
+    if let Some(pid) = pid {
+        s.push_str(&format!(
+            "; read it with get_window_state(pid={pid}, window_id={window})"
+        ));
+    }
+    s
 }
 
 /// What changed between two window sets.
@@ -225,9 +267,30 @@ fn pid_window_set(pid: Option<u32>) -> Vec<WindowEntry> {
                 window: w.xid,
                 description: format!("window {}{title}", w.xid),
                 owned: pid.is_some(),
+                foreign: false,
             }
         })
         .collect();
+    // Dialogs another process opened for the target's windows (a portal file
+    // dialog): the action's effect, though no window of the pid changed.
+    if let Some(pid) = pid {
+        set.extend(
+            crate::x11::list_cross_pid_transient_windows(pid)
+                .into_iter()
+                .filter(|w| w.is_on_screen)
+                .map(|w| WindowEntry {
+                    window: w.xid,
+                    description: describe_foreign_window(
+                        w.xid,
+                        &w.title,
+                        w.pid,
+                        crate::x11::transient_for(w.xid),
+                    ),
+                    owned: true,
+                    foreign: true,
+                }),
+        );
+    }
     set.extend(
         super::mapped_popup_windows()
             .into_iter()
@@ -239,6 +302,7 @@ fn pid_window_set(pid: Option<u32>) -> Vec<WindowEntry> {
                 window: p.window,
                 description: p.describe(),
                 owned: pid.is_some() && p.pid == pid,
+                foreign: false,
             }),
     );
     set
@@ -951,11 +1015,15 @@ fn post_check(target: Window, target_pid: Option<u32>, pid_windows: &[WindowEntr
     if x.is_within(focused, target) {
         return FocusAfter::Target;
     }
-    if pid_windows
+    if let Some(entry) = pid_windows
         .iter()
-        .any(|entry| x.is_within(focused, entry.window as Window))
+        .find(|entry| x.is_within(focused, entry.window as Window))
     {
-        return FocusAfter::SamePid;
+        return if entry.foreign {
+            FocusAfter::Related
+        } else {
+            FocusAfter::SamePid
+        };
     }
     // The body may have closed the target itself (Escape on a dialog, alt+F4,
     // a popup item click): its pid was read (or named by the caller) before
@@ -966,6 +1034,45 @@ fn post_check(target: Window, target_pid: Option<u32>, pid_windows: &[WindowEntr
     ) {
         (Some(a), Some(b)) if a == b => FocusAfter::SamePid,
         _ => FocusAfter::Elsewhere,
+    }
+}
+
+/// The managed window that holds the input focus now when it is not one of
+/// `before` (the client windows that existed before the action).
+fn focused_new_window(before: &[u64]) -> Option<WindowEntry> {
+    let x = X11::open().ok()?;
+    let focused = x.focused()?;
+    let window = crate::x11::list_windows(None)
+        .into_iter()
+        .filter(|w| !before.contains(&w.xid))
+        .find(|w| x.is_within(focused, w.xid as Window))?;
+    Some(WindowEntry {
+        window: window.xid,
+        description: describe_foreign_window(
+            window.xid,
+            &window.title,
+            window.pid,
+            crate::x11::transient_for(window.xid),
+        ),
+        owned: true,
+        foreign: true,
+    })
+}
+
+/// `change` with `entry` added as an appeared window.
+fn with_appeared(change: Option<WindowChange>, entry: &WindowEntry) -> WindowChange {
+    match change {
+        Some(mut change) if !change.summary.contains(&entry.description) => {
+            change.summary = format!("{}; appeared: {}", change.summary, entry.description);
+            change.owned = true;
+            change
+        }
+        Some(change) => change,
+        None => WindowChange {
+            summary: format!("appeared: {}", entry.description),
+            owned: true,
+            closed: Vec::new(),
+        },
     }
 }
 
@@ -1021,6 +1128,10 @@ pub fn with_x11_foreground_opts<T>(
         .or(opts.target_pid)
         .or_else(|| popup.and_then(|popup| crate::x11::window_pid(u64::from(popup))));
     let windows_before = pid_window_set(target_pid);
+    let clients_before: Vec<u64> = crate::x11::list_windows(None)
+        .into_iter()
+        .map(|w| w.xid)
+        .collect();
     let value = body()?;
     // The post-check is what the tool reports as evidence for both keyboard
     // and pointer bodies: a real click that opened a menu or a dialog moves
@@ -1037,6 +1148,22 @@ pub fn with_x11_foreground_opts<T>(
         post_check(target, target_pid, &windows_after)
     })
     .unwrap_or(FocusAfter::Unknown);
+    // A new window of another process that took the focus during the action
+    // (a file dialog that names no parent) is the action's effect too.
+    let (focus_after, window_change) = match focus_after {
+        FocusAfter::Elsewhere => match run_with_deadline(Duration::from_millis(1500), move || {
+            focused_new_window(&clients_before)
+        })
+        .flatten()
+        {
+            Some(entry) => (
+                FocusAfter::Related,
+                Some(with_appeared(window_change, &entry)),
+            ),
+            None => (focus_after, window_change),
+        },
+        _ => (focus_after, window_change),
+    };
     Ok((
         value,
         ForegroundReport {
@@ -1344,11 +1471,63 @@ mod tests {
         assert!(!is_pincer_overlay(&menu));
     }
 
+    /// A window of another process is named with its pid and the read call
+    /// that names that pid (a read with the target's pid returns the
+    /// target's own windows).
+    #[test]
+    fn a_foreign_window_is_named_with_its_pid_and_read_call() {
+        let text =
+            describe_foreign_window(48234668, "Choose a scan", Some(u32::MAX), Some(90177553));
+        assert!(
+            text.starts_with("window 48234668 \"Choose a scan\" owned by pid"),
+            "{text}"
+        );
+        assert!(text.contains("a dialog of window 90177553"), "{text}");
+        assert!(
+            text.contains(&format!(
+                "get_window_state(pid={}, window_id=48234668)",
+                u32::MAX
+            )),
+            "{text}"
+        );
+        let change = with_appeared(
+            None,
+            &WindowEntry {
+                window: 48234668,
+                description: text.clone(),
+                owned: true,
+                foreign: true,
+            },
+        );
+        assert!(change.owned);
+        assert_eq!(change.summary, format!("appeared: {text}"));
+    }
+
+    /// Focus inside a dialog another process opened for the target is kept
+    /// focus, not focus lost to another application.
+    #[test]
+    fn focus_in_a_related_window_counts_as_kept() {
+        let report = ForegroundReport {
+            already_active: false,
+            retried_activation: false,
+            confirm_ms: 5,
+            focus_after: FocusAfter::Related,
+            window_change: Some("appeared: window 48234668".into()),
+            window_change_owned: true,
+            popup_target: None,
+            popup_closed: false,
+        };
+        assert!(report.focus_kept());
+        assert!(report.window_change_confirms());
+        assert_eq!(report.to_json()["focus_after"], "related_window");
+    }
+
     fn entry(window: u64, description: &str, owned: bool) -> WindowEntry {
         WindowEntry {
             window,
             description: description.to_string(),
             owned,
+            foreign: false,
         }
     }
 

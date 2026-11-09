@@ -986,10 +986,22 @@ impl WindowOverlays {
         for dialog in &self.dialogs {
             let id = dialog["window_id"].as_u64().unwrap_or(0);
             let owning_pid = dialog.get("owning_pid").and_then(|v| v.as_u64());
+            // A dialog of another process (a portal file dialog) is read and
+            // driven with that process's pid; pid-only keys for this pid never
+            // reach it.
+            let (read_pid, keys) = match owning_pid {
+                Some(owner) => (
+                    owner,
+                    format!(
+                        "act on it with pid {owner}; pid-only keys for pid {pid} do not reach it"
+                    ),
+                ),
+                None => (u64::from(pid), "pid-only keys go to it".to_owned()),
+            };
             parts.push(format!(
                 "dialog \"{}\" (window_id {id}, transient of window {}{}{}) is open over this \
-                 window: call get_window_state(pid={pid}, window_id={id}) to index it and act \
-                 there (pid-only keys go to it).",
+                 window: call get_window_state(pid={read_pid}, window_id={id}) to index it and \
+                 act there ({keys}).",
                 dialog["title"].as_str().unwrap_or(""),
                 dialog["transient_for"].as_u64().unwrap_or(0),
                 if dialog["modal"].as_bool() == Some(true) {
@@ -1048,6 +1060,20 @@ fn window_target_matches(pid: u32, xid: u64, window_meta: Option<&crate::x11::Wi
                 .iter()
                 .any(|w| w.xid == xid)
     }
+}
+
+/// The pid that owns `xid` when it is not `pid` but a dialog another process
+/// opened for one of `pid`'s windows (its `WM_TRANSIENT_FOR` chain reaches
+/// them); `None` for `pid`'s own windows and anything unrelated.
+fn cross_pid_dialog_owner(pid: u32, xid: u64) -> Option<u32> {
+    if crate::x11::window_belongs_to_pid(xid, pid) {
+        return None;
+    }
+    crate::x11::list_cross_pid_transient_windows(pid)
+        .into_iter()
+        .find(|w| w.xid == xid)
+        .and_then(|w| w.pid)
+        .filter(|owner| *owner != pid)
 }
 
 /// Native-size PNG of one window. When a same-pid popup or dialog covers the
@@ -1260,6 +1286,21 @@ impl Tool for GetWindowStateTool {
                     }
                 }
             }
+        };
+        // A dialog another process opened for one of this pid's windows (a
+        // portal file dialog transient for the app's dialog) lives in that
+        // process's accessibility tree, so a walk as this pid could only
+        // return this pid's own windows. Read it as its owner: the snapshot,
+        // its element tokens and the header all name the owner's pid.
+        let requested_pid = pid;
+        let pid = if crate::wayland::is_wayland() {
+            pid
+        } else {
+            tokio::task::spawn_blocking(move || cross_pid_dialog_owner(pid, xid))
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(pid)
         };
         // The per-call field replaces the configured ceiling entirely
         // (including 0 = native size).
@@ -1909,6 +1950,15 @@ impl Tool for GetWindowStateTool {
                 if let Some(note) = overlays.follow_up(pid) {
                     structured["follow_up"] = json!(note);
                     content.push(pincer_core::protocol::Content::text(note));
+                }
+                if pid != requested_pid {
+                    structured["requested_pid"] = json!(requested_pid);
+                    content.push(pincer_core::protocol::Content::text(format!(
+                        "Window {xid} belongs to pid {pid}, not pid {requested_pid}: it is a \
+                         dialog pid {pid} opened for pid {requested_pid}'s window. This read and \
+                         its element tokens act as pid {pid}; pass pid={pid} for keys and later \
+                         reads of this window."
+                    )));
                 }
                 structured["coordinate_frame"] = json!("window");
                 structured["frame_note"] = json!(
@@ -3623,7 +3673,7 @@ fn key_route_result(action: &str, route: KeyRoute, mode_label: &str) -> ToolResu
             let opened_window = report
                 .focus_guard
                 .as_ref()
-                .and_then(|guard| guard.same_app_window.as_ref())
+                .and_then(|guard| guard.opened_window())
                 .filter(|_| report.delivery_confirmed);
             if closed_target && report.delivery_confirmed {
                 // The key closed the window that held the focus (Escape /
@@ -3643,10 +3693,16 @@ fn key_route_result(action: &str, route: KeyRoute, mode_label: &str) -> ToolResu
                     "title": window.title,
                     "focused": window.focused,
                 });
+                if let Some(owner) = window.owner_pid {
+                    structured["window_opened"]["pid"] = json!(owner);
+                }
                 text.push_str(&format!(
-                    " The key opened window {} \"{}\"; call get_window_state(pid, window_id={}) \
-                     to index it and act there.",
-                    window.window, window.title, window.window
+                    " The key opened window {}; call {} to index it and act there.",
+                    window.describe(),
+                    window.read_call().unwrap_or_else(|| format!(
+                        "get_window_state(pid, window_id={})",
+                        window.window
+                    ))
                 ));
             } else if !report.virtual_focus_held || !report.delivery_confirmed {
                 structured["effect"] = json!("suspected_noop");

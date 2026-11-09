@@ -75,7 +75,14 @@ of the pointer tools are pixels of this screenshot. Closed menus are listed
 with a `description` ("closed menu with N items…") and are not walked;
 click the menu (a real press) and read the popup by its window_id.
 `press_key` / `hotkey` that map a new top-level report it as `window_opened`
-with `window_change` evidence. Action results carry the same text as
+with `window_change` evidence. A dialog another process opened for the window
+(xdg-desktop-portal-kde's file dialog for a Qt "Browse...") is listed with
+`owning_pid`, and its follow-up names that pid: the window lives in the owner's
+accessibility tree. `get_window_state` given the app's pid and such a window
+reads it as its owner and says so (`requested_pid`). A click that opens a
+window names it with its window_id, pid and title, including a dialog of
+another process (transient for the app's window) or a new window that took the
+focus during the click; a window that existed before is never called opened. Action results carry the same text as
 `summary` inside `structuredContent`, for clients that only show that.
 
 **Screenshot scale.** The window screenshot is delivered at or below 1.15

@@ -128,8 +128,14 @@ fn a_cross_process_dialog_names_its_real_owning_pid_in_the_follow_up() {
         note.contains("owned by a different process pid 999, not pid 5"),
         "{note}"
     );
+    // The read names the pid that owns the dialog: a read with pid 5 walks
+    // pid 5's tree, which does not hold it (the tested app's portal file dialog).
     assert!(
-        note.contains("get_window_state(pid=5, window_id=90)"),
+        note.contains("get_window_state(pid=999, window_id=90)"),
+        "{note}"
+    );
+    assert!(
+        note.contains("pid-only keys for pid 5 do not reach it"),
         "{note}"
     );
 }
