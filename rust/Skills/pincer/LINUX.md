@@ -147,6 +147,16 @@ button or slider nobody names is `unlabelled: true` with its place in
 `description` (`unlabelled spin button; 3rd of 4 spin buttons in this panel`,
 in visual order). `parent_index` is the nearest indexed real ancestor.
 
+**Clicks inside a popup.** A popup is override-redirect, so the window manager
+never makes it the active window (KWin clears `_NET_ACTIVE_WINDOW` when asked
+to). A foreground click on a popup (`click(pid, window_id=<popup>, x, y)`, or a
+token from the popup's read) sends no activation: it checks that the popup is
+mapped and on top at the point, presses it with XTest, and reports
+`foreground.popup_target`. In both modes the result says whether the popup
+closed (`popup_closed`), which a click on an item does. Qt runs a menu item's
+accessible action without closing its menu, so a background click that ran
+one says the menu is still open; close it with `press_key` Escape.
+
 **Grid presses.** After a click that lands on a table cell (LibreOffice Calc),
 the result appends `focus: cell D2` (`focused_cell`, evidence) read from the
 focus log, so a one-row miss is visible before you type.

@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use x11rb::connection::Connection as _;
 use x11rb::protocol::xproto::{
     AtomEnum, ClientMessageEvent, ConnectionExt as _, CreateWindowAux, EventMask, InputFocus,
-    PropMode, Window, WindowClass, CLIENT_MESSAGE_EVENT,
+    MapState, PropMode, Window, WindowClass, CLIENT_MESSAGE_EVENT,
 };
 use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
@@ -47,6 +47,10 @@ pub struct ForegroundOptions {
     /// override-redirect popup (a LibreOffice VCL menu) never carries — and
     /// which is gone by the post-check when the click closed it.
     pub target_pid: Option<u32>,
+    /// Screen point the body presses, when it is a pointer action. A point
+    /// on an open popup of the target's process makes the popup the target:
+    /// see [`popup_target`].
+    pub point: Option<(i32, i32)>,
 }
 
 impl ForegroundOptions {
@@ -56,6 +60,7 @@ impl ForegroundOptions {
             settle: Duration::from_millis(800),
             keyboard: false,
             target_pid: None,
+            point: None,
         }
     }
 
@@ -66,6 +71,7 @@ impl ForegroundOptions {
             settle: Duration::from_millis(1500),
             keyboard: true,
             target_pid: None,
+            point: None,
         }
     }
 
@@ -79,6 +85,12 @@ impl ForegroundOptions {
     /// Name the process the target window belongs to (see `target_pid`).
     pub fn for_pid(mut self, pid: u32) -> Self {
         self.target_pid = Some(pid);
+        self
+    }
+
+    /// Name the screen point a pointer body presses (see `point`).
+    pub fn at_point(mut self, x: i32, y: i32) -> Self {
+        self.point = Some((x, y));
         self
     }
 }
@@ -131,18 +143,31 @@ pub struct ForegroundReport {
     /// unknown, every on-screen window; a change among those alone is not
     /// the target's own.
     pub window_change_owned: bool,
+    /// The input went to this open popup (a menu or combo list) instead of
+    /// an activated window: a popup is override-redirect, so the window
+    /// manager never makes it the active window, and asking it to only
+    /// clears `_NET_ACTIVE_WINDOW`. The transaction confirmed the popup was
+    /// mapped and on top at the point instead.
+    pub popup_target: Option<u64>,
+    /// `popup_target` closed during the post-check: the click chose an item
+    /// (or dismissed the popup), so the input reached it.
+    pub popup_closed: bool,
 }
 
 impl ForegroundReport {
     pub fn to_json(&self) -> serde_json::Value {
         let mut v = serde_json::json!({
-            "activated": !self.already_active,
+            "activated": !self.already_active && self.popup_target.is_none(),
             "retried_activation": self.retried_activation,
             "confirm_ms": self.confirm_ms,
             "focus_after": self.focus_after.as_str(),
         });
         if let Some(change) = &self.window_change {
             v["window_change"] = serde_json::json!(change);
+        }
+        if let Some(popup) = self.popup_target {
+            v["popup_target"] = serde_json::json!(popup);
+            v["popup_closed"] = serde_json::json!(self.popup_closed);
         }
         v
     }
@@ -178,6 +203,8 @@ struct WindowEntry {
 struct WindowChange {
     summary: String,
     owned: bool,
+    /// Windows of the before set that are gone from the after set.
+    closed: Vec<u64>,
 }
 
 /// The on-screen toplevels of `pid` (managed windows plus override-redirect
@@ -205,6 +232,9 @@ fn pid_window_set(pid: Option<u32>) -> Vec<WindowEntry> {
         super::mapped_popup_windows()
             .into_iter()
             .filter(|p| pid.is_none() || p.pid.is_none() || p.pid == pid)
+            // Pincer's own agent cursor overlay maps on the first action of a
+            // session; it is never the target's popup.
+            .filter(|p| !is_pincer_overlay(p))
             .map(|p| WindowEntry {
                 window: p.window,
                 description: p.describe(),
@@ -212,6 +242,12 @@ fn pid_window_set(pid: Option<u32>) -> Vec<WindowEntry> {
             }),
     );
     set
+}
+
+/// An override-redirect window Pincer maps for itself (the agent cursor
+/// overlay is titled `Pincer.AgentCursorOverlay.<cursor_id>`).
+fn is_pincer_overlay(popup: &super::PopupWindow) -> bool {
+    popup.pid.is_none() && popup.title.starts_with("Pincer.")
 }
 
 /// Describe what changed between two window sets, or `None` when nothing did.
@@ -240,6 +276,7 @@ fn describe_window_change(before: &[WindowEntry], after: &[WindowEntry]) -> Opti
     Some(WindowChange {
         summary: parts.join("; "),
         owned: appeared.iter().chain(&vanished).any(|e| e.owned),
+        closed: vanished.iter().map(|e| e.window).collect(),
     })
 }
 
@@ -302,6 +339,24 @@ fn wait_for_window_change(
         }
         if Instant::now() >= deadline {
             return (after, None);
+        }
+        std::thread::sleep(bounds.poll);
+    }
+}
+
+/// Whether the popup `window` closes within the window-change bounds after a
+/// background click on it. A click on a menu or combo list item closes the
+/// popup; a click that chose nothing (a scroll arrow, a separator) leaves it
+/// open. Read-only.
+pub fn wait_for_popup_close(window: u64) -> bool {
+    let bounds = window_change_bounds();
+    let deadline = Instant::now() + bounds.timeout;
+    loop {
+        if super::popup_window_info(window).is_none() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
         }
         std::thread::sleep(bounds.poll);
     }
@@ -604,6 +659,188 @@ impl X11 {
             None => false,
         }
     }
+
+    /// `window` is a mapped override-redirect window that can draw: a menu,
+    /// combo list or popover (or a tooltip; see [`Self::passive_popup`]).
+    fn mapped_popup(&self, window: Window) -> bool {
+        self.conn
+            .get_window_attributes(window)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .is_some_and(|attrs| {
+                attrs.override_redirect
+                    && attrs.map_state == MapState::VIEWABLE
+                    && attrs.class != WindowClass::INPUT_ONLY
+            })
+    }
+
+    /// `_NET_WM_WINDOW_TYPE` marks a tooltip, notification or drag icon:
+    /// override-redirect, but nobody's menu.
+    fn passive_popup(&self, window: Window) -> bool {
+        let atom = |name: &[u8]| {
+            self.conn
+                .intern_atom(true, name)
+                .ok()
+                .and_then(|cookie| cookie.reply().ok())
+                .map(|reply| reply.atom)
+                .filter(|atom| *atom != 0)
+        };
+        let Some(type_atom) = atom(b"_NET_WM_WINDOW_TYPE") else {
+            return false;
+        };
+        let passive: Vec<u32> = [
+            &b"_NET_WM_WINDOW_TYPE_TOOLTIP"[..],
+            b"_NET_WM_WINDOW_TYPE_NOTIFICATION",
+            b"_NET_WM_WINDOW_TYPE_DND",
+        ]
+        .iter()
+        .filter_map(|name| atom(name))
+        .collect();
+        self.conn
+            .get_property(false, window, type_atom, AtomEnum::ATOM, 0, 8)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .and_then(|reply| reply.value32().map(|v| v.collect::<Vec<u32>>()))
+            .is_some_and(|types| types.iter().any(|t| passive.contains(t)))
+    }
+
+    /// The topmost root child that takes input at screen point `(x, y)`:
+    /// the server skips windows whose input shape excludes the point, such
+    /// as the agent cursor overlay.
+    fn root_child_at(&self, x: i32, y: i32) -> Option<Window> {
+        let x = i16::try_from(x).ok()?;
+        let y = i16::try_from(y).ok()?;
+        self.conn
+            .translate_coordinates(self.root, self.root, x, y)
+            .ok()?
+            .reply()
+            .ok()
+            .map(|reply| reply.child)
+            .filter(|child| *child != 0)
+    }
+
+    /// Centre of `window` in screen coordinates.
+    fn screen_centre(&self, window: Window) -> Option<(i32, i32)> {
+        let geometry = self.conn.get_geometry(window).ok()?.reply().ok()?;
+        let origin = self
+            .conn
+            .translate_coordinates(window, self.root, 0, 0)
+            .ok()?
+            .reply()
+            .ok()?;
+        Some((
+            i32::from(origin.dst_x) + i32::from(geometry.width) / 2,
+            i32::from(origin.dst_y) + i32::from(geometry.height) / 2,
+        ))
+    }
+}
+
+/// The open popup a foreground action should go to instead of activating
+/// `target`, or `None` for an ordinary window.
+///
+/// A popup (Qt combo list, menu-bar menu, context menu) is override-redirect:
+/// the window manager does not manage it, never makes it the active window,
+/// and KWin answers a `_NET_ACTIVE_WINDOW` request for it by clearing the
+/// active window (seen 2026-11-09 with `xprop -spy`), so the activation could
+/// never be confirmed. While it is open its toolkit holds the pointer and
+/// keyboard grabs, so real input at its screen point reaches it as is.
+///
+/// That holds when `target` is the popup itself, and when the pointer
+/// `point` lies on a popup of the target's own process that sits on top of
+/// the target there (an element of an open menu addressed through the main
+/// window's snapshot). A popup of another process is never taken over.
+fn popup_target(
+    target: Window,
+    point: Option<(i32, i32)>,
+    target_pid: Option<u32>,
+) -> Option<Window> {
+    let x = X11::open().ok()?;
+    if x.mapped_popup(target) {
+        return Some(target);
+    }
+    let (px, py) = point?;
+    let top = x.root_child_at(px, py)?;
+    if top == target || !x.mapped_popup(top) || x.passive_popup(top) {
+        return None;
+    }
+    let target_pid = target_pid.or_else(|| x.owning_pid(target))?;
+    let popup_pid = x.owning_pid(top).or_else(|| {
+        // Popups that name no pid (VCL menus) belong to the target when the
+        // same X client created them.
+        same_x11_client(top, target, x.resource_id_mask).then_some(target_pid)
+    });
+    (popup_pid == Some(target_pid)).then_some(top)
+}
+
+/// Why a popup could not take the input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PopupState {
+    /// Mapped and the topmost input window at the point.
+    OnTop,
+    /// Gone or unmapped: it closed before the input was sent.
+    Closed,
+    /// Mapped, but this other root child takes input at the point.
+    Covered(Window),
+}
+
+/// Classify a popup from what the server reports: whether it is still mapped
+/// and which root child takes input at the point.
+fn popup_state(mapped: bool, topmost_at_point: Option<Window>, popup: Window) -> PopupState {
+    match (mapped, topmost_at_point) {
+        (false, _) => PopupState::Closed,
+        (true, Some(top)) if top != popup => PopupState::Covered(top),
+        _ => PopupState::OnTop,
+    }
+}
+
+/// The popup counterpart of [`confirm_phase`]: send no activation, and wait
+/// until the popup is mapped and on top at `point` (its centre when the
+/// action has no point). A popup that closed or is covered is refused, with
+/// no input sent.
+fn confirm_popup_phase(
+    popup: Window,
+    point: Option<(i32, i32)>,
+    settle: Duration,
+) -> Result<ConfirmOutcome> {
+    let x = X11::open()?;
+    let start = Instant::now();
+    let deadline = start + settle;
+    loop {
+        let mapped = x.mapped_popup(popup);
+        let at = point.or_else(|| x.screen_centre(popup));
+        let top = at.and_then(|(px, py)| x.root_child_at(px, py));
+        let state = popup_state(mapped, top, popup);
+        if state == PopupState::OnTop {
+            return Ok(ConfirmOutcome {
+                confirmed: true,
+                already_active: false,
+                retried: false,
+                elapsed: start.elapsed(),
+                active_after: x.active_window().unwrap_or(0),
+                focus_within: x.focus_is_within(popup),
+                focus_holder: None,
+            });
+        }
+        if Instant::now() >= deadline {
+            return Err(match state {
+                PopupState::Closed => anyhow!(
+                    "{CODE_UNAVAILABLE}: popup window 0x{popup:x} is no longer open (it \
+                     closed before the input was sent); no input was sent. Open it again \
+                     (click its combo box or menu) and read it with get_window_state."
+                ),
+                PopupState::Covered(top) => anyhow!(
+                    "{CODE_UNAVAILABLE}: popup window 0x{popup:x} is open but window \
+                     0x{top:x} takes input at ({}, {}); no input was sent. A popup cannot \
+                     be raised or activated: close what covers it, or press Escape and open \
+                     the popup again.",
+                    at.map(|p| p.0).unwrap_or(0),
+                    at.map(|p| p.1).unwrap_or(0)
+                ),
+                PopupState::OnTop => unreachable!("handled above"),
+            });
+        }
+        std::thread::sleep(Duration::from_millis(15));
+    }
 }
 
 struct ConfirmOutcome {
@@ -736,6 +973,10 @@ fn post_check(target: Window, target_pid: Option<u32>, pid_windows: &[WindowEntr
 /// `opts.settle`, run `body`, then (for keyboard actions) report where focus
 /// ended up. Returns `foreground_unavailable` (no input sent) when the WM never
 /// confirms, and `foreground_timeout` when the X server stops answering.
+///
+/// An open popup (see [`popup_target`]) is never activated: the transaction
+/// confirms it is mapped and on top at `opts.point` instead, and reports it
+/// as `popup_target`, with `popup_closed` once the body made it close.
 pub fn with_x11_foreground_opts<T>(
     xid: u64,
     opts: ForegroundOptions,
@@ -743,13 +984,20 @@ pub fn with_x11_foreground_opts<T>(
 ) -> Result<(T, ForegroundReport)> {
     let target = xid as Window;
     let phase_budget = opts.settle + Duration::from_millis(1500);
-    let outcome = run_with_deadline(phase_budget, move || confirm_phase(target, opts.settle))
-        .ok_or_else(|| {
-            anyhow!(
-                "{CODE_TIMEOUT}: the X server did not answer the activation of window \
-                 0x{xid:x} within {phase_budget:?}; no input was sent"
-            )
-        })??;
+    let outcome = run_with_deadline(phase_budget, move || {
+        match popup_target(target, opts.point, opts.target_pid) {
+            Some(popup) => confirm_popup_phase(popup, opts.point, opts.settle)
+                .map(|outcome| (Some(popup), outcome)),
+            None => confirm_phase(target, opts.settle).map(|outcome| (None, outcome)),
+        }
+    })
+    .ok_or_else(|| {
+        anyhow!(
+            "{CODE_TIMEOUT}: the X server did not answer the activation of window \
+             0x{xid:x} within {phase_budget:?}; no input was sent"
+        )
+    })??;
+    let (popup, outcome) = outcome;
     if !outcome.confirmed {
         let holder = outcome.focus_holder.as_deref().unwrap_or("unknown");
         let cause = if outcome.active_after == 0 {
@@ -769,7 +1017,9 @@ pub fn with_x11_foreground_opts<T>(
             outcome.focus_within
         ));
     }
-    let target_pid = crate::x11::window_pid(xid).or(opts.target_pid);
+    let target_pid = crate::x11::window_pid(xid)
+        .or(opts.target_pid)
+        .or_else(|| popup.and_then(|popup| crate::x11::window_pid(u64::from(popup))));
     let windows_before = pid_window_set(target_pid);
     let value = body()?;
     // The post-check is what the tool reports as evidence for both keyboard
@@ -795,7 +1045,13 @@ pub fn with_x11_foreground_opts<T>(
             confirm_ms: outcome.elapsed.as_millis() as u64,
             focus_after,
             window_change_owned: window_change.as_ref().is_some_and(|c| c.owned),
+            popup_closed: popup.is_some_and(|popup| {
+                window_change
+                    .as_ref()
+                    .is_some_and(|c| c.closed.contains(&u64::from(popup)))
+            }),
             window_change: window_change.map(|c| c.summary),
+            popup_target: popup.map(u64::from),
         },
     ))
 }
@@ -999,6 +1255,8 @@ mod tests {
             focus_after: FocusAfter::SamePid,
             window_change: Some("appeared: popup window 7 (200x300 at 1,2)".into()),
             window_change_owned: false,
+            popup_target: None,
+            popup_closed: false,
         };
         let json = report.to_json();
         assert_eq!(json["activated"], false);
@@ -1009,6 +1267,81 @@ mod tests {
             "appeared: popup window 7 (200x300 at 1,2)"
         );
         assert!(report.focus_kept());
+    }
+
+    /// A popup is the target of a foreground action only while it is mapped
+    /// and takes input at the point; it is never activated.
+    #[test]
+    fn popup_state_requires_mapped_and_on_top() {
+        let popup = 0x560_001b;
+        assert_eq!(popup_state(true, Some(popup), popup), PopupState::OnTop);
+        // No root child reported at the point: nothing covers it.
+        assert_eq!(popup_state(true, None, popup), PopupState::OnTop);
+        assert_eq!(popup_state(false, Some(popup), popup), PopupState::Closed);
+        assert_eq!(popup_state(false, None, popup), PopupState::Closed);
+        assert_eq!(
+            popup_state(true, Some(0x600_0012), popup),
+            PopupState::Covered(0x600_0012)
+        );
+    }
+
+    /// A transaction that went to a popup says so and does not claim an
+    /// activation; the closed popup is reported as such.
+    #[test]
+    fn popup_report_json_names_the_popup_without_activation() {
+        let report = ForegroundReport {
+            already_active: false,
+            retried_activation: false,
+            confirm_ms: 4,
+            focus_after: FocusAfter::SamePid,
+            window_change: Some("closed: popup window 90177563 \"PincerQtProbe\"".into()),
+            window_change_owned: true,
+            popup_target: Some(90177563),
+            popup_closed: true,
+        };
+        let json = report.to_json();
+        assert_eq!(json["activated"], false);
+        assert_eq!(json["popup_target"], 90177563);
+        assert_eq!(json["popup_closed"], true);
+        assert!(report.window_change_confirms());
+        let window = ForegroundReport {
+            popup_target: None,
+            popup_closed: false,
+            ..report
+        };
+        let json = window.to_json();
+        assert_eq!(json["activated"], true);
+        assert!(json.get("popup_target").is_none());
+    }
+
+    #[test]
+    fn options_carry_the_pressed_point() {
+        assert_eq!(ForegroundOptions::pointer().point, None);
+        assert_eq!(
+            ForegroundOptions::pointer().at_point(845, 394).point,
+            Some((845, 394))
+        );
+    }
+
+    /// The agent cursor overlay mapped by the click itself is not reported
+    /// as a popup the click opened.
+    #[test]
+    fn the_agent_cursor_overlay_is_not_a_window_change() {
+        let overlay = crate::input::PopupWindow {
+            window: 92274691,
+            title: "Pincer.AgentCursorOverlay.default".into(),
+            width: 2560,
+            height: 1440,
+            ..Default::default()
+        };
+        assert!(is_pincer_overlay(&overlay));
+        let menu = crate::input::PopupWindow {
+            window: 90177590,
+            title: "PincerQtProbe".into(),
+            pid: Some(1586953),
+            ..Default::default()
+        };
+        assert!(!is_pincer_overlay(&menu));
     }
 
     fn entry(window: u64, description: &str, owned: bool) -> WindowEntry {
@@ -1034,6 +1367,7 @@ mod tests {
             Some(WindowChange {
                 summary: "appeared: popup window 9; closed: window 2".into(),
                 owned: true,
+                closed: vec![2],
             })
         );
         assert_eq!(describe_window_change(&before, &before), None);

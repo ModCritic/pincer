@@ -1606,7 +1606,8 @@ impl Tool for GetWindowStateTool {
                             "This popup's items are not in the accessibility tree (Qt publishes \
                              no accessible for a context menu). Read them in this screenshot \
                              and click one with click(pid={pid}, window_id={}, x, y) using its \
-                             pixels, or press Escape on the window to close the popup.",
+                             pixels (the result says whether the popup closed, which a click on \
+                             an item does), or press Escape on the window to close the popup.",
                             popup.window
                         );
                         structured["popup_items_unavailable"] = json!(true);
@@ -2815,6 +2816,98 @@ fn apply_foreground_report(v: &mut Value, report: &crate::input::ForegroundRepor
         .unwrap_or_default();
     items.push(evidence);
     v["evidence"] = json!(items);
+}
+
+/// What became of the open popup (menu, combo list) a click was aimed at.
+/// A click on one of its items closes it, so a popup that closed is
+/// `window_change` evidence that the click reached it; one still open after
+/// the click means the click chose nothing that closes it, which the result
+/// says instead of leaving the caller to guess.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PopupClickOutcome {
+    window: u64,
+    closed: bool,
+    /// The click ran an item's accessible action instead of pressing it:
+    /// Qt runs a menu item that way but leaves its menu open.
+    ran_action: bool,
+}
+
+impl PopupClickOutcome {
+    /// The outcome of a foreground transaction that went to a popup.
+    fn from_foreground(report: &crate::input::ForegroundReport) -> Option<Self> {
+        report.popup_target.map(|window| Self {
+            window,
+            closed: report.popup_closed,
+            ran_action: false,
+        })
+    }
+
+    /// Fold the outcome into a result's structured content (`popup_closed`,
+    /// evidence, effect) and return the sentence for its text.
+    fn apply(&self, v: &mut Value) -> String {
+        v["popup_closed"] = json!(self.closed);
+        if self.closed {
+            if v.get("effect").and_then(Value::as_str) != Some("confirmed") {
+                push_evidence(
+                    v,
+                    json!({
+                        "kind": "window_change",
+                        "detail": format!(
+                            "popup window {} closed after the click", self.window
+                        ),
+                    }),
+                );
+            }
+            v["effect"] = json!("confirmed");
+            v["verified"] = json!(true);
+            if let Some(object) = v.as_object_mut() {
+                object.remove("warning");
+            }
+            format!(
+                " The popup (window_id {}) closed after the click, so the click reached it.",
+                self.window
+            )
+        } else if self.ran_action {
+            format!(
+                " The item's accessible action was dispatched, but the popup (window_id {}) \
+                 is still open: an accessible action does not close a Qt menu. Close it with \
+                 press_key Escape, or click the item with delivery_mode foreground, which \
+                 presses it like a user and closes the popup.",
+                self.window
+            )
+        } else {
+            format!(
+                " The popup (window_id {}) is still open after the click, so the click did \
+                 not choose an item that closes it. Check it with get_window_state, or close \
+                 it with press_key Escape.",
+                self.window
+            )
+        }
+    }
+}
+
+/// Text tail for a foreground pixel click: the confirming window change when
+/// there is one, else the usual request to confirm with a screenshot.
+fn foreground_click_suffix(path: &str, report: &crate::input::ForegroundReport) -> String {
+    let popup = report
+        .popup_target
+        .map(|popup| format!(", popup window {popup} took the input without activation"))
+        .unwrap_or_default();
+    let change = report
+        .window_change
+        .as_deref()
+        .filter(|_| report.window_change_confirms());
+    match change {
+        Some(change) => format!(
+            "(delivery_mode=foreground, path={path}{popup}, focus_after={}); {change}.",
+            report.focus_after.as_str()
+        ),
+        None => format!(
+            "(delivery_mode=foreground, path={path}{popup}, focus_after={}); not verified — \
+             confirm with a screenshot.",
+            report.focus_after.as_str()
+        ),
+    }
 }
 
 /// Typed refusal for a pointer tool whose arguments name neither an element
@@ -6485,6 +6578,11 @@ impl ClickTool {
                     .flatten();
                 reveal_pointer_action_target_for(&self.state, cursor_id, sx, sy, true, target_rect)
                     .await;
+                // Read before the click: a popup the click closes has no
+                // geometry left afterwards.
+                let window_point = crate::x11::window_info(xid)
+                    .map(|w| (sx.round() as i32 - w.x, sy.round() as i32 - w.y))
+                    .unwrap_or((sx.round() as i32, sy.round() as i32));
                 let modifier_owned = modifiers.to_vec();
                 let result = spawn_blocking_bounded(
                     "foreground element click",
@@ -6494,7 +6592,9 @@ impl ClickTool {
                             modifier_owned.iter().map(String::as_str).collect();
                         crate::input::with_x11_foreground_opts(
                             xid,
-                            crate::input::ForegroundOptions::pointer(),
+                            crate::input::ForegroundOptions::pointer()
+                                .for_pid(pid)
+                                .at_point(sx.round() as i32, sy.round() as i32),
                             || {
                                 crate::input::send_click_xtest_desktop_with_modifiers(
                                     sx.round() as i32,
@@ -6508,15 +6608,27 @@ impl ClickTool {
                     },
                 )
                 .await;
-                let window_point = crate::x11::window_info(xid)
-                    .map(|w| (sx.round() as i32 - w.x, sy.round() as i32 - w.y))
-                    .unwrap_or((sx.round() as i32, sy.round() as i32));
                 match result {
                     Ok(Ok(((), report))) => {
                         let confirmed = report.window_change_confirms();
+                        let popup_outcome = PopupClickOutcome::from_foreground(&report);
+                        let mut structured = foreground_structured(
+                            "x11_xtest_fg",
+                            report.clone(),
+                            serde_json::Map::new(),
+                        );
+                        let popup_note = popup_outcome
+                            .map(|outcome| outcome.apply(&mut structured))
+                            .unwrap_or_default();
                         let result = ToolResult::text(format!(
                             "Clicked element [{idx}] (pid {pid}) with a real pointer click \
-                             (delivery_mode=foreground, focus_after={}){}{}",
+                             (delivery_mode=foreground{}, focus_after={}){}{}{popup_note}",
+                            report
+                                .popup_target
+                                .map(|popup| format!(
+                                    ", popup window {popup} took the input without activation"
+                                ))
+                                .unwrap_or_default(),
                             report.focus_after.as_str(),
                             if confirmed {
                                 format!("; {}.", report.window_change.as_deref().unwrap_or(""))
@@ -6528,11 +6640,7 @@ impl ClickTool {
                                 .map(|n| format!(" ({n})."))
                                 .unwrap_or_default(),
                         ))
-                        .with_structured(foreground_structured(
-                            "x11_xtest_fg",
-                            report,
-                            serde_json::Map::new(),
-                        ));
+                        .with_structured(structured);
                         with_pixel_points(
                             result,
                             Some((sx.round() as i32, sy.round() as i32)),
@@ -7112,6 +7220,19 @@ impl Tool for ClickTool {
             {
                 let observed_for_ax = observed.clone();
                 let guard_pid = (!delivery.is_foreground()).then_some(pid);
+                // A token from a popup's own snapshot (a menu-bar menu read
+                // with get_window_state): whether the popup closed afterwards
+                // tells the caller if the item really ran its click.
+                let token_popup = match xid_hint.filter(|_| !delivery.is_foreground()) {
+                    Some(xid) if !crate::wayland::is_wayland() => {
+                        tokio::task::spawn_blocking(move || crate::input::popup_window_info(xid))
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|popup| popup.window)
+                    }
+                    _ => None,
+                };
                 let ax_result = match tokio::time::timeout(
                     ELEMENT_AX_BUDGET,
                     tokio::task::spawn_blocking(move || {
@@ -7155,9 +7276,24 @@ impl Tool for ClickTool {
                              AT-SPI timeout; its effect is unknown"
                         );
                     }
+                    let mut text = format!("Clicked element [{idx}] (pid {pid}).");
+                    if let Some(window) = token_popup {
+                        let closed = tokio::task::spawn_blocking(move || {
+                            crate::input::foreground::wait_for_popup_close(window)
+                        })
+                        .await
+                        .unwrap_or(false);
+                        text.push_str(
+                            &PopupClickOutcome {
+                                window,
+                                closed,
+                                ran_action: true,
+                            }
+                            .apply(&mut structured),
+                        );
+                    }
                     return attach_focus_guard(
-                        ToolResult::text(format!("Clicked element [{idx}] (pid {pid})."))
-                            .with_structured(structured),
+                        ToolResult::text(text).with_structured(structured),
                         guard.as_ref(),
                     );
                 }
@@ -7510,6 +7646,20 @@ impl Tool for ClickTool {
             )
             .await;
         }
+        // A background click on an open popup (the call get_window_state
+        // advises for a Qt combo list whose items have no accessibles) is
+        // checked afterwards by whether the popup closed. Foreground clicks
+        // learn the same from their own transaction.
+        let background_popup =
+            if !delivery.is_foreground() && !crate::wayland::wayland_input_enabled() {
+                tokio::task::spawn_blocking(move || crate::input::popup_window_info(xid))
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|popup| popup.window)
+            } else {
+                None
+            };
         let cursor_id_for_task = cursor_id.clone();
         let modifiers_for_task = modifiers.clone();
         // delivery_mode: background (default) = no-focus-steal injection;
@@ -7642,11 +7792,11 @@ impl Tool for ClickTool {
                 Ok((if fg { "x11_pixel_fg" } else { "x11_pixel" }, None, None))
             };
             if delivery.is_foreground() {
-                crate::input::with_x11_foreground_opts(
-                    xid,
-                    crate::input::ForegroundOptions::pointer(),
-                    || inject(true),
-                )
+                let mut opts = crate::input::ForegroundOptions::pointer().for_pid(pid);
+                if let Some((sx, sy)) = pixel_screen_point {
+                    opts = opts.at_point(sx, sy);
+                }
+                crate::input::with_x11_foreground_opts(xid, opts, || inject(true))
                 .map(|((path, route, guard), report)| (path, Some(report), route, guard))
             } else {
                 inject(false).map(|(path, route, guard)| (path, None, route, guard))
@@ -7695,16 +7845,40 @@ impl Tool for ClickTool {
                         "delivery_mode": mode_label,
                     }),
                 };
-                if let Some(report) = report {
-                    apply_foreground_report(&mut structured, &report);
+                if let Some(report) = &report {
+                    apply_foreground_report(&mut structured, report);
                 }
-                let suffix = match &route {
-                    Some(route) => route.text_suffix(mode_label),
-                    None => format!(
+                let mut suffix = match (&route, &report) {
+                    (Some(route), _) => route.text_suffix(mode_label),
+                    (None, Some(report)) => foreground_click_suffix(path, report),
+                    (None, None) => format!(
                         "(delivery_mode={mode_label}, path={path}); not verified — confirm \
                          with a screenshot."
                     ),
                 };
+                let popup_outcome = match (&report, background_popup) {
+                    (Some(report), _) => PopupClickOutcome::from_foreground(report),
+                    (None, Some(window)) => {
+                        let closed = tokio::task::spawn_blocking(move || {
+                            crate::input::foreground::wait_for_popup_close(window)
+                        })
+                        .await
+                        .unwrap_or(false);
+                        Some(PopupClickOutcome {
+                            window,
+                            closed,
+                            ran_action: matches!(route, Some(PointerRoute::Atspi(_))),
+                        })
+                    }
+                    (None, None) => None,
+                };
+                if let Some(outcome) = popup_outcome {
+                    if outcome.closed {
+                        // The closed popup is the verification.
+                        suffix = suffix.replace("; not verified — confirm with a screenshot.", ".");
+                    }
+                    suffix.push_str(&outcome.apply(&mut structured));
+                }
                 attach_focus_guard(
                     ToolResult::text(format!("Clicked at ({x:.1}, {y:.1}) × {count} {suffix}"))
                         .with_structured(structured),
