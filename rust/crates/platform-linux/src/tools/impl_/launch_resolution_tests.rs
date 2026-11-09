@@ -55,9 +55,42 @@ fn a_missing_process_counts_as_exited() {
     assert!(!process_exited(std::process::id()));
 }
 
+fn clean_exit(after_ms: u64) -> LaunchExit {
+    use std::os::unix::process::ExitStatusExt;
+    LaunchExit {
+        status: std::process::ExitStatus::from_raw(0),
+        after: std::time::Duration::from_millis(after_ms),
+    }
+}
+
+fn failed_exit(code: i32, after_ms: u64) -> LaunchExit {
+    use std::os::unix::process::ExitStatusExt;
+    LaunchExit {
+        status: std::process::ExitStatus::from_raw(code << 8),
+        after: std::time::Duration::from_millis(after_ms),
+    }
+}
+
+fn result_text(result: &ToolResult) -> String {
+    result
+        .content
+        .iter()
+        .filter_map(|content| match content {
+            pincer_core::protocol::Content::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn a_handoff_timeout_is_a_refusal_not_a_null_pid_success() {
-    let result = launch_handoff_timeout_result("Nautilus", 4242, 8);
+    let result = launch_handoff_timeout_result(
+        "Nautilus",
+        4242,
+        8,
+        Some(&clean_exit(300)),
+        &launch_child::Handoff::Launcher("gapplication".into()),
+    );
     assert_eq!(
         result.is_error,
         Some(true),
@@ -70,4 +103,97 @@ fn a_handoff_timeout_is_a_refusal_not_a_null_pid_success() {
     assert_eq!(s["running"], Value::Null);
     assert_eq!(s["launcher_pid"], 4242);
     assert_eq!(s["waited_secs"], 8);
+}
+
+#[test]
+fn a_running_instance_handoff_names_the_running_pid() {
+    let mut window = window("gnome-calculator");
+    window.pid = Some(900);
+    window.xid = 77;
+    let result = launch_handoff_timeout_result(
+        "Calculator",
+        4242,
+        8,
+        Some(&clean_exit(300)),
+        &launch_child::Handoff::RunningInstance {
+            pid: 900,
+            windows: vec![window],
+        },
+    );
+    let text = result_text(&result);
+    assert!(text.contains("already running as pid 900"), "{text}");
+    assert!(!text.contains("D-Bus activation"), "{text}");
+    let s = result.structured_content.unwrap();
+    assert_eq!(s["handoff"], "running_instance");
+    assert_eq!(s["running_instance"]["pid"], 900);
+    assert_eq!(s["exit_code"], 0);
+}
+
+#[test]
+fn a_process_that_exits_without_a_window_is_reported_as_it_ended() {
+    let result = launch_exited_result("/usr/bin/sleep 1", 4242, Some(&clean_exit(1003)), "", true);
+    assert_eq!(result.is_error, Some(true));
+    let text = result_text(&result);
+    assert!(
+        text.contains(
+            "'/usr/bin/sleep 1' (pid 4242) exited with code 0 after 1.0 s without opening a window"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("It printed nothing."), "{text}");
+    assert!(!text.contains("D-Bus"), "{text}");
+    assert!(!text.contains("handed off"), "{text}");
+    let s = result.structured_content.unwrap();
+    assert_eq!(s["code"], "launch_exited");
+    assert_eq!(s["exit_code"], 0);
+    assert_eq!(s["running"], false);
+    assert_eq!(s["exited_after_ms"], 1003);
+    assert!(s.get("handoff").is_none());
+
+    let failed = launch_exited_result(
+        "TestApp-x86_64.AppImage",
+        4243,
+        Some(&failed_exit(127, 40)),
+        "Error: No suitable fusermount binary found on the $PATH",
+        true,
+    );
+    let text = result_text(&failed);
+    assert!(text.contains("exited with code 127 after 40 ms"), "{text}");
+    assert!(
+        text.ends_with(
+            "The end of its output:\nError: No suitable fusermount binary found on the $PATH"
+        ),
+        "{text}"
+    );
+    let s = failed.structured_content.unwrap();
+    assert_eq!(s["exit_code"], 127);
+    assert_eq!(
+        s["output_tail"],
+        "Error: No suitable fusermount binary found on the $PATH"
+    );
+
+    // Output not captured: no claim that it printed nothing.
+    let blind = launch_exited_result("x", 1, None, "", false);
+    let text = result_text(&blind);
+    assert!(text.contains("its exit status was not recorded"), "{text}");
+    assert!(!text.contains("printed nothing"), "{text}");
+    assert_eq!(
+        blind.structured_content.unwrap()["output_tail"],
+        Value::Null
+    );
+}
+
+#[test]
+fn a_failed_launcher_is_not_waited_on_for_the_handoff_budget() {
+    use std::time::Duration;
+    assert_eq!(
+        launch_window_budget(Some(&failed_exit(127, 40)), true),
+        Duration::from_millis(40) + LAUNCH_FAILED_GRACE
+    );
+    assert_eq!(
+        launch_window_budget(Some(&clean_exit(1000)), true),
+        LAUNCH_HANDOFF_BUDGET
+    );
+    assert_eq!(launch_window_budget(None, true), LAUNCH_HANDOFF_BUDGET);
+    assert_eq!(launch_window_budget(None, false), LAUNCH_STARTING_BUDGET);
 }

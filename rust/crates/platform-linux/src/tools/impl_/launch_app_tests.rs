@@ -47,7 +47,9 @@ fn launched_children_are_reaped_instead_of_lingering_as_zombies() {
     // `/bin/sh` rather than a richer coreutils binary: it is the one
     // executable POSIX and the Nix build sandbox both guarantee, and the
     // sandbox has no `/bin/true`.
-    let pid = spawn_launch_command("/bin/sh -c exit", &[]).expect("/bin/sh should spawn");
+    let pid = spawn_launch_command("/bin/sh -c exit", &[])
+        .expect("/bin/sh should spawn")
+        .pid;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         match proc_state(pid) {

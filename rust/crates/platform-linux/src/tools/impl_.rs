@@ -2125,10 +2125,16 @@ mod get_window_state_actions_tests;
 pub struct LaunchAppTool;
 static LAUNCH_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
+mod launch_child;
+use launch_child::{LaunchExit, LaunchedChild};
+
 /// Spawn a launcher command line (an executable plus arguments, e.g. an XDG
-/// `Exec=` value with field codes stripped) in the background and return the
-/// child pid.
-fn spawn_launch_command(cmd: &str, additional_arguments: &[String]) -> std::io::Result<u32> {
+/// `Exec=` value with field codes stripped) in the background. The child's
+/// exit and the end of its output are recorded for the launch result.
+fn spawn_launch_command(
+    cmd: &str,
+    additional_arguments: &[String],
+) -> std::io::Result<LaunchedChild> {
     let mut parts = cmd.split_whitespace();
     let prog = parts.next().unwrap_or(cmd);
     let mut rest: Vec<String> = parts.map(str::to_owned).collect();
@@ -2139,10 +2145,9 @@ fn spawn_launch_command(cmd: &str, additional_arguments: &[String]) -> std::io::
         // The child must not inherit the driver's stdio: in private-worker mode
         // stdout is the JSON-RPC stream to the SDK, and a chatty app (Chromium's
         // zygote logs, GTK warnings) writing there corrupts a response and shuts
-        // the worker down.
+        // the worker down. Its stdout and stderr go to a capture
+        // (`spawn_watched`) instead.
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
         // Enable accessibility for this child without toggling GNOME's global
         // ScreenReaderEnabled setting (which can launch Orca). Native
         // toolkits ignore these when they do not need them.
@@ -2155,10 +2160,7 @@ fn spawn_launch_command(cmd: &str, additional_arguments: &[String]) -> std::io::
     {
         launch.arg("--force-renderer-accessibility");
     }
-    let child = launch.spawn()?;
-    let pid = child.id();
-    reap_in_background(child);
-    Ok(pid)
+    launch_child::spawn_watched(launch)
 }
 
 /// Collect a launched child's exit status in the background.
@@ -2305,7 +2307,7 @@ impl Tool for LaunchAppTool {
                 .map(|w| w.xid)
                 .collect();
         let result = tokio::task::spawn_blocking(
-            move || -> anyhow::Result<(String, Option<u32>, String)> {
+            move || -> anyhow::Result<(String, Option<LaunchedChild>, String)> {
                 // Open URLs via xdg-open.
                 if !urls.is_empty() {
                     let mut children = Vec::new();
@@ -2332,10 +2334,10 @@ impl Tool for LaunchAppTool {
                 let command = launch_path_opt.as_deref().or(name_opt.as_deref());
                 if let Some(cmd) = command {
                     match spawn_launch_command(cmd, &additional_arguments) {
-                        Ok(pid) => {
+                        Ok(child) => {
                             return Ok((
-                                format!("✅ Launched {cmd} (pid {pid}) in background."),
-                                Some(pid),
+                                format!("✅ Launched {cmd} (pid {}) in background.", child.pid),
+                                Some(child),
                                 cmd.to_owned(),
                             ));
                         }
@@ -2345,7 +2347,7 @@ impl Tool for LaunchAppTool {
                             // source list_apps reads — and run the match's Exec=.
                             let installed = crate::installed_apps::list_installed_apps();
                             if let Some(app) = match_installed_app(&installed, cmd) {
-                                let pid =
+                                let child =
                                     spawn_launch_command(&app.launch_path, &additional_arguments)
                                         .map_err(|e| {
                                         anyhow::anyhow!(
@@ -2357,11 +2359,11 @@ impl Tool for LaunchAppTool {
                                     })?;
                                 return Ok((
                                     format!(
-                                        "✅ Launched {} (`{}`, pid {pid}) in background — \
+                                        "✅ Launched {} (`{}`, pid {}) in background — \
                                          resolved '{cmd}' via its desktop entry.",
-                                        app.name, app.launch_path
+                                        app.name, app.launch_path, child.pid
                                     ),
-                                    Some(pid),
+                                    Some(child),
                                     format!("{}\u{0}{cmd}\u{0}{}", app.name, app.launch_path),
                                 ));
                             }
@@ -2397,14 +2399,20 @@ impl Tool for LaunchAppTool {
         .await;
 
         match result {
-            Ok(Ok((message, pid_opt, name))) => {
-                if let Some(launcher_pid) = pid_opt {
+            Ok(Ok((message, child_opt, name))) => {
+                if let Some(child) = child_opt {
+                    let launcher_pid = child.pid;
                     // `name` may carry NUL-separated match keys (display name,
-                    // query, Exec=) for a desktop-entry launch.
+                    // query, Exec=) for a desktop-entry launch. The last key
+                    // is the command that actually ran.
                     let query = name.clone();
+                    let program = launch_child::launch_program(
+                        query.rsplit('\u{0}').next().unwrap_or(&query),
+                    );
                     let name = name.split('\u{0}').next().unwrap_or("").to_owned();
+                    let watched = child.clone();
                     let resolved = tokio::task::spawn_blocking(move || {
-                        resolve_launched_windows(launcher_pid, &query, &windows_before)
+                        resolve_launched_windows(&watched, &query, &windows_before)
                     })
                     .await
                     .unwrap_or_else(|_| LaunchedWindows::default());
@@ -2430,18 +2438,36 @@ impl Tool for LaunchAppTool {
                                 ));
                             }
                             None => {
-                                // The launcher exited (D-Bus activation or a failed
-                                // start) and the hand-off budget in
-                                // `resolve_launched_windows` passed with no new
-                                // window ever appearing. This is not a success: we
-                                // have no pid, no window, and no way to know the app
-                                // actually started. Report a typed refusal instead
-                                // of a `pid: null` shape that reads as success.
-                                return launch_handoff_timeout_result(
-                                    &name,
-                                    launcher_pid,
-                                    LAUNCH_HANDOFF_BUDGET.as_secs(),
+                                // The launcher exited and no new window appeared.
+                                // This is not a success: no pid, no window. It is
+                                // a hand-off only with evidence of one (see
+                                // `launch_child::handoff_evidence`); otherwise the
+                                // result says how the process ended and quotes
+                                // its output.
+                                let exit = resolved.exit.or_else(|| {
+                                    child.exit_within(std::time::Duration::from_millis(200))
+                                });
+                                let handoff = launch_child::handoff_evidence(
+                                    &program,
+                                    exit.as_ref(),
+                                    &resolved.running_instance,
                                 );
+                                return match handoff {
+                                    Some(handoff) => launch_handoff_timeout_result(
+                                        &name,
+                                        launcher_pid,
+                                        LAUNCH_HANDOFF_BUDGET.as_secs(),
+                                        exit.as_ref(),
+                                        &handoff,
+                                    ),
+                                    None => launch_exited_result(
+                                        &name,
+                                        launcher_pid,
+                                        exit.as_ref(),
+                                        &child.output_tail(),
+                                        child.output_captured(),
+                                    ),
+                                };
                             }
                         }
                     }
@@ -2463,26 +2489,105 @@ impl Tool for LaunchAppTool {
     }
 }
 
-/// The `launch_app` D-Bus-activation hand-off timed out: the launcher exited
-/// (handing the request to a running service) but no new window of the app
-/// ever appeared within the deadline. This has no pid and no confirmed
+/// A `launch_app` hand-off timed out: the launcher exited cleanly with
+/// evidence that it handed the request on (`handoff`), but no new window of
+/// the app appeared within the deadline. This has no pid and no confirmed
 /// window, so it is a refusal (`code: "launch_handoff_timeout"`), never a
 /// `pid: null` shape that a caller could mistake for success.
-fn launch_handoff_timeout_result(name: &str, launcher_pid: u32, waited_secs: u64) -> ToolResult {
-    ToolResult::error(format!(
-        "'{name}' was handed off for D-Bus activation but no new window appeared within \
-         {waited_secs}s; the launch could not be confirmed. Call list_windows to check \
-         whether it started anyway, or retry."
-    ))
-    .with_structured(json!({
+fn launch_handoff_timeout_result(
+    name: &str,
+    launcher_pid: u32,
+    waited_secs: u64,
+    exit: Option<&LaunchExit>,
+    handoff: &launch_child::Handoff,
+) -> ToolResult {
+    let after = exit
+        .map(|exit| format!(" after {}", launch_elapsed(exit.after)))
+        .unwrap_or_default();
+    let mut structured = json!({
         "code": "launch_handoff_timeout",
         "effect": "refused",
-        "handoff": "dbus_activation",
         "name": name,
         "launcher_pid": launcher_pid,
         "pid": Value::Null,
         "running": Value::Null,
         "waited_secs": waited_secs,
+        "exit_code": exit.and_then(|exit| exit.status.code()),
+        "exited_after_ms": exit.map(|exit| exit.after.as_millis() as u64),
+    });
+    let text = match handoff {
+        launch_child::Handoff::Launcher(program) => {
+            structured["handoff"] = json!("launcher");
+            format!(
+                "'{name}' (pid {launcher_pid}) exited cleanly{after}: {program} hands a launch \
+                 to another process and exits, but no new window appeared within \
+                 {waited_secs}s; the launch could not be confirmed. Call list_windows to check \
+                 whether it started anyway, or retry."
+            )
+        }
+        launch_child::Handoff::RunningInstance { pid, windows } => {
+            structured["handoff"] = json!("running_instance");
+            structured["running_instance"] = json!({
+                "pid": pid,
+                "windows": windows.iter().map(window_record_json).collect::<Vec<_>>(),
+            });
+            let named = windows
+                .first()
+                .map(|window| format!(" (window {} \"{}\")", window.xid, window.title))
+                .unwrap_or_default();
+            format!(
+                "'{name}' (pid {launcher_pid}) exited cleanly{after} and no new window appeared \
+                 within {waited_secs}s. The app is already running as pid {pid}{named}; a \
+                 single-instance app hands a second launch to its running instance, which may \
+                 only have raised its existing window. Act on pid {pid}, or call list_windows."
+            )
+        }
+    };
+    ToolResult::error(text).with_structured(structured)
+}
+
+/// "40 ms" under a second, "1.0 s" from there.
+fn launch_elapsed(elapsed: std::time::Duration) -> String {
+    if elapsed < std::time::Duration::from_secs(1) {
+        format!("{} ms", elapsed.as_millis())
+    } else {
+        format!("{:.1} s", elapsed.as_secs_f64())
+    }
+}
+
+/// The launched process ended without opening a window and nothing shows a
+/// hand-off: say how it ended (exit code or signal, and when) and quote the
+/// end of its output (stdout and stderr).
+fn launch_exited_result(
+    name: &str,
+    launcher_pid: u32,
+    exit: Option<&LaunchExit>,
+    output_tail: &str,
+    output_captured: bool,
+) -> ToolResult {
+    use std::os::unix::process::ExitStatusExt;
+    let how = match exit {
+        Some(exit) => format!("{} after {}", exit.describe(), launch_elapsed(exit.after)),
+        None => "exited (its exit status was not recorded)".to_owned(),
+    };
+    let mut text =
+        format!("'{name}' (pid {launcher_pid}) {how} without opening a window; it is not running.");
+    if !output_tail.is_empty() {
+        text.push_str(&format!(" The end of its output:\n{output_tail}"));
+    } else if output_captured {
+        text.push_str(" It printed nothing.");
+    }
+    ToolResult::error(text).with_structured(json!({
+        "code": "launch_exited",
+        "effect": "none",
+        "name": name,
+        "launcher_pid": launcher_pid,
+        "pid": Value::Null,
+        "running": false,
+        "exit_code": exit.and_then(|exit| exit.status.code()),
+        "signal": exit.and_then(|exit| exit.status.signal()),
+        "exited_after_ms": exit.map(|exit| exit.after.as_millis() as u64),
+        "output_tail": if output_captured { json!(output_tail) } else { Value::Null },
     }))
 }
 
@@ -2496,6 +2601,11 @@ struct LaunchedWindows {
     /// The window belongs to another process than the launcher, or the
     /// launcher exited without one.
     handed_off: bool,
+    /// How the launcher exited, when it did.
+    exit: Option<LaunchExit>,
+    /// When the launcher exited without a new window: windows matching the
+    /// launch that other processes own (an already-running instance).
+    running_instance: Vec<crate::x11::WindowInfo>,
 }
 
 /// Whether the launched process is gone or a zombie (already reaped or being
@@ -2550,6 +2660,21 @@ fn window_matches_launch_key(window: &crate::x11::WindowInfo, query: &str) -> bo
 /// taken over, so the window is either imminent or never coming).
 const LAUNCH_STARTING_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
 const LAUNCH_HANDOFF_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
+/// After a launcher fails (non-zero exit or a signal), how long a window of
+/// the launch is still waited for: a failed start does not hand off, so its
+/// window is not coming.
+const LAUNCH_FAILED_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The window budget once the launcher's state is known: a failed exit waits
+/// only [`LAUNCH_FAILED_GRACE`] past the exit, a clean exit the hand-off
+/// budget, a running launcher the starting budget.
+fn launch_window_budget(exit: Option<&LaunchExit>, launcher_exited: bool) -> std::time::Duration {
+    match exit {
+        Some(exit) if !exit.status.success() => exit.after + LAUNCH_FAILED_GRACE,
+        _ if launcher_exited => LAUNCH_HANDOFF_BUDGET,
+        _ => LAUNCH_STARTING_BUDGET,
+    }
+}
 
 /// Resolve the window(s) of a launch. Prefers the launcher's own window;
 /// otherwise adopts a newly mapped top-level whose WM_CLASS matches the
@@ -2557,10 +2682,11 @@ const LAUNCH_HANDOFF_BUDGET: std::time::Duration = std::time::Duration::from_sec
 /// (`libreoffice` → `soffice.bin`), or the running D-Bus service GNOME apps
 /// hand their request to.
 fn resolve_launched_windows(
-    launcher_pid: u32,
+    launcher: &LaunchedChild,
     query: &str,
     before: &std::collections::HashSet<u64>,
 ) -> LaunchedWindows {
+    let launcher_pid = launcher.pid;
     let started = std::time::Instant::now();
     loop {
         let all = crate::wayland::list_windows_dispatch(None);
@@ -2574,6 +2700,8 @@ fn resolve_launched_windows(
                 pid: Some(launcher_pid),
                 windows: own,
                 handed_off: false,
+                exit: None,
+                running_instance: Vec::new(),
             };
         }
         let fresh: Vec<_> = all
@@ -2588,19 +2716,28 @@ fn resolve_launched_windows(
                 pid: Some(pid),
                 windows,
                 handed_off: true,
+                exit: launcher.exit(),
+                running_instance: Vec::new(),
             };
         }
-        let launcher_exited = process_exited(launcher_pid);
-        let budget = if launcher_exited {
-            LAUNCH_HANDOFF_BUDGET
-        } else {
-            LAUNCH_STARTING_BUDGET
-        };
-        if started.elapsed() >= budget {
+        let exit = launcher.exit();
+        let launcher_exited = exit.is_some() || process_exited(launcher_pid);
+        if started.elapsed() >= launch_window_budget(exit.as_ref(), launcher_exited) {
+            let running_instance = if launcher_exited {
+                all.iter()
+                    .filter(|w| w.pid.is_some() && w.pid != Some(launcher_pid))
+                    .filter(|w| window_matches_launch(w, query))
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
             return LaunchedWindows {
                 pid: (!launcher_exited).then_some(launcher_pid),
                 windows: Vec::new(),
                 handed_off: launcher_exited,
+                exit,
+                running_instance,
             };
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
