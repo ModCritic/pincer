@@ -241,16 +241,19 @@ evidence; the focus guard alone only watches the target pid.
 `launch_app` keeps the launched process's stdout and stderr in an anonymous
 file (O_TMPFILE under `~/.cache/pincer`, emptied past 1 MiB while the driver
 runs, freed when the app exits) and records how it exits. A window of the
-launcher, of a process it started (an AppImage's app, a forking wrapper), or a
-new window matching the launch is the launch's window. A process that ends
-without one is reported as it ended: `code: "launch_exited"`, "exited with
-code N after X" or the signal, and the last lines it printed. A failed exit is
-reported one second after it happens. It counts as a hand-off
-(`code: "launch_handoff_timeout"`) only after a clean exit with evidence: a
-program whose job is to pass a launch on (xdg-open, gio, gtk-launch,
-gapplication, kioclient, kde-open, kstart, exo-open, dex, dbus-send, gdbus,
-busctl), or a window of the app that another process already owns (the
-running instance of a single-instance app, named with its pid).
+launcher, of a process it started (an AppImage's app, a forking wrapper, a CLI
+that starts its app detached and exits), or a new window matching the launch
+is the launch's window. A process that ends without one is reported as it
+ended: `code: "launch_exited"`, "exited with code N after X" or the signal,
+and the last lines it printed, one second after the exit. It counts as a
+hand-off (`code: "launch_handoff_timeout"`, after up to 8 s of waiting for a
+window) only after a clean exit with evidence: a program whose job is to pass
+a launch on (xdg-open, gio, gtk-launch, gapplication, kioclient, kde-open,
+kstart, exo-open, dex, dbus-send, gdbus, busctl), a window of the app that
+another process already owns (the running instance of a single-instance app,
+named with its pid; its window class must be the program's or the desktop
+entry's own name, so a desktop shell or another app never counts), or a
+process the launcher started that is still running (named with its pid).
 
 **AppImages without FUSE.** When the driver runs in a user namespace that does
 not map root (the `unshare -rn ... --map-user=1000` no-network wrapper), the
