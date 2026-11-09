@@ -183,20 +183,28 @@ pub fn point_ownership(
             };
             let scoped = resolve_window_frame(conn, pid, xid, &seeds).await;
             // A Qt popup has no top-level of its own: ask the container its
-            // items hang under, the one its read walked. The point is already
-            // relative to the popup, the window Qt measures them from.
+            // items hang under, the one its read walked.
             let popup_root = match scoped {
                 Some(_) => None,
                 None => qt_popup_item_container(conn, &app, &seeds, xid)
                     .await
                     .map(|(_, container)| container),
             };
-            let (hit_x, hit_y) = match scoped {
-                Some(ordinal) => {
+            let (hit_x, hit_y) = match (scoped, &popup_root) {
+                (Some(ordinal), _) => {
                     let frame_origin = decoration_frame_origin(conn, &app, &seeds[ordinal]).await;
                     at_point_toolkit_coords((win_x, win_y), Some(client_origin), frame_origin)
                 }
-                None => (win_x, win_y),
+                // Qt measures a popup item's `Window` coordinates from the
+                // window that opened the popup, not from the popup, so the
+                // popup-relative point named the item one row up in a File
+                // menu that opens near the main window's left edge. Take the
+                // offset from the container itself.
+                (None, Some(container)) => match window_origin_of(conn, container).await {
+                    Some(origin) => screen_to_toolkit_window((sx, sy), origin),
+                    None => return Ok(PointOwnership::Unknown),
+                },
+                (None, None) => (win_x, win_y),
             };
             let ordered: Vec<RawObjectRef> = match (scoped, popup_root) {
                 (_, Some(container)) => vec![container],
@@ -247,6 +255,29 @@ pub fn point_ownership(
         || Ok(PointOwnership::Unknown),
     );
     result.unwrap_or(PointOwnership::Unknown)
+}
+
+/// The screen point where `object`'s toolkit puts `Window` coordinate (0, 0):
+/// its screen origin minus its window origin, as the object reports both.
+async fn window_origin_of(
+    conn: &AccessibilityConnection,
+    object: &RawObjectRef,
+) -> Option<(i32, i32)> {
+    let component = call(raw_component(conn.connection(), object)).await?.ok()?;
+    let screen = call(component.get_extents(CoordType::Screen)).await?.ok()?;
+    let window = call(component.get_extents(CoordType::Window)).await?.ok()?;
+    Some(window_origin((screen.0, screen.1), (window.0, window.1)))
+}
+
+/// Where `Window` coordinate (0, 0) lies on screen, from one object's origin
+/// in both coordinate types.
+fn window_origin(screen: (i32, i32), window: (i32, i32)) -> (i32, i32) {
+    (screen.0 - window.0, screen.1 - window.1)
+}
+
+/// A screen point in `Window` coordinates whose (0, 0) is at `origin`.
+fn screen_to_toolkit_window((sx, sy): (i32, i32), origin: (i32, i32)) -> (i32, i32) {
+    (sx - origin.0, sy - origin.1)
 }
 
 /// Whether `ancestor` is on `node`'s parent chain (bounded).
@@ -308,6 +339,28 @@ mod tests {
         assert!(is_row_container_role("list"));
         assert!(!is_row_container_role("panel"));
         assert!(!is_row_container_role("menu"));
+    }
+
+    #[test]
+    fn a_qt_popup_point_is_measured_from_the_window_that_opened_it() {
+        // The probe's File menu, open at 686,331 (258x74) over a main window
+        // whose client area starts at 680,297. Qt reports the menu container
+        // at window (6, 34): its window coordinates are the main window's.
+        let origin = window_origin((686, 331), (6, 34));
+        assert_eq!(origin, (680, 297));
+        // "Quit", the second row (screen 686,369 258x36): its centre must be
+        // asked as window (135, 90), where Qt answers "Quit". The
+        // popup-relative point (129, 56) is the first row's, "Open import...".
+        assert_eq!(screen_to_toolkit_window((815, 387), origin), (135, 90));
+        assert_eq!(screen_to_toolkit_window((815, 349), origin), (135, 52));
+        // The Category combo's list (screen 786,341, window 106,44): "Utilities"
+        // is the third row, centred at screen 881,431.
+        let combo = window_origin((786, 341), (106, 44));
+        assert_eq!(screen_to_toolkit_window((881, 431), combo), (201, 134));
+        // A toolkit that measures from the popup itself gives an origin at
+        // the popup's corner, and the point stays popup-relative.
+        let own = window_origin((686, 331), (0, 0));
+        assert_eq!(screen_to_toolkit_window((815, 387), own), (129, 56));
     }
 
     #[test]
