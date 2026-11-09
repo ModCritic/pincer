@@ -128,7 +128,7 @@ fn a_child_that_exits_is_recorded_with_its_code_and_output() {
          echo 'Error: $FUSERMOUNT_PROG not set' >&2\nexit 127",
     );
     let capture_dir = dir.path().join("cache");
-    let child = spawn_watched_in(Command::new(&path), Some(&capture_dir)).unwrap();
+    let child = spawn_watched_in(Command::new(&path), Some(&capture_dir), None).unwrap();
     assert!(child.output_captured());
     let exit = child
         .exit_within(Duration::from_secs(10))
@@ -148,13 +148,14 @@ fn a_child_that_exits_is_recorded_with_its_code_and_output() {
 fn a_silent_child_has_an_empty_tail_and_without_a_directory_nothing_is_captured() {
     let dir = tempfile::tempdir().unwrap();
     let quiet = script(dir.path(), "quiet.sh", "exit 0");
-    let child = spawn_watched_in(Command::new(&quiet), Some(&dir.path().join("cache"))).unwrap();
+    let child =
+        spawn_watched_in(Command::new(&quiet), Some(&dir.path().join("cache")), None).unwrap();
     let exit = child.exit_within(Duration::from_secs(10)).unwrap();
     assert!(exit.status.success());
     assert_eq!(child.output_tail(), "");
 
     let loud = script(dir.path(), "loud.sh", "echo lost; echo lost >&2; exit 2");
-    let child = spawn_watched_in(Command::new(&loud), None).unwrap();
+    let child = spawn_watched_in(Command::new(&loud), None, None).unwrap();
     assert!(!child.output_captured());
     assert_eq!(
         child
@@ -181,4 +182,46 @@ fn a_capture_over_its_cap_is_emptied_and_appends_again() {
     (&writer).write_all(b"after the cap\n").unwrap();
     assert_eq!(capture.file.metadata().unwrap().len(), 14);
     assert_eq!(capture.tail(), "after the cap");
+}
+
+#[test]
+fn the_reaper_deletes_the_run_folder_once_the_launch_exits() {
+    let dir = tempfile::tempdir().unwrap();
+    let run_root = dir.path().join("appimage-run");
+    let run_dir = super::super::appimage::RunDir::create(&run_root).unwrap();
+    let run_path = run_dir.path().to_path_buf();
+    // Like the runtime: unpack into the folder, run, exit.
+    let path = script(
+        dir.path(),
+        "unpacks.sh",
+        &format!(
+            "mkdir -p {0}/appimage_extracted_x && echo data > {0}/appimage_extracted_x/f\nsleep 0.3",
+            run_path.display()
+        ),
+    );
+    let child = spawn_watched_in(Command::new(&path), None, Some(run_dir)).unwrap();
+    // The launcher was recorded before the reaper could release the folder.
+    assert!(std::fs::read_to_string(run_path.join(".pincer-launcher"))
+        .unwrap()
+        .starts_with(&format!("{} ", child.pid)));
+    child.exit_within(Duration::from_secs(10)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while run_path.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!run_path.exists(), "the run folder outlived the launch");
+}
+
+#[test]
+fn a_launch_that_cannot_spawn_removes_its_run_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let run_dir = super::super::appimage::RunDir::create(&dir.path().join("run")).unwrap();
+    let run_path = run_dir.path().to_path_buf();
+    assert!(spawn_watched_in(
+        Command::new(dir.path().join("missing")),
+        None,
+        Some(run_dir)
+    )
+    .is_err());
+    assert!(!run_path.exists());
 }

@@ -202,18 +202,50 @@ fn a_failed_launcher_is_not_waited_on_for_the_handoff_budget() {
 fn an_unpacked_appimage_launch_says_so_and_why() {
     let reason = "/usr/bin/fusermount3 shows owner uid 65534 here because root is not mapped \
                   in this user namespace, so it can't run setuid root";
+    let owned = appimage::ExtractAndRun {
+        reason: reason.to_owned(),
+        run_dir: Some(PathBuf::from("/home/u/.cache/pincer/appimage-run/1-2-0")),
+    };
     let launched = with_appimage_note(
         ToolResult::text("Launched TestApp-x86_64.AppImage (pid 7) in background.")
             .with_structured(json!({ "pid": 7 })),
-        Some(reason),
+        Some(&owned),
     );
     let text = result_text(&launched);
     assert!(text.contains("--appimage-extract-and-run"), "{text}");
-    assert!(text.contains("unpacked itself"), "{text}");
     assert!(text.contains("root is not mapped"), "{text}");
+    assert!(
+        text.contains("unpacks itself into /home/u/.cache/pincer/appimage-run/1-2-0"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Pincer deletes that folder when the app exits."),
+        "{text}"
+    );
     let s = launched.structured_content.unwrap();
     assert_eq!(s["appimage"]["mode"], "extract_and_run");
     assert_eq!(s["appimage"]["reason"], reason);
+    assert_eq!(
+        s["appimage"]["run_dir"],
+        "/home/u/.cache/pincer/appimage-run/1-2-0"
+    );
+    assert_eq!(s["appimage"]["removed_after_exit"], true);
+
+    // The command set its own TMPDIR: not ours to clean up, and it says so.
+    let theirs = appimage::ExtractAndRun {
+        reason: reason.to_owned(),
+        run_dir: None,
+    };
+    let launched = with_appimage_note(
+        ToolResult::text("Launched x.").with_structured(json!({ "pid": 7 })),
+        Some(&theirs),
+    );
+    let text = result_text(&launched);
+    assert!(text.contains("Pincer does not clean that up"), "{text}");
+    assert_eq!(
+        launched.structured_content.unwrap()["appimage"]["removed_after_exit"],
+        false
+    );
 
     let plain = with_appimage_note(
         ToolResult::text("Launched x.").with_structured(json!({ "pid": 7 })),

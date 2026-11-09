@@ -2139,10 +2139,27 @@ fn spawn_launch_command(
     let mut words: Vec<String> = cmd.split_whitespace().map(str::to_owned).collect();
     words.extend(additional_arguments.iter().cloned());
     // A type-2 AppImage that can't mount with FUSE here (root unmapped in a
-    // user namespace) unpacks and runs instead of failing with exit 127.
+    // user namespace) unpacks and runs instead of failing with exit 127. It
+    // unpacks into a folder of its own on disk, which the reaper deletes once
+    // the app has exited, unless the command sets its own TMPDIR.
+    let mut run_dir = None;
     let extract_and_run = appimage::extract_and_run_needed(&words).map(|(at, reason)| {
+        if !appimage::command_sets_tmpdir(&words, at) {
+            if let Some(root) = appimage::run_root() {
+                appimage::sweep_run_dirs(&root);
+                match appimage::RunDir::create(&root) {
+                    Ok(dir) => run_dir = Some(dir),
+                    Err(error) => {
+                        tracing::debug!("no AppImage run folder under {}: {error}", root.display())
+                    }
+                }
+            }
+        }
         words.insert(at + 1, appimage::EXTRACT_AND_RUN_FLAG.to_owned());
-        reason
+        appimage::ExtractAndRun {
+            reason,
+            run_dir: run_dir.as_ref().map(|dir| dir.path().to_path_buf()),
+        }
     });
     let prog = words.first().map(String::as_str).unwrap_or(cmd);
     let rest = words.get(1..).unwrap_or_default();
@@ -2167,36 +2184,55 @@ fn spawn_launch_command(
     {
         launch.arg("--force-renderer-accessibility");
     }
-    let mut child = launch_child::spawn_watched(launch)?;
+    if let Some(dir) = &run_dir {
+        launch.env("TMPDIR", dir.path());
+    }
+    let mut child = launch_child::spawn_watched(launch, run_dir)?;
     child.extract_and_run = extract_and_run;
     Ok(child)
 }
 
-/// The note a launch that unpacked an AppImage carries: why, and what it
-/// costs. The runtime unpacks to `$TMPDIR` (default /tmp); one tested
-/// AppImage's runtime left its 547 MB copy there after the app exited.
-fn appimage_extract_note(reason: &str) -> String {
-    format!(
-        "Started with {}: FUSE can't mount AppImages here ({reason}), so it unpacked itself \
-         to $TMPDIR (default /tmp) instead of mounting, which costs time and disk (RAM when \
-         /tmp is tmpfs) on every start and may leave the unpacked copy behind.",
-        appimage::EXTRACT_AND_RUN_FLAG
-    )
+/// The note a launch that unpacked an AppImage carries: why, where the copy
+/// goes and what it costs. In a driver-owned folder the copy is deleted
+/// after the app exits; elsewhere the runtime is left to it, and the
+/// tested AppImage's runtime left its 547 MB copy behind.
+fn appimage_extract_note(extract: &appimage::ExtractAndRun) -> String {
+    let flag = appimage::EXTRACT_AND_RUN_FLAG;
+    let reason = &extract.reason;
+    match &extract.run_dir {
+        Some(dir) => format!(
+            "Started with {flag}: FUSE can't mount AppImages here ({reason}), so it unpacks \
+             itself into {} (on disk; also the app's TMPDIR) instead of mounting, which costs \
+             time and disk on every start. Pincer deletes that folder when the app exits.",
+            dir.display()
+        ),
+        None => format!(
+            "Started with {flag}: FUSE can't mount AppImages here ({reason}), so it unpacks \
+             itself to $TMPDIR (default /tmp) instead of mounting, which costs time and disk \
+             (RAM when /tmp is tmpfs) on every start and may leave the unpacked copy behind; \
+             Pincer does not clean that up."
+        ),
+    }
 }
 
 /// [`appimage_extract_note`] on a launch result, text and structured.
-fn with_appimage_note(mut result: ToolResult, reason: Option<&str>) -> ToolResult {
-    let Some(reason) = reason else {
+fn with_appimage_note(
+    mut result: ToolResult,
+    extract: Option<&appimage::ExtractAndRun>,
+) -> ToolResult {
+    let Some(extract) = extract else {
         return result;
     };
-    let note = appimage_extract_note(reason);
+    let note = appimage_extract_note(extract);
     result
         .content
         .push(pincer_core::protocol::Content::text(note));
     if let Some(structured) = result.structured_content.as_mut() {
         structured["appimage"] = json!({
             "mode": "extract_and_run",
-            "reason": reason,
+            "reason": extract.reason,
+            "run_dir": extract.run_dir,
+            "removed_after_exit": extract.run_dir.is_some(),
         });
     }
     result
@@ -2513,16 +2549,13 @@ impl Tool for LaunchAppTool {
                                         child.output_captured(),
                                     ),
                                 };
-                                return with_appimage_note(
-                                    result,
-                                    child.extract_and_run.as_deref(),
-                                );
+                                return with_appimage_note(result, child.extract_and_run.as_ref());
                             }
                         }
                     }
                     with_appimage_note(
                         ToolResult::text(text).with_structured(structured),
-                        child.extract_and_run.as_deref(),
+                        child.extract_and_run.as_ref(),
                     )
                 } else {
                     ToolResult::text(message).with_structured(json!({
@@ -16661,6 +16694,15 @@ pub fn build_registry_with_provider(
         )),
     )));
     r.register(Box::new(LaunchAppTool));
+    // AppImage run folders a crash or an earlier driver left behind.
+    #[cfg(not(test))]
+    if let Some(root) = appimage::run_root() {
+        let _ = std::thread::Builder::new()
+            .name("pincer-appimage-sweep".into())
+            .spawn(move || {
+                appimage::sweep_run_dirs(&root);
+            });
+    }
     let browser_engine = pincer_core::browser::BrowserEngine::new_with_runtime_services(
         Arc::new(crate::browser_platform::LinuxBrowserPlatform::new(
             state.cursor_registry.clone(),

@@ -253,11 +253,19 @@ found on the $PATH"). `launch_app` checks for that the way the AppImage
 runtime does (a `fusermount` or `fusermountN` on `PATH` owned by root with the
 setuid bit, `/dev/fuse`, no_new_privs; `FUSERMOUNT_PROG` overrides) and starts
 an ELF with the "AI\x02" magic with `--appimage-extract-and-run` instead. The
-result says so (`appimage: {mode: "extract_and_run", reason}`): the image is
-unpacked to `$TMPDIR` (default /tmp, RAM when tmpfs) on each start, and the
-runtime in one tested AppImage (type2-runtime fedfad5) left its 547 MB
-copy there after the app exited. To avoid that, start the AppImage from a
-normal shell and drive it by pid.
+image unpacks on every start, which takes time and disk: into a folder of its
+own under `~/.cache/pincer/appimage-run/` (on disk, not a tmpfs /tmp), which is
+also the app's `TMPDIR`. The runtime in one tested AppImage (type2-runtime
+fedfad5) never deletes its 547 MB copy, so the driver does: once the launched
+process has exited and nothing runs from the folder any more, the reaper
+removes it, and folders a crash or an earlier driver left behind are swept at
+startup and before the next AppImage launch. Each launch has its own folder
+because the runtime names its copy after the file's md5, so launches sharing a
+`TMPDIR` would share one copy. A command that sets `TMPDIR` itself
+(`env TMPDIR=... app.AppImage`) keeps it, and that copy is not cleaned up. The
+result says which (`appimage: {mode: "extract_and_run", reason, run_dir,
+removed_after_exit}`). Starting the AppImage from a normal shell and driving it
+by pid avoids the unpacking.
 
 ## Native application menus
 

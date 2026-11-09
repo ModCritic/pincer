@@ -65,8 +65,8 @@ fn signal_name(signal: i32) -> Option<&'static str> {
 pub(super) struct LaunchedChild {
     pub pid: u32,
     /// Set when an AppImage was started with `--appimage-extract-and-run`:
-    /// why FUSE could not mount it.
-    pub extract_and_run: Option<String>,
+    /// why FUSE could not mount it, and the folder it unpacks into.
+    pub extract_and_run: Option<super::appimage::ExtractAndRun>,
     exit: Arc<Mutex<Option<LaunchExit>>>,
     output: Option<Arc<OutputCapture>>,
 }
@@ -113,13 +113,18 @@ impl LaunchedChild {
 /// Spawn `command` with its stdout and stderr captured together, and reap it
 /// in the background, recording how and when it exited. Both streams are
 /// kept: the AppImage runtime prints its FUSE error on stdout and only a
-/// detail on stderr.
-pub(super) fn spawn_watched(command: Command) -> io::Result<LaunchedChild> {
+/// detail on stderr. A `run_dir` (an unpacked AppImage's folder) records the
+/// child as its launcher and is released by the reaper after the exit.
+pub(super) fn spawn_watched(
+    command: Command,
+    run_dir: Option<super::appimage::RunDir>,
+) -> io::Result<LaunchedChild> {
     spawn_watched_in(
         command,
         dirs::cache_dir()
             .map(|cache| cache.join("pincer"))
             .as_deref(),
+        run_dir,
     )
 }
 
@@ -129,6 +134,7 @@ pub(super) fn spawn_watched(command: Command) -> io::Result<LaunchedChild> {
 pub(super) fn spawn_watched_in(
     mut command: Command,
     capture_dir: Option<&std::path::Path>,
+    run_dir: Option<super::appimage::RunDir>,
 ) -> io::Result<LaunchedChild> {
     let capture = capture_dir
         .and_then(OutputCapture::create)
@@ -148,21 +154,38 @@ pub(super) fn spawn_watched_in(
         }
     };
     let started = Instant::now();
-    let child = command.spawn()?;
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            if let Some(run_dir) = run_dir {
+                run_dir.remove_now();
+            }
+            return Err(error);
+        }
+    };
+    if let Some(run_dir) = &run_dir {
+        run_dir.record_launcher(child.id());
+    }
     let launched = LaunchedChild {
         pid: child.id(),
         extract_and_run: None,
         exit: Arc::new(Mutex::new(None)),
         output,
     };
-    reap_recording(child, started, launched.clone());
+    reap_recording(child, started, launched.clone(), run_dir);
     Ok(launched)
 }
 
 /// The reaper of [`spawn_watched`]: like `reap_in_background`, one thread
 /// per child, blocked until the child exits; it also records the exit and
-/// keeps the output capture under its cap while the child runs.
-fn reap_recording(mut child: Child, started: Instant, launched: LaunchedChild) {
+/// keeps the output capture under its cap while the child runs. After the
+/// exit it releases the launch's `run_dir`, if any.
+fn reap_recording(
+    mut child: Child,
+    started: Instant,
+    launched: LaunchedChild,
+    run_dir: Option<super::appimage::RunDir>,
+) {
     let pid = child.id();
     let reaper = std::thread::Builder::new()
         .name(format!("pincer-reap-{pid}"))
@@ -183,6 +206,9 @@ fn reap_recording(mut child: Child, started: Instant, launched: LaunchedChild) {
                     });
                 }
                 Err(e) => tracing::debug!(pid, "launched app could not be reaped: {e}"),
+            }
+            if let Some(run_dir) = run_dir {
+                run_dir.release();
             }
         });
     if let Err(e) = reaper {
