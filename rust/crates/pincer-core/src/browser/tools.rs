@@ -817,7 +817,7 @@ fn isolated_session_lifecycle(
     let snapshot = crate::session::session_snapshot(
         session,
         owner_transport,
-        crate::session::DEFAULT_SESSION_IDLE_TTL,
+        crate::session::configured_session_idle_ttl(),
     )
     .filter(|snapshot| !snapshot.ending)?;
     Some(json!({
@@ -3327,7 +3327,10 @@ mod tests {
     async fn isolated_new_publishes_the_session_effective_idle_ttl() {
         let engine = launching_engine();
         for (idle_ttl, expected) in [
-            (None, crate::session::DEFAULT_SESSION_IDLE_TTL.as_secs()),
+            (
+                None,
+                crate::session::configured_session_idle_ttl().as_secs(),
+            ),
             (Some(std::time::Duration::from_secs(1234)), 1234),
         ] {
             let (session, owner) = start_lifecycle_session(idle_ttl);

@@ -77,8 +77,9 @@ platform-extensible results. Session lifecycle calls return dedicated generated
 records.
 
 `startSession` is optional for ordinary calls. The runtime creates one
-implicit session for this SDK transport and reuses it until shutdown, explicit
-end, or five minutes of inactivity. Use a named session when application code
+implicit session for this SDK transport and reuses it until shutdown or explicit
+end. After 30 minutes of inactivity a session ends, and the next call starts it
+again, fresh. Use a named session when application code
 needs to configure or inspect that run explicitly.
 
 The agent cursor is session-owned and initializes on the first cursor-bearing

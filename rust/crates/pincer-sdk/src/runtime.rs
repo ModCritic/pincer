@@ -24,7 +24,6 @@ use std::sync::{
 };
 
 const RECORDING_IDLE_TTL_SECS_DEFAULT: u64 = 300;
-const SESSION_IDLE_TTL_SECS_DEFAULT: u64 = 300;
 #[cfg(test)]
 // A tokio mutex: the async tests hold it across awaits to serialize runtime
 // ownership, and it does not poison the remaining tests when one fails.
@@ -499,10 +498,8 @@ fn spawn_lifecycle_maintenance(runtime: &Arc<DriverRuntime>) -> LifecycleMainten
         "PINCER_RECORDING_IDLE_TTL_SECS",
         RECORDING_IDLE_TTL_SECS_DEFAULT,
     );
-    let session_ttl = std::time::Duration::from_secs(configured_ttl(
-        "PINCER_SESSION_IDLE_TTL_SECS",
-        SESSION_IDLE_TTL_SECS_DEFAULT,
-    ));
+    // PINCER_SESSION_IDLE_TTL_SECS, or 30 minutes.
+    let session_ttl = pincer_core::session::configured_session_idle_ttl();
     let thread = std::thread::spawn(move || loop {
         if shutdown_rx
             .recv_timeout(std::time::Duration::from_secs(30))

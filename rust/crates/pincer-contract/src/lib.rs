@@ -546,6 +546,8 @@ mod tests {
         assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("session label for multi-call work"));
         assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("repeat it on every call"));
         assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("connection's default session"));
+        assert!(MULTI_CALL_SESSION_DESCRIPTION
+            .contains("After 30 min idle, the next call restarts it fresh"));
     }
 
     #[test]

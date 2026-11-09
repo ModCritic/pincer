@@ -63,7 +63,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           },
           "target": {
@@ -289,7 +289,7 @@
             "type": "boolean"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           }
         },
@@ -372,7 +372,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           },
           "text": {
@@ -472,7 +472,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           },
           "steps": {
@@ -1021,7 +1021,7 @@
         "additionalProperties": false,
         "properties": {
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           }
         },
@@ -1082,7 +1082,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           }
         },
@@ -1203,7 +1203,7 @@
         "additionalProperties": false,
         "properties": {
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           }
         },
@@ -1792,7 +1792,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           },
           "target": {
@@ -2023,7 +2023,7 @@
             "type": "integer"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           },
           "window_id": {
@@ -2594,7 +2594,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           },
           "target": {
@@ -2833,7 +2833,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           },
           "target": {
@@ -3075,7 +3075,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           },
           "target": {
@@ -3715,7 +3715,7 @@
             "type": "integer"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           },
           "width": {
@@ -3896,7 +3896,7 @@
     },
     {
       "name": "start_session",
-      "description": "Optional: create or return a session before acting. For multi-call work, use a short `session` label and repeat it on every call; omitted, the connection's default session is used. Actions create or reuse a named session on their own, so call this only to set the initial cursor theme or motion, or to revive a public name after it has ended (ordinary actions never revive ended names). Idempotent.",
+      "description": "Optional: create or return a session before acting. For multi-call work, use a short `session` label and repeat it on every call; omitted, the connection's default session is used. Actions create or reuse a named session on their own, so call this only to set the initial cursor theme or motion, or to revive a name ended with end_session (ordinary actions never revive those). A session idle for 30 min ends, and its next call restarts it fresh. Idempotent.",
       "platforms": [
         "macos",
         "windows",
@@ -4260,7 +4260,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session. After 30 min idle, the next call restarts it fresh (old element tokens are gone).",
             "type": "string"
           },
           "target": {
@@ -4574,7 +4574,7 @@
             "type": "integer"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the\nconnection's default session. This field never selects capture modality or authorization.",
+            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the\nconnection's default session. After 30 min idle, the next call restarts it fresh (old\nelement tokens are gone). This field never selects capture modality or authorization.",
             "type": "string"
           },
           "stable_samples": {

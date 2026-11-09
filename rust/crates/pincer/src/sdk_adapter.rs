@@ -265,8 +265,8 @@ impl SdkAdapter {
     }
 
     /// Whether the legacy socket must refuse a call on this ended session.
-    /// An unnamed transport session reclaimed by the idle sweep is not
-    /// refused: core recreates it on the call.
+    /// A session reclaimed by the idle sweep is not refused: core recreates
+    /// it on its owner's call.
     pub fn is_session_ended(&self, session: &str) -> bool {
         if !self
             .public_sessions
@@ -277,8 +277,10 @@ impl SdkAdapter {
         {
             return false;
         }
+        // A session the idle sweep ended, unnamed or a label, restarts on its
+        // owner's next call; core admission checks the owner.
         let internal = format!("{}{session}", self.runtime_prefix);
-        !pincer_core::session::recreates_on_next_call(&internal, &internal)
+        !pincer_core::session::ended_by_idle(&internal)
     }
 
     pub fn mark_all_sessions_ended(&self) {
@@ -349,7 +351,7 @@ impl SdkAdapter {
     pub fn operator_sessions_json(&self) -> Value {
         let sessions = pincer_core::session::list_session_snapshots_with_prefix(
             &self.runtime_prefix,
-            pincer_core::session::DEFAULT_SESSION_IDLE_TTL,
+            pincer_core::session::configured_session_idle_ttl(),
         )
         .into_iter()
         .map(|session| {

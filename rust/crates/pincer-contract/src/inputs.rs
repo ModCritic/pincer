@@ -90,7 +90,8 @@ fn element_token_schema(_: &mut SchemaGenerator) -> Schema {
 
 pub const MULTI_CALL_SESSION_DESCRIPTION: &str =
     "Short session label for multi-call work; repeat it on every call. Omit to use the \
-     connection's default session.";
+     connection's default session. After 30 min idle, the next call restarts it fresh (old \
+     element tokens are gone).";
 
 fn string_list_schema(generator: &mut SchemaGenerator) -> Schema {
     Vec::<String>::json_schema(generator)

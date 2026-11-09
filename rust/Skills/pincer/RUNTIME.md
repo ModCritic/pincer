@@ -35,7 +35,7 @@ The old computer-use compatibility flag does not add a screenshot tool. Use `get
 
 For multi-call work, prefer a short public label and pass the same label on every call that accepts it. Passing it once is not sticky: omission uses the transport's implicit session. Named CLI state is shared only within the daemon's CLI namespace, not with arbitrary MCP connections or a new daemon generation.
 
-`start_session` is optional: actions can establish the run. Use it to configure the initial cursor theme or revive a name after `end_session`. The default idle TTL is five minutes; do not assume a long human permission wait preserves handles.
+`start_session` is optional: actions can establish the run. Use it to configure the initial cursor theme or revive a name after `end_session`. A session idle for 30 minutes (the default TTL) ends and its cleanup runs; the next call with the same label on the same connection starts it again, fresh, and says so once, but element tokens, snapshots, approvals and recordings from before are gone. A label ended with `end_session` stays ended until `start_session`.
 
 ```bash
 pincer start_session '{"session":"run-1"}'

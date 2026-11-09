@@ -236,9 +236,11 @@ impl Tool for GetSessionTool {
                 .with_structured(json!({ "code": "session_not_started" }));
         };
         let owner = owner_transport_of(&args, &id);
-        let Some(snapshot) =
-            crate::session::session_snapshot(&id, &owner, crate::session::DEFAULT_SESSION_IDLE_TTL)
-        else {
+        let Some(snapshot) = crate::session::session_snapshot(
+            &id,
+            &owner,
+            crate::session::configured_session_idle_ttl(),
+        ) else {
             return ToolResult::error("session is not visible to this transport")
                 .with_structured(json!({ "code": "session_not_started" }));
         };
@@ -289,8 +291,10 @@ impl Tool for ListSessionsTool {
                 }
             },
         };
-        let sessions =
-            crate::session::list_session_snapshots(owner, crate::session::DEFAULT_SESSION_IDLE_TTL);
+        let sessions = crate::session::list_session_snapshots(
+            owner,
+            crate::session::configured_session_idle_ttl(),
+        );
         let end = (offset + limit as usize).min(sessions.len());
         let page = sessions
             .get(offset..end)

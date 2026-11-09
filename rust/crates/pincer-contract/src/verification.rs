@@ -157,7 +157,8 @@ pub struct VerifyStateInput {
     #[schemars(length(min = 1, max = 8))]
     pub expect: Vec<StatePredicate>,
     /// Short session label for multi-call work; repeat it on every call. Omit to use the
-    /// connection's default session. This field never selects capture modality or authorization.
+    /// connection's default session. After 30 min idle, the next call restarts it fresh (old
+    /// element tokens are gone). This field never selects capture modality or authorization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "string_schema")]
     pub session: Option<String>,

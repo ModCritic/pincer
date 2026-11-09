@@ -24,7 +24,10 @@ The typed slice covers the cross-platform session lifecycle tools:
 
 Ordinary calls do not need `start_session`. The runtime creates one implicit
 session for the authenticated transport lease and reuses it until transport
-close, explicit end, or five minutes of inactivity. A session carries no
+close or explicit end. After 30 minutes of inactivity (`PINCER_SESSION_IDLE_TTL_SECS`
+overrides it) a session, unnamed or named, ends and its cleanup runs; the same
+transport's next call starts it again, fresh, and says so once. A session ended
+with `end_session` stays ended until `start_session`. A session carries no
 capture scope: each action selects its window or desktop target.
 
 It also covers the portable whole-desktop loop:

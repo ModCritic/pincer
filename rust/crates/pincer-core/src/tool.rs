@@ -2253,6 +2253,24 @@ impl ToolRegistry {
             tool.invoke(args.clone()),
         )
         .await;
+        // The one call that restarted a session the idle sweep had ended
+        // says so: what the earlier episode held is gone.
+        if let Some(restart) = lifecycle_dispatch
+            .as_ref()
+            .and_then(crate::session::SessionDispatchGuard::restarted_after_idle)
+        {
+            let note = idle_restart_note(
+                args.get("_public_session_label").and_then(Value::as_str),
+                restart,
+            );
+            match result.content.iter_mut().find_map(|content| match content {
+                Content::Text { text, .. } => Some(text),
+                _ => None,
+            }) {
+                Some(text) => *text = format!("{note}\n{text}"),
+                None => result.content.insert(0, Content::text(note)),
+            }
+        }
         match resolved_name {
             // A region crop is not the desktop frame later desktop-scope
             // pixels are read from, so it leaves the recorded scale alone.
@@ -4310,7 +4328,8 @@ resources:
     }
 
     #[tokio::test]
-    async fn idle_reclaimed_unnamed_session_recreates_and_ended_sessions_name_a_working_recovery() {
+    async fn idle_reclaimed_sessions_restart_once_noted_and_ended_sessions_name_a_working_recovery()
+    {
         let hits = Arc::new(AtomicUsize::new(0));
         let mut registry = super::ToolRegistry::new_with_protected_consent_provider(None);
         registry.register(Box::new(ObservationProbe {
@@ -4359,11 +4378,50 @@ resources:
             2
         );
 
-        // The unnamed session comes back on its next call.
-        assert_ne!(call(serde_json::json!({})).await.is_error, Some(true));
+        let first_text = |result: &ToolResult| match result.content.first() {
+            Some(crate::protocol::Content::Text { text, .. }) => text.clone(),
+            other => panic!("no text block: {other:?}"),
+        };
+
+        // The unnamed session comes back on its next call, which says so.
+        let unnamed = call(serde_json::json!({})).await;
+        assert_ne!(unnamed.is_error, Some(true));
+        assert!(
+            first_text(&unnamed).starts_with(
+                "This connection's unnamed session had ended after 0 s idle, so this call started it again, fresh"
+            ),
+            "{unnamed:?}"
+        );
         assert_eq!(hits.load(Ordering::SeqCst), 3);
 
-        // A named session stays refused, and the named recovery works.
+        // So does a named label the sweep ended, and only its first call
+        // after the restart says so.
+        let named = call(serde_json::json!({"session": "named"})).await;
+        assert_ne!(named.is_error, Some(true), "{named:?}");
+        let text = first_text(&named);
+        assert!(
+            text.starts_with("Session 'named' had ended after 0 s idle, so this call started it again, fresh: element tokens and snapshots from before are gone"),
+            "{text}"
+        );
+        assert!(text.ends_with("\nprivate state"), "{text}");
+        let named = call(serde_json::json!({"session": "named"})).await;
+        assert_eq!(first_text(&named), "private state");
+        assert_eq!(hits.load(Ordering::SeqCst), 5);
+
+        // A label ended with end_session stays refused, also after an idle
+        // end, and the named recovery works.
+        assert_eq!(
+            crate::session::evict_idle_with_prefix(Duration::ZERO, &format!("{prefix}named")).len(),
+            1
+        );
+        let ended = registry
+            .invoke_with_context(
+                "end_session",
+                serde_json::json!({"session": "named"}),
+                context.clone(),
+            )
+            .await;
+        assert_ne!(ended.is_error, Some(true), "{ended:?}");
         let named = call(serde_json::json!({"session": "named"})).await;
         assert_eq!(
             refusal(&named),
@@ -4403,7 +4461,7 @@ resources:
             .await;
         assert_ne!(restarted.is_error, Some(true), "{restarted:?}");
         assert_ne!(call(serde_json::json!({})).await.is_error, Some(true));
-        assert_eq!(hits.load(Ordering::SeqCst), 5);
+        assert_eq!(hits.load(Ordering::SeqCst), 7);
 
         crate::session::revoke_sessions_with_prefix(&prefix);
         crate::session::forget_ended_sessions_with_prefix(&prefix);
@@ -6016,6 +6074,23 @@ fn protected_scope_refusal(message: &str) -> ToolResult {
 /// Recovery text for a call on an ended lifecycle episode. A named session is
 /// restarted by name from its own transport; an unnamed one has no label to
 /// pass, so naming one would only start an unrelated session.
+/// The note on the call that restarted a session the idle sweep had ended.
+fn idle_restart_note(public_label: Option<&str>, restart: crate::session::IdleRestart) -> String {
+    let idle = match restart.idle_ttl {
+        Some(ttl) => format!("after {} s idle", ttl.as_secs()),
+        None => "after being idle".to_owned(),
+    };
+    let session = match public_label {
+        Some(label) => format!("Session '{label}'"),
+        None => "This connection's unnamed session".to_owned(),
+    };
+    format!(
+        "{session} had ended {idle}, so this call started it again, fresh: element tokens and \
+         snapshots from before are gone (read the window again), and so are its approvals, \
+         recording and launched-app ownership."
+    )
+}
+
 fn ended_session_refusal_message(public_label: Option<&str>) -> String {
     match public_label {
         Some(label) => format!(

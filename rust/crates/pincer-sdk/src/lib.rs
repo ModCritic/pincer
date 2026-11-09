@@ -57,7 +57,7 @@ use worker::{ActionCompletion, PrivateWorkerClient};
 fn host_sessions_json_for_prefix(runtime_prefix: &str) -> Value {
     let sessions = pincer_core::session::list_session_snapshots_with_prefix(
         runtime_prefix,
-        pincer_core::session::DEFAULT_SESSION_IDLE_TTL,
+        pincer_core::session::configured_session_idle_ttl(),
     )
     .into_iter()
     .map(|session| {
