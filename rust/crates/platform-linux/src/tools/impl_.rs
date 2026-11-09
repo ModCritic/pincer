@@ -2791,7 +2791,10 @@ fn window_matches_launch_key(window: &crate::x11::WindowInfo, query: &str) -> bo
         .unwrap_or(&query)
         .trim_end_matches(".desktop")
         .to_owned();
-    let last = stem.rsplit('.').next().unwrap_or(&stem).to_owned();
+    // Only an app id's last part names the app: "org.gnome.Nautilus" is
+    // "nautilus", but "hi.sh" is not "sh", which every class containing
+    // "sh" (plasmashell, gnome-shell) matched.
+    let last = app_id_last(&stem).unwrap_or(&stem).to_owned();
     let class_last = class.rsplit('.').next().unwrap_or(&class).to_owned();
     class == stem
         || class_last == last
@@ -2801,6 +2804,87 @@ fn window_matches_launch_key(window: &crate::x11::WindowInfo, query: &str) -> bo
             .split_whitespace()
             .next()
             .is_some_and(|word| class.contains(word))
+}
+
+/// The last part of a reverse-DNS app id ("org.gnome.Nautilus" ->
+/// "Nautilus"): a single word with at least two dots. A file name with an
+/// extension ("hi.sh", "soffice.bin") is not one.
+fn app_id_last(name: &str) -> Option<&str> {
+    let (_, last) = name.rsplit_once('.')?;
+    (name.matches('.').count() >= 2
+        && !last.is_empty()
+        && !name.contains(char::is_whitespace)
+        && !name.contains('/'))
+    .then_some(last)
+}
+
+/// The names a launch's own window class can have, lowercase. A query is
+/// NUL-separated keys (a desktop entry's display name, the query, and last
+/// the command that ran) or one command. Each key counts whole; a key that
+/// is one word also as its file name without ".desktop" and, for an app id,
+/// its last part. The command adds the program it runs, with and without its
+/// extension.
+fn launch_identity_names(query: &str) -> Vec<String> {
+    let keys: Vec<String> = query
+        .split('\u{0}')
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let mut candidates: Vec<String> = Vec::new();
+    for key in &keys {
+        candidates.push(key.clone());
+        if key.contains(char::is_whitespace) {
+            continue;
+        }
+        let stem = key
+            .rsplit('/')
+            .next()
+            .unwrap_or(key)
+            .trim_end_matches(".desktop");
+        candidates.push(stem.to_owned());
+        if let Some(last) = app_id_last(stem) {
+            candidates.push(last.to_owned());
+        }
+    }
+    if let Some(command) = keys.last() {
+        let program = launch_child::launch_program(command);
+        match app_id_last(&program) {
+            Some(last) => candidates.push(last.to_owned()),
+            None => {
+                if let Some((base, _)) = program
+                    .rsplit_once('.')
+                    .filter(|(base, _)| !base.is_empty())
+                {
+                    candidates.push(base.to_owned());
+                }
+            }
+        }
+        candidates.push(program);
+    }
+    let mut names: Vec<String> = Vec::new();
+    for name in candidates {
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// Whether `window` is plainly an instance of the launched app: its class,
+/// or an app-id class's last part, is one of the launch's names, whole
+/// (case-insensitive). This is the evidence for a running instance, so,
+/// unlike [`window_matches_launch`], it never matches part of a name: a
+/// script "hi.sh" must not name the desktop shell ("plasmashell") as the app
+/// it handed off to.
+fn window_is_launched_app(window: &crate::x11::WindowInfo, query: &str) -> bool {
+    let class = window.app_name.trim().to_ascii_lowercase();
+    if class.is_empty() {
+        return false;
+    }
+    let names = launch_identity_names(query);
+    names.contains(&class)
+        || app_id_last(&class).is_some_and(|last| names.iter().any(|name| name == last))
 }
 
 /// How long a launch may take to show a window while the launcher process is
@@ -2890,7 +2974,7 @@ fn resolve_launched_windows(
             let running_instance = if launcher_exited {
                 all.iter()
                     .filter(|w| w.pid.is_some() && w.pid != Some(launcher_pid))
-                    .filter(|w| window_matches_launch(w, query))
+                    .filter(|w| window_is_launched_app(w, query))
                     .cloned()
                     .collect()
             } else {

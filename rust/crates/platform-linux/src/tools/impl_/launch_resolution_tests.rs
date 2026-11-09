@@ -50,6 +50,85 @@ fn launch_queries_match_window_classes() {
 }
 
 #[test]
+fn a_script_is_not_an_instance_of_the_desktop_shell() {
+    // A plain script that opens no window, launched with Plasma's desktop
+    // running: the result named pid 647, window "Desktop @ QRect(0,0
+    // 2560x1440)", as the app the script handed off to, because the script's
+    // name ended in ".sh" and "plasmashell" contains "sh".
+    let mut desktop = window("plasmashell");
+    desktop.pid = Some(647);
+    desktop.title = "Desktop @ QRect(0,0 2560x1440) ".into();
+    let script = "/tmp/scripts/hi.sh";
+    assert!(!window_is_launched_app(&desktop, script));
+    assert!(!window_matches_launch(&desktop, script));
+    for class in [
+        "gnome-shell",
+        "fish",
+        "Konsole",
+        "firefox",
+        "org.kde.dolphin",
+    ] {
+        assert!(!window_is_launched_app(&window(class), script), "{class}");
+        assert!(!window_matches_launch(&window(class), script), "{class}");
+    }
+    assert!(!window_is_launched_app(&desktop, "/usr/bin/sleep"));
+    assert!(!window_is_launched_app(&window("Gedit"), "nautilus"));
+    // A wrapper's new window is still adopted by the loose match
+    // (libreoffice runs soffice.bin), but a window of another class is not
+    // evidence of a running instance.
+    assert!(window_matches_launch(
+        &window("libreoffice-writer"),
+        "libreoffice"
+    ));
+    assert!(!window_is_launched_app(
+        &window("libreoffice-writer"),
+        "libreoffice"
+    ));
+    assert!(!window_is_launched_app(&window("plasmashell"), "plasma"));
+}
+
+#[test]
+fn a_running_instance_is_a_window_of_the_launched_program() {
+    let names = |class: &str, query: &str| window_is_launched_app(&window(class), query);
+    assert!(names("gnome-calculator", "gnome-calculator"));
+    assert!(names("Gnome-calculator", "/usr/bin/gnome-calculator"));
+    assert!(names("org.gnome.Nautilus", "nautilus"));
+    assert!(names(
+        "org.gnome.Nautilus",
+        "Files\u{0}org.gnome.Nautilus\u{0}nautilus --new-window"
+    ));
+    assert!(names(
+        "firefox",
+        "env MOZ_ENABLE_WAYLAND=0 /usr/lib/firefox/firefox --new-window"
+    ));
+    assert!(names("kate", "Kate\u{0}org.kde.kate\u{0}kate -b"));
+    assert!(names("Code", "code"));
+    assert!(names(
+        "org.gnome.TextEditor",
+        "Text Editor\u{0}org.gnome.TextEditor\u{0}gnome-text-editor"
+    ));
+    // Whole names only: no part of an app id, a display name's first word,
+    // or an id's vendor prefix.
+    assert!(!names("org.gnome.Nautilus", "naut"));
+    assert!(!names(
+        "text",
+        "Text Editor\u{0}org.gnome.TextEditor\u{0}gnome-text-editor"
+    ));
+    assert!(!names("org.gnome", "org.gnome.Nautilus"));
+    assert!(!names("", "nautilus"));
+}
+
+#[test]
+fn only_an_app_id_has_a_last_part() {
+    assert_eq!(app_id_last("org.gnome.Nautilus"), Some("Nautilus"));
+    assert_eq!(app_id_last("hi.sh"), None);
+    assert_eq!(app_id_last("soffice.bin"), None);
+    assert_eq!(app_id_last("nautilus"), None);
+    assert_eq!(app_id_last("/opt/a.b.c"), None);
+    assert_eq!(app_id_last("org.gnome.x --flag"), None);
+}
+
+#[test]
 fn a_missing_process_counts_as_exited() {
     assert!(process_exited(u32::MAX - 1));
     assert!(!process_exited(std::process::id()));
