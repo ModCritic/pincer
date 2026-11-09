@@ -688,3 +688,36 @@ async fn wait_for_looks_in_the_window_its_own_step_names() {
     assert_ne!(result.is_error, Some(true), "{}", text(&result));
     assert!(!harness.ui.lock().unwrap().dialog_open);
 }
+
+/// The report's flow: step 1 opens a modal dialog, step 2 types into it
+/// with desktop scope. The typing step takes no window from the batch, its
+/// check finds the field in the dialog on top (the app's frontmost window),
+/// and `observe` reads that dialog.
+#[tokio::test]
+async fn a_desktop_scope_step_checks_the_apps_windows_and_observes_where_its_check_held() {
+    let harness = Harness::new();
+    let result = harness
+        .run(json!({
+            "pid": 42, "window_id": 7, "delivery_mode": "foreground",
+            "steps": [
+                {"click": {"role": "button", "name": "Next"}},
+                {"click": {"role": "button", "name": "Back"}},
+                {"type_text": {"text": "x", "scope": "desktop"},
+                 "expect": [{"role": "button", "name": "Keep"}]}
+            ],
+            "observe": {}
+        }))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let typed = harness.calls("type_text")[0].clone();
+    for key in ["pid", "window_id", "delivery_mode"] {
+        assert!(typed.get(key).is_none(), "desktop step got {key}: {typed}");
+    }
+    let structured = result.structured_content.clone().unwrap();
+    assert_eq!(
+        structured["steps"][2]["expect"][0]["ok"], true,
+        "{structured}"
+    );
+    let observed = harness.calls("get_window_state").last().cloned().unwrap();
+    assert_eq!(observed["window_id"], 8, "{observed}");
+}

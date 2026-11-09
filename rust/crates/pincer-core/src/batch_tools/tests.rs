@@ -87,6 +87,7 @@ impl Harness {
                             "y": {"type": "number"},
                             "button": {"type": "string", "enum": ["left", "right", "middle"]},
                             "target": {"type": "object"},
+                            "scope": {"type": "string", "enum": ["window", "desktop"]},
                             "full_output": {"type": "boolean"},
                             "max_elements": {"type": "integer", "minimum": 1}
                         },

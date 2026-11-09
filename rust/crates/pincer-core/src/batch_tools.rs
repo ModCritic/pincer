@@ -167,7 +167,8 @@ impl Tool for RunStepsTool {
                 double_click, right_click, set_value, type_text, press_key, hotkey, scroll, drag, \
                 move_cursor, and `args` are that tool's arguments. `pid`/`window_id` (or \
                 `app`/`window`) and `delivery_mode` on run_steps are defaults for steps that set \
-                none. Reads between steps are skipped; a final get_window_state is the \
+                none; a step with scope \"desktop\" takes neither and acts on whatever has focus \
+                (its checks search the app's windows). Reads between steps are skipped; a final get_window_state is the \
                 `observe`, a final zoom runs after it. Steps share the batch's session and get \
                 the same permission and approval checks as direct calls. All steps are \
                 validated before the first runs. At most 64 steps and 60 s per batch.\n\n\
@@ -295,6 +296,10 @@ struct Action {
     /// platform nor this process's reads know which window it names: its
     /// snapshot was replaced or expired, or it never existed.
     unknown_token: Option<String>,
+    /// `scope:"desktop"` (or a desktop `target`) with no window of its own:
+    /// the action goes to whatever has focus, as it does outside a batch,
+    /// so it takes no window and no delivery_mode from the batch.
+    desktop: bool,
 }
 
 struct Step {
@@ -525,7 +530,7 @@ impl Plan {
             }
             let mut step = parse_step(registry, index, raw, session.as_deref(), has_window)?;
             if let (Some(mode), Some(action)) = (&default_delivery, step.action.as_mut()) {
-                if accepts(registry, action.tool, "delivery_mode") {
+                if !action.desktop && accepts(registry, action.tool, "delivery_mode") {
                     if let Some(object) = action.args.as_object_mut() {
                         object.entry("delivery_mode").or_insert_with(|| json!(mode));
                     }
@@ -849,14 +854,22 @@ async fn run_step(
     // A step's checks look where its action acts: the window the step
     // names (pid/window_id, app/window, or its element token's window),
     // else the window the batch is in.
+    // A desktop-scope step acts wherever the focus is, often in a dialog an
+    // earlier step opened, so its checks search all of the app's windows.
     let own_window = step
         .action
         .as_ref()
         .map(|action| &action.window)
         .filter(|window| !window.is_empty())
         .cloned();
+    let desktop = step.action.as_ref().is_some_and(|action| action.desktop);
     if let Some(check) = &step.wait_for {
         let fallback = own_window.clone().unwrap_or_else(|| context.clone());
+        let fallback = if desktop {
+            app_wide(&fallback)
+        } else {
+            fallback
+        };
         match locator.check(check, &fallback).await {
             Ok(checked) => {
                 if !check.window.is_empty() {
@@ -940,7 +953,7 @@ async fn run_step(
                     return failure(index, label, Phase::Find, miss.code, miss.message, report);
                 }
             }
-        } else if needs_lookup(&window_spec, &args, tool, registry) {
+        } else if !desktop && needs_lookup(&window_spec, &args, tool, registry) {
             match locator.window(&window_spec).await {
                 Ok(resolved) => {
                     let object = args.as_object_mut().expect("object");
@@ -1047,12 +1060,20 @@ async fn run_step(
         })
         .filter(|_| context.is_empty())
         .unwrap_or_else(|| context.clone());
+    let fallback = if desktop {
+        app_wide(&fallback)
+    } else {
+        fallback
+    };
     let mut checked = Vec::new();
     for (nth, check) in step.expect.iter().enumerate() {
         match locator.check(check, &fallback).await {
             Ok(outcome) => {
                 if let Some(window) = &outcome.window {
-                    if last_window.is_none() || step_has_no_action {
+                    // A step that names no window of its own (a check, or a
+                    // desktop-scope action) is best told by where its check
+                    // held, so that window is the one `observe` reads.
+                    if last_window.is_none() || step_has_no_action || desktop {
                         *last_window = Some(window.clone());
                     }
                 }
@@ -1752,13 +1773,18 @@ fn parse_action(
             ));
         }
     }
+    let desktop = window.is_empty()
+        && element.is_empty()
+        && args.get("element_token").is_none()
+        && desktop_scoped(&args);
     // Check the arguments now, with stand-ins for what the lookup fills.
     let mut probe = args.clone();
     if let Some(object) = probe.as_object_mut() {
         let needs_window = !element.is_empty() || window.app.is_some() || window.title.is_some();
         // A step that names no window takes the one an earlier step (or the
         // batch) named; the run fills it in.
-        let inherits = inherits_window && window.is_empty() && accepts(registry, tool, "pid");
+        let inherits =
+            inherits_window && window.is_empty() && !desktop && accepts(registry, tool, "pid");
         if needs_window || inherits {
             object.entry("pid").or_insert(json!(1));
             if accepts(registry, tool, "window_id") {
@@ -1778,7 +1804,37 @@ fn parse_action(
         element,
         find_timeout: Duration::from_millis(find_timeout),
         unknown_token,
+        desktop,
     })
+}
+
+/// Whether the arguments ask for the desktop (`scope:"desktop"` or a typed
+/// desktop `target`) and name no pid or window_id. With a pid, desktop scope
+/// means desktop-frame coordinates against that window instead.
+fn desktop_scoped(args: &Value) -> bool {
+    let desktop = args.get("scope").and_then(Value::as_str) == Some("desktop")
+        || args.pointer("/target/kind").and_then(Value::as_str) == Some("desktop");
+    desktop
+        && args.get("pid").is_none_or(Value::is_null)
+        && args.get("window_id").is_none_or(Value::is_null)
+}
+
+/// The app a window spec belongs to, without pinning one of its windows:
+/// an exact pid and window_id becomes the pid, whose windows a lookup
+/// searches frontmost first. A spec by app or title is left as it is.
+fn app_wide(spec: &WindowSpec) -> WindowSpec {
+    match spec {
+        WindowSpec {
+            pid: Some(pid),
+            app: None,
+            title: None,
+            ..
+        } => WindowSpec {
+            pid: Some(*pid),
+            ..Default::default()
+        },
+        other => other.clone(),
+    }
 }
 
 /// The pid and window an element token names: the platform's current

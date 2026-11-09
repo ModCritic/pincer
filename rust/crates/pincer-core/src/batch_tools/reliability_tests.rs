@@ -210,6 +210,65 @@ async fn batch_level_delivery_mode_is_the_steps_default() {
     );
 }
 
+/// A desktop-scope step acts on whatever has focus, as it does outside a
+/// batch: it takes neither the batch's window nor its delivery_mode (a
+/// desktop click with delivery_mode background is refused). A step's own
+/// pid still wins, and a desktop step does not change what later steps
+/// inherit.
+#[tokio::test]
+async fn a_desktop_scope_step_takes_no_window_or_delivery_mode_from_the_batch() {
+    let harness = Harness::new();
+    let result = harness
+        .run(json!({"pid": 7, "window_id": 3, "delivery_mode": "foreground", "steps": [
+            {"tool": "click", "args": {"x": 1, "y": 2}},
+            {"tool": "type_text", "args": {"text": "Ada", "scope": "desktop"}},
+            {"tool": "press_key", "args": {"key": "Return", "target": {"kind": "desktop", "display_id": "primary"}}},
+            {"tool": "type_text", "args": {"text": "after"}},
+            {"tool": "press_key", "args": {"key": "Tab", "scope": "desktop", "pid": 9}}
+        ]}))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let click = harness.last("click");
+    assert_eq!(
+        (click["pid"].clone(), click["delivery_mode"].clone()),
+        (json!(7), json!("foreground"))
+    );
+    let typed = harness.calls["type_text"].lock().unwrap().clone();
+    for key in ["pid", "window_id", "delivery_mode"] {
+        assert!(
+            typed[0].get(key).is_none(),
+            "desktop step got {key}: {}",
+            typed[0]
+        );
+    }
+    assert_eq!(
+        typed[1]["window_id"], 3,
+        "later steps still inherit the batch window"
+    );
+    let keys = harness.calls["press_key"].lock().unwrap().clone();
+    assert!(
+        keys[0].get("pid").is_none(),
+        "typed desktop target: {}",
+        keys[0]
+    );
+    assert!(keys[0].get("delivery_mode").is_none(), "{}", keys[0]);
+    assert_eq!(keys[1]["pid"], 9, "a step's own pid wins: {}", keys[1]);
+
+    // With background as the batch default, a desktop click is not turned
+    // into the refused desktop-plus-background combination.
+    let result = harness
+        .run(
+            json!({"pid": 7, "window_id": 3, "delivery_mode": "background", "steps": [
+                {"tool": "click", "args": {"x": 1, "y": 2, "scope": "desktop"}}
+            ]}),
+        )
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let click = harness.last("click");
+    assert!(click.get("delivery_mode").is_none(), "{click}");
+    assert!(click.get("pid").is_none(), "{click}");
+}
+
 // ── read steps ───────────────────────────────────────────────────────────
 
 #[tokio::test]
