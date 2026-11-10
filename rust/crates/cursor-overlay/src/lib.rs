@@ -31,7 +31,7 @@ pub use pincer_cursor_motion::dubins as path_planner;
 pub mod z_order;
 
 pub use badge_glyphs::{BadgeChip, BadgeGlyph};
-pub use badge_mode::BadgeMode;
+pub use badge_mode::{BadgeMode, KeyCombo};
 pub use bezier::CubicBezier;
 pub use motion::{
     MotionConfig, MotionEffects, MotionStyle, MotionTiming, ResolvedEffects, Spring,
@@ -48,9 +48,9 @@ pub use render_state::{
 };
 pub use session_badge::{
     paint_session_badge, sanitize_session_label, session_badge_extents, session_badge_layout,
-    BadgeExtents, BadgeLabelLayout, SessionBadgeInput, SessionBadgeLayout, BADGE_CHIP_GAP,
-    BADGE_CHIP_GROUP_GAP, BADGE_CHIP_SIZE, BADGE_CURSOR_GAP, BADGE_HEIGHT, BADGE_MAX_WIDTH,
-    MAX_SESSION_LABEL_CHARS,
+    BadgeExtents, BadgeKeycap, BadgeKeycaps, BadgeLabelLayout, SessionBadgeInput,
+    SessionBadgeLayout, BADGE_CHIP_GAP, BADGE_CHIP_GROUP_GAP, BADGE_CHIP_SIZE, BADGE_CURSOR_GAP,
+    BADGE_HEIGHT, BADGE_MAX_WIDTH, MAX_SESSION_LABEL_CHARS,
 };
 pub use surface_fit::{SurfaceFit, SurfaceGeometry, SURFACE_REFIT_INTERVAL};
 pub use theme::{

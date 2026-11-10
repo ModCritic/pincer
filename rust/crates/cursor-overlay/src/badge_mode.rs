@@ -195,6 +195,24 @@ pub fn config_schema_properties() -> Map<String, Value> {
     properties
 }
 
+/// A held key combo as the minimal badge draws it: one keycap per key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyCombo {
+    /// Modifier labels in display order, then the main key, such as
+    /// `["Ctrl", "Shift", "Z"]`, or `["⇧", "⌘", "Z"]` on macOS. A key that
+    /// is itself `+` stays one part.
+    pub keys: Vec<String>,
+    /// macOS spelling: modifier symbols sit side by side with no `+`.
+    pub mac: bool,
+}
+
+impl KeyCombo {
+    /// The combo as one line of text, such as `Ctrl+Shift+Z` or `⇧⌘Z`.
+    pub fn text(&self) -> String {
+        self.keys.join(if self.mac { "" } else { "+" })
+    }
+}
+
 /// Format a key combo for the minimal badge, such as `⌘C` on macOS or
 /// `Ctrl+C` elsewhere. `None` unless at least one modifier is held with a
 /// non-modifier key: a bare key press does not earn a chip.
@@ -203,6 +221,16 @@ pub fn format_key_combo(keys: &[String]) -> Option<String> {
 }
 
 pub(crate) fn format_key_combo_for(keys: &[String], mac: bool) -> Option<String> {
+    key_combo_parts_for(keys, mac).map(|combo| combo.text())
+}
+
+/// Split a key combo into the keys the badge draws, with the same order,
+/// spelling and rules as [`format_key_combo`].
+pub fn key_combo_parts(keys: &[String]) -> Option<KeyCombo> {
+    key_combo_parts_for(keys, cfg!(target_os = "macos"))
+}
+
+pub(crate) fn key_combo_parts_for(keys: &[String], mac: bool) -> Option<KeyCombo> {
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     enum Modifier {
         Control,
@@ -246,29 +274,24 @@ pub(crate) fn format_key_combo_for(keys: &[String], mac: bool) -> Option<String>
             }
         }
     };
-    let mut label = String::new();
-    if mac {
-        for modifier in modifiers {
-            label.push(match modifier {
-                Modifier::Control => '⌃',
-                Modifier::Option => '⌥',
-                Modifier::Shift => '⇧',
-                Modifier::Command => '⌘',
-            });
-        }
-        label.push_str(&key_label);
-    } else {
-        for modifier in modifiers {
-            label.push_str(match modifier {
-                Modifier::Control => "Ctrl+",
-                Modifier::Option => "Alt+",
-                Modifier::Shift => "Shift+",
-                Modifier::Command => "Win+",
-            });
-        }
-        label.push_str(&key_label);
-    }
-    Some(label)
+    let mut parts: Vec<String> = modifiers
+        .into_iter()
+        .map(|modifier| {
+            match (mac, modifier) {
+                (true, Modifier::Control) => "⌃",
+                (true, Modifier::Option) => "⌥",
+                (true, Modifier::Shift) => "⇧",
+                (true, Modifier::Command) => "⌘",
+                (false, Modifier::Control) => "Ctrl",
+                (false, Modifier::Option) => "Alt",
+                (false, Modifier::Shift) => "Shift",
+                (false, Modifier::Command) => "Win",
+            }
+            .to_owned()
+        })
+        .collect();
+    parts.push(key_label);
+    Some(KeyCombo { keys: parts, mac })
 }
 
 #[cfg(test)]
@@ -351,5 +374,73 @@ mod tests {
         assert_eq!(format_key_combo_for(&keys(&["return"]), true), None);
         assert_eq!(format_key_combo_for(&keys(&["cmd"]), true), None);
         assert_eq!(format_key_combo_for(&[], true), None);
+    }
+
+    #[test]
+    fn key_combo_parts_keep_the_text_order_and_spelling() {
+        let parts = |values: &[&str], mac: bool| {
+            key_combo_parts_for(&keys(values), mac).map(|combo| combo.keys)
+        };
+        assert_eq!(
+            parts(&["z", "shift", "ctrl"], false),
+            Some(vec!["Ctrl".into(), "Shift".into(), "Z".into()])
+        );
+        assert_eq!(
+            parts(&["alt", "page_down"], false),
+            Some(vec!["Alt".into(), "Page down".into()])
+        );
+        assert_eq!(
+            parts(&["win", "alt", "shift", "ctrl", "k"], false),
+            Some(vec![
+                "Ctrl".into(),
+                "Alt".into(),
+                "Shift".into(),
+                "Win".into(),
+                "K".into()
+            ])
+        );
+        assert_eq!(
+            parts(&["shift", "cmd", "z"], true),
+            Some(vec!["⇧".into(), "⌘".into(), "Z".into()])
+        );
+        assert_eq!(
+            parts(&["cmd", "ctrl", "opt", "shift", "k"], true),
+            Some(vec![
+                "⌃".into(),
+                "⌥".into(),
+                "⇧".into(),
+                "⌘".into(),
+                "K".into()
+            ])
+        );
+        assert_eq!(parts(&["ctrl", "ctrl", "c"], false).unwrap().len(), 2);
+        assert_eq!(parts(&["return"], false), None);
+        assert_eq!(parts(&["shift"], true), None);
+
+        // The parts and the text always agree.
+        for (values, mac) in [
+            (&["ctrl", "c"][..], false),
+            (&["shift", "cmd", "z"][..], true),
+            (&["alt", "page_down"][..], false),
+        ] {
+            assert_eq!(
+                key_combo_parts_for(&keys(values), mac).map(|combo| combo.text()),
+                format_key_combo_for(&keys(values), mac)
+            );
+        }
+    }
+
+    #[test]
+    fn a_plus_key_stays_one_part() {
+        let linux = key_combo_parts_for(&keys(&["ctrl", "+"]), false).unwrap();
+        assert_eq!(linux.keys, vec!["Ctrl".to_owned(), "+".to_owned()]);
+        assert!(!linux.mac);
+        assert_eq!(linux.text(), "Ctrl++");
+        let shifted = key_combo_parts_for(&keys(&["ctrl", "shift", "+"]), false).unwrap();
+        assert_eq!(shifted.keys, ["Ctrl", "Shift", "+"]);
+        let mac = key_combo_parts_for(&keys(&["cmd", "+"]), true).unwrap();
+        assert_eq!(mac.keys, vec!["⌘".to_owned(), "+".to_owned()]);
+        assert!(mac.mac);
+        assert_eq!(mac.text(), "⌘+");
     }
 }

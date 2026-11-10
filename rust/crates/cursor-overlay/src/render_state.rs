@@ -67,8 +67,8 @@ pub const FOREGROUND_CHIP_LABEL: &str = "foreground";
 /// The brief chip the minimal badge shows for one action.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MinimalChip {
-    /// Formatted combo such as `⌘C`, when the action holds one.
-    pub key_combo: Option<String>,
+    /// The keys of a held combo such as ⌘C, when the action holds one.
+    pub key_combo: Option<crate::KeyCombo>,
     /// The action brings something to the foreground.
     pub foreground: bool,
     /// Seconds played. The clock only runs once the action has ended and
@@ -538,6 +538,7 @@ impl RenderStateCore {
     ) -> SessionBadgeInput<'_> {
         let mut input = SessionBadgeInput {
             label: None,
+            key_combo: None,
             delivery: None,
             target: None,
             cursor,
@@ -562,10 +563,9 @@ impl RenderStateCore {
                     // The chip briefly takes the badge over, then the name
                     // (when shown at all) comes back.
                     Some(chip) => {
-                        input.label = chip
-                            .key_combo
-                            .as_deref()
-                            .or(chip.foreground.then_some(FOREGROUND_CHIP_LABEL));
+                        input.key_combo = chip.key_combo.as_ref();
+                        input.label = (chip.key_combo.is_none() && chip.foreground)
+                            .then_some(FOREGROUND_CHIP_LABEL);
                         input.delivery = chip.foreground.then_some(DeliveryModifier::Foreground);
                         input.label_alpha = chip_alpha;
                         input.chip_alpha = chip_alpha;
@@ -958,7 +958,7 @@ impl RenderStateCore {
                 true
             }
             OverlayCommand::ShowKeyCombo(keys) => {
-                let Some(combo) = crate::badge_mode::format_key_combo(&keys) else {
+                let Some(combo) = crate::badge_mode::key_combo_parts(&keys) else {
                     return false;
                 };
                 // Joins the chip its own BeginAction just started.
@@ -1771,11 +1771,20 @@ mod session_badge_and_action_tests {
         core.apply_command_base(OverlayCommand::EndAction(CursorAction::Key), false, false);
         core.tick_motion(MINIMAL_CHIP_DELAY_SECS + MINIMAL_CHIP_FADE_IN_SECS + 0.1);
         let layout = shown(&core).expect("the combo paints");
-        let expected = crate::badge_mode::format_key_combo(&["cmd".into(), "c".into()]);
+        let expected = crate::badge_mode::key_combo_parts(&["cmd".into(), "c".into()]).unwrap();
+        let keycaps = layout
+            .keycaps
+            .as_ref()
+            .expect("the combo paints as keycaps");
         assert_eq!(
-            layout.label.as_ref().map(|label| label.text.clone()),
-            expected
+            keycaps
+                .caps
+                .iter()
+                .map(|cap| cap.label.text.as_str())
+                .collect::<Vec<_>>(),
+            expected.keys
         );
+        assert!(layout.label.is_none());
         assert!(layout.delivery_chip.is_some(), "the foreground mark stays");
         core.tick_motion(MINIMAL_CHIP_SECS);
         assert!(shown(&core).is_none());

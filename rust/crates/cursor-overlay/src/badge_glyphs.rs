@@ -140,10 +140,12 @@ fn circle_path(x: f32, y: f32, radius: f32) -> Option<Path> {
     PathBuilder::from_circle(x, y, radius)
 }
 
+/// Paint one chip. A filled chip sits in a `filled_well` of the badge's
+/// choosing, so its white glyph keeps contrast on whatever the badge is.
 pub(crate) fn paint_badge_chip(
     pixmap: &mut Pixmap,
     chip: BadgeChip,
-    session_fill: [u8; 4],
+    filled_well: [u8; 3],
     alpha: f32,
 ) {
     let alpha = alpha.clamp(0.0, 1.0);
@@ -158,10 +160,7 @@ pub(crate) fn paint_badge_chip(
     if chip.filled {
         pixmap.fill_path(
             &well,
-            &paint_color(
-                [session_fill[0], session_fill[1], session_fill[2], 220],
-                alpha,
-            ),
+            &paint_color([filled_well[0], filled_well[1], filled_well[2], 220], alpha),
             FillRule::Winding,
             Transform::identity(),
             None,
