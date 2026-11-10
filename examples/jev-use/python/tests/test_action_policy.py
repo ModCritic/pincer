@@ -46,7 +46,7 @@ def inputs(
         "probabilities": {action.candidate_id: 0.777, "reobserve": 0.123, "abstain": 0.1},
     }
     parsed = {
-        "schema": "pincer.visual_regions_v1",
+        "schema": "cua.visual_regions_v1",
         "capture": {
             "capture_id": "capture-1",
             "source": {"kind": "window", "pid": 10, "window_id": 20},

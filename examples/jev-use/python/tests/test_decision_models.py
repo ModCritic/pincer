@@ -330,7 +330,7 @@ class DecisionModelsTest(unittest.TestCase):
 
     def test_local_s1_selects_modality_and_binds_the_screenshot(self) -> None:
         try:
-            import pincer_s1.four_b  # noqa: F401
+            import cua_s1.four_b  # noqa: F401
         except ImportError:
             self.skipTest("cua-s1 is not installed")
         with tempfile.TemporaryDirectory() as directory:

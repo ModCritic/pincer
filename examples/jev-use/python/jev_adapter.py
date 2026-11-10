@@ -68,7 +68,7 @@ def visual_decision_state(visual: VisualObservation | None) -> dict[str, Any] | 
     if visual is None:
         return None
     return {
-        "schema": "pincer.visual_regions_v1",
+        "schema": "cua.visual_regions_v1",
         "capture_id": visual.capture_id,
         "screenshot_reference": visual.screenshot_reference,
         "source": {

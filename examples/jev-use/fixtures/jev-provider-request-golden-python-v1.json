@@ -5,1065 +5,1065 @@
   "page/windows-page-1-python": [
    {
     "step": 1,
-    "request": "6b7824e66e1328bf",
+    "request": "e329ba7a0d86cbc0",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "871e01954513c7d7",
+    "request": "2aa61b9c7eb2c3f9",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 3,
-    "request": "be0bdd31f3b11cbe",
+    "request": "bff7b30b21c08f60",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 4,
-    "request": "00f3ee95dc3813ad",
+    "request": "c6e3b150533168ea",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "page/linux-page-3-python": [
    {
     "step": 1,
-    "request": "6b7824e66e1328bf",
+    "request": "e329ba7a0d86cbc0",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "871e01954513c7d7",
+    "request": "2aa61b9c7eb2c3f9",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 3,
-    "request": "be0bdd31f3b11cbe",
+    "request": "bff7b30b21c08f60",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 4,
-    "request": "00f3ee95dc3813ad",
+    "request": "c6e3b150533168ea",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "page/linux-page-7-typescript": [
    {
     "step": 1,
-    "request": "6b7824e66e1328bf",
+    "request": "e329ba7a0d86cbc0",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "871e01954513c7d7",
+    "request": "2aa61b9c7eb2c3f9",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 3,
-    "request": "be0bdd31f3b11cbe",
+    "request": "bff7b30b21c08f60",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 4,
-    "request": "00f3ee95dc3813ad",
+    "request": "c6e3b150533168ea",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "page/linux-page-2-python": [
    {
     "step": 1,
-    "request": "6b7824e66e1328bf",
+    "request": "e329ba7a0d86cbc0",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "871e01954513c7d7",
+    "request": "2aa61b9c7eb2c3f9",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "page_capture_bound_auto/windows-page-1-python": [
    {
     "step": 1,
-    "request": "6b7824e66e1328bf",
+    "request": "e329ba7a0d86cbc0",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "871e01954513c7d7",
+    "request": "2aa61b9c7eb2c3f9",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 3,
-    "request": "be0bdd31f3b11cbe",
+    "request": "bff7b30b21c08f60",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 4,
-    "request": "00f3ee95dc3813ad",
+    "request": "c6e3b150533168ea",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "page_capture_bound_auto/linux-page-3-python": [
    {
     "step": 1,
-    "request": "6b7824e66e1328bf",
+    "request": "e329ba7a0d86cbc0",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "871e01954513c7d7",
+    "request": "2aa61b9c7eb2c3f9",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 3,
-    "request": "be0bdd31f3b11cbe",
+    "request": "bff7b30b21c08f60",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 4,
-    "request": "00f3ee95dc3813ad",
+    "request": "c6e3b150533168ea",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "page_capture_bound_auto/linux-page-7-typescript": [
    {
     "step": 1,
-    "request": "6b7824e66e1328bf",
+    "request": "e329ba7a0d86cbc0",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "871e01954513c7d7",
+    "request": "2aa61b9c7eb2c3f9",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 3,
-    "request": "be0bdd31f3b11cbe",
+    "request": "bff7b30b21c08f60",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 4,
-    "request": "00f3ee95dc3813ad",
+    "request": "c6e3b150533168ea",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "page_capture_bound_auto/linux-page-2-python": [
    {
     "step": 1,
-    "request": "6b7824e66e1328bf",
+    "request": "e329ba7a0d86cbc0",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "871e01954513c7d7",
+    "request": "2aa61b9c7eb2c3f9",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "page_capture_bound_always/windows-page-1-python": [
    {
     "step": 1,
-    "request": "7d7f17000d74bdb5",
+    "request": "d68534e2c8d6f38b",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "64ad866cbb7de3a0",
+    "request": "183f4efddb6fe3b9",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 3,
-    "request": "55fa0c6279c5998f",
+    "request": "23ea095b6b5c5dbb",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 4,
-    "request": "7ed26ecebd151c79",
+    "request": "842fe3ab8fd19885",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "page_capture_bound_always/linux-page-3-python": [
    {
     "step": 1,
-    "request": "7d7f17000d74bdb5",
+    "request": "d68534e2c8d6f38b",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "64ad866cbb7de3a0",
+    "request": "183f4efddb6fe3b9",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 3,
-    "request": "55fa0c6279c5998f",
+    "request": "23ea095b6b5c5dbb",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 4,
-    "request": "7ed26ecebd151c79",
+    "request": "842fe3ab8fd19885",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "page_capture_bound_always/linux-page-7-typescript": [
    {
     "step": 1,
-    "request": "7d7f17000d74bdb5",
+    "request": "d68534e2c8d6f38b",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "64ad866cbb7de3a0",
+    "request": "183f4efddb6fe3b9",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 3,
-    "request": "55fa0c6279c5998f",
+    "request": "23ea095b6b5c5dbb",
     "candidates": "d229b9dd4f676e88"
    },
    {
     "step": 4,
-    "request": "7ed26ecebd151c79",
+    "request": "842fe3ab8fd19885",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "page_capture_bound_always/linux-page-2-python": [
    {
     "step": 1,
-    "request": "7d7f17000d74bdb5",
+    "request": "d68534e2c8d6f38b",
     "candidates": "ec571c9800d7b4e8"
    },
    {
     "step": 2,
-    "request": "64ad866cbb7de3a0",
+    "request": "183f4efddb6fe3b9",
     "candidates": "d229b9dd4f676e88"
    }
   ],
   "visual_capture_bound_auto/linux_python_pre_4255_a": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "7b92846b88b799cd",
+    "request": "31b36ed65eddb8ac",
     "candidates": "0a86001ae911a77b"
    }
   ],
   "visual_capture_bound_auto/linux_typescript_pre_4255_a": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "40216332a214fafb",
+    "request": "afaff3c5b8992e8f",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 4,
-    "request": "f76646d52770d00e",
+    "request": "ade7fe39043ee877",
     "candidates": "0a86001ae911a77b"
    }
   ],
   "visual_capture_bound_auto/linux_python_pre_4255_b": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "7b92846b88b799cd",
+    "request": "31b36ed65eddb8ac",
     "candidates": "0a86001ae911a77b"
    }
   ],
   "visual_capture_bound_auto/linux_typescript_pre_4255_b": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "7b92846b88b799cd",
+    "request": "31b36ed65eddb8ac",
     "candidates": "0a86001ae911a77b"
    }
   ],
   "visual_capture_bound_auto/windows_python_pre_4255_a": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "40216332a214fafb",
+    "request": "afaff3c5b8992e8f",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 4,
-    "request": "8f69d7cab750cca9",
+    "request": "69cffed55fa9cc16",
     "candidates": "d11ea8f49c30445a"
    }
   ],
   "visual_capture_bound_auto/windows_typescript_pre_4255_a": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "40216332a214fafb",
+    "request": "afaff3c5b8992e8f",
     "candidates": "d11ea8f49c30445a"
    }
   ],
   "visual_capture_bound_auto/windows_python_pre_4255_b": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "40216332a214fafb",
+    "request": "afaff3c5b8992e8f",
     "candidates": "d11ea8f49c30445a"
    }
   ],
   "visual_capture_bound_auto/windows_typescript_pre_4255_b": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "40216332a214fafb",
+    "request": "afaff3c5b8992e8f",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 4,
-    "request": "8f69d7cab750cca9",
+    "request": "69cffed55fa9cc16",
     "candidates": "d11ea8f49c30445a"
    }
   ],
   "visual_capture_bound_auto/linux_python_post_4255_regression_1": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "ae88c22f9ca831ad",
+    "request": "06e6b3ed979a0622",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "2b38e5d032f55588",
+    "request": "2c8f0f4bf8ca299a",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "c11f02c7d592f865",
+    "request": "2877b9fd0d1e3048",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_auto/linux_python_post_4255_regression_2": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "ae88c22f9ca831ad",
+    "request": "06e6b3ed979a0622",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "2b38e5d032f55588",
+    "request": "2c8f0f4bf8ca299a",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "c11f02c7d592f865",
+    "request": "2877b9fd0d1e3048",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_auto/linux_python_post_4255_regression_3": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "ae88c22f9ca831ad",
+    "request": "06e6b3ed979a0622",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "2b38e5d032f55588",
+    "request": "2c8f0f4bf8ca299a",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "c11f02c7d592f865",
+    "request": "2877b9fd0d1e3048",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_auto/linux_python_post_4255_regression_4": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "ae88c22f9ca831ad",
+    "request": "06e6b3ed979a0622",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "2b38e5d032f55588",
+    "request": "2c8f0f4bf8ca299a",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "c11f02c7d592f865",
+    "request": "2877b9fd0d1e3048",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_auto/linux_python_post_4255_regression_5": [
    {
     "step": 1,
-    "request": "c76f8a530fa915f0",
+    "request": "7a08ca0b5bc0d1aa",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "ae88c22f9ca831ad",
+    "request": "06e6b3ed979a0622",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "2b38e5d032f55588",
+    "request": "2c8f0f4bf8ca299a",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "c11f02c7d592f865",
+    "request": "2877b9fd0d1e3048",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_always/linux_python_pre_4255_a": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "7b92846b88b799cd",
+    "request": "31b36ed65eddb8ac",
     "candidates": "0a86001ae911a77b"
    }
   ],
   "visual_capture_bound_always/linux_typescript_pre_4255_a": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "40216332a214fafb",
+    "request": "afaff3c5b8992e8f",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 4,
-    "request": "f76646d52770d00e",
+    "request": "ade7fe39043ee877",
     "candidates": "0a86001ae911a77b"
    }
   ],
   "visual_capture_bound_always/linux_python_pre_4255_b": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "7b92846b88b799cd",
+    "request": "31b36ed65eddb8ac",
     "candidates": "0a86001ae911a77b"
    }
   ],
   "visual_capture_bound_always/linux_typescript_pre_4255_b": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "7b92846b88b799cd",
+    "request": "31b36ed65eddb8ac",
     "candidates": "0a86001ae911a77b"
    }
   ],
   "visual_capture_bound_always/windows_python_pre_4255_a": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "40216332a214fafb",
+    "request": "afaff3c5b8992e8f",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 4,
-    "request": "8f69d7cab750cca9",
+    "request": "69cffed55fa9cc16",
     "candidates": "d11ea8f49c30445a"
    }
   ],
   "visual_capture_bound_always/windows_typescript_pre_4255_a": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "40216332a214fafb",
+    "request": "afaff3c5b8992e8f",
     "candidates": "d11ea8f49c30445a"
    }
   ],
   "visual_capture_bound_always/windows_python_pre_4255_b": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "40216332a214fafb",
+    "request": "afaff3c5b8992e8f",
     "candidates": "d11ea8f49c30445a"
    }
   ],
   "visual_capture_bound_always/windows_typescript_pre_4255_b": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "0d32ec5c61a4a8b5",
+    "request": "708ed6e0fe93c9e6",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 3,
-    "request": "40216332a214fafb",
+    "request": "afaff3c5b8992e8f",
     "candidates": "d11ea8f49c30445a"
    },
    {
     "step": 4,
-    "request": "8f69d7cab750cca9",
+    "request": "69cffed55fa9cc16",
     "candidates": "d11ea8f49c30445a"
    }
   ],
   "visual_capture_bound_always/linux_python_post_4255_regression_1": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1702e777270e55d9",
+    "request": "d0fca3ed5b17d6b8",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "13ad158a26367929",
+    "request": "6dc35876b8d5aac9",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "b3bd04ea455a1283",
+    "request": "4e2e8399f9aac7c4",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_always/linux_python_post_4255_regression_2": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1702e777270e55d9",
+    "request": "d0fca3ed5b17d6b8",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "13ad158a26367929",
+    "request": "6dc35876b8d5aac9",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "b3bd04ea455a1283",
+    "request": "4e2e8399f9aac7c4",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_always/linux_python_post_4255_regression_3": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1702e777270e55d9",
+    "request": "d0fca3ed5b17d6b8",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "13ad158a26367929",
+    "request": "6dc35876b8d5aac9",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "b3bd04ea455a1283",
+    "request": "4e2e8399f9aac7c4",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_always/linux_python_post_4255_regression_4": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1702e777270e55d9",
+    "request": "d0fca3ed5b17d6b8",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "13ad158a26367929",
+    "request": "6dc35876b8d5aac9",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "b3bd04ea455a1283",
+    "request": "4e2e8399f9aac7c4",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_always/linux_python_post_4255_regression_5": [
    {
     "step": 1,
-    "request": "b645dd31d80e6d4b",
+    "request": "e8a5647e8a53b5b5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1702e777270e55d9",
+    "request": "d0fca3ed5b17d6b8",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "13ad158a26367929",
+    "request": "6dc35876b8d5aac9",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "b3bd04ea455a1283",
+    "request": "4e2e8399f9aac7c4",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_off/linux_python_pre_4255_a": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1dc3f220096db95a",
+    "request": "345ce46c8770e1f8",
     "candidates": "daba6141ff108d4e"
    },
    {
     "step": 3,
-    "request": "566457a742192f26",
+    "request": "afec5214538f5de2",
     "candidates": "daba6141ff108d4e"
    }
   ],
   "visual_capture_bound_off/linux_typescript_pre_4255_a": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1dc3f220096db95a",
+    "request": "345ce46c8770e1f8",
     "candidates": "daba6141ff108d4e"
    },
    {
     "step": 3,
-    "request": "d5821263e5bced53",
+    "request": "25f7a58d4d5daa24",
     "candidates": "daba6141ff108d4e"
    },
    {
     "step": 4,
-    "request": "a415ac151c2ee8a0",
+    "request": "6a8a4a3e656243f8",
     "candidates": "daba6141ff108d4e"
    }
   ],
   "visual_capture_bound_off/linux_python_pre_4255_b": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1dc3f220096db95a",
+    "request": "345ce46c8770e1f8",
     "candidates": "daba6141ff108d4e"
    },
    {
     "step": 3,
-    "request": "566457a742192f26",
+    "request": "afec5214538f5de2",
     "candidates": "daba6141ff108d4e"
    }
   ],
   "visual_capture_bound_off/linux_typescript_pre_4255_b": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1dc3f220096db95a",
+    "request": "345ce46c8770e1f8",
     "candidates": "daba6141ff108d4e"
    },
    {
     "step": 3,
-    "request": "566457a742192f26",
+    "request": "afec5214538f5de2",
     "candidates": "daba6141ff108d4e"
    }
   ],
   "visual_capture_bound_off/windows_python_pre_4255_a": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1dc3f220096db95a",
+    "request": "345ce46c8770e1f8",
     "candidates": "daba6141ff108d4e"
    },
    {
     "step": 3,
-    "request": "d5821263e5bced53",
+    "request": "25f7a58d4d5daa24",
     "candidates": "daba6141ff108d4e"
    },
    {
     "step": 4,
-    "request": "1114de9dcd19be4c",
+    "request": "fb94b0187f9e1b04",
     "candidates": "daba6141ff108d4e"
    }
   ],
   "visual_capture_bound_off/windows_typescript_pre_4255_a": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1dc3f220096db95a",
+    "request": "345ce46c8770e1f8",
     "candidates": "daba6141ff108d4e"
    },
    {
     "step": 3,
-    "request": "d5821263e5bced53",
+    "request": "25f7a58d4d5daa24",
     "candidates": "daba6141ff108d4e"
    }
   ],
   "visual_capture_bound_off/windows_python_pre_4255_b": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1dc3f220096db95a",
+    "request": "345ce46c8770e1f8",
     "candidates": "daba6141ff108d4e"
    },
    {
     "step": 3,
-    "request": "d5821263e5bced53",
+    "request": "25f7a58d4d5daa24",
     "candidates": "daba6141ff108d4e"
    }
   ],
   "visual_capture_bound_off/windows_typescript_pre_4255_b": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "1dc3f220096db95a",
+    "request": "345ce46c8770e1f8",
     "candidates": "daba6141ff108d4e"
    },
    {
     "step": 3,
-    "request": "d5821263e5bced53",
+    "request": "25f7a58d4d5daa24",
     "candidates": "daba6141ff108d4e"
    },
    {
     "step": 4,
-    "request": "1114de9dcd19be4c",
+    "request": "fb94b0187f9e1b04",
     "candidates": "daba6141ff108d4e"
    }
   ],
   "visual_capture_bound_off/linux_python_post_4255_regression_1": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "e6d4d6a95565d28c",
+    "request": "92bb9980dd570501",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "20599cb6821eb742",
+    "request": "900adab3ca6db1d8",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "8a03f8eedacfd33e",
+    "request": "fa65748090be7bab",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_off/linux_python_post_4255_regression_2": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "e6d4d6a95565d28c",
+    "request": "92bb9980dd570501",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "20599cb6821eb742",
+    "request": "900adab3ca6db1d8",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "8a03f8eedacfd33e",
+    "request": "fa65748090be7bab",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_off/linux_python_post_4255_regression_3": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "e6d4d6a95565d28c",
+    "request": "92bb9980dd570501",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "20599cb6821eb742",
+    "request": "900adab3ca6db1d8",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "8a03f8eedacfd33e",
+    "request": "fa65748090be7bab",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_off/linux_python_post_4255_regression_4": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "e6d4d6a95565d28c",
+    "request": "92bb9980dd570501",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "20599cb6821eb742",
+    "request": "900adab3ca6db1d8",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "8a03f8eedacfd33e",
+    "request": "fa65748090be7bab",
     "candidates": "70875f146d859b36"
    }
   ],
   "visual_capture_bound_off/linux_python_post_4255_regression_5": [
    {
     "step": 1,
-    "request": "8dfe7fa95bf30864",
+    "request": "e7d9d24311f2b7f5",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 2,
-    "request": "e6d4d6a95565d28c",
+    "request": "92bb9980dd570501",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 3,
-    "request": "20599cb6821eb742",
+    "request": "900adab3ca6db1d8",
     "candidates": "70875f146d859b36"
    },
    {
     "step": 4,
-    "request": "8a03f8eedacfd33e",
+    "request": "fa65748090be7bab",
     "candidates": "70875f146d859b36"
    }
   ]
  },
  "single_requests": {
   "page_other_value": {
-   "request": "900887082b50ecd6",
+   "request": "9c5eb97c3397d2ca",
    "candidates": "ec571c9800d7b4e8"
   },
   "page_after_with_visual": {
-   "request": "9d507ebbaad75a8e",
+   "request": "06690b582ef280aa",
    "candidates": "d229b9dd4f676e88"
   },
   "page_after_no_button": {
-   "request": "77f2b9531e52e341",
+   "request": "06215905789cbe6a",
    "candidates": "daba6141ff108d4e"
   },
   "page_after_no_button_visual_path": {
-   "request": "2a0f4a3e90da5dab",
+   "request": "16054f2421660eb2",
    "candidates": "daba6141ff108d4e"
   },
   "no_form_refs": {
-   "request": "3905fd10ee1e16ae",
+   "request": "359758b75056fdf0",
    "candidates": "daba6141ff108d4e"
   },
   "visual_after_no_capture_bound_click": {
-   "request": "4a5f5196307c7a85",
+   "request": "ad202ad7667cc91b",
    "candidates": "daba6141ff108d4e"
   },
   "visual_after_without_submit_region": {
-   "request": "966403408348763b",
+   "request": "739109272a3d42c4",
    "candidates": "daba6141ff108d4e"
   },
   "visual_after_duplicate_submit_region": {
-   "request": "38460b37f9ee6b63",
+   "request": "ed9dbd6146afa801",
    "candidates": "daba6141ff108d4e"
   },
   "visual_after_foreground": {
-   "request": "3cd06681ec4e772d",
+   "request": "da30f08fc1f311f2",
    "candidates": "0a86001ae911a77b"
   },
   "visual_after_other_value": {
-   "request": "c6a54b6b1940bb00",
+   "request": "b543d9aaf613ae64",
    "candidates": "3c210f06a8903bc9"
   }
  },
  "requests": {
-  "6b7824e66e1328bf": {
+  "e329ba7a0d86cbc0": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -1091,7 +1091,7 @@
     }
    }
   },
-  "871e01954513c7d7": {
+  "2aa61b9c7eb2c3f9": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -1125,7 +1125,7 @@
     }
    }
   },
-  "be0bdd31f3b11cbe": {
+  "bff7b30b21c08f60": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -1164,7 +1164,7 @@
     }
    }
   },
-  "00f3ee95dc3813ad": {
+  "c6e3b150533168ea": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -1208,7 +1208,7 @@
     }
    }
   },
-  "7d7f17000d74bdb5": {
+  "d68534e2c8d6f38b": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -1222,7 +1222,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - button \"Submit\" [focusable=true]\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -1429,7 +1429,7 @@
     }
    }
   },
-  "64ad866cbb7de3a0": {
+  "183f4efddb6fe3b9": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -1443,7 +1443,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -1656,7 +1656,7 @@
     }
    }
   },
-  "55fa0c6279c5998f": {
+  "23ea095b6b5c5dbb": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -1670,7 +1670,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -1888,7 +1888,7 @@
     }
    }
   },
-  "7ed26ecebd151c79": {
+  "842fe3ab8fd19885": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -1902,7 +1902,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -2125,7 +2125,7 @@
     }
    }
   },
-  "c76f8a530fa915f0": {
+  "7a08ca0b5bc0d1aa": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -2153,7 +2153,7 @@
     }
    }
   },
-  "0d32ec5c61a4a8b5": {
+  "708ed6e0fe93c9e6": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -2167,7 +2167,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -2380,7 +2380,7 @@
     }
    }
   },
-  "7b92846b88b799cd": {
+  "31b36ed65eddb8ac": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -2394,7 +2394,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -2612,7 +2612,7 @@
     }
    }
   },
-  "40216332a214fafb": {
+  "afaff3c5b8992e8f": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -2626,7 +2626,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -2844,7 +2844,7 @@
     }
    }
   },
-  "f76646d52770d00e": {
+  "ade7fe39043ee877": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -2858,7 +2858,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -3081,7 +3081,7 @@
     }
    }
   },
-  "8f69d7cab750cca9": {
+  "69cffed55fa9cc16": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -3095,7 +3095,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -3318,7 +3318,7 @@
     }
    }
   },
-  "ae88c22f9ca831ad": {
+  "06e6b3ed979a0622": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -3352,7 +3352,7 @@
     }
    }
   },
-  "2b38e5d032f55588": {
+  "2c8f0f4bf8ca299a": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -3391,7 +3391,7 @@
     }
    }
   },
-  "c11f02c7d592f865": {
+  "2877b9fd0d1e3048": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -3435,7 +3435,7 @@
     }
    }
   },
-  "b645dd31d80e6d4b": {
+  "e8a5647e8a53b5b5": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -3449,7 +3449,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -3656,7 +3656,7 @@
     }
    }
   },
-  "1702e777270e55d9": {
+  "d0fca3ed5b17d6b8": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -3670,7 +3670,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -3883,7 +3883,7 @@
     }
    }
   },
-  "13ad158a26367929": {
+  "6dc35876b8d5aac9": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -3897,7 +3897,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -4115,7 +4115,7 @@
     }
    }
   },
-  "b3bd04ea455a1283": {
+  "4e2e8399f9aac7c4": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4129,7 +4129,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n      - generic [editable=\"plaintext\"]\n    - textbox \"verification value\" [editable=\"plaintext\",focusable=true,required=true]\n    - statictext \"Submit\"\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -4352,7 +4352,7 @@
     }
    }
   },
-  "8dfe7fa95bf30864": {
+  "e7d9d24311f2b7f5": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4380,7 +4380,7 @@
     }
    }
   },
-  "1dc3f220096db95a": {
+  "345ce46c8770e1f8": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4413,7 +4413,7 @@
     }
    }
   },
-  "566457a742192f26": {
+  "afec5214538f5de2": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4451,7 +4451,7 @@
     }
    }
   },
-  "d5821263e5bced53": {
+  "25f7a58d4d5daa24": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4489,7 +4489,7 @@
     }
    }
   },
-  "a415ac151c2ee8a0": {
+  "6a8a4a3e656243f8": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4532,7 +4532,7 @@
     }
    }
   },
-  "1114de9dcd19be4c": {
+  "fb94b0187f9e1b04": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4575,7 +4575,7 @@
     }
    }
   },
-  "e6d4d6a95565d28c": {
+  "92bb9980dd570501": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4609,7 +4609,7 @@
     }
    }
   },
-  "20599cb6821eb742": {
+  "900adab3ca6db1d8": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4648,7 +4648,7 @@
     }
    }
   },
-  "8a03f8eedacfd33e": {
+  "fa65748090be7bab": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4692,7 +4692,7 @@
     }
    }
   },
-  "900887082b50ecd6": {
+  "9c5eb97c3397d2ca": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4720,7 +4720,7 @@
     }
    }
   },
-  "9d507ebbaad75a8e": {
+  "06690b582ef280aa": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4734,7 +4734,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n      - generic [editable=\"plaintext\"]\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n    - button \"Submit\" [focusable=true]\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n  - status\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -4941,7 +4941,7 @@
     }
    }
   },
-  "77f2b9531e52e341": {
+  "06215905789cbe6a": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4968,7 +4968,7 @@
     }
    }
   },
-  "2a0f4a3e90da5dab": {
+  "16054f2421660eb2": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -4995,7 +4995,7 @@
     }
    }
   },
-  "3905fd10ee1e16ae": {
+  "359758b75056fdf0": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -5019,7 +5019,7 @@
     }
    }
   },
-  "4a5f5196307c7a85": {
+  "ad202ad7667cc91b": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -5033,7 +5033,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -5239,7 +5239,7 @@
     }
    }
   },
-  "966403408348763b": {
+  "739109272a3d42c4": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -5253,7 +5253,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -5445,7 +5445,7 @@
     }
    }
   },
-  "38460b37f9ee6b63": {
+  "ed9dbd6146afa801": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -5459,7 +5459,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -5679,7 +5679,7 @@
     }
    }
   },
-  "3cd06681ec4e772d": {
+  "da30f08fc1f311f2": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -5693,7 +5693,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {
@@ -5900,7 +5900,7 @@
     }
    }
   },
-  "c6a54b6b1940bb00": {
+  "b543d9aaf613ae64": {
    "state": {
     "goal": "Enter the required verification token into the verification field, then submit the form.",
     "observation": {
@@ -5914,7 +5914,7 @@
      },
      "outline": "- main\n  - heading \"Pincer + TypeSafe Jev fixture\"\n  - paragraph\n    - statictext \"Enter the verification value and submit it.\"\n  - form\n    - textbox \"verification value\": [verification token] [editable=\"plaintext\",focusable=true,focused=true,required=true]\n      - generic [editable=\"plaintext\"]\n    - statictext \"Submit\"\n  - status\n        - statictext \"[verification token]\" [editable=\"plaintext\"]\n    - statictext \"status=waiting\"",
      "visual": {
-      "schema": "pincer.visual_regions_v1",
+      "schema": "cua.visual_regions_v1",
       "capture_id": "capture_8a22ffd72f02467f9ff0f0b6de791b6e_0000000000000000",
       "screenshot_reference": "png-sha256:2be15022cfea6b1c45bf72902bd4db54075cec6748d1defec5ecd1d75cc9259a",
       "source": {

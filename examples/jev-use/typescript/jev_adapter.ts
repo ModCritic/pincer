@@ -80,7 +80,7 @@ function candidateCriteria(candidates: Candidate[]): Record<string, string> {
 export function visualDecisionState(visual?: VisualObservation) {
   if (!visual) return null;
   return {
-    schema: 'pincer.visual_regions_v1' as const,
+    schema: 'cua.visual_regions_v1' as const,
     capture_id: visual.captureId,
     screenshot_reference: visual.screenshotReference,
     source: {

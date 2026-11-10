@@ -135,7 +135,7 @@ def authorize_exact_region_text_action(
         or capture_id != current_capture_id
     ):
         raise ActionAuthorizationError("capture identity changed")
-    if parsed.get("schema") != "pincer.visual_regions_v1":
+    if parsed.get("schema") != "cua.visual_regions_v1":
         raise ActionAuthorizationError("unsupported visual observation")
     source = capture.get("source")
     if (

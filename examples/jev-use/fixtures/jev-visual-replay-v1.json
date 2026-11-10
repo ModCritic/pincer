@@ -132,7 +132,7 @@
     },
     "parser": {
       "backend": "onnx_runtime_cpu",
-      "extension_id": "pincer-perception",
+      "extension_id": "cua-perception",
       "extension_version": "0.2.1",
       "model_id": "omniparser-v2-ppocrv5-en",
       "model_manifest_sha256": "59f5197c98d0bbe20668993771a19fa495624027e69ef87a75c6606986a60b13",
@@ -313,7 +313,7 @@
         "text": "Submit"
       }
     ],
-    "schema": "pincer.visual_regions_v1",
+    "schema": "cua.visual_regions_v1",
     "timing": {
       "duration_ms": 3893
     }
