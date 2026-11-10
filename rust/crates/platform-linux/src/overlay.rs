@@ -657,31 +657,36 @@ fn dispatch_shell_helper_command(key: &str, cmd: &OverlayCommand, semantic: bool
         | OverlayCommand::ClickPulse { x, y } => {
             crate::wayland::shell_helper::move_cursor(*x as i32, *y as i32);
         }
-        OverlayCommand::BeginAction {
-            action,
-            delivery,
-            target,
-        } if semantic => {
-            // The GNOME helper paints its own single-cursor badge. Under the
-            // minimal badge it gets only foreground moments; under `off`, no
-            // chips at all.
-            let (delivery, target) = match cursor_overlay::badge_mode::active() {
-                cursor_overlay::BadgeMode::Verbose => (*delivery, *target),
-                cursor_overlay::BadgeMode::Minimal => (
-                    delivery.filter(|value| *value == cursor_overlay::DeliveryModifier::Foreground),
-                    None,
-                ),
-                cursor_overlay::BadgeMode::Off => (None, None),
-            };
-            crate::wayland::shell_helper::set_cursor_state(
-                action.as_str(),
-                delivery.as_ref().map_or("", |value| value.as_str()),
-                target.as_ref().map_or("", |value| value.as_str()),
-                true,
+        OverlayCommand::BeginAction { .. }
+        | OverlayCommand::EndAction(_)
+        | OverlayCommand::ShowKeyCombo(_)
+            if semantic =>
+        {
+            let calls = shell_helper_badge_calls(
+                cmd,
+                cursor_overlay::badge_mode::active(),
+                crate::wayland::shell_helper::minimal_chip_available,
             );
-        }
-        OverlayCommand::EndAction(action) if semantic => {
-            crate::wayland::shell_helper::set_cursor_state(action.as_str(), "", "", false);
+            for call in calls {
+                match call {
+                    ShellHelperBadgeCall::CursorState {
+                        action,
+                        delivery,
+                        target,
+                        active,
+                    } => crate::wayland::shell_helper::set_cursor_state(
+                        action.as_str(),
+                        delivery.as_ref().map_or("", |value| value.as_str()),
+                        target.as_ref().map_or("", |value| value.as_str()),
+                        active,
+                    ),
+                    ShellHelperBadgeCall::MinimalChip {
+                        keys,
+                        mac,
+                        foreground,
+                    } => crate::wayland::shell_helper::show_minimal_chip(&keys, mac, foreground),
+                }
+            }
         }
         OverlayCommand::SetSessionLabel(label) if semantic => {
             // The helper has no hover reveal and draws one cursor, so the
@@ -696,6 +701,95 @@ fn dispatch_shell_helper_command(key: &str, cmd: &OverlayCommand, semantic: bool
         }
         OverlayCommand::SetEnabled(false) => crate::wayland::shell_helper::hide_cursor(),
         _ => {}
+    }
+}
+
+/// One badge call to the semantic GNOME helper.
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ShellHelperBadgeCall {
+    /// `SetCursorState(action, delivery, target, active)`.
+    CursorState {
+        action: cursor_overlay::CursorAction,
+        delivery: Option<cursor_overlay::DeliveryModifier>,
+        target: Option<cursor_overlay::TargetModifier>,
+        active: bool,
+    },
+    /// `ShowMinimalChip(keys, mac, foreground)` (helper API 11).
+    MinimalChip {
+        keys: Vec<String>,
+        mac: bool,
+        foreground: bool,
+    },
+}
+
+/// What the GNOME helper, which paints its own single-cursor badge, is sent
+/// for an action or a key combo under badge `mode`. `minimal_chip_api` says
+/// whether the helper serves `ShowMinimalChip` (API 11), and is asked only
+/// under the minimal badge.
+///
+/// Verbose: every chip while the action runs, and no key combo, as in the
+/// Rust overlay. Off: no chips. Minimal, with API 11: the Rust overlay's
+/// minimal chip, played after the action ends: "foreground" with its chip
+/// for a foreground moment, and a key combo as keycaps (joining that chip
+/// when both happen). Minimal, older helper: the foreground chip while the
+/// action runs and no key combo, as before.
+#[cfg(target_os = "linux")]
+fn shell_helper_badge_calls(
+    cmd: &OverlayCommand,
+    mode: cursor_overlay::BadgeMode,
+    minimal_chip_api: impl FnOnce() -> bool,
+) -> Vec<ShellHelperBadgeCall> {
+    use cursor_overlay::{BadgeMode, DeliveryModifier};
+    let state = |action: cursor_overlay::CursorAction, delivery, target, active| {
+        ShellHelperBadgeCall::CursorState {
+            action,
+            delivery,
+            target,
+            active,
+        }
+    };
+    match cmd {
+        OverlayCommand::BeginAction {
+            action,
+            delivery,
+            target,
+        } => match mode {
+            BadgeMode::Verbose => vec![state(*action, *delivery, *target, true)],
+            BadgeMode::Off => vec![state(*action, None, None, true)],
+            BadgeMode::Minimal => {
+                let foreground = *delivery == Some(DeliveryModifier::Foreground);
+                if !minimal_chip_api() {
+                    return vec![state(
+                        *action,
+                        foreground.then_some(DeliveryModifier::Foreground),
+                        None,
+                        true,
+                    )];
+                }
+                let mut calls = vec![state(*action, None, None, true)];
+                if foreground {
+                    calls.push(ShellHelperBadgeCall::MinimalChip {
+                        keys: Vec::new(),
+                        mac: false,
+                        foreground: true,
+                    });
+                }
+                calls
+            }
+        },
+        OverlayCommand::ShowKeyCombo(keys) if mode == BadgeMode::Minimal => {
+            match cursor_overlay::badge_mode::key_combo_parts(keys) {
+                Some(combo) if minimal_chip_api() => vec![ShellHelperBadgeCall::MinimalChip {
+                    keys: combo.keys,
+                    mac: combo.mac,
+                    foreground: false,
+                }],
+                _ => Vec::new(),
+            }
+        }
+        OverlayCommand::EndAction(action) => vec![state(*action, None, None, false)],
+        _ => Vec::new(),
     }
 }
 
@@ -5574,5 +5668,142 @@ mod shell_helper_surface_tests {
             now
         ));
         assert!(shell_helper_surface_event(&cmd(b), now));
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod shell_helper_badge_tests {
+    use super::*;
+    use cursor_overlay::{BadgeMode, DeliveryModifier, TargetModifier};
+
+    fn begin(delivery: Option<DeliveryModifier>) -> OverlayCommand {
+        OverlayCommand::BeginAction {
+            action: CursorAction::Key,
+            delivery,
+            target: Some(TargetModifier::Ax),
+        }
+    }
+
+    fn combo(keys: &[&str]) -> OverlayCommand {
+        OverlayCommand::ShowKeyCombo(keys.iter().map(|key| (*key).to_owned()).collect())
+    }
+
+    fn state(
+        delivery: Option<DeliveryModifier>,
+        target: Option<TargetModifier>,
+        active: bool,
+    ) -> ShellHelperBadgeCall {
+        ShellHelperBadgeCall::CursorState {
+            action: CursorAction::Key,
+            delivery,
+            target,
+            active,
+        }
+    }
+
+    fn chip(keys: &[&str], foreground: bool) -> ShellHelperBadgeCall {
+        ShellHelperBadgeCall::MinimalChip {
+            keys: keys.iter().map(|key| (*key).to_owned()).collect(),
+            mac: false,
+            foreground,
+        }
+    }
+
+    fn unasked() -> bool {
+        panic!("only the minimal badge asks for the helper's API version")
+    }
+
+    #[test]
+    fn an_api_11_helper_gets_the_minimal_chip_after_its_action() {
+        let foreground = Some(DeliveryModifier::Foreground);
+        let api_11 = || true;
+        // A foreground moment: no chip while the action runs, then the chip.
+        assert_eq!(
+            shell_helper_badge_calls(&begin(foreground), BadgeMode::Minimal, api_11),
+            vec![state(None, None, true), chip(&[], true)]
+        );
+        assert_eq!(
+            shell_helper_badge_calls(
+                &begin(Some(DeliveryModifier::Background)),
+                BadgeMode::Minimal,
+                api_11
+            ),
+            vec![state(None, None, true)]
+        );
+        // The combo's parts, so a `+` key stays one key.
+        assert_eq!(
+            shell_helper_badge_calls(&combo(&["ctrl", "+"]), BadgeMode::Minimal, api_11),
+            vec![chip(&["Ctrl", "+"], false)]
+        );
+        assert_eq!(
+            shell_helper_badge_calls(&combo(&["z", "shift", "ctrl"]), BadgeMode::Minimal, api_11),
+            vec![chip(&["Ctrl", "Shift", "Z"], false)]
+        );
+        // A bare key earns no chip.
+        assert_eq!(
+            shell_helper_badge_calls(&combo(&["return"]), BadgeMode::Minimal, api_11),
+            vec![]
+        );
+        // The end of the action starts the chip's clock in the helper.
+        assert_eq!(
+            shell_helper_badge_calls(
+                &OverlayCommand::EndAction(CursorAction::Key),
+                BadgeMode::Minimal,
+                unasked
+            ),
+            vec![state(None, None, false)]
+        );
+    }
+
+    #[test]
+    fn an_older_helper_keeps_its_minimal_badge_and_gets_no_combo() {
+        let api_10 = || false;
+        assert_eq!(
+            shell_helper_badge_calls(
+                &begin(Some(DeliveryModifier::Foreground)),
+                BadgeMode::Minimal,
+                api_10
+            ),
+            vec![state(Some(DeliveryModifier::Foreground), None, true)]
+        );
+        assert_eq!(
+            shell_helper_badge_calls(
+                &begin(Some(DeliveryModifier::Background)),
+                BadgeMode::Minimal,
+                api_10
+            ),
+            vec![state(None, None, true)]
+        );
+        assert_eq!(
+            shell_helper_badge_calls(&combo(&["ctrl", "a"]), BadgeMode::Minimal, api_10),
+            vec![]
+        );
+    }
+
+    #[test]
+    fn verbose_and_off_badges_never_ask_for_the_minimal_chip() {
+        let foreground = Some(DeliveryModifier::Foreground);
+        assert_eq!(
+            shell_helper_badge_calls(&begin(foreground), BadgeMode::Verbose, unasked),
+            vec![state(foreground, Some(TargetModifier::Ax), true)]
+        );
+        assert_eq!(
+            shell_helper_badge_calls(&begin(foreground), BadgeMode::Off, unasked),
+            vec![state(None, None, true)]
+        );
+        for mode in [BadgeMode::Verbose, BadgeMode::Off] {
+            assert_eq!(
+                shell_helper_badge_calls(&combo(&["ctrl", "a"]), mode, unasked),
+                vec![]
+            );
+        }
+        assert_eq!(
+            shell_helper_badge_calls(
+                &OverlayCommand::SetSessionLabel("Research".into()),
+                BadgeMode::Minimal,
+                unasked
+            ),
+            vec![]
+        );
     }
 }

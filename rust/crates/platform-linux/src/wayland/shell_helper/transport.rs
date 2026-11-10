@@ -89,6 +89,7 @@ async fn invoke(
     let (interface, member) = method.rsplit_once('.').ok_or(Failure::Reply)?;
     let parse_u32 = |value: &String| value.parse::<u32>().map_err(|_| Failure::Reply);
     let parse_i32 = |value: &String| value.parse::<i32>().map_err(|_| Failure::Reply);
+    let parse_bool = |value: &String| value.parse::<bool>().map_err(|_| Failure::Reply);
     macro_rules! send {
         ($body:expr) => {
             connection
@@ -119,7 +120,14 @@ async fn invoke(
             action.as_str(),
             delivery.as_str(),
             target.as_str(),
-            active.parse::<bool>().map_err(|_| Failure::Reply)?
+            parse_bool(active)?
+        )),
+        // `(asbb)`: the keys, then `mac` and `foreground`, which lead the
+        // flat argument list.
+        ("ShowMinimalChip", [mac, foreground, keys @ ..]) => send!((
+            keys.iter().map(String::as_str).collect::<Vec<_>>(),
+            parse_bool(mac)?,
+            parse_bool(foreground)?
         )),
         _ => return Err(Failure::Reply),
     };
@@ -165,9 +173,16 @@ mod tests {
     // backslash, a newline and non-ASCII. A typed reply carries them intact.
     const RECTS: &str = r#"[{"id":3,"pid":41,"title":"Tomorrow's \"plan\" C:\\ 1\n2 飞书","x":0,"y":0,"w":10,"h":10},{"id":7,"pid":42,"title":"Target","x":14,"y":12,"w":800,"h":600}]"#;
 
+    /// Every `ShowMinimalChip` the test helper received, in order.
+    static MINIMAL_CHIPS: std::sync::Mutex<Vec<(Vec<String>, bool, bool)>> =
+        std::sync::Mutex::new(Vec::new());
+
     struct Helper;
     #[zbus::interface(name = "org.pincer.WinRects")]
     impl Helper {
+        fn show_minimal_chip(&self, keys: Vec<String>, mac: bool, foreground: bool) {
+            MINIMAL_CHIPS.lock().unwrap().push((keys, mac, foreground));
+        }
         fn get_version(&self) -> u32 {
             10
         }
@@ -348,6 +363,37 @@ mod tests {
             Err(Failure::Reply)
         );
         assert_eq!(call("NoSuchMethod", vec![]).await, Err(Failure::Reply));
+        // ShowMinimalChip carries its keys as a string array, so a `+` key
+        // and the macOS symbols arrive as one key each, and no keys at all
+        // is the foreground pill.
+        let chip = |keys: &[&str], mac: bool, foreground: bool| {
+            let keys: Vec<String> = keys.iter().map(|key| (*key).to_owned()).collect();
+            super::super::minimal_chip_args(&keys, mac, foreground)
+        };
+        for args in [
+            chip(&["Ctrl", "+"], false, false),
+            chip(&["⇧", "⌘", "Z"], true, true),
+            chip(&[], false, true),
+        ] {
+            assert_eq!(call("ShowMinimalChip", args).await.as_deref(), Ok("()"));
+        }
+        assert_eq!(
+            call("ShowMinimalChip", vec!["yes".into(), "false".into()]).await,
+            Err(Failure::Reply)
+        );
+        assert_eq!(
+            call("ShowMinimalChip", vec!["false".into()]).await,
+            Err(Failure::Reply)
+        );
+        let owned = |keys: &[&str]| keys.iter().map(|key| (*key).to_owned()).collect();
+        assert_eq!(
+            *MINIMAL_CHIPS.lock().unwrap(),
+            vec![
+                (owned(&["Ctrl", "+"]), false, false),
+                (owned(&["⇧", "⌘", "Z"]), true, true),
+                (Vec::new(), false, true),
+            ]
+        );
         assert_eq!(
             call("GetVersion", vec![]).await.as_deref(),
             Ok("(uint32 10,)")

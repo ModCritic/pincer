@@ -18,6 +18,8 @@
 //! - `CaptureWindow(id,pid)` (API 9) / `CaptureWindowPreview(id,pid,max)`
 //!   (API 10) — snapshot one window's own actor, so a covering window never
 //!   shows; the preview variant downscales on the GPU first.
+//! - `ShowMinimalChip(keys,mac,foreground)` (API 11): the minimal badge's
+//!   brief chip, a key combo as keycaps or the "foreground" pill.
 //!
 //! Everything here is **best-effort**: if the extension isn't installed/enabled
 //! the calls return `None` / no-op and callers keep the prior behaviour (no
@@ -42,6 +44,9 @@ const SEMANTIC_CURSOR_API_VERSION: u32 = 8;
 pub const WINDOW_CAPTURE_API_VERSION: u32 = 9;
 /// `CaptureWindowPreview(id, pid, max_dimension)`: GPU-downscaled capture.
 pub const WINDOW_PREVIEW_API_VERSION: u32 = 10;
+/// `ShowMinimalChip(keys, mac, foreground)`: the minimal badge's brief chip,
+/// with key combos drawn as keycaps.
+pub const MINIMAL_CHIP_API_VERSION: u32 = 11;
 
 #[derive(Debug, Clone)]
 struct ShellWindow {
@@ -600,6 +605,32 @@ pub fn set_session_label(label: &str) {
     let _ = gdbus_call("SetSessionLabel", &[label.to_owned()]);
 }
 
+/// Whether a helper at API `version` serves `ShowMinimalChip`.
+fn serves_minimal_chip(version: u32) -> bool {
+    version >= MINIMAL_CHIP_API_VERSION
+}
+
+/// Whether the verified helper serves `ShowMinimalChip`. An older helper
+/// keeps the minimal badge it always had.
+pub fn minimal_chip_available() -> bool {
+    attested_owner_with_version().is_some_and(|(_, version)| serves_minimal_chip(version))
+}
+
+/// Transport arguments of `ShowMinimalChip`: `mac` and `foreground`, then
+/// one argument per key, so a `+` key stays one key.
+fn minimal_chip_args(keys: &[String], mac: bool, foreground: bool) -> Vec<String> {
+    let mut args = vec![mac.to_string(), foreground.to_string()];
+    args.extend(keys.iter().cloned());
+    args
+}
+
+/// Show the minimal badge's chip: `keys` as keycaps (none when empty), with
+/// the foreground mark when `foreground`. Callers gate this on
+/// [`minimal_chip_available`]; an older helper refuses the unknown method.
+pub fn show_minimal_chip(keys: &[String], mac: bool, foreground: bool) {
+    let _ = gdbus_call("ShowMinimalChip", &minimal_chip_args(keys, mac, foreground));
+}
+
 /// Hide the agent cursor.
 pub fn hide_cursor() {
     let _ = gdbus_call("HideCursor", &[]);
@@ -710,9 +741,47 @@ mod tests {
     }
 
     #[test]
+    fn only_an_api_11_helper_serves_the_minimal_chip() {
+        assert!(!serves_minimal_chip(WINDOW_PREVIEW_API_VERSION));
+        assert!(!serves_minimal_chip(SEMANTIC_CURSOR_API_VERSION));
+        assert!(serves_minimal_chip(11));
+        assert!(serves_minimal_chip(12));
+    }
+
+    #[test]
+    fn minimal_chip_args_lead_with_the_flags_and_keep_each_key() {
+        let keys = ["Ctrl".to_owned(), "+".to_owned()];
+        assert_eq!(
+            minimal_chip_args(&keys, false, true),
+            ["false", "true", "Ctrl", "+"]
+        );
+        assert_eq!(minimal_chip_args(&[], true, false), ["true", "false"]);
+    }
+
+    #[test]
+    fn bundled_helper_serves_api_11_on_gnome_51() {
+        assert!(EXTENSION_SOURCE.contains(&format!(
+            "GetVersion() {{\n    return {MINIMAL_CHIP_API_VERSION};"
+        )));
+        assert!(EXTENSION_SOURCE.contains(
+            "<method name=\"ShowMinimalChip\"><arg type=\"as\" direction=\"in\" name=\"keys\"/>\
+             <arg type=\"b\" direction=\"in\" name=\"mac\"/>\
+             <arg type=\"b\" direction=\"in\" name=\"foreground\"/></method>"
+        ));
+        assert!(EXTENSION_SOURCE.contains("ShowMinimalChip(keys, mac, foreground) {"));
+        assert!(EXTENSION_SOURCE.contains("function drawKeycapTray"));
+        let metadata: serde_json::Value =
+            serde_json::from_str(EXTENSION_METADATA).expect("valid bundled helper metadata");
+        assert_eq!(metadata["version"], MINIMAL_CHIP_API_VERSION);
+        assert!(metadata["shell-version"]
+            .as_array()
+            .expect("shell-version list")
+            .contains(&serde_json::Value::from("51")));
+    }
+
+    #[test]
     fn bundled_helper_uses_host_owned_modifier_badge_chips() {
         assert!(EXTENSION_SOURCE.contains("GetVersion()"));
-        assert!(EXTENSION_SOURCE.contains("return 10;"));
         assert!(EXTENSION_SOURCE.contains("SetCursorState"));
         assert!(EXTENSION_SOURCE.contains("SetCursorColor"));
         assert!(EXTENSION_SOURCE.contains("SetSessionLabel"));
@@ -730,14 +799,11 @@ mod tests {
         assert!(EXTENSION_SOURCE.contains("this._badge.add_child(this._badgeLabel)"));
         assert!(EXTENSION_SOURCE.contains("this._deliveryChip"));
         assert!(EXTENSION_SOURCE.contains("this._targetChip"));
-        assert!(EXTENSION_SOURCE.contains("if (labelAlpha > 0.001 || chipAlpha > 0.001)"));
+        assert!(EXTENSION_SOURCE.contains("(labelAlpha > 0.001 || chipAlpha > 0.001)"));
         assert!(EXTENSION_SOURCE.contains("this._badgeLabel.hide()"));
         assert!(!EXTENSION_SOURCE.contains("this._badgeIdentity"));
         assert!(!EXTENSION_SOURCE.contains("this._badgeDot"));
         assert!(!EXTENSION_SOURCE.contains("function drawModifiers"));
-        let metadata: serde_json::Value =
-            serde_json::from_str(EXTENSION_METADATA).expect("valid bundled helper metadata");
-        assert_eq!(metadata["version"], 10);
 
         for action in [
             "idle", "observe", "click", "drag", "scroll", "text", "key", "navigate", "app",

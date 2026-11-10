@@ -2,6 +2,6 @@
   "uuid": "winrects@pincer",
   "name": "WinRects",
   "description": "Expose window geometry, capture, cursor, and verified activation for pincer on Wayland.",
-  "shell-version": ["45", "46", "47", "48", "49", "50"],
-  "version": 10
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "version": 11
 }

@@ -43,6 +43,27 @@ It exposes `org.pincer.WinRects` on the session bus:
   full-size pixels, which pincer reports as the original size. pincer
   removes GNOME's per-capture `Creation Time` PNG chunk, so identical frames
   are byte-identical.
+- `ShowMinimalChip(keys,mac,foreground)` (API 11, signature `asbb`): the
+  minimal badge's brief chip, as the Rust overlay draws it. `keys` are the
+  combo's keys in display order, one string per key (so a `+` key stays one
+  key), drawn as light keycaps over a bevel in the session color in a dark
+  tray, with a `+` between caps unless `mac`. `foreground` adds the
+  foreground chip; with no keys the chip is a pill that reads "foreground".
+  A combo too wide for the 188 px badge shows as its text in the pill. A
+  call while a chip is pending joins it (keys replace, `foreground` adds).
+  The chip waits for `SetCursorState(..., active=false)`, or 10 s, then
+  plays while the cursor is at rest: 0.12 s delay, 0.08 s fade in, 0.5 s
+  hold, 0.3 s fade out. It takes the session badge's place while it shows,
+  and the next `SetCursorState(..., active=true)` drops it. Ignored while the
+  cursor is hidden. pincer sends it only under the minimal badge
+  (`cursor.badges`), and only to a helper that reports API 11 or newer; with
+  an older helper the minimal badge keeps the foreground chip from
+  `SetCursorState` and shows no key combo.
+
+The session badge is a pill in the session color with white text, a 1 px
+rim of that color darkened 35%, and a soft shadow, at most 188 px wide
+(longer labels ellipsize). The frame timer that animates the cursor and the
+badge runs only while the cursor is shown.
 
 It runs in the shell's privileged context, so **no xdg-desktop-portal grant** is
 needed (unlike libei/RemoteDesktop).
@@ -97,7 +118,8 @@ any copy serve every client:
   first defined in T3 Code's Linux patch to Pincer 0.34.0
   ([pingdotgg/t3code#16975](https://github.com/pingdotgg/t3code/pull/16975))
   and are adopted here unchanged, so T3 Code's v10 and this v10 are
-  interchangeable. Coordinate any new number with apps that bundle the helper.
+  interchangeable. Version 11 was first defined here. Coordinate any new
+  number with apps that bundle the helper.
 - Installers never downgrade. `install.sh` and the pincer installers keep
   an installed helper whose version is newer than the bundled one, and say so.
   `install.sh --force` replaces it anyway.
@@ -107,10 +129,11 @@ any copy serve every client:
 | 8       | The semantic `SetCursorState` contract; shipped by Pincer 0.34 |
 | 9       | `CaptureWindow(id,pid)`                                            |
 | 10      | `CaptureWindowPreview(id,pid,max_dimension)`                       |
+| 11      | `ShowMinimalChip(keys,mac,foreground)`; lists GNOME Shell 51       |
 
 Pincer 0.34 and earlier bundle v8 or older, and their installers overwrite
 an installed helper unconditionally. Running one of those installers after an app
-installed v10 downgrades the helper until the newer app reinstalls it.
+installed v10 or newer downgrades the helper until the newer app reinstalls it.
 
 ## Other compositors
 
