@@ -50,7 +50,7 @@ interchangeable.
 Fleet images should consume this same checkout recipe or a derived reviewed
 recipe, pin the image's exact Hyprland package, and keep the plugin unloaded by
 default. The initial acceptance image must match Omarchy `4.0.2-1`, Hyprland
-`0.56.2`, xdg-desktop-portal-hyprland `1.4.1`, Pincer `0.23.2`, and a
+`0.56.2`, xdg-desktop-portal-hyprland `1.4.1`, Cua Driver `0.23.2`, and a
 UWSM/SDDM session. This packages a discovery-only plugin; isolated background
 input is not available in stable `0.23.2` or nightly. See
 `../../tests/README.md` for the required Fleet and subsequent bare-metal

@@ -858,7 +858,7 @@ impl BrowserPlatform for LinuxBrowserPlatform {
                     return Ok(Some(owned.len() == 1 && owned[0] == window_id));
                 }
                 if crate::wayland::is_inject_mode() {
-                    // The private pincer-compositor route owns both the native
+                    // The private cua-compositor route owns both the native
                     // toplevel enumeration and its PID correlation. Unlike a
                     // generic AT-SPI-only Wayland session, that is sufficient
                     // to attest singleton native-window cardinality for an

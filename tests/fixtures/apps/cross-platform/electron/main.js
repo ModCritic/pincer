@@ -81,7 +81,7 @@ function createWindow() {
     // Map the normal harness immediately. Xvfb/Openbox can enumerate a
     // deferred BrowserWindow while never painting it into the root desktop.
     // The sentinel normally stays hidden until it has maximized and claimed
-    // focus. pincer-compositor has no window-policy transition to perform, so map
+    // focus. cua-compositor has no window-policy transition to perform, so map
     // it at construction time; a synchronous show() after DOMContentLoaded can
     // otherwise stall Chromium before the renderer paints or schedules timers.
     show: !sentinelMode || customPincerCompositor,
@@ -170,11 +170,11 @@ function createWindow() {
           } else if (!customPincerCompositor) {
             mainWindow.maximize();
           }
-          // The minimal nested pincer-compositor intentionally has no fullscreen
+          // The minimal nested cua-compositor intentionally has no fullscreen
           // policy implementation. Requesting fullscreen leaves Chromium
           // waiting on a configure transition and stops the heartbeat oracle.
           // Its 1280x900 sentinel already covers the smaller fixture at origin.
-          // pincer-compositor mapped and focused this toplevel at construction
+          // cua-compositor mapped and focused this toplevel at construction
           // time. Avoid a second synchronous show/configure/focus transition
           // after the renderer has emitted its ready event.
           if (!customPincerCompositor) {

@@ -225,7 +225,7 @@ AT-SPI semantic actions are separate from this plugin. A semantic action can
 sometimes update a background application's accessibility object without raw
 pointer or keyboard synthesis; that does not prove isolated synthetic input.
 
-Validate stock Pincer `0.23.2` desktop capture, window enumeration,
+Validate stock Cua Driver `0.23.2` desktop capture, window enumeration,
 foreground actions, and AT-SPI actions separately. Available protocols and
 accessibility services establish prerequisites; successful actions require
 application-state evidence. The host Hyprland/plugin ABI pair, plugin transport,
@@ -280,7 +280,7 @@ The exact initial host acceptance baseline is:
 | Omarchy                     | `4.0.2-1`         |
 | Hyprland                    | `0.56.2`          |
 | xdg-desktop-portal-hyprland | `1.4.1`           |
-| Pincer                  | `0.23.2`          |
+| Cua Driver                  | `0.23.2`          |
 | Session and display manager | UWSM / SDDM       |
 
 This baseline is an acceptance target, not a statement that the reported host

@@ -1,6 +1,6 @@
 {
   "schema": "pincer.jev_use_visual_replay_v1",
-  "description": "Visual-path fixture (--visual-fixture: Submit is a presentational element with no button ref). Snapshots are real get_browser_state semantic_v2 results and visual_regions is a real parse_visual_regions result, captured on Linux X11 with released Pincer 0.30.1 and pincer-perception 0.2.1. recorded_live_runs are the step choices TypeSafe Jev made in live visual-fixture runs: *_pre_4255 before the filled-form-state change (all verified) and *_post_4255_regression after it (Jev reobserved at step 1 every time). pre_fix_step1 is the exact state and candidate criteria the runner sent Jev at step 1 in those regressed runs.",
+  "description": "Visual-path fixture (--visual-fixture: Submit is a presentational element with no button ref). Snapshots are real get_browser_state semantic_v2 results and visual_regions is a real parse_visual_regions result, captured on Linux X11 with released Cua Driver 0.30.1 and cua-perception 0.2.1. recorded_live_runs are the step choices TypeSafe Jev made in live visual-fixture runs: *_pre_4255 before the filled-form-state change (all verified) and *_post_4255_regression after it (Jev reobserved at step 1 every time). pre_fix_step1 is the exact state and candidate criteria the runner sent Jev at step 1 in those regressed runs.",
   "token": "jev-guide-live",
   "snapshots": {
     "before_typing": {

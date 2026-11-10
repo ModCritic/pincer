@@ -1,4 +1,4 @@
-//! Write the golden trajectories shared with `pincer-cursor-motion`:
+//! Write the golden trajectories shared with upstream's `@trycua/cursor-motion`:
 //!
 //! ```bash
 //! cargo run -p pincer-cursor-motion --features serde --example export_golden \

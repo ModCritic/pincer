@@ -4,10 +4,11 @@ The Rust `pincer mcp` endpoint supports modern MCP `2026-07-28` over stdio
 and retains the legacy `initialize` flow with version `2025-06-18`. Direct and
 daemon-backed stdio use the same protocol and skill catalog.
 
-This implementation shipped in Pincer 0.28.0 through PR #3609. MCP uses
-date-based protocol revisions: `2026-07-28` is the modern revision implemented
-here. The JSON-RPC `2.0` envelope and MCP SDK 2.x package versions are separate
-version numbers, so “MCP 2.0” is not a precise protocol revision name.
+This implementation shipped in upstream Cua Driver 0.28.0 through PR #3609.
+MCP uses date-based protocol revisions: `2026-07-28` is the modern revision
+implemented here. The JSON-RPC `2.0` envelope and MCP SDK 2.x package
+versions are separate version numbers, so “MCP 2.0” is not a precise protocol
+revision name.
 
 ## Connect
 
@@ -91,7 +92,7 @@ may support tools and resource reads without supporting native skill loading.
 
 ## Verified client behavior
 
-A clean macOS VM test with the released Pincer 0.28.0 established these
+A clean macOS VM test with the released Cua Driver 0.28.0 established these
 client boundaries:
 
 - Codex 0.154.0 discovered and read the embedded skill through its MCP resource

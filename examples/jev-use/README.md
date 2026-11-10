@@ -166,7 +166,7 @@ uv run --frozen python verify_native.py --harness winui3 --typescript --output-d
 ```
 
 `--capture-dir` also records sanitized `get_window_state` fixtures like the
-ones under `fixtures/native/`. On Linux, Pincer 0.30.2 and earlier report
+ones under `fixtures/native/`. On Linux, Cua Driver 0.30.2 and earlier report
 no `value` for a named text field
 ([#4291](https://github.com/trycua/cua/issues/4291)). With those Drivers,
 `gtk3-save-note` cannot observe its own write, so it keeps offering the write
@@ -199,7 +199,7 @@ uv run --frozen python measure_native.py replay --provider s1 --reps 5 \
 ```
 
 `fixtures/native/` has density 12 and 24 captures for all four harnesses
-(`appkit`, `wpf`, `winui3`, and `gtk3`). Measured live with Pincer 0.30.4
+(`appkit`, `wpf`, `winui3`, and `gtk3`). Measured live with Cua Driver 0.30.4
 on macOS, Windows, and Linux, with both the Python and TypeScript runners,
 TypeSafe Jev and Cua-S1 chose correctly in all 1,680 decisions at about 4,
 12, and 24 candidates. The per-harness tables are in upstream's RFC 4268

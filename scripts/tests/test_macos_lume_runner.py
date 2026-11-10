@@ -195,8 +195,9 @@ def test_tcc_guest_seed_requires_certificate_backed_requirement_by_default() -> 
     assert 'classify_designated_requirement "${REQUIREMENT}" "${SIGNING_IDENTIFIER}"' in text
 
 
-# The designated requirement codesign derives for the released, notarized
-# Pincer.app (Developer ID Application: Cua AI, Inc.).
+# The designated requirement codesign derives for upstream's released,
+# notarized CuaDriver.app (Developer ID Application: Cua AI, Inc.), with this
+# fork's bundle id in place of upstream's.
 RELEASED_DEVELOPER_ID_DR = (
     'identifier "io.github.modcritic.pincer" and anchor apple generic and '
     "certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and "

@@ -3,8 +3,8 @@
 //! Lineage:
 //! - The arc knobs (`start_handle`, `end_handle`, `arc_size`, `arc_flow`,
 //!   `spring`), their defaults and clamp ranges, and the glide speed constants
-//!   originate in Pincer's Swift `CursorMotionPath.swift` (April 2026,
-//!   #1359). The Dubins glide they feed is from Pincer's Swift
+//!   originate in Cua Driver's Swift `CursorMotionPath.swift` (April 2026,
+//!   #1359). The Dubins glide they feed is from Cua Driver's Swift
 //!   `AgentCursorRenderer.swift` (#1360).
 //! - The `press_duration_ms` knob, the 80 ms `dwell_after_click_ms` default
 //!   and the `with_overrides` method shape follow trope-cua's C#
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // The styles, timing modes and effect switches live in `pincer-cursor-motion`, the
-// single source of truth for cursor motion shared with `pincer-cursor-motion`.
+// single source of truth for cursor motion shared with upstream's `@trycua/cursor-motion`.
 pub use pincer_cursor_motion::{
     MotionEffects, MotionStyle, MotionTiming, ResolvedEffects, DEFAULT_FIXED_MS,
 };

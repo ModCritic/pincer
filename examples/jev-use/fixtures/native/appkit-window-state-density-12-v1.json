@@ -1,6 +1,6 @@
 {
  "_fixture": {
-  "source": "PincerTestHarness.AppKit with PINCER_APPKIT_TASK_STATE and PINCER_APPKIT_TASK_DENSITY=12 set (initial), observed by pincer 0.30.4 get_window_state (macOS 26.5.2 Lume guest)",
+  "source": "PincerTestHarness.AppKit with PINCER_APPKIT_TASK_STATE and PINCER_APPKIT_TASK_DENSITY=12 set (initial), observed by Cua Driver 0.30.4 get_window_state (macOS 26.5.2 Lume guest)",
   "sanitized": "Recorded by verify_native.py --capture-dir. Screenshot bytes, tree_markdown, local file paths, and Driver guidance notes removed. The system Apple menu's machine-specific items (the Recent Items entries and the account name) were removed."
  },
  "app_name": "PincerTestHarness.AppKit",

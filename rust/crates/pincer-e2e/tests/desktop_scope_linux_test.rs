@@ -453,9 +453,9 @@ fn desktop_scope_hotkey_releases_modifiers() {
 }
 
 /// Route for a modified desktop drag. X11 holds the modifier through XTest.
-/// Every native Wayland session, including the nested pincer-compositor lane,
+/// Every native Wayland session, including the nested cua-compositor lane,
 /// reaches desktop drags through the Wayland desktop pointer: the
-/// pincer-compositor socket has no drag command, and its pointer commands carry
+/// cua-compositor socket has no drag command, and its pointer commands carry
 /// no modifier state (its only modifier mask is transient inside a hotkey).
 fn desktop_drag_route(native_wayland: bool) -> DriverRoute {
     if native_wayland {

@@ -1,7 +1,7 @@
 {
  "_fixture": {
   "sanitized": "Recorded by verify_native.py --capture-dir. Screenshot bytes, tree_markdown, local file paths, and Driver guidance notes removed.",
-  "source": "PincerTestHarness task window with PINCER_WINUI3_TASK_DENSITY=12 (initial), observed by get_window_state: Windows WinUI3 harness (PINCER_WINUI3_TASK_STATE), released Pincer 0.30.4 from the canonical install.ps1 on an Azure Windows VM (interactive RDP session)"
+  "source": "PincerTestHarness task window with PINCER_WINUI3_TASK_DENSITY=12 (initial), observed by get_window_state: Windows WinUI3 harness (PINCER_WINUI3_TASK_STATE), released Cua Driver 0.30.4 from the canonical install.ps1 on an Azure Windows VM (interactive RDP session)"
  },
  "app_name": "PincerTestHarness.WinUI3.exe",
  "capture_id": "capture_4e329836024f46afb3ba8f1667e29216_0000000000000000",

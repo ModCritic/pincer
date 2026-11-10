@@ -2120,7 +2120,7 @@ fn move_cursor_absolute_vptr(
 /// Press-drag-release on a native Wayland toplevel. Emits one button press at
 /// `(from_x, from_y)`, then `steps` interpolated motion events along the
 /// straight segment to `(to_x, to_y)`, then a release. Coordinates are
-/// output-relative; window-local coords need the nested pincer-compositor
+/// output-relative; window-local coords need the nested cua-compositor
 /// injection socket (`PINCER_INJECT_SOCKET`).
 pub fn drag(
     window_id: u64,
@@ -3048,14 +3048,14 @@ fn key_to_evdev(key: &str) -> Option<u32> {
     Some(code)
 }
 
-// ── Nested pincer-compositor injection ────────────────────────────────────────
+// ── Nested cua-compositor injection ────────────────────────────────────────
 //
-// When pincer's nested compositor is `pincer-compositor` (our patched wlroots,
-// see nix/pincer/compositor/), it exposes a line-protocol control socket at
-// $PINCER_INJECT_SOCKET for what stock Wayland forbids: focus-FREE per-surface
-// keyboard injection and MULTI-cursor pointer injection, routed by stable PID
-// when available and xdg app_id only as a fallback. These helpers speak that
-// protocol.
+// When pincer's nested compositor is upstream's `cua-compositor` (Cua's patched
+// wlroots, see nix/cua-driver/compositor/ upstream), it exposes a line-protocol
+// control socket at $PINCER_INJECT_SOCKET for what stock Wayland forbids:
+// focus-FREE per-surface keyboard injection and MULTI-cursor pointer injection,
+// routed by stable PID when available and xdg app_id only as a fallback. These
+// helpers speak that protocol.
 //
 // The protocol is a simple line-based v1 exchange with per-command
 // acknowledgement: the client sends `INJECT_PROTO_HELLO` and the compositor
@@ -3069,7 +3069,7 @@ fn key_to_evdev(key: &str) -> Option<u32> {
 const INJECT_PROTO_HELLO: &str = "pincer-inject v1";
 
 /// The exact named keys the nested compositor's `k` command can emit — the
-/// whitelist in `pincer_key_named` (pincer_compositor_patch.py). Compared
+/// whitelist in `cua_key_named` (cua_compositor_patch.py). Compared
 /// case-insensitively, matching the compositor's `strcasecmp`.
 const INJECT_NAMED_KEYS: &[&str] = &[
     "enter",
@@ -3097,14 +3097,14 @@ const INJECT_NAMED_KEYS: &[&str] = &[
     "f12",
 ];
 
-/// The control socket path, when running against the nested pincer-compositor.
+/// The control socket path, when running against the nested cua-compositor.
 pub fn inject_socket_path() -> Option<String> {
     std::env::var("PINCER_INJECT_SOCKET")
         .ok()
         .filter(|s| !s.is_empty())
 }
 
-/// True when input should be routed through the nested pincer-compositor's control
+/// True when input should be routed through the nested cua-compositor's control
 /// socket (focus-free / multi-cursor) rather than wtype / virtual-pointer.
 pub fn is_inject_mode() -> bool {
     inject_socket_path().is_some()
@@ -3187,7 +3187,7 @@ fn validate_injectable_text(text: &str) -> anyhow::Result<()> {
 }
 
 /// Reject any key name outside the compositor's named-key whitelist before
-/// sending. Mirrors `pincer_key_named`; unsupported names must fail here rather
+/// sending. Mirrors `cua_key_named`; unsupported names must fail here rather
 /// than being silently ignored by the compositor.
 fn validate_injectable_key(key: &str) -> anyhow::Result<()> {
     let normalized = key.trim().to_ascii_lowercase();
@@ -3286,7 +3286,7 @@ fn read_inject_line(reader: &mut impl std::io::BufRead) -> anyhow::Result<String
     Ok(line)
 }
 
-/// Connect to the nested pincer-compositor control socket, perform the v1
+/// Connect to the nested cua-compositor control socket, perform the v1
 /// handshake, then send each command line and require exactly one
 /// acknowledgement per command. Fails on protocol mismatch, timeout, EOF, or a
 /// compositor error line — the earlier fire-and-forget path hid all of these.
@@ -3377,7 +3377,7 @@ fn inject_window_origin(pid: u32) -> Option<(i32, i32)> {
 
 /// Resolve a window_id to its xdg app_id via the stable identity registry that
 /// [`list_windows`] populates (falling back to sway IPC / AT-SPI through
-/// [`identity_for`]) — the nested pincer-compositor injection protocol addresses
+/// [`identity_for`]) — the nested cua-compositor injection protocol addresses
 /// windows by app_id. Returns `None` when no identity is registered or the
 /// resolved app_id is empty, so callers can surface a clear error.
 pub fn app_id_for_window(window_id: u64) -> Option<String> {
@@ -3413,7 +3413,7 @@ fn evdev_button(x_button: u32) -> u32 {
     }
 }
 
-/// Sentinel error when a window_id has no registered pincer-compositor identity.
+/// Sentinel error when a window_id has no registered cua-compositor identity.
 fn no_app_id(window_id: u64) -> anyhow::Error {
     anyhow::anyhow!(
         "no known pincer-compositor app_id for window {window_id}; call list_windows first so its \
@@ -3519,7 +3519,7 @@ pub fn inject_scroll(
     inject_send(&lines)
 }
 
-/// Focus-free click into the window's surface via the nested pincer-compositor.
+/// Focus-free click into the window's surface via the nested cua-compositor.
 /// Coordinates are window-local, matching the rest of the inject protocol.
 pub fn inject_click(
     target_pid: u32,

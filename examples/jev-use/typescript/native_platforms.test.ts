@@ -112,7 +112,7 @@ test('a text entry value is never a label', () => {
     assert.equal(field.label, 'Note');
     const ids = note.candidates(after).map((c) => c.id);
     if (harness === 'gtk3') {
-      // Known limitation of Pincer 0.30.2 (#4291): a named AT-SPI text
+      // Known limitation of Cua Driver 0.30.2 (#4291): a named AT-SPI text
       // field reports no value, so the written note is not observable.
       assert.ok('limitation' in windowState(harness, 'after-save-note')._fixture);
       assert.equal(field.value, undefined);

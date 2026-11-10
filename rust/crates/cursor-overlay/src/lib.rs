@@ -3,11 +3,11 @@
 //! Platform renderers (macOS, Windows, Linux) depend on this crate for:
 //! - `CursorConfig` — theme, accessibility, visibility, and motion settings
 //! - `MotionConfig` — glide duration, spring, dwell, idle-hide timings
-//! - `CubicBezier` — Bezier path math (from Pincer's Swift `Bezier.swift` /
+//! - `CubicBezier` — Bezier path math (from Cua Driver's Swift `Bezier.swift` /
 //!   `CursorMotionPath.swift`; arc-length helper after trope-cua, see
 //!   THIRD_PARTY_NOTICES.md)
 //! - `trajectory` — the motion styles, timing and effect geometry, which live
-//!   in the `pincer-cursor-motion` crate (shared with the `pincer-cursor-motion` web package)
+//!   in the `pincer-cursor-motion` crate (shared with upstream's `@trycua/cursor-motion` web package)
 //! - `OverlayCommand` — messages sent from MCP tools to the overlay thread
 //! - `SurfaceFit` — keeps each platform's overlay surface fitted to the live
 //!   display geometry, so screen-coordinate cursors stay on the pointer

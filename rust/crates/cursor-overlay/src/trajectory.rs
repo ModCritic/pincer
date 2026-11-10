@@ -1,7 +1,7 @@
 //! Planned agent-cursor trajectories.
 //!
 //! The motion math lives in the `pincer-cursor-motion` crate, the single source of
-//! truth shared with the `pincer-cursor-motion` web package. This module adapts the
+//! truth shared with upstream's `@trycua/cursor-motion` web package. This module adapts the
 //! driver's [`MotionConfig`] to it.
 
 use crate::motion::MotionConfig;

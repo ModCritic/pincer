@@ -429,7 +429,7 @@ your prior tool calls earned.
    it as `pincer-local.exe` instead.
    If it is missing, point the user at the build steps in the Pincer README
    (https://github.com/ModCritic/pincer) and stop. Do not suggest upstream
-   Pincer's installer; it installs a different build.
+   Cua's installer; it installs a different build.
 2. **The runtime owner must run in an interactive session (Session 1+),
    NOT Session 0.** This is the daemon for one-shot CLI/service mode and the
    MCP process for bare stdio MCP. Windows isolates services into Session 0 with no

@@ -149,7 +149,7 @@ class RecordedHarnessFixtureTest(unittest.TestCase):
                 self.assertEqual(field.label, "Note")
                 ids = [c.id for c in note.candidates(after)]
                 if harness == "gtk3":
-                    # Known limitation of Pincer 0.30.2 (#4291): a named
+                    # Known limitation of Cua Driver 0.30.2 (#4291): a named
                     # AT-SPI text field reports no value, so the written note
                     # is not observable and the write stays offered.
                     self.assertIn("limitation", window_state(harness, "after-save-note")["_fixture"])

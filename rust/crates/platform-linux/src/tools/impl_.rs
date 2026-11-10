@@ -9871,7 +9871,7 @@ impl Tool for PressKeyTool {
         )
         .await;
 
-        // Nested pincer-compositor addresses the owning Wayland client directly.
+        // Nested cua-compositor addresses the owning Wayland client directly.
         // Preserve legacy modifiers by promoting the request to a chord.
         if crate::wayland::is_inject_mode() {
             if let Err(error) =
@@ -12749,7 +12749,7 @@ impl Tool for RightClickTool {
 // ── drag ─────────────────────────────────────────────────────────────────────
 
 /// Typed refusal for a modified drag on native Wayland. The Wayland pointer
-/// routes (virtual pointer, libei, and the nested pincer-compositor socket) do not
+/// routes (virtual pointer, libei, and the nested cua-compositor socket) do not
 /// hold keyboard modifier state across a pointer gesture, so the drag is
 /// refused before any input is dispatched rather than degraded to an
 /// unmodified drag. The stable `code` lets callers branch without parsing text.
@@ -14031,7 +14031,7 @@ pub struct ParallelMouseDragTool {
 }
 static PMDRAG_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
-/// pincer-compositor path for parallel_mouse_drag: build window-local drag paths
+/// cua-compositor path for parallel_mouse_drag: build window-local drag paths
 /// and run them as concurrent multi-cursor injections over the control socket.
 /// Coordinates stay window-local (the compositor maps them per app_id), so no
 /// X11 geometry/MPX is needed — the X11 path's hard blocker on Wayland.
@@ -14140,7 +14140,7 @@ impl Tool for ParallelMouseDragTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
-        // Nested pincer-compositor: run the drags as concurrent multi-cursor
+        // Nested cua-compositor: run the drags as concurrent multi-cursor
         // injections (window-local, no X11 MPX/geometry needed).
         if crate::wayland::is_inject_mode() {
             return parallel_drag_inject(&args).await;

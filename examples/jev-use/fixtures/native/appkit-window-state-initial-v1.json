@@ -1,7 +1,7 @@
 {
  "_fixture": {
-  "source": "PincerTestHarness.AppKit with PINCER_APPKIT_TASK_STATE set, observed by pincer 0.28.2 get_window_state (macOS 26)",
-  "sanitized": "Screenshot bytes and tree_markdown removed. The system Apple menu's machine-specific items (recent items, account names) were removed; two generic items remain. capture_id was added because Pincer 0.30 and later return it with the screenshot."
+  "source": "PincerTestHarness.AppKit with PINCER_APPKIT_TASK_STATE set, observed by Cua Driver 0.28.2 get_window_state (macOS 26)",
+  "sanitized": "Screenshot bytes and tree_markdown removed. The system Apple menu's machine-specific items (recent items, account names) were removed; two generic items remain. capture_id was added because Cua Driver 0.30 and later return it with the screenshot."
  },
  "pid": 20535,
  "window_id": 71364,

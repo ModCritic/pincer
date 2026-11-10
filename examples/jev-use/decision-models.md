@@ -118,13 +118,13 @@ hosts cannot run this path.
 
 ```bash
 S1_DEVICE=cpu S1_DTYPE=float16 \
-  /path/to/trycua-pincer/libs/cua-s1/python/.venv/bin/python \
+  /path/to/trycua-cua/libs/cua-s1/python/.venv/bin/python \
   python/choose_decision.py --model s1 \
   < fixtures/jev-choice-request-v1.json
 ```
 
 On Apple silicon, use `S1_DEVICE=mps` with the default `float16` or with
-`bfloat16`. `pincer_s1` loads `mps` weights sequentially, because Transformers'
+`bfloat16`. `cua_s1` loads `mps` weights sequentially, because Transformers'
 concurrent loader crashed or hung with `mps` and `float16` (#4198).
 
 The S1 text adapter renders OmniParser regions, including confidence and

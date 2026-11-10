@@ -1,7 +1,7 @@
 {
  "_fixture": {
   "sanitized": "Recorded by verify_native.py --capture-dir. Screenshot bytes, tree_markdown, local file paths, and Driver guidance notes removed.",
-  "source": "PincerTestHarness task window with PINCER_WPF_TASK_DENSITY=12 (initial), observed by get_window_state: Windows WPF harness (PINCER_WPF_TASK_STATE), released Pincer 0.30.4 from the canonical install.ps1 on an Azure Windows VM (interactive RDP session)"
+  "source": "PincerTestHarness task window with PINCER_WPF_TASK_DENSITY=12 (initial), observed by get_window_state: Windows WPF harness (PINCER_WPF_TASK_STATE), released Cua Driver 0.30.4 from the canonical install.ps1 on an Azure Windows VM (interactive RDP session)"
  },
  "app_name": "PincerTestHarness.Wpf.exe",
  "capture_id": "capture_e7b465bec67d4230804aa300873aa629_0000000000000000",

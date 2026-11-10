@@ -1,6 +1,6 @@
 # Action results and postcondition verification
 
-Pincer 0.15 separates two facts that earlier releases mixed together:
+Cua Driver 0.15 separates two facts that earlier releases mixed together:
 
 - `ActionResult` says what route the driver used and how strongly it can
   account for the action itself.

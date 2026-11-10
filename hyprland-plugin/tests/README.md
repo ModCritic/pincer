@@ -10,7 +10,7 @@ The [concurrent real-app follow-up](../docs/realapp-validation.md) records two-l
 Calc/Inkscape tasks, moving-primary measurement, a warp-and-return negative
 control, per-lane Cancel, and global Stop on its exact tested candidate.
 
-Neither stable Pincer `0.23.2` nor nightly provides isolated background
+Neither stable Cua Driver `0.23.2` nor nightly provides isolated background
 input through this plugin. Normal-build discovery covers protocol negotiation,
 status, and liveness only; application target discovery and input mutation are
 not enabled.
@@ -373,7 +373,7 @@ packaging, mutation behavior, or harness changes afterward, rerun the evidence
 affected by that change before promotion.
 
 The exact initial baseline is Omarchy `4.0.2-1`, Hyprland `0.56.2`,
-xdg-desktop-portal-hyprland `1.4.1`, Pincer `0.23.2`, and UWSM/SDDM. Record
+xdg-desktop-portal-hyprland `1.4.1`, Cua Driver `0.23.2`, and UWSM/SDDM. Record
 all five values with the candidate SHA and plugin module digest.
 
 Run each row separately and retain the typed protocol result plus the listed

@@ -10,7 +10,7 @@ theme-authoring = []
 
 [dependencies]
 pincer-contract = { path = "../pincer-contract" }
-# Motion math (paths, timing, effects geometry), shared with pincer-cursor-motion.
+# Motion math (paths, timing, effects geometry), shared with upstream's @trycua/cursor-motion.
 pincer-cursor-motion = { path = "../pincer-cursor-motion", features = ["serde"] }
 # Shared agent cursor lifecycle (idle timeout, fade, session end).
 pincer-core = { path = "../pincer-core", default-features = false }

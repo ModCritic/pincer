@@ -122,41 +122,46 @@ the public name between verification and an activation request. One exact
 target is activated only for the bounded operation, then the previously
 focused Shell window is restored and verified.
 
-## Versions and other apps that bundle the helper
+## Versions, and upstream's copy of the helper
 
 The extension is identified by its UUID, `winrects@pincer`, and serves the
-session-bus name `org.pincer.WinRects`. Other apps ship the same helper: T3 Code
-bundles it with its Linux build of Pincer. Keeping one UUID is deliberate.
-Two copies under different UUIDs would both be enabled and race for the same
-bus name and object path, and which one answered would be undefined. With one
-UUID there is exactly one installed copy per user, and the rules below let
-any copy serve every client:
+session-bus name `org.pincer.WinRects` at `/org/pincer/WinRects`. Upstream Cua
+Driver ships its own copy of this helper as `winrects@cua` on
+`org.cua.WinRects` at `/org/cua/WinRects`, and T3 Code bundles that upstream
+helper, under those names, with its Linux build of Cua Driver. Pincer's
+helper shares neither its UUID nor its bus name with those copies, so the two
+install side by side: each lives in its own extension directory, both can be
+enabled at once, each client talks only to its own helper, and installing or
+updating one never replaces or downgrades the other.
+
+Every Pincer install uses the one UUID `winrects@pincer`, so there is exactly
+one installed copy of Pincer's helper per user, and the rules below let it
+serve every Pincer client, older or newer:
 
 - `GetVersion()` returns an integer API version, and `metadata.json`
   `"version"` carries the same number.
 - API versions only add methods. A method never changes or disappears in a
   later version, so a newer helper serves every older client. Clients gate
   each feature on `GetVersion()`.
-- A version number names one method set everywhere. Versions 9 and 10 were
-  first defined in T3 Code's Linux patch to Pincer 0.34.0
-  ([pingdotgg/t3code#16975](https://github.com/pingdotgg/t3code/pull/16975))
-  and are adopted here unchanged, so T3 Code's v10 and this v10 are
-  interchangeable. Version 11 was first defined here. Coordinate any new
-  number with apps that bundle the helper.
+- The version numbers are Pincer's own, and each names one method set.
+  Pincer kept the numbering it inherited from upstream Cua Driver. Versions 9
+  and 10 are the method sets first defined in T3 Code's Linux patch to Cua
+  Driver 0.34.0
+  ([pingdotgg/t3code#16975](https://github.com/pingdotgg/t3code/pull/16975)),
+  which upstream adopted unchanged before this fork was taken. Version 11 was
+  first defined in this fork. Numbers after 10 are not coordinated with
+  upstream's `winrects@cua`, so the same number on the two helpers need not
+  mean the same methods.
 - Installers never downgrade. `install.sh` and the pincer installers keep
   an installed helper whose version is newer than the bundled one, and say so.
   `install.sh --force` replaces it anyway.
 
 | Version | Adds                                                               |
 | ------- | ------------------------------------------------------------------ |
-| 8       | The semantic `SetCursorState` contract; shipped by Pincer 0.34 |
+| 8       | The semantic `SetCursorState` contract; shipped by Cua Driver 0.34 |
 | 9       | `CaptureWindow(id,pid)`                                            |
 | 10      | `CaptureWindowPreview(id,pid,max_dimension)`                       |
 | 11      | `ShowMinimalChip(keys,mac,foreground)`; lists GNOME Shell 51       |
-
-Pincer 0.34 and earlier bundle v8 or older, and their installers overwrite
-an installed helper unconditionally. Running one of those installers after an app
-installed v10 or newer downgrades the helper until the newer app reinstalls it.
 
 ## Other compositors
 

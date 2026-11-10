@@ -2,7 +2,7 @@
 
 This cross-agent skill teaches an AI agent to operate native applications on
 macOS, Windows, and Linux with the `pincer` CLI or MCP server from
-[Pincer](https://github.com/ModCritic/pincer), a fork of Pincer.
+[Pincer](https://github.com/ModCritic/pincer), a fork of Cua Driver.
 
 It covers the canonical snapshot-action-verify loop, exact window addressing,
 accessibility and pixel actions, background/foreground delivery, typed browser

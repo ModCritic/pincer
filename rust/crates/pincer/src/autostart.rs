@@ -24,7 +24,7 @@
 //! one takes a BSTR" footguns. Shelling out to PowerShell's
 //! `Register-ScheduledTask` cmdlet, which itself uses Task Scheduler
 //! 2.0 under the hood, gets us identical behavior in 5 lines. Upstream
-//! Pincer's release installer (`scripts/install.ps1`, which this fork
+//! Cua's release installer (`scripts/install.ps1`, which this fork
 //! removed) ran the same command.
 
 use anyhow::{anyhow, Result};

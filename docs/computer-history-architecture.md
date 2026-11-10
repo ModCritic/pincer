@@ -77,7 +77,7 @@ value of giving agents bounded prior-run context without weakening user privacy.
 - Exposing agent mutation, deletion, raw encrypted chunks, keys, unrestricted queries, or model-generated summaries in Preview 0.
 - Claiming physical secure erasure or complete rollback resistance.
 - Claiming parity where an operating system or desktop cannot supply the same native evidence.
-- Using history as product telemetry or uploading it to Pincer services.
+- Using history as product telemetry or uploading it to any service.
 
 ## Terminology
 
@@ -555,7 +555,7 @@ Preview 0 exposes lifecycle and destructive controls only through local CLI
 requests to a daemon-private method. The daemon authenticates the same-user
 Unix-socket or named-pipe peer, resolves its executable from the kernel-reported
 peer PID, and requires the exact helper inside the verified installed product.
-macOS release admission additionally pins the Pincer signing team and Apple
+macOS release admission additionally pins the upstream Cua signing team and Apple
 code-signing trust anchor. Caller-declared direct-CLI routing fields remain
 defense in depth and cannot authenticate an arbitrary same-user process:
 

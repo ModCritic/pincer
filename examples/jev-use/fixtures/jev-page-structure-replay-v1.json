@@ -1,6 +1,6 @@
 {
   "schema": "pincer.jev_use_page_structure_replay_v1",
-  "description": "Page-structure (DOM) path fixture. Snapshots are real get_browser_state semantic_v2 results from the loopback fixture (captured with pincer on macOS); recorded_live_runs are the step choices TypeSafe Jev made in live Linux/Windows runs with released Pincer 0.30.1. pre_fix_submit_state is the exact state the runner sent Jev at the submit step before the filled-form-state fix.",
+  "description": "Page-structure (DOM) path fixture. Snapshots are real get_browser_state semantic_v2 results from the loopback fixture (captured with Cua Driver on macOS); recorded_live_runs are the step choices TypeSafe Jev made in live Linux/Windows runs with released Cua Driver 0.30.1. pre_fix_submit_state is the exact state the runner sent Jev at the submit step before the filled-form-state fix.",
   "token": "jev-guide-live",
   "snapshots": {
     "before_typing": {
