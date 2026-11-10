@@ -62,9 +62,37 @@ const POINTER_ANCHOR_OFFSET = 16;
 const RIPPLE_SECONDS = 0.52;
 const CLICK_FX_SECONDS = 0.55;
 const SQUISH = 0.12;
-// The cursor's actor leaves room around the pointer for the speed glow. The
-// ripple has an actor of its own at the click point, since the cursor can
-// still be gliding there; the ring reaches 53 px out.
+// MoveCursor's glide is the move pincer-cursor-motion's plan_move plans for
+// the default motion, signature_arc with the default steady timing, to a
+// point with no target rect (DEFAULT_TARGET_PT wide): the Pincer bezier
+// bowed to the chord's natural side (spec.rs knob_shape, path.rs
+// pincer_path), timed by Fitts' law with a 600 ms floor and a sine ease plus
+// a small follow-through (plan.rs generate, ease.rs bump_profile), sampled at
+// 120 Hz. The dart turns to lead along the path and settles back to rest
+// (plan.rs finish). Change these with the crate.
+const MOTION_SAMPLE_MS = 1000 / 120;
+const MOTION_TARGET_WIDTH = 24;
+const MOTION_FLOOR_MS = 600;
+const MOTION_FITTS = { a: 150, b: 120, minMs: 300, maxMs: 1000, scale: 1.1 };
+const ARC_HANDLE = 0.3;
+const ARC_SIZE = 0.16;
+const ARC_FLOW = 0.15;
+const ARC_LENGTH_STEPS = 256;
+const FOLLOW_THROUGH = { amount: 0.018, maxPt: 8, at: 0.82 };
+const REST_HEADING = Math.PI / 4;
+// The heading's tip angle at rest, its turn rate, and the speeds (pt/s)
+// over which it starts to lead.
+const TIP_ANGLE = -0.75 * Math.PI;
+const HEADING_RATE = 22;
+const HEADING_SPEED_MIN = 40;
+const HEADING_SPEED_RANGE = 260;
+const HEADING_SETTLE_STEPS = 36;
+// The longest glide has 134 samples (Fitts' cap, 1100 ms), plus the settle.
+const MAX_GLIDE_SAMPLES = 192;
+// The cursor's actor leaves room around the pointer for the speed glow,
+// which reaches 77 px out at any heading. The ripple has an actor of its own
+// at the click point, since the cursor can still be gliding there; the ring
+// reaches 53 px out.
 const ACTOR_SIZE = 160;
 const ACTOR_CENTER = ACTOR_SIZE / 2;
 const RIPPLE_ACTOR_SIZE = 112;
@@ -122,9 +150,9 @@ const MINIMAL_CHIP_SECONDS =
 // never arrives.
 const MINIMAL_CHIP_ARM_TIMEOUT_SECONDS = 10;
 const FOREGROUND_CHIP_LABEL = 'foreground';
-// MoveCursor glides for this long; the minimal chip waits for rest.
-const CURSOR_GLIDE_MS = 480;
 const FRAME_INTERVAL_MS = 33;
+// A glide redraws the cursor at most this often.
+const GLIDE_PAINT_SECONDS = 0.012;
 const ACTIONS = new Set([
   'idle',
   'observe',
@@ -857,18 +885,17 @@ function effectColor(color) {
 /**
  * effects::glow for a cursor moving at (vx, vy) px/s, relative to the
  * pointer: a radial glow around the cursor's anchor, POINTER_ANCHOR_OFFSET
- * behind the tip along its resting heading, pulled back against the motion.
- * Null when the cursor is too slow for one.
+ * behind the tip along `heading`, pulled back against the motion. Null when
+ * the cursor is too slow for one.
  */
-function speedGlow(vx, vy) {
+function speedGlow(vx, vy, heading) {
   const speed = Math.hypot(vx, vy);
   const alpha = Math.min(speed * 0.00014, 0.42);
   if (alpha <= 0.02) return null;
   const pullback = Math.min(speed * 0.009, 18);
-  const anchor = POINTER_ANCHOR_OFFSET * Math.SQRT1_2;
   return {
-    x: anchor - (vx / speed) * pullback,
-    y: anchor - (vy / speed) * pullback,
+    x: Math.cos(heading) * POINTER_ANCHOR_OFFSET - (vx / speed) * pullback,
+    y: Math.sin(heading) * POINTER_ANCHOR_OFFSET - (vy / speed) * pullback,
     r: 30 * (1 + Math.min(speed * 0.00024, 0.44)),
     alpha,
   };
@@ -909,14 +936,272 @@ function clickSquish(age) {
   );
 }
 
+/** geom.rs wrap_angle: `angle` in (-pi, pi]. */
+function wrapAngle(angle) {
+  const tau = 2 * Math.PI;
+  let r = angle % tau;
+  if (r > Math.PI) r -= tau;
+  if (r < -Math.PI) r += tau;
+  return r;
+}
+
+// The planned glide, filled by planGlide once per move and read by
+// sampleGlide every frame. Samples are seconds from the start of the move,
+// the pointer's point and the dart's heading. One cursor, so one plan.
+const glidePlan = {
+  count: 0,
+  // Samples up to the arrival at the destination, then the heading's settle.
+  glideCount: 0,
+  glideSeconds: 0,
+  seconds: 0,
+  t: new Float64Array(MAX_GLIDE_SAMPLES),
+  x: new Float64Array(MAX_GLIDE_SAMPLES),
+  y: new Float64Array(MAX_GLIDE_SAMPLES),
+  heading: new Float64Array(MAX_GLIDE_SAMPLES),
+};
+// The path's control points (x, y of the start, both handles and the end)
+// and its arc-length table (path.rs Path).
+const glideCurve = new Float64Array(8);
+const glideArcLengths = new Float64Array(ARC_LENGTH_STEPS + 1);
+const glidePathEnds = { length: 0, startDx: 0, startDy: 0, endDx: 0, endDy: 0 };
+
+/** The cubic at parameter `u`, into plan sample `i` (path.rs cubic). */
+function curvePoint(u, i) {
+  const c = glideCurve;
+  const v = 1 - u;
+  const a = v * v * v;
+  const b = 3 * v * v * u;
+  const d = 3 * v * u * u;
+  const e = u * u * u;
+  glidePlan.x[i] = a * c[0] + b * c[2] + d * c[4] + e * c[6];
+  glidePlan.y[i] = a * c[1] + b * c[3] + d * c[5] + e * c[7];
+}
+
+/**
+ * Path::at_fraction: the point `fraction` of the way along the path by
+ * distance, into plan sample `i`. Past either end it carries on along the
+ * end's tangent, which is how the follow-through leaves the path and comes
+ * back.
+ */
+function pathPoint(fraction, i) {
+  const ends = glidePathEnds;
+  const length = ends.length;
+  const c = glideCurve;
+  if (length < 1e-9) {
+    curvePoint(Math.max(0, Math.min(1, fraction)), i);
+  } else if (fraction > 1) {
+    glidePlan.x[i] = c[6] + ends.endDx * (fraction - 1) * length;
+    glidePlan.y[i] = c[7] + ends.endDy * (fraction - 1) * length;
+  } else if (fraction < 0) {
+    glidePlan.x[i] = c[0] + ends.startDx * -fraction * length;
+    glidePlan.y[i] = c[1] + ends.startDy * -fraction * length;
+  } else {
+    const target = fraction * length;
+    let lo = 0;
+    let hi = ARC_LENGTH_STEPS;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (glideArcLengths[mid] < target) lo = mid;
+      else hi = mid;
+    }
+    const span = glideArcLengths[hi] - glideArcLengths[lo] || 1;
+    const u0 = lo / ARC_LENGTH_STEPS;
+    const u1 = hi / ARC_LENGTH_STEPS;
+    curvePoint(u0 + (u1 - u0) * ((target - glideArcLengths[lo]) / span), i);
+  }
+}
+
+/**
+ * The path's direction at one end, as Path::new finds it: from the curve at
+ * `u` toward the end point at glideCurve[endIndex], into glidePathEnds.
+ */
+function endTangent(u, endIndex, keyX, keyY) {
+  curvePoint(u, 0);
+  const dx = glideCurve[endIndex] - glidePlan.x[0];
+  const dy = glideCurve[endIndex + 1] - glidePlan.y[0];
+  const d = Math.hypot(dx, dy) || 1;
+  glidePathEnds[keyX] = dx / d;
+  glidePathEnds[keyY] = dy / d;
+}
+
+/**
+ * plan_move for the default motion, from the pointer at (fromX, fromY) with
+ * the dart at `fromHeading` to (toX, toY), into glidePlan. Allocates
+ * nothing.
+ */
+function planGlide(fromX, fromY, fromHeading, toX, toY) {
+  const plan = glidePlan;
+  const c = glideCurve;
+  // pincer_path with knob_shape's arc, bowed to natural_side: upward for a
+  // move to the right.
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  const distance = Math.hypot(dx, dy);
+  const side = dx >= 0 ? -1 : 1;
+  const len = Math.max(distance, 1);
+  const px = -dy / len;
+  const py = dx / len;
+  const deflection = len * (ARC_SIZE * side);
+  const flow = (ARC_FLOW + 1) / 2;
+  const startBend = deflection * (1 - 0.5 * flow);
+  const endBend = deflection * (1 - 0.5 * (1 - flow));
+  c[0] = fromX;
+  c[1] = fromY;
+  c[2] = fromX + dx * ARC_HANDLE + px * startBend;
+  c[3] = fromY + dy * ARC_HANDLE + py * startBend;
+  c[4] = toX - dx * ARC_HANDLE + px * endBend;
+  c[5] = toY - dy * ARC_HANDLE + py * endBend;
+  c[6] = toX;
+  c[7] = toY;
+  // Path::new: the arc-length table and the end tangents.
+  let total = 0;
+  glideArcLengths[0] = 0;
+  curvePoint(0, 0);
+  let prevX = plan.x[0];
+  let prevY = plan.y[0];
+  for (let i = 1; i <= ARC_LENGTH_STEPS; i++) {
+    curvePoint(i / ARC_LENGTH_STEPS, 0);
+    total += Math.hypot(plan.x[0] - prevX, plan.y[0] - prevY);
+    glideArcLengths[i] = total;
+    prevX = plan.x[0];
+    prevY = plan.y[0];
+  }
+  glidePathEnds.length = total;
+  endTangent(1e-3, 0, 'startDx', 'startDy');
+  endTangent(1 - 1e-3, 6, 'endDx', 'endDy');
+
+  // Fitts' law for a target MOTION_TARGET_WIDTH wide, at least the steady
+  // floor; the floor also swaps the min-jerk ease for a sine one.
+  const fitts = MOTION_FITTS;
+  const ms = Math.max(
+    Math.min(
+      Math.max(fitts.a + fitts.b * Math.log2(distance / MOTION_TARGET_WIDTH + 1), fitts.minMs),
+      fitts.maxMs
+    ) * fitts.scale,
+    MOTION_FLOOR_MS
+  );
+  // bump_profile: a follow-through of `over` of the distance, peaking at `at`.
+  const over = Math.min(FOLLOW_THROUGH.amount, FOLLOW_THROUGH.maxPt / Math.max(distance, 1));
+  const at = FOLLOW_THROUGH.at;
+  const bumpA = Math.max(at * 10, 1.5);
+  const bumpB = Math.max((1 - at) * 10, 1.5);
+  const peak = (bumpA / (bumpA + bumpB)) ** bumpA * (bumpB / (bumpA + bumpB)) ** bumpB;
+  // sample_timed and pin_ends.
+  const n = Math.min(Math.max(Math.ceil(ms / MOTION_SAMPLE_MS), 2), MAX_GLIDE_SAMPLES - 1);
+  for (let i = 0; i <= n; i++) {
+    const tau = i / n;
+    const eased = 0.5 - 0.5 * Math.cos(Math.PI * tau);
+    pathPoint(eased + over * ((tau ** bumpA * (1 - tau) ** bumpB) / peak), i);
+    plan.t[i] = tau * ms;
+  }
+  plan.x[0] = fromX;
+  plan.y[0] = fromY;
+  plan.x[n] = toX;
+  plan.y[n] = toY;
+
+  // finish: the heading leads along the velocity once the dart moves, eased
+  // toward it at HEADING_RATE, then settles back to rest at the end.
+  const count = n + 1;
+  let rot = wrapAngle(fromHeading - REST_HEADING);
+  for (let i = 0; i < count; i++) {
+    const a = Math.max(i - 2, 0);
+    const b = Math.min(i + 2, count - 1);
+    const dt = Math.max((plan.t[b] - plan.t[a]) / 1000, 1e-3);
+    const vx = (plan.x[b] - plan.x[a]) / dt;
+    const vy = (plan.y[b] - plan.y[a]) / dt;
+    const lead = Math.max(
+      0,
+      Math.min(1, (Math.hypot(vx, vy) - HEADING_SPEED_MIN) / HEADING_SPEED_RANGE)
+    );
+    const want = wrapAngle(Math.atan2(vy, vx) - TIP_ANGLE) * lead;
+    const step = i > 0 ? (plan.t[i] - plan.t[i - 1]) / 1000 : 0;
+    rot += wrapAngle(want - rot) * (1 - Math.exp(-step * HEADING_RATE));
+    plan.heading[i] = REST_HEADING + rot;
+  }
+  for (let i = 0; i < count; i++) plan.t[i] /= 1000;
+  plan.glideCount = count;
+  plan.glideSeconds = plan.t[n];
+  let samples = count;
+  const settleStep = MOTION_SAMPLE_MS / 1000;
+  const settle = 1 - Math.exp(-settleStep * HEADING_RATE);
+  for (let k = 0; k < HEADING_SETTLE_STEPS && samples < MAX_GLIDE_SAMPLES; k++) {
+    if (Math.abs(rot) < 0.002) break;
+    rot -= rot * settle;
+    plan.t[samples] = plan.t[samples - 1] + settleStep;
+    plan.x[samples] = toX;
+    plan.y[samples] = toY;
+    plan.heading[samples] = REST_HEADING + rot;
+    samples++;
+  }
+  plan.heading[samples - 1] = REST_HEADING;
+  plan.count = samples;
+  plan.seconds = plan.t[samples - 1];
+}
+
+/**
+ * Trajectory::sample_at: the planned point and heading `t` seconds into the
+ * move, into `out`, interpolated between the two samples around it.
+ */
+function sampleGlide(t, out) {
+  const plan = glidePlan;
+  const last = plan.count - 1;
+  let i;
+  if (t <= plan.t[0]) {
+    i = 0;
+  } else if (t >= plan.t[last]) {
+    i = last;
+  } else {
+    // Samples are evenly spaced up to the arrival, then MOTION_SAMPLE_MS
+    // apart; guess the index, then step to the pair around `t`.
+    i =
+      t < plan.glideSeconds
+        ? Math.floor((t / plan.glideSeconds) * (plan.glideCount - 1))
+        : plan.glideCount - 1 + Math.floor(((t - plan.glideSeconds) * 1000) / MOTION_SAMPLE_MS);
+    i = Math.max(0, Math.min(i, last - 1));
+    while (i > 0 && plan.t[i] > t) i--;
+    while (i < last - 1 && plan.t[i + 1] <= t) i++;
+    const f = (t - plan.t[i]) / (plan.t[i + 1] - plan.t[i]);
+    out.x = plan.x[i] + (plan.x[i + 1] - plan.x[i]) * f;
+    out.y = plan.y[i] + (plan.y[i + 1] - plan.y[i]) * f;
+    out.heading = plan.heading[i] + wrapAngle(plan.heading[i + 1] - plan.heading[i]) * f;
+    return;
+  }
+  out.x = plan.x[i];
+  out.y = plan.y[i];
+  out.heading = plan.heading[i];
+}
+
+const velocityBefore = { x: 0, y: 0, heading: 0 };
+const velocityAfter = { x: 0, y: 0, heading: 0 };
+
+/** Trajectory::velocity_at: the pointer's velocity, px/s, `t` seconds into the move, into `out`. */
+function glideVelocity(t, out) {
+  const h = 0.008;
+  if (t > glidePlan.seconds + h) {
+    out.vx = 0;
+    out.vy = 0;
+    return;
+  }
+  sampleGlide(t - h, velocityBefore);
+  sampleGlide(t + h, velocityAfter);
+  out.vx = (velocityAfter.x - velocityBefore.x) / (2 * h);
+  out.vy = (velocityAfter.y - velocityBefore.y) / (2 * h);
+}
+
+// Where the glide has the cursor, for its frames and for its paint.
+const framePoint = { x: 0, y: 0, heading: REST_HEADING };
+const paintPoint = { x: 0, y: 0, heading: REST_HEADING };
+const paintVelocity = { vx: 0, vy: 0 };
+
 /**
  * One frame of the agent cursor, as render_state.rs paint_cursor draws it,
  * with the pointer's point at the origin: the speed glow, then the theme's
- * frame for `action` `elapsed` seconds in, squished about the hotspot and
+ * frame for `action` `elapsed` seconds in, squished about the hotspot,
+ * turned about it to `heading` (REST_HEADING is the artwork's own pose) and
  * floating. `effects` comes from _effectFrame. The ripple, which paint_cursor
  * draws last, is the ripple actor's.
  */
-function drawAgentCursor(cr, action, elapsed, fillColor, effects) {
+function drawAgentCursor(cr, action, elapsed, fillColor, effects, heading) {
   if (effects.glow) drawSpeedGlow(cr, effects.glow, effectColor(fillColor));
   const animation = THEME_ACTIONS[action] ?? THEME_ACTIONS.idle;
   const frame = Math.floor(Math.max(0, elapsed) * THEME_FPS) % animation.frames;
@@ -924,7 +1209,7 @@ function drawAgentCursor(cr, action, elapsed, fillColor, effects) {
   const float = sharedFloatMotion((Math.max(0, elapsed) % FLOAT_DURATION) / FLOAT_DURATION);
   cr.save();
   cr.translate(float.dx * scale, float.dy * scale);
-  cr.rotate(float.rotation);
+  cr.rotate(heading - REST_HEADING + float.rotation);
   cr.scale(scale, scale);
   cr.translate(-HOTSPOT[0], -HOTSPOT[1]);
   drawCursorLayers(cr, animation.cursor ?? {}, frame, fillColor);
@@ -1068,35 +1353,70 @@ export default class WinRectsExtension extends Extension {
     // The first session's color until Pincer sends one.
     this._fillColor = [...DEFAULT_CURSOR_FILL];
     this._fillColorCss = '#c95e48';
-    // The glide MoveCursor started and the last ClickPulse, for the effects.
+    // The glide MoveCursor started ({ start, scale }, its clock running
+    // `scale` times slower than real time) and the last ClickPulse.
     this._glide = null;
     this._clickAt = null;
-    this._cursor = new St.DrawingArea({
+    // The cursor is a plain actor that moves, around the art that is drawn:
+    // St redraws a drawing area whenever it is moved itself, but not when
+    // its parent is.
+    this._cursor = new Clutter.Actor({
       width: ACTOR_SIZE,
       height: ACTOR_SIZE,
       visible: false,
       reactive: false,
+    });
+    this._cursorArt = new St.DrawingArea({
+      width: ACTOR_SIZE,
+      height: ACTOR_SIZE,
+      reactive: false,
       can_focus: false,
     });
-    this._cursor.connect('repaint', (area) => {
+    this._cursor.add_child(this._cursorArt);
+    // When the art was last drawn, in real seconds (the glide's repaints
+    // are paced by it), and how far it was drawn off the actor's whole
+    // pixel: the cursor's point can sit between pixels while it glides.
+    this._paintedAt = 0;
+    this._artOffsetX = 0;
+    this._artOffsetY = 0;
+    this._cursorArt.connect('repaint', (area) => {
+      this._paintedAt = GLib.get_monotonic_time() / 1_000_000;
+      this._artOffsetX = (this._pointX ?? 0) - Math.round(this._pointX ?? 0);
+      this._artOffsetY = (this._pointY ?? 0) - Math.round(this._pointY ?? 0);
       const cr = area.get_context();
       const now = nowSeconds();
-      cr.translate(ACTOR_CENTER, ACTOR_CENTER);
+      const effects = this._effectFrame(now);
+      cr.translate(ACTOR_CENTER + this._artOffsetX, ACTOR_CENTER + this._artOffsetY);
       drawAgentCursor(
         cr,
         this._action,
         now - this._actionStarted,
         this._fillColor,
-        this._effectFrame(now)
+        effects,
+        effects.heading
       );
       cr.$dispose();
     });
-    this._cursor.set_pivot_point(0.5, 0.5);
+    // A glide moves the cursor on every frame Shell paints, from the cursor's
+    // own frame clock, and redraws it as it turns.
+    this._glideTimeline = new Clutter.Timeline({
+      actor: this._cursor,
+      duration: 1000,
+      repeat_count: -1,
+    });
+    this._glideTimeline.connect('new-frame', () => {
+      if (!this._glideFrame()) this._glideTimeline?.stop();
+    });
     // Shell can dispose these actors on its own, at shutdown before
     // disable() runs: forget them and stop the frame timer then.
     this._cursor.connect('destroy', () => {
       this._cursor = null;
+      this._stopGlide();
+      this._glideTimeline = null;
       this._stopTicking();
+    });
+    this._cursorArt.connect('destroy', () => {
+      this._cursorArt = null;
     });
     Main.layoutManager.addTopChrome(this._cursor);
     // Over the cursor, under the badge, as paint_cursor layers them.
@@ -1230,8 +1550,11 @@ export default class WinRectsExtension extends Extension {
     this._keycapLayout = null;
     this._minimalChip = null;
 
+    // Where MoveCursor and ClickPulse last sent the cursor, and where it is.
     this._cursorX = null;
     this._cursorY = null;
+    this._pointX = null;
+    this._pointY = null;
     this._badgeRevealedAt = null;
     this._modifierFadeAt = null;
     this._glideEndsAt = 0;
@@ -1245,6 +1568,8 @@ export default class WinRectsExtension extends Extension {
       entry.clone.destroy();
     }
     this._captureClones.clear();
+    this._stopGlide();
+    this._glideTimeline = null;
     // Each destroy handler forgets its own references.
     this._cursor?.destroy();
     this._ripple?.destroy();
@@ -1253,7 +1578,6 @@ export default class WinRectsExtension extends Extension {
     this._keycaps?.destroy();
     this._minimalChip = null;
     this._keycapLayout = null;
-    this._glide = null;
     this._clickAt = null;
     if (this._impl) {
       this._impl.unexport();
@@ -1279,37 +1603,78 @@ export default class WinRectsExtension extends Extension {
     GLib.source_remove(this._frameId);
     this._frameId = 0;
   }
-  /** Where the current glide has the pointer at `now`, as Clutter's ease-out cubic. */
-  _glidePoint(now) {
+  /** Whether a glide is under way at `now`; if so, its point and heading then go into `out`. */
+  _glideAt(now, out) {
     const glide = this._glide;
-    if (!glide) return null;
-    const t = Math.max(0, Math.min(1, (now - glide.start) / glide.seconds));
-    const eased = 1 - (1 - t) ** 3;
-    return [
-      glide.fromX + (glide.toX - glide.fromX) * eased,
-      glide.fromY + (glide.toY - glide.fromY) * eased,
-    ];
-  }
-  /** Whether the glide MoveCursor started is still under way at `now`. */
-  _gliding(now) {
-    return this._glide !== null && now - this._glide.start < this._glide.seconds;
+    if (!glide) return false;
+    const t = (now - glide.start) / glide.scale;
+    if (t >= glidePlan.seconds) return false;
+    sampleGlide(t, out);
+    return true;
   }
   /**
-   * The cursor's motion effects at `now`, as RenderStateCore.effect_frame
-   * gives them for the default motion style: the speed glow while a glide
-   * runs, and the squish for CLICK_FX_SECONDS after a ClickPulse.
+   * One frame of a glide: the cursor and its badge to the planned point.
+   * Returns false once the glide is over, with the cursor on its destination.
+   */
+  _glideFrame() {
+    const glide = this._glide;
+    if (!glide || !this._cursor) return false;
+    const t = (nowSeconds() - glide.start) / glide.scale;
+    const over = t >= glidePlan.seconds;
+    // Move and redraw (for the turn and the glow) at most every
+    // GLIDE_PAINT_SECONDS: every frame at 60 Hz, as the X11 overlay paints,
+    // and every other one on faster displays. The last frame always lands.
+    // The frame timer leaves the glide's repaints to this.
+    if (!over && GLib.get_monotonic_time() / 1_000_000 - this._paintedAt < GLIDE_PAINT_SECONDS)
+      return true;
+    sampleGlide(t, framePoint);
+    this._placeCursor(framePoint.x, framePoint.y, true);
+    if (!over) return true;
+    this._glide = null;
+    return false;
+  }
+  _stopGlide() {
+    this._glide = null;
+    this._glideTimeline?.stop();
+  }
+  /**
+   * Put the cursor's point on (x, y), and its badge under it. The actor
+   * moves to the whole pixel and the art is drawn the rest of the way, as
+   * the X11 overlay renders it, so the art is redrawn when that changes, or
+   * when `repaint`. A drawing area redraws as soon as it is asked to, so
+   * this asks once.
+   */
+  _placeCursor(x, y, repaint = false) {
+    this._pointX = x;
+    this._pointY = y;
+    const ax = Math.round(x);
+    const ay = Math.round(y);
+    this._cursor?.set_position(ax - ACTOR_CENTER, ay - ACTOR_CENTER);
+    if (repaint || x - ax !== this._artOffsetX || y - ay !== this._artOffsetY)
+      this._cursorArt?.queue_repaint();
+    this._positionBadge();
+  }
+  /**
+   * The cursor's heading and motion effects at `now`, as RenderStateCore
+   * gives them for the default motion style: while a glide runs, the heading
+   * it plans and the speed glow from its velocity; the squish for
+   * CLICK_FX_SECONDS after a ClickPulse.
    */
   _effectFrame(now) {
     let glow = null;
+    let heading = REST_HEADING;
     const glide = this._glide;
-    const t = glide ? (now - glide.start) / glide.seconds : 1;
-    if (t >= 0 && t < 1) {
-      // The ease-out cubic's speed, as a share of the distance per second.
-      const rate = (3 * (1 - t) ** 2) / glide.seconds;
-      glow = speedGlow((glide.toX - glide.fromX) * rate, (glide.toY - glide.fromY) * rate);
+    if (this._glideAt(now, paintPoint)) {
+      heading = paintPoint.heading;
+      glideVelocity((now - glide.start) / glide.scale, paintVelocity);
+      glow = speedGlow(paintVelocity.vx / glide.scale, paintVelocity.vy / glide.scale, heading);
     }
     const age = this._clickAt === null ? -1 : now - this._clickAt;
-    return { glow, squish: age >= 0 && age < CLICK_FX_SECONDS ? clickSquish(age) : 0 };
+    return {
+      glow,
+      heading,
+      squish: age >= 0 && age < CLICK_FX_SECONDS ? clickSquish(age) : 0,
+    };
   }
   /** Show the ripple while it plays, and repaint it. */
   _frameRipple(now) {
@@ -1330,7 +1695,7 @@ export default class WinRectsExtension extends Extension {
       now - this._actionStarted >= ACTION_DURATIONS[this._action]
     )
       this._setCursorState('idle', '', '');
-    this._cursor.queue_repaint();
+    if (!this._glide) this._cursorArt?.queue_repaint();
     this._frameRipple(now);
     let labelAlpha = this._badgeRevealedAt === null ? 0 : 1;
     if (this._badgeRevealedAt !== null) {
@@ -1362,8 +1727,7 @@ export default class WinRectsExtension extends Extension {
       this._badgeLabel.opacity = Math.round(255 * labelAlpha);
       if (labelAlpha <= 0.001 && this._badgeLabel.visible) {
         this._badgeLabel.hide();
-        if (this._cursorX !== null && this._cursorY !== null)
-          this._positionBadge(this._cursorX, this._cursorY, 0);
+        this._positionBadge();
       }
     }
     if (this._badgeChips) this._badgeChips.opacity = Math.round(255 * chipAlpha);
@@ -1617,31 +1981,37 @@ export default class WinRectsExtension extends Extension {
     if (!this._cursor) return;
     const revealBadge = !this._cursor.visible;
     const now = nowSeconds();
-    // Only a real move is a glide the minimal chip waits out.
-    if (x !== this._cursorX || y !== this._cursorY)
-      this._glideEndsAt = now + CURSOR_GLIDE_MS / 1000;
-    // The ease below starts over from wherever the cursor is, and the speed
-    // glow follows it. Shell scales every ease's duration, and makes it 0
-    // while animations are off (adjustAnimationTime), so the glow does too.
+    // The glide starts from where the cursor is and the way it points: in
+    // the middle of a glide, that glide's point and heading at this moment.
+    let fromX = this._pointX ?? this._cursor.x + ACTOR_CENTER;
+    let fromY = this._pointY ?? this._cursor.y + ACTOR_CENTER;
+    let fromHeading = REST_HEADING;
+    if (this._glideAt(now, framePoint)) {
+      fromX = framePoint.x;
+      fromY = framePoint.y;
+      fromHeading = framePoint.heading;
+    }
+    // Shell scales every ease's duration, and makes it 0 while animations
+    // are off (adjustAnimationTime): the glide does the same, so with
+    // animations off the cursor jumps, without a turn or a glow.
     const settings = St.Settings.get();
-    const seconds = settings.enable_animations
-      ? (settings.slow_down_factor * CURSOR_GLIDE_MS) / 1000
-      : 0;
-    const [fromX, fromY] = this._glidePoint(now) ?? [
-      this._cursor.x + ACTOR_CENTER,
-      this._cursor.y + ACTOR_CENTER,
-    ];
-    this._glide = seconds > 0 ? { fromX, fromY, toX: x, toY: y, start: now, seconds } : null;
+    const scale = settings.enable_animations ? settings.slow_down_factor : 0;
+    const moving = this._glide !== null || fromX !== x || fromY !== y;
     this._cursorX = x;
     this._cursorY = y;
     this._cursor.show();
-    this._cursor.ease({
-      x: x - ACTOR_CENTER,
-      y: y - ACTOR_CENTER,
-      duration: CURSOR_GLIDE_MS,
-      mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
-    });
-    this._positionBadge(x, y, CURSOR_GLIDE_MS);
+    if (scale > 0 && moving) {
+      planGlide(fromX, fromY, fromHeading, x, y);
+      this._glide = { start: now, scale };
+      // The minimal chip waits until the glide, its settle included, is over.
+      this._glideEndsAt = now + glidePlan.seconds * scale;
+      this._glideFrame();
+      this._glideTimeline?.start();
+    } else {
+      this._stopGlide();
+      this._glideEndsAt = 0;
+      this._placeCursor(x, y);
+    }
     this._positionMinimalChip(x, y);
     if (revealBadge) this._revealBadge();
     this._startTicking();
@@ -1651,22 +2021,23 @@ export default class WinRectsExtension extends Extension {
     const revealBadge = !this._cursor.visible;
     this._cursorX = x;
     this._cursorY = y;
-    this._cursor.set_position(x - ACTOR_CENTER, y - ACTOR_CENTER);
     this._glideEndsAt = 0;
-    // set_position leaves a running ease on its way, so a glide still under
-    // way keeps its glow, as a move settling on the click point does on X11.
+    // A glide still under way finishes on its own, with its turn and glow,
+    // as a move settling on the click point does on X11.
     const now = nowSeconds();
-    if (!this._gliding(now)) this._glide = null;
+    if (!this._glideAt(now, framePoint)) {
+      this._stopGlide();
+      this._placeCursor(x, y);
+    }
     // The ripple stays where the click landed.
     this._clickAt = now;
     this._ripple?.set_position(x - RIPPLE_ACTOR_SIZE / 2, y - RIPPLE_ACTOR_SIZE / 2);
     this._frameRipple(now);
-    this._positionBadge(x, y, 0);
     this._positionMinimalChip(x, y);
     if (['idle', 'navigate', 'click'].includes(this._action))
       this._setCursorState('click', this._delivery, this._target);
     this._cursor.show();
-    this._cursor.queue_repaint();
+    this._cursorArt?.queue_repaint();
     if (revealBadge) this._revealBadge();
     this._startTicking();
   }
@@ -1685,7 +2056,7 @@ export default class WinRectsExtension extends Extension {
     this._targetChip?.queue_repaint();
     this._chipForeground?.queue_repaint();
     this._keycaps?.queue_repaint();
-    if (this._cursor) this._cursor.queue_repaint();
+    this._cursorArt?.queue_repaint();
   }
   SetCursorState(action, delivery, target, active) {
     if (!ACTIONS.has(action)) return;
@@ -1745,32 +2116,21 @@ export default class WinRectsExtension extends Extension {
       if (!this._delivery && !this._target) this._badge.hide();
       return;
     }
-    if (this._cursorX !== null && this._cursorY !== null) {
-      this._positionBadge(this._cursorX, this._cursorY, 0);
+    if (this._pointX !== null) {
+      this._positionBadge();
       this._revealBadge();
     }
   }
-  _positionBadge(x, y, duration) {
-    if (!this._badge) return;
+  /** The badge under the cursor's point, wherever the cursor is in its glide. */
+  _positionBadge() {
+    if (!this._badge || this._pointX === null) return;
     // centerOnX shifts the badge left by half its allocated width.
-    const badgeX = Math.round(x);
-    const badgeY = Math.round(y + BADGE_Y_OFFSET);
-    if (duration > 0) {
-      this._badge.ease({
-        x: badgeX,
-        y: badgeY,
-        duration,
-        mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
-      });
-    } else {
-      this._badge.set_position(badgeX, badgeY);
-    }
+    this._badge.set_position(Math.round(this._pointX), Math.round(this._pointY + BADGE_Y_OFFSET));
   }
   _revealBadge() {
     if (!this._badge || !this._badgeLabel || this._badgeLabel.get_text().length === 0) return;
     this._badgeLabel.show();
-    if (this._cursorX !== null && this._cursorY !== null)
-      this._positionBadge(this._cursorX, this._cursorY, 0);
+    this._positionBadge();
     this._badgeRevealedAt = nowSeconds();
     this._badge.opacity = 255;
     this._badge.show();
@@ -1789,9 +2149,8 @@ export default class WinRectsExtension extends Extension {
     this._updateModifierChips();
     this._actionStarted = nowSeconds();
     this._endingAt = null;
-    if (this._cursor) this._cursor.queue_repaint();
-    if (this._cursorX !== null && this._cursorY !== null)
-      this._positionBadge(this._cursorX, this._cursorY, 0);
+    this._cursorArt?.queue_repaint();
+    this._positionBadge();
   }
   _updateModifierChips() {
     if (this._deliveryChip) {
@@ -1810,7 +2169,7 @@ export default class WinRectsExtension extends Extension {
     this._stopTicking();
     if (this._cursor) this._cursor.hide();
     this._ripple?.hide();
-    this._glide = null;
+    this._stopGlide();
     this._clickAt = null;
     if (this._badge) this._badge.hide();
     this._clearMinimalChip();

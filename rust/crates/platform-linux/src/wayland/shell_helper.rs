@@ -904,4 +904,132 @@ mod tests {
             assert!(!EXTENSION_SOURCE.contains(retired), "{retired}");
         }
     }
+
+    /// The helper plans MoveCursor's glide by hand as `plan_move` plans the
+    /// default motion (extension.js says so). Rebuilt from the helper's
+    /// constants, a move must be the trajectory the Rust overlay plays:
+    /// its timing, its path and its heading, sample by sample.
+    #[test]
+    fn bundled_helper_glides_like_the_default_motion() {
+        use cursor_overlay::trajectory::{
+            ease, natural_side, pincer_path, plan_move, wrap_angle, ArcShape, MoveRequest, Pt,
+            DEFAULT_TARGET_PT, DT_MS, REST_HEADING,
+        };
+        let motion = cursor_overlay::MotionConfig::default();
+        assert_eq!(motion.style, cursor_overlay::MotionStyle::SignatureArc);
+        assert_eq!(motion.timing, cursor_overlay::MotionTiming::Steady);
+        assert_eq!(motion.glide_duration_ms, 0.0);
+
+        let (handle, arc_size, arc_flow) = (0.3, 0.16, 0.15);
+        let (fitts_a, fitts_b, fitts_min, fitts_max, fitts_scale) =
+            (150.0, 120.0, 300.0, 1000.0, 1.1);
+        let (over_amount, over_max, over_at) = (0.018_f64, 8.0, 0.82);
+        let floor = 600.0;
+        let (tip_angle, rate, speed_min, speed_range, settle_steps) =
+            (-0.75 * std::f64::consts::PI, 22.0, 40.0, 260.0, 36);
+        assert_eq!(DT_MS, 1000.0 / 120.0);
+        assert_eq!(REST_HEADING, std::f64::consts::FRAC_PI_4);
+        for line in [
+            "const MOTION_SAMPLE_MS = 1000 / 120;".to_owned(),
+            format!("const MOTION_TARGET_WIDTH = {DEFAULT_TARGET_PT};"),
+            format!("const MOTION_FLOOR_MS = {floor};"),
+            format!(
+                "const MOTION_FITTS = {{ a: {fitts_a}, b: {fitts_b}, minMs: {fitts_min}, \
+                 maxMs: {fitts_max}, scale: {fitts_scale} }};"
+            ),
+            format!("const ARC_HANDLE = {handle};"),
+            format!("const ARC_SIZE = {arc_size};"),
+            format!("const ARC_FLOW = {arc_flow};"),
+            format!(
+                "const FOLLOW_THROUGH = {{ amount: {over_amount}, maxPt: {over_max}, at: {over_at} }};"
+            ),
+            "const REST_HEADING = Math.PI / 4;".to_owned(),
+            "const TIP_ANGLE = -0.75 * Math.PI;".to_owned(),
+            format!("const HEADING_RATE = {rate};"),
+            format!("const HEADING_SPEED_MIN = {speed_min};"),
+            format!("const HEADING_SPEED_RANGE = {speed_range};"),
+            format!("const HEADING_SETTLE_STEPS = {settle_steps};"),
+        ] {
+            assert!(EXTENSION_SOURCE.contains(&line), "{line}");
+        }
+
+        // A short hop (the floor), a long throw (Fitts' cap) and moves
+        // either way, one starting mid-turn.
+        for (from, to, from_heading) in [
+            ((100.0, 500.0), (500.0, 380.0), REST_HEADING),
+            ((900.0, 300.0), (420.0, 640.0), 2.6),
+            ((700.0, 500.0), (730.0, 480.0), REST_HEADING),
+            ((0.0, 0.0), (3000.0, 1200.0), -2.9),
+        ] {
+            let (from, to) = (Pt::new(from.0, from.1), Pt::new(to.0, to.1));
+            let traj = plan_move(
+                &motion,
+                &MoveRequest {
+                    from_heading,
+                    ..MoveRequest::new(from, to)
+                },
+            );
+            let samples = &traj.samples;
+            let d = (to.x - from.x).hypot(to.y - from.y);
+            let width = DEFAULT_TARGET_PT;
+            let ms = ((fitts_a + fitts_b * (d / width + 1.0).log2()).clamp(fitts_min, fitts_max)
+                * fitts_scale)
+                .max(floor);
+            let n = ((ms / DT_MS).ceil() as usize).max(2);
+            assert!(samples.len() > n && samples.len() <= n + 1 + settle_steps);
+            assert!(
+                (samples[n].t - ms / 1000.0).abs() < 1e-12,
+                "{d} pt took {}",
+                samples[n].t
+            );
+            let path = pincer_path(
+                from,
+                to,
+                ArcShape {
+                    start_handle: handle,
+                    end_handle: handle,
+                    arc_size: arc_size * natural_side(from, to),
+                    arc_flow,
+                },
+            );
+            let profile =
+                ease::bump_profile(ease::in_out_sine, over_amount.min(over_max / d), over_at);
+            let mut rot = wrap_angle(from_heading - REST_HEADING);
+            for (i, sample) in samples.iter().enumerate().take(n + 1) {
+                let tau = i as f64 / n as f64;
+                let p = match i {
+                    0 => from,
+                    _ if i == n => to,
+                    _ => path.at_fraction(profile(tau)),
+                };
+                assert!((sample.x - p.x).hypot(sample.y - p.y) < 1e-9, "sample {i}");
+                let (a, b) = (&samples[i.saturating_sub(2)], &samples[(i + 2).min(n)]);
+                let dt = (b.t - a.t).max(1e-3);
+                let (vx, vy) = ((b.x - a.x) / dt, (b.y - a.y) / dt);
+                let lead = ((vx.hypot(vy) - speed_min) / speed_range).clamp(0.0, 1.0);
+                let want = wrap_angle(vy.atan2(vx) - tip_angle) * lead;
+                let step = if i > 0 {
+                    sample.t - samples[i - 1].t
+                } else {
+                    0.0
+                };
+                rot += wrap_angle(want - rot) * (1.0 - (-step * rate).exp());
+                let heading = if i + 1 == samples.len() {
+                    REST_HEADING
+                } else {
+                    REST_HEADING + rot
+                };
+                assert!(
+                    wrap_angle(sample.heading - heading).abs() < 1e-9,
+                    "heading {i}"
+                );
+            }
+            // Then the heading settles back to rest at the destination.
+            for sample in &samples[n + 1..] {
+                assert_eq!((sample.x, sample.y), (to.x, to.y));
+                assert!((sample.t - samples[n].t) / (DT_MS / 1000.0) <= settle_steps as f64 + 1e-6);
+            }
+            assert_eq!(samples.last().unwrap().heading, REST_HEADING);
+        }
+    }
 }

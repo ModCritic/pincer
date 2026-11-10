@@ -67,16 +67,26 @@ ported to Cairo by hand from
 together: the dart, 42 px across with its tip on the given point, in the
 session color with a dark red (#2B0000) outline and a soft drop shadow down
 and to the right, and the orange (#E28150) action marks, played from the
-theme's own keyframes at 30 fps. The effects of Pincer's default motion style
-are drawn in the session color lifted toward white: a speed glow while
-`MoveCursor` glides, and a ripple and a squish after `ClickPulse`. The glide
-follows Shell's animation settings, so with animations off the cursor jumps
-and shows no glow.
+theme's own keyframes at 30 fps. `MoveCursor` glides the way the Rust overlay
+moves the cursor with Pincer's default motion (`signature_arc` with `steady`
+timing, to a point with no target rect): along a curve bowed to one side, in
+0.6 to 1.1 s by Fitts' law, with the dart turning to lead along its path and
+then, for up to 0.3 s more, settling back to rest. The helper plans each glide
+from where the cursor is, the way it points and the destination, as
+`pincer-cursor-motion`'s `plan_move` does, and each frame only interpolates
+the plan. A motion style or timing chosen in Pincer does not reach the helper,
+which always glides this way. The effects of the default motion are drawn in
+the session color lifted toward white: a speed glow that follows the glide,
+and a ripple and a squish after `ClickPulse`. The glide follows Shell's
+animation settings, so with animations off the cursor jumps, without a turn
+or a glow.
 
 The session badge is a pill in the session color with white text, a 1 px
 rim of that color darkened 35%, and a soft shadow, at most 188 px wide
 (longer labels ellipsize). The frame timer that animates the cursor and the
-badge runs only while the cursor is shown.
+badge runs only while the cursor is shown. The cursor moves as a plain actor
+around its drawing, since St redraws a drawing area that is moved itself; a
+glide redraws it at most every 12 ms, and at rest the timer does every 33 ms.
 
 It runs in the shell's privileged context, so **no xdg-desktop-portal grant** is
 needed (unlike libei/RemoteDesktop).
