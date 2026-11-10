@@ -945,7 +945,7 @@ pub mod linux {
         Sway,
         Hyprland,
         Gnome,
-        PincerCompositor,
+        CuaCompositor,
         Missing,
     }
 
@@ -966,8 +966,8 @@ pub mod linux {
                 || std::env::var_os("WAYLAND_DISPLAY").is_some();
             let mut probe_error = None;
             let session = if explicit_wayland {
-                if pincer_compositor_available() {
-                    SessionKind::PincerCompositor
+                if cua_compositor_available() {
+                    SessionKind::CuaCompositor
                 } else if sway_available() {
                     SessionKind::Sway
                 } else if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
@@ -1018,7 +1018,7 @@ pub mod linux {
                     cursor: true,
                     leaked_input: false,
                 },
-                SessionKind::Sway | SessionKind::Gnome | SessionKind::PincerCompositor => {
+                SessionKind::Sway | SessionKind::Gnome | SessionKind::CuaCompositor => {
                     ObserverCapabilities {
                         focus: true,
                         z_order: true,
@@ -1039,7 +1039,7 @@ pub mod linux {
                 SessionKind::Sway => sway_snapshot(target),
                 SessionKind::Hyprland => super::hyprland::snapshot(target),
                 SessionKind::Gnome => gnome_snapshot(target),
-                SessionKind::PincerCompositor => pincer_compositor_snapshot(target),
+                SessionKind::CuaCompositor => cua_compositor_snapshot(target),
                 SessionKind::Missing => Ok(DesktopSnapshot {
                     foreground: None,
                     input_focus: None,
@@ -1074,7 +1074,7 @@ pub mod linux {
                     SessionKind::Sway => sway_focus_identity(),
                     SessionKind::Hyprland => super::hyprland::focus_identity(),
                     SessionKind::Gnome => gnome_focus_identity(),
-                    SessionKind::PincerCompositor => pincer_compositor_focus_identity(),
+                    SessionKind::CuaCompositor => cua_compositor_focus_identity(),
                     SessionKind::Missing => Ok(None),
                 };
                 let mut previous = focus_identity().ok().flatten();
@@ -1170,21 +1170,21 @@ pub mod linux {
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    struct PincerCompositorState {
+    struct CuaCompositorState {
         focused_pid: Option<u64>,
         target_z: TargetZ,
     }
 
-    fn parse_pincer_compositor_state(line: &str) -> Result<PincerCompositorState, ObserverError> {
+    fn parse_cua_compositor_state(line: &str) -> Result<CuaCompositorState, ObserverError> {
         let mut fields = line.split_whitespace();
         if fields.next() != Some("state") {
             return Err(ObserverError::new(format!(
-                "invalid pincer-compositor observer response: {line:?}"
+                "invalid cua-compositor observer response: {line:?}"
             )));
         }
         let focused_pid = fields
             .next()
-            .ok_or_else(|| ObserverError::new("pincer-compositor state omitted focused pid"))?
+            .ok_or_else(|| ObserverError::new("cua-compositor state omitted focused pid"))?
             .parse::<u64>()
             .map_err(|error| ObserverError::new(format!("invalid focused pid: {error}")))?;
         let target_z = match fields.next() {
@@ -1194,36 +1194,34 @@ pub mod linux {
             Some("not_found") => TargetZ::NotFound,
             Some(value) => {
                 return Err(ObserverError::new(format!(
-                    "invalid pincer-compositor target state: {value}"
+                    "invalid cua-compositor target state: {value}"
                 )))
             }
             None => {
                 return Err(ObserverError::new(
-                    "pincer-compositor state omitted target state",
+                    "cua-compositor state omitted target state",
                 ))
             }
         };
         if fields.next().is_some() {
             return Err(ObserverError::new(
-                "pincer-compositor state contained trailing fields",
+                "cua-compositor state contained trailing fields",
             ));
         }
-        Ok(PincerCompositorState {
+        Ok(CuaCompositorState {
             focused_pid: (focused_pid != 0).then_some(focused_pid),
             target_z,
         })
     }
 
-    fn pincer_compositor_state(target_pid: u32) -> Result<PincerCompositorState, ObserverError> {
+    fn cua_compositor_state(target_pid: u32) -> Result<CuaCompositorState, ObserverError> {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixStream;
 
-        let socket = std::env::var("PINCER_INJECT_SOCKET")
-            .map_err(|_| ObserverError::new("PINCER_INJECT_SOCKET is not set"))?;
+        let socket = std::env::var("CUA_INJECT_SOCKET")
+            .map_err(|_| ObserverError::new("CUA_INJECT_SOCKET is not set"))?;
         let stream = UnixStream::connect(&socket).map_err(|error| {
-            ObserverError::new(format!(
-                "connect pincer-compositor observer socket: {error}"
-            ))
+            ObserverError::new(format!("connect cua-compositor observer socket: {error}"))
         })?;
         stream
             .set_read_timeout(Some(Duration::from_secs(2)))
@@ -1233,16 +1231,16 @@ pub mod linux {
             .map_err(|error| ObserverError::new(format!("clone observer socket: {error}")))?;
         let mut reader = BufReader::new(stream);
 
-        writeln!(writer, "pincer-inject v1")
+        writeln!(writer, "cua-inject v1")
             .and_then(|_| writer.flush())
             .map_err(|error| ObserverError::new(format!("write observer handshake: {error}")))?;
         let mut line = String::new();
         reader
             .read_line(&mut line)
             .map_err(|error| ObserverError::new(format!("read observer handshake: {error}")))?;
-        if line.trim() != "pincer-inject v1" {
+        if line.trim() != "cua-inject v1" {
             return Err(ObserverError::new(format!(
-                "pincer-compositor observer handshake mismatch: {:?}",
+                "cua-compositor observer handshake mismatch: {:?}",
                 line.trim()
             )));
         }
@@ -1256,18 +1254,18 @@ pub mod linux {
             .map_err(|error| ObserverError::new(format!("read observer query: {error}")))?;
         if read == 0 {
             return Err(ObserverError::new(
-                "pincer-compositor closed the observer query",
+                "cua-compositor closed the observer query",
             ));
         }
-        parse_pincer_compositor_state(&line)
+        parse_cua_compositor_state(&line)
     }
 
-    fn pincer_compositor_available() -> bool {
-        std::env::var_os("PINCER_INJECT_SOCKET").is_some() && pincer_compositor_state(0).is_ok()
+    fn cua_compositor_available() -> bool {
+        std::env::var_os("CUA_INJECT_SOCKET").is_some() && cua_compositor_state(0).is_ok()
     }
 
-    fn pincer_compositor_snapshot(target: TargetWindow) -> Result<DesktopSnapshot, ObserverError> {
-        let state = pincer_compositor_state(target.pid)?;
+    fn cua_compositor_snapshot(target: TargetWindow) -> Result<DesktopSnapshot, ObserverError> {
+        let state = cua_compositor_state(target.pid)?;
         Ok(DesktopSnapshot {
             foreground: state.focused_pid,
             input_focus: state.focused_pid,
@@ -1276,8 +1274,8 @@ pub mod linux {
         })
     }
 
-    fn pincer_compositor_focus_identity() -> Result<Option<u64>, ObserverError> {
-        Ok(pincer_compositor_state(0)?.focused_pid)
+    fn cua_compositor_focus_identity() -> Result<Option<u64>, ObserverError> {
+        Ok(cua_compositor_state(0)?.focused_pid)
     }
 
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -1863,26 +1861,26 @@ pub mod linux {
         }
 
         #[test]
-        fn pincer_compositor_state_is_strict_and_pid_based() {
+        fn cua_compositor_state_is_strict_and_pid_based() {
             assert_eq!(
-                parse_pincer_compositor_state("state 200 background_occluded\n")
+                parse_cua_compositor_state("state 200 background_occluded\n")
                     .expect("valid compositor state"),
-                PincerCompositorState {
+                CuaCompositorState {
                     focused_pid: Some(200),
                     target_z: TargetZ::BackgroundOccluded,
                 }
             );
             assert_eq!(
-                parse_pincer_compositor_state("state 0 not_found")
+                parse_cua_compositor_state("state 0 not_found")
                     .expect("zero means no focused client"),
-                PincerCompositorState {
+                CuaCompositorState {
                     focused_pid: None,
                     target_z: TargetZ::NotFound,
                 }
             );
-            assert!(parse_pincer_compositor_state("ok").is_err());
-            assert!(parse_pincer_compositor_state("state 1 unknown").is_err());
-            assert!(parse_pincer_compositor_state("state 1 foreground trailing").is_err());
+            assert!(parse_cua_compositor_state("ok").is_err());
+            assert!(parse_cua_compositor_state("state 1 unknown").is_err());
+            assert!(parse_cua_compositor_state("state 1 foreground trailing").is_err());
         }
 
         #[test]

@@ -134,7 +134,7 @@ pub enum DriverRoute {
     LinuxXTest,
     LinuxLibei,
     LinuxWaylandVirtualPointer,
-    LinuxPincerCompositorInject,
+    LinuxCuaCompositorInject,
     Cdp,
     Composite,
 }
@@ -227,7 +227,7 @@ fn shared_web_route_for_environment(
 
         (Platform::Linux, DisplayServer::Wayland, Targeting::Px, _) if nested_inject =>
         {
-            Ok(Route::LinuxPincerCompositorInject)
+            Ok(Route::LinuxCuaCompositorInject)
         }
         (Platform::Linux, DisplayServer::Wayland, Targeting::Px, _) => {
             Ok(Route::LinuxWaylandVirtualPointer)
@@ -238,7 +238,7 @@ fn shared_web_route_for_environment(
         (Platform::Linux, DisplayServer::Wayland, Targeting::Ax, "type_text")
             if nested_inject =>
         {
-            Ok(Route::LinuxPincerCompositorInject)
+            Ok(Route::LinuxCuaCompositorInject)
         }
         (
             Platform::Linux,
@@ -263,7 +263,7 @@ fn shared_web_route_for_environment(
             DisplayServer::Wayland,
             Targeting::Ax,
             "right_click" | "double_click" | "press_key" | "hotkey",
-        ) if nested_inject => Ok(Route::LinuxPincerCompositorInject),
+        ) if nested_inject => Ok(Route::LinuxCuaCompositorInject),
         (
             Platform::Linux,
             DisplayServer::Wayland,
@@ -422,7 +422,7 @@ pub fn environment_schema_supported(schema: &str) -> bool {
 }
 
 fn nested_inject_from_env() -> bool {
-    std::env::var_os("PINCER_INJECT_SOCKET").is_some()
+    std::env::var_os("CUA_INJECT_SOCKET").is_some()
 }
 
 fn compositor_from_env() -> Option<String> {
@@ -436,7 +436,7 @@ fn compositor_from_env() -> Option<String> {
         (Platform::Macos, DisplayServer::Quartz) => Some("windowserver".to_owned()),
         (Platform::Linux, DisplayServer::X11) => Some("openbox-x11".to_owned()),
         (Platform::Linux, DisplayServer::Wayland) if nested_inject_from_env() => {
-            Some("pincer-compositor-nested".to_owned())
+            Some("cua-compositor-nested".to_owned())
         }
         (Platform::Linux, DisplayServer::Wayland) => {
             let desktop = std::env::var("XDG_CURRENT_DESKTOP")
@@ -479,7 +479,7 @@ fn input_backends_from_env() -> Vec<String> {
             "xtest".to_owned(),
         ],
         (Platform::Linux, DisplayServer::Wayland) if nested_inject_from_env() => {
-            vec!["atspi".to_owned(), "pincer-compositor-inject".to_owned()]
+            vec!["atspi".to_owned(), "cua-compositor-inject".to_owned()]
         }
         (Platform::Linux, DisplayServer::Wayland) => vec!["atspi".to_owned()],
         _ => Vec::new(),
@@ -3275,7 +3275,7 @@ mod tests {
             true,
         );
         assert_eq!(stock, Ok(DriverRoute::LinuxWaylandVirtualPointer));
-        assert_eq!(nested, Ok(DriverRoute::LinuxPincerCompositorInject));
+        assert_eq!(nested, Ok(DriverRoute::LinuxCuaCompositorInject));
 
         let nested_text = shared_web_route_for_environment(
             Platform::Linux,
@@ -3285,7 +3285,7 @@ mod tests {
             Delivery::Background,
             true,
         );
-        assert_eq!(nested_text, Ok(DriverRoute::LinuxPincerCompositorInject));
+        assert_eq!(nested_text, Ok(DriverRoute::LinuxCuaCompositorInject));
     }
 
     #[test]

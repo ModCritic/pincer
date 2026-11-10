@@ -1663,7 +1663,7 @@ fn shared_case_with_native_hyprland(
         // occluded, unfocused toplevel. Focus-free AT-SPI button actions are
         // the exception: they are externally verified by the fixture and the
         // focus/z-order/leak sentinels.
-        if std::env::var_os("PINCER_INJECT_SOCKET").is_some() {
+        if std::env::var_os("CUA_INJECT_SOCKET").is_some() {
             Vec::new()
         } else {
             match (action, targeting) {

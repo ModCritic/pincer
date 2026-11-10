@@ -8375,7 +8375,7 @@ impl Tool for ClickTool {
                 }
                 if crate::wayland::is_inject_mode() {
                     crate::wayland::inject_click(pid, xid, x, y, count as u32, button)?;
-                    return Ok(("wayland_pincer_compositor", None, None, None));
+                    return Ok(("wayland_cua_compositor", None, None, None));
                 }
                 if !delivery.is_foreground() {
                     return Ok(("background_unavailable", None, None, None));
@@ -9019,7 +9019,7 @@ impl Tool for TypeTextTool {
             .await;
             return match result {
                 Ok(Ok(())) => ToolResult::text(format!(
-                    "Typed {text_len} character(s) (focus-free via pincer-compositor)."
+                    "Typed {text_len} character(s) (focus-free via cua-compositor)."
                 ))
                 .with_structured(type_text_structured(
                     "key_events",
@@ -9896,7 +9896,7 @@ impl Tool for PressKeyTool {
             };
             return match result {
                 Ok(Ok(())) => ToolResult::text(format!(
-                    "Pressed key '{key}' (focus-free via pincer-compositor)."
+                    "Pressed key '{key}' (focus-free via cua-compositor)."
                 )),
                 Ok(Err(e)) => ToolResult::error(e.to_string()),
                 Err(e) => ToolResult::error(format!("Task error: {e}")),
@@ -10355,7 +10355,7 @@ impl Tool for HotkeyTool {
             .await;
             return match result {
                 Ok(Ok(())) => ToolResult::text(format!(
-                    "Pressed hotkey '{key_display}' (focus-free via pincer-compositor)."
+                    "Pressed hotkey '{key_display}' (focus-free via cua-compositor)."
                 )),
                 Ok(Err(error)) => ToolResult::error(error.to_string()),
                 Err(error) => ToolResult::error(format!("Task error: {error}")),
@@ -11781,12 +11781,12 @@ impl Tool for ScrollTool {
             .await;
             return match result {
                 Ok(Ok(())) => ToolResult::text(format!(
-                    "Scrolled {direction} {amount} ticks (focus-free via pincer-compositor)."
+                    "Scrolled {direction} {amount} ticks (focus-free via cua-compositor)."
                 ))
                 .with_structured(json!({
                     "verified": false,
                     "delivery_mode": if delivery.is_foreground() { "foreground" } else { "background" },
-                    "route": "pincer_compositor_inject"
+                    "route": "cua_compositor_inject"
                 })),
                 Ok(Err(error)) => ToolResult::error(error.to_string()),
                 Err(error) => ToolResult::error(format!("Task error: {error}")),
@@ -14099,7 +14099,7 @@ async fn parallel_drag_inject(args: &Value) -> ToolResult {
     let n = drags.len();
     match tokio::task::spawn_blocking(move || crate::wayland::inject_parallel_drags(&drags)).await {
         Ok(Ok(())) => ToolResult::text(format!(
-            "Ran {n} concurrent drags (multi-cursor via pincer-compositor)."
+            "Ran {n} concurrent drags (multi-cursor via cua-compositor)."
         )),
         Ok(Err(e)) => ToolResult::error(e.to_string()),
         Err(e) => ToolResult::error(format!("Task error: {e}")),
@@ -14150,8 +14150,8 @@ impl Tool for ParallelMouseDragTool {
         // silently calling the X11 path that's guaranteed to fail.
         if crate::wayland::is_wayland() {
             return ToolResult::error(
-                "parallel_mouse_drag requires the pincer-compositor inject socket on Wayland \
-                 (set PINCER_INJECT_SOCKET to the pincer-compositor control socket), \
+                "parallel_mouse_drag requires the cua-compositor inject socket on Wayland \
+                 (set CUA_INJECT_SOCKET to the cua-compositor control socket), \
                  or run the target under X11.",
             );
         }

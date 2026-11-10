@@ -1087,7 +1087,7 @@ fn row_expects_refusal(row: CatalogRow) -> bool {
     {
         return false;
     }
-    let inject_mode = std::env::var_os("PINCER_INJECT_SOCKET").is_some();
+    let inject_mode = std::env::var_os("CUA_INJECT_SOCKET").is_some();
     if !inject_mode
         && matches!(
             row.operation,
@@ -1129,8 +1129,8 @@ fn run_catalog_row(row: CatalogRow) {
         ) && row.delivery == Delivery::Background
         {
             DriverRoute::LinuxAtSpiAction
-        } else if std::env::var_os("PINCER_INJECT_SOCKET").is_some() {
-            DriverRoute::LinuxPincerCompositorInject
+        } else if std::env::var_os("CUA_INJECT_SOCKET").is_some() {
+            DriverRoute::LinuxCuaCompositorInject
         } else {
             DriverRoute::LinuxWaylandVirtualPointer
         }

@@ -874,9 +874,7 @@ impl BrowserPlatform for LinuxBrowserPlatform {
                     .map_err(|error| {
                         refusal(
                             BrowserRefusalCode::BrowserRouteUnavailable,
-                            format!(
-                                "could not enumerate pincer-compositor browser windows: {error}"
-                            ),
+                            format!("could not enumerate cua-compositor browser windows: {error}"),
                         )
                     })?;
                     return Ok(Some(owned.len() == 1 && owned[0] == window_id));

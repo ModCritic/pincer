@@ -162,8 +162,8 @@ fn tree_contains(snap: &serde_json::Value, marker: &str) -> bool {
 }
 
 fn desktop_input_route() -> DriverRoute {
-    if std::env::var_os("PINCER_INJECT_SOCKET").is_some() {
-        DriverRoute::LinuxPincerCompositorInject
+    if std::env::var_os("CUA_INJECT_SOCKET").is_some() {
+        DriverRoute::LinuxCuaCompositorInject
     } else if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         DriverRoute::LinuxWaylandVirtualPointer
     } else {

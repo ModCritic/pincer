@@ -236,7 +236,7 @@ impl ForegroundSentinel {
         reset_journal(&self.journal_path)?;
 
         let canary_key = if std::env::var("PINCER_E2E_WAYLAND_SESSION")
-            .is_ok_and(|session| session == "pincer-compositor")
+            .is_ok_and(|session| session == "cua-compositor")
         {
             // The intentionally small injection protocol exposes navigation
             // and control keys, not printable letters. Space still exercises

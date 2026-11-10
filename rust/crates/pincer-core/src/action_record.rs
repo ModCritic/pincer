@@ -92,7 +92,7 @@ pub enum ActionTransport {
     LinuxX11MpxUinput,
     LinuxLibei,
     LinuxWaylandVirtualPointer,
-    LinuxPincerCompositorInject,
+    LinuxCuaCompositorInject,
     LinuxHyprlandIsolatedInput,
     LinuxHyprlandForegroundInput,
     LinuxX11ConfigureWindow,
@@ -132,7 +132,7 @@ impl ActionTransport {
         Self::LinuxX11MpxUinput,
         Self::LinuxLibei,
         Self::LinuxWaylandVirtualPointer,
-        Self::LinuxPincerCompositorInject,
+        Self::LinuxCuaCompositorInject,
         Self::LinuxHyprlandIsolatedInput,
         Self::LinuxHyprlandForegroundInput,
         Self::LinuxX11ConfigureWindow,
@@ -172,7 +172,7 @@ impl ActionTransport {
             | Self::LinuxLibei
             | Self::LinuxWaylandVirtualPointer
             | Self::LinuxHyprlandForegroundInput
-            | Self::LinuxPincerCompositorInject => ActionRoute::GlobalInput,
+            | Self::LinuxCuaCompositorInject => ActionRoute::GlobalInput,
             Self::WindowsSetWindowPos | Self::LinuxX11ConfigureWindow | Self::MacosAppleEvent => {
                 ActionRoute::SystemApi
             }
@@ -794,8 +794,8 @@ fn transport_from_legacy(
         | "xtest_core_grab" => ActionTransport::LinuxXTest,
         "wayland_activate" | "wayland_focused" => ActionTransport::LinuxLibei,
         "wayland_desktop" => ActionTransport::LinuxWaylandVirtualPointer,
-        "pincer_compositor_inject" | "wayland_pincer_compositor" => {
-            ActionTransport::LinuxPincerCompositorInject
+        "cua_compositor_inject" | "wayland_cua_compositor" => {
+            ActionTransport::LinuxCuaCompositorInject
         }
         "hid" | "cgevent_hid" | "cgevent_fg" => ActionTransport::MacosCgEventHid,
         "cgevent" => {
@@ -1141,7 +1141,7 @@ fn transport_name(transport: ActionTransport) -> &'static str {
         ActionTransport::LinuxX11MpxUinput => "linux_x11_mpx_uinput",
         ActionTransport::LinuxLibei => "linux_libei",
         ActionTransport::LinuxWaylandVirtualPointer => "linux_wayland_virtual_pointer",
-        ActionTransport::LinuxPincerCompositorInject => "linux_pincer_compositor_inject",
+        ActionTransport::LinuxCuaCompositorInject => "linux_cua_compositor_inject",
         ActionTransport::LinuxHyprlandIsolatedInput => "linux_hyprland_isolated_input",
         ActionTransport::LinuxHyprlandForegroundInput => "linux_hyprland_foreground_input",
         ActionTransport::LinuxX11ConfigureWindow => "linux_x11_configure_window",
@@ -2075,8 +2075,8 @@ mod tests {
             "wayland_activate",
             "wayland_focused",
             "wayland_desktop",
-            "pincer_compositor_inject",
-            "wayland_pincer_compositor",
+            "cua_compositor_inject",
+            "wayland_cua_compositor",
             "hid",
             "cgevent_hid",
             "cgevent",

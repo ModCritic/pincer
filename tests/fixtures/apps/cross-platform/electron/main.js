@@ -9,7 +9,7 @@ const http = require('http');
 const path = require('path');
 const sentinelMode = process.env.PINCER_E2E_SENTINEL === '1';
 const nativeWayland = process.platform === 'linux' && Boolean(process.env.WAYLAND_DISPLAY);
-const customPincerCompositor = process.env.PINCER_E2E_WAYLAND_SESSION === 'pincer-compositor';
+const customCuaCompositor = process.env.PINCER_E2E_WAYLAND_SESSION === 'cua-compositor';
 const fixtureJournalUrl = process.env.PINCER_E2E_FIXTURE_JOURNAL_URL || '';
 const sentinelJournalPath = process.env.PINCER_E2E_SENTINEL_JOURNAL || '';
 const sentinelControlPath = process.env.PINCER_E2E_SENTINEL_CONTROL || '';
@@ -84,7 +84,7 @@ function createWindow() {
     // focus. cua-compositor has no window-policy transition to perform, so map
     // it at construction time; a synchronous show() after DOMContentLoaded can
     // otherwise stall Chromium before the renderer paints or schedules timers.
-    show: !sentinelMode || customPincerCompositor,
+    show: !sentinelMode || customCuaCompositor,
     // A floating-level macOS window is omitted by pincer's deliberate
     // layer-0 top-level window contract. Foreground + maximized is sufficient
     // for occlusion there and lets an unexpected target raise remain visible.
@@ -124,7 +124,7 @@ function createWindow() {
       // appear to steal focus. The scenario's behavioral oracle is child
       // creation, so keep the child hidden on native Wayland and preserve the
       // visible non-activating window contract on the other backends.
-      if (!nativeWayland || customPincerCompositor) {
+      if (!nativeWayland || customCuaCompositor) {
         child.showInactive();
       }
     });
@@ -165,9 +165,9 @@ function createWindow() {
           if (process.platform !== 'darwin' && !nativeWayland) {
             mainWindow.setAlwaysOnTop(true);
           }
-          if (nativeWayland && !customPincerCompositor) {
+          if (nativeWayland && !customCuaCompositor) {
             mainWindow.setFullScreen(true);
-          } else if (!customPincerCompositor) {
+          } else if (!customCuaCompositor) {
             mainWindow.maximize();
           }
           // The minimal nested cua-compositor intentionally has no fullscreen
@@ -177,7 +177,7 @@ function createWindow() {
           // cua-compositor mapped and focused this toplevel at construction
           // time. Avoid a second synchronous show/configure/focus transition
           // after the renderer has emitted its ready event.
-          if (!customPincerCompositor) {
+          if (!customCuaCompositor) {
             mainWindow.show();
             mainWindow.focus();
           }
