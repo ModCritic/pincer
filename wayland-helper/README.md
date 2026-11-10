@@ -29,8 +29,9 @@ It exposes `org.pincer.WinRects` on the session bus:
   target context appears as host-owned chips in the session badge rather than
   pointer-relative theme artwork. This contract requires helper v8.
 - `SetCursorColor(fill_color)`: apply the stable per-session fill selected by
-  pincer. The helper validates the `#RRGGBB` value, updates the matching
-  glow, and keeps a white pointer outline.
+  pincer. The helper validates the `#RRGGBB` value and paints the pointer's
+  body in it, as the Rust overlay recolors `pincer.default`. The outline, the
+  shadow and the action marks keep the theme's own colors.
 - `CaptureWindow(id,pid) -> png_base64` (API 9): snapshot one window's own
   compositor actor (`paint_to_content`), not the stage, so a covering window
   never shows and the target is not activated. `pid` 0 skips the owner check.
@@ -59,6 +60,18 @@ It exposes `org.pincer.WinRects` on the session bus:
   (`cursor.badges`), and only to a helper that reports API 11 or newer; with
   an older helper the minimal badge keeps the foreground chip from
   `SetCursorState` and shows no key combo.
+
+The agent cursor is `pincer.default` as the Rust overlay draws it on X11,
+ported to Cairo by hand from
+`rust/crates/cursor-overlay/assets/build_default_theme.py`, so the two change
+together: the dart, 42 px across with its tip on the given point, in the
+session color with a dark red (#2B0000) outline and a soft drop shadow down
+and to the right, and the orange (#E28150) action marks, played from the
+theme's own keyframes at 30 fps. The effects of Pincer's default motion style
+are drawn in the session color lifted toward white: a speed glow while
+`MoveCursor` glides, and a ripple and a squish after `ClickPulse`. The glide
+follows Shell's animation settings, so with animations off the cursor jumps
+and shows no glow.
 
 The session badge is a pill in the session color with white text, a 1 px
 rim of that color darkened 35%, and a soft shadow, at most 188 px wide

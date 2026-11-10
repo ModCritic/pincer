@@ -14,6 +14,13 @@ The runtime applies two bounded effects after decoding the compiled theme:
 
 Those effects are runtime concerns because they must stay synchronized across
 all action layers. Delivery and target context is rendered by the host badge.
+
+On GNOME Wayland the agent cursor is drawn by the Shell helper,
+wayland-helper/winrects@pincer/extension.js, which cannot run the Rust
+renderer and ports this artwork by hand: CURSOR_PATH, HOTSPOT, the palette,
+both shadows, and every action's shapes, stroke widths and keyframes. Change
+the helper together with this script. platform-linux's tests compare the
+helper's hotspot, palette and dart with the compiled theme.
 """
 
 from __future__ import annotations

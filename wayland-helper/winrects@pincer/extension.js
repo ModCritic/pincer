@@ -29,16 +29,45 @@ const IFACE = `<node><interface name="org.pincer.WinRects">
 <method name="HideCursor"></method>
 </interface></node>`;
 
-// GNOME cannot host the Rust renderer directly, so this Shell actor mirrors
-// the embedded pincer.default vector theme and semantic state vocabulary.
+// GNOME cannot host the Rust renderer, so this Shell actor draws the agent
+// cursor itself: the pincer.default theme that the Rust overlay draws on X11
+// and elsewhere, ported by hand from
+// rust/crates/cursor-overlay/assets/build_default_theme.py. The dart, its
+// outline and drop shadow, each action's marks and their keyframes all come
+// from that script, so it and this port must change together.
 const CANVAS_SIZE = 128;
 const DISPLAY_SIZE = 42;
-const ACTOR_SIZE = 112;
-const ACTOR_CENTER = ACTOR_SIZE / 2;
 const SCALE = DISPLAY_SIZE / CANVAS_SIZE;
+const THEME_FPS = 30;
+// Every layer of the theme scales and turns about the canvas center.
+const LAYER_ANCHOR = CANVAS_SIZE / 2;
+// The outline's tip, drawn on the pointer's point.
+const HOTSPOT = [42, 28];
+// MAIN, the body's fill, is the tint key: the session color replaces it.
+const DEFAULT_CURSOR_FILL = [201, 94, 72];
+const THEME_ACCENT = [226, 129, 80];
+const THEME_OUTLINE = [43, 0, 0];
+const OUTLINE_WIDTH = 5;
+// tiny-skia's miter limit, which keeps the outline's tip and notch pointed.
+const OUTLINE_MITER_LIMIT = 4;
+const SHADOW_OFFSET = [5, 6];
+const SHADOW_STEPS = 8;
 const FLOAT_DURATION = 4.0;
-const GLOW_SURFACE_SCALE = 3;
-const GLOW_PADDING = 24;
+// The motion effects of the default motion style, signature_arc, as
+// pincer-cursor-motion's effects.rs shapes them: a speed glow while the
+// cursor glides, and a ripple and a squish on a click, in the session color
+// lifted 45% toward white.
+const EFFECT_LIFT = 0.45;
+const POINTER_ANCHOR_OFFSET = 16;
+const RIPPLE_SECONDS = 0.52;
+const CLICK_FX_SECONDS = 0.55;
+const SQUISH = 0.12;
+// The cursor's actor leaves room around the pointer for the speed glow. The
+// ripple has an actor of its own at the click point, since the cursor can
+// still be gliding there; the ring reaches 53 px out.
+const ACTOR_SIZE = 160;
+const ACTOR_CENTER = ACTOR_SIZE / 2;
+const RIPPLE_ACTOR_SIZE = 112;
 const BADGE_Y_OFFSET = 29;
 const BADGE_HOLD_SECONDS = 2.0;
 const BADGE_FADE_SECONDS = 0.4;
@@ -382,77 +411,8 @@ function easeInOut(value) {
   return t * t * (3 - 2 * t);
 }
 
-function triangleWave(value) {
-  const t = ((value % 1) + 1) % 1;
-  return t < 0.5 ? t * 2 : (1 - t) * 2;
-}
-
-function setInk(cr, alpha = 1) {
-  cr.setSourceRGBA(1, 1, 1, alpha);
-}
-
-function setPaper(cr, alpha = 1) {
-  cr.setSourceRGBA(1, 1, 1, alpha);
-}
-
 function setFill(cr, color, alpha = 1) {
   cr.setSourceRGBA(color[0] / 255, color[1] / 255, color[2] / 255, alpha);
-}
-
-function glowPath(cr, width, alpha, glowColor) {
-  if (!glowColor) return;
-  const layers = 12;
-  const outerExpansion = 13;
-  const innerExpansion = 2.5;
-  const maxOpacity = 0.17;
-  let accumulatedOpacity = 0;
-  for (let layer = 0; layer < layers; layer++) {
-    const progress = (layer + 1) / layers;
-    const expansion = outerExpansion + (innerExpansion - outerExpansion) * progress;
-    const targetOpacity = maxOpacity * Math.max(0, Math.min(1, alpha)) * Math.pow(progress, 1.6);
-    const layerOpacity =
-      (targetOpacity - accumulatedOpacity) / Math.max(0.001, 1 - accumulatedOpacity);
-    accumulatedOpacity = targetOpacity;
-    cr.setLineWidth(width + expansion);
-    cr.setLineCap(Cairo.LineCap.ROUND);
-    cr.setLineJoin(Cairo.LineJoin.ROUND);
-    setFill(cr, glowColor, layerOpacity);
-    cr.strokePreserve();
-  }
-}
-
-function strokePath(cr, width, alpha = 1, glowColor = null) {
-  glowPath(cr, width, alpha, glowColor);
-  cr.setLineWidth(glowColor ? width + 1.5 : width);
-  cr.setLineCap(Cairo.LineCap.ROUND);
-  cr.setLineJoin(Cairo.LineJoin.ROUND);
-  setInk(cr, alpha);
-  if (!glowColor) {
-    cr.stroke();
-    return;
-  }
-  cr.strokePreserve();
-  cr.setLineWidth(Math.max(1.5, width - 1));
-  setFill(cr, glowColor, alpha);
-  cr.stroke();
-}
-
-function fillPath(cr, glowWidth, alpha = 1, glowColor = null) {
-  glowPath(cr, glowWidth, alpha, glowColor);
-  cr.setLineWidth(3);
-  cr.setLineCap(Cairo.LineCap.ROUND);
-  cr.setLineJoin(Cairo.LineJoin.ROUND);
-  setInk(cr, alpha);
-  cr.strokePreserve();
-  setFill(cr, glowColor, alpha);
-  cr.fill();
-}
-
-function linePath(cr, points, width = 4, alpha = 1, glowColor = null) {
-  if (points.length === 0) return;
-  cr.moveTo(points[0][0], points[0][1]);
-  for (let i = 1; i < points.length; i++) cr.lineTo(points[i][0], points[i][1]);
-  strokePath(cr, width, alpha, glowColor);
 }
 
 function roundedRect(cr, x, y, width, height, radius) {
@@ -477,380 +437,498 @@ function roundedRect(cr, x, y, width, height, radius) {
   cr.closePath();
 }
 
-function traceCursorBody(cr) {
-  cr.moveTo(55, 30);
-  cr.curveTo(48, 28, 42, 33, 43, 41);
-  cr.lineTo(64, 98);
-  cr.curveTo(67, 106, 73, 106, 77, 99);
-  cr.lineTo(86, 79);
-  cr.curveTo(88, 75, 91, 72, 95, 70);
-  cr.lineTo(108, 63);
-  cr.curveTo(115, 59, 114, 53, 107, 50);
+function roundTo2(value) {
+  return Math.round(value * 100) / 100;
+}
+
+// ── The pincer.default theme ────────────────────────────────────────────
+//
+// Everything below is in the theme's 128-unit canvas, ported from
+// build_default_theme.py. The Rust overlay plays a compiled copy of it
+// (pincer.default.pincer-theme, built by cursor-theme-cli), sampled at whole
+// frames of 30 fps, and so does this port.
+
+// CURSOR_PATH: the dart, with its tip, its notch and two rounded back
+// corners, as Lottie vertices with in and out tangents. Reprint it from the
+// assets directory with
+// python3 -c 'import build_default_theme as b; print(b.CURSOR_PATH["ks"]["k"])'
+const CURSOR_PATH = {
+  v: [[46.26, 32.26], [71.085, 98.652], [73.406, 98.704], [85.15, 71.15], [112.704, 59.406], [112.652, 57.085]],
+  i: [[0, 0], [0, 0], [-0.443, 1.038], [0, 0], [0, 0], [1.057, 0.395]],
+  o: [[0, 0], [0.395, 1.057], [0, 0], [0, 0], [1.038, -0.443], [0, 0]],
+};
+
+/** Trace a closed Lottie path as tiny-skia's append_geometry does. */
+function traceCursorPath(cr) {
+  const { v, i, o } = CURSOR_PATH;
+  cr.moveTo(v[0][0], v[0][1]);
+  for (let index = 0; index < v.length; index++) {
+    const next = (index + 1) % v.length;
+    const [x0, y0] = v[index];
+    const [x1, y1] = v[next];
+    const out = o[index];
+    const incoming = i[next];
+    if (out[0] || out[1] || incoming[0] || incoming[1])
+      cr.curveTo(x0 + out[0], y0 + out[1], x1 + incoming[0], y1 + incoming[1], x1, y1);
+    else cr.lineTo(x1, y1);
+  }
   cr.closePath();
 }
 
-function drawCursorGlowShape(cr, fillColor) {
-  const layers = 36;
-  const outerWidth = 44;
-  const innerWidth = 7;
-  const maxOpacity = 0.34;
-  let accumulatedOpacity = 0;
+// Shapes of the action marks, as functions that add to the current path.
+function polyline(...points) {
+  return (cr) => {
+    cr.moveTo(points[0][0], points[0][1]);
+    for (const [x, y] of points.slice(1)) cr.lineTo(x, y);
+  };
+}
 
-  for (let layer = 0; layer < layers; layer++) {
-    const progress = (layer + 1) / layers;
-    const width = outerWidth + (innerWidth - outerWidth) * progress;
-    const targetOpacity = maxOpacity * Math.pow(progress, 1.65);
-    const layerOpacity =
-      (targetOpacity - accumulatedOpacity) / Math.max(0.001, 1 - accumulatedOpacity);
-    accumulatedOpacity = targetOpacity;
-    if (layerOpacity <= 0) continue;
+/** A two-vertex Lottie path: from `start` along `out`, into `end` along `incoming`. */
+function curve(start, out, incoming, end) {
+  return (cr) => {
+    const [x0, y0] = start;
+    cr.moveTo(x0, y0);
+    const [x1, y1] = end;
+    cr.curveTo(x0 + out[0], y0 + out[1], x1 + incoming[0], y1 + incoming[1], x1, y1);
+  };
+}
 
-    traceCursorBody(cr);
-    cr.setLineWidth(width);
+/** rectangle(): a square of `size` centered on (x, y), its corners rounded. */
+function square(x, y, size, roundness) {
+  return (cr) => roundedRect(cr, x - size / 2, y - size / 2, size, size, roundness);
+}
+
+/** ellipse(): a circle `size` across, traced as tiny-skia's append_ellipse does. */
+function circle(x, y, size) {
+  return (cr) => {
+    const r = size / 2;
+    const k = 0.5522848 * r;
+    cr.moveTo(x + r, y);
+    cr.curveTo(x + r, y + k, x + k, y + r, x, y + r);
+    cr.curveTo(x - k, y + r, x - r, y + k, x - r, y);
+    cr.curveTo(x - r, y - k, x - k, y - r, x, y - r);
+    cr.curveTo(x + k, y - r, x + r, y - k, x + r, y);
+    cr.closePath();
+  };
+}
+
+/** A keyframe track, as animated() writes it: [frame, value] pairs. */
+function track(keys, linear = false) {
+  return { keys, linear };
+}
+
+/** Whether `value` is a track rather than a constant number or point. */
+function isTrack(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// The handles animated() gives every keyframe but the last. The compiler
+// eases into the last one, which has no in-handle, with (1, 1).
+const EASED_HANDLES = { out: [0.2, 0.75], in: [0.25, 1] };
+const LINEAR_HANDLES = { out: [0.167, 0.167], in: [0.833, 0.833] };
+
+function cubicCoordinate(t, first, second) {
+  const u = 1 - t;
+  return 3 * u * u * t * first + 3 * u * t * t * second + t * t * t;
+}
+
+/** cursor-theme-cli's eased_progress: solve the handles' x by bisection, then read y. */
+function easedProgress(progress, [x1, y1], [x2, y2]) {
+  const target = Math.max(0, Math.min(1, progress));
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 14; step++) {
+    const middle = (low + high) / 2;
+    if (cubicCoordinate(middle, x1, x2) < target) low = middle;
+    else high = middle;
+  }
+  return Math.max(0, Math.min(1, cubicCoordinate((low + high) / 2, y1, y2)));
+}
+
+/** `value` at `frame`: a constant as it is, a track as the compiler samples it. */
+function sample(value, frame) {
+  if (!isTrack(value)) return value;
+  const { keys, linear } = value;
+  if (frame <= keys[0][0]) return keys[0][1];
+  for (let index = 0; index + 1 < keys.length; index++) {
+    const [start, from] = keys[index];
+    const [end, to] = keys[index + 1];
+    if (frame >= end) continue;
+    const handles = linear ? LINEAR_HANDLES : EASED_HANDLES;
+    const progress = easedProgress(
+      end > start ? (frame - start) / (end - start) : 0,
+      handles.out,
+      index + 2 < keys.length ? handles.in : [1, 1]
+    );
+    return Array.isArray(from)
+      ? from.map((component, axis) => component + (to[axis] - component) * progress)
+      : from + (to - from) * progress;
+  }
+  return keys[keys.length - 1][1];
+}
+
+/** faster_fade: a mark's shadow fades with each keyframe's opacity squared. */
+function fasterFade(opacity) {
+  if (opacity === undefined) return undefined;
+  if (!isTrack(opacity)) return roundTo2((opacity * opacity) / 100);
+  return track(
+    opacity.keys.map(([frame, value]) => [frame, roundTo2((value * value) / 100)]),
+    opacity.linear
+  );
+}
+
+/** A layer's transform at `frame` (shape_layer), moved by `offset` for its shadow. */
+function applyLayerTransform(cr, layer, frame, offset = [0, 0]) {
+  const [x, y] = sample(layer.position ?? [LAYER_ANCHOR, LAYER_ANCHOR], frame);
+  const scale = sample(layer.scale ?? 100, frame) / 100;
+  cr.translate(x + offset[0], y + offset[1]);
+  cr.rotate((sample(layer.rotation ?? 0, frame) * Math.PI) / 180);
+  cr.scale(scale, scale);
+  cr.translate(-LAYER_ANCHOR, -LAYER_ANCHOR);
+}
+
+/**
+ * soft_shadow: SHADOW_STEPS black strokes over the current path, each wider
+ * by 2 * spread / SHADOW_STEPS, that build up to `peak` percent where they
+ * all overlap. `width` is the stroke of the shape casting it (0 when filled).
+ */
+function strokeSoftShadow(cr, width, spread, peak, opacity) {
+  const each = roundTo2(100 * (1 - (1 - peak / 100) ** (1 / SHADOW_STEPS))) / 100;
+  cr.setLineCap(Cairo.LineCap.ROUND);
+  cr.setLineJoin(Cairo.LineJoin.ROUND);
+  cr.setSourceRGBA(0, 0, 0, each * opacity);
+  for (let step = 1; step <= SHADOW_STEPS; step++) {
+    cr.setLineWidth(width + (2 * spread * step) / SHADOW_STEPS);
+    cr.strokePreserve();
+  }
+  cr.newPath();
+}
+
+/**
+ * cursor_layers: the dart's shadow, offset down and right, then its body in
+ * the session color with the dark outline. `motion` holds the action's
+ * keyframes for the dart (the click's press, the drag's tug).
+ */
+function drawCursorLayers(cr, motion, frame, fillColor) {
+  cr.save();
+  applyLayerTransform(cr, motion, frame, SHADOW_OFFSET);
+  traceCursorPath(cr);
+  cr.setSourceRGBA(0, 0, 0, 0.08);
+  cr.fillPreserve();
+  strokeSoftShadow(cr, 0, 8, 20, 1);
+  cr.restore();
+
+  cr.save();
+  applyLayerTransform(cr, motion, frame);
+  traceCursorPath(cr);
+  setFill(cr, fillColor);
+  cr.fillPreserve();
+  cr.setLineWidth(OUTLINE_WIDTH);
+  cr.setLineCap(Cairo.LineCap.ROUND);
+  cr.setLineJoin(Cairo.LineJoin.MITER);
+  cr.setMiterLimit(OUTLINE_MITER_LIMIT);
+  setFill(cr, THEME_OUTLINE);
+  cr.stroke();
+  cr.restore();
+}
+
+/**
+ * cue_layers: one action mark, its soft shadow first, then its shapes
+ * stroked in the accent color (or filled, for the record dot). The accent is
+ * the same for every session.
+ */
+function drawMark(cr, mark, frame) {
+  const opacity = sample(mark.opacity ?? 100, frame) / 100;
+  const shadowOpacity = sample(fasterFade(mark.opacity) ?? 100, frame) / 100;
+  const trace = () => {
+    for (const shape of mark.shapes) shape(cr);
+  };
+  if (shadowOpacity > 0) {
+    cr.save();
+    applyLayerTransform(cr, mark, frame, SHADOW_OFFSET);
+    trace();
+    if (mark.filled) {
+      cr.setSourceRGBA(0, 0, 0, 0.08 * shadowOpacity);
+      cr.fillPreserve();
+    }
+    strokeSoftShadow(cr, mark.filled ? 0 : mark.width, 4, 22, shadowOpacity);
+    cr.restore();
+  }
+  if (opacity <= 0) return;
+  cr.save();
+  applyLayerTransform(cr, mark, frame);
+  trace();
+  setFill(cr, THEME_ACCENT, opacity);
+  if (mark.filled) {
+    cr.fill();
+  } else {
+    cr.setLineWidth(mark.width);
     cr.setLineCap(Cairo.LineCap.ROUND);
     cr.setLineJoin(Cairo.LineJoin.ROUND);
-    setFill(cr, fillColor, layerOpacity);
     cr.stroke();
   }
+  cr.restore();
 }
 
-function createGlowSurface(fillColor) {
-  const surface = new Cairo.ImageSurface(
-    Cairo.Format.ARGB32,
-    (CANVAS_SIZE + GLOW_PADDING * 2) * GLOW_SURFACE_SCALE,
-    (CANVAS_SIZE + GLOW_PADDING * 2) * GLOW_SURFACE_SCALE
-  );
-  const cr = new Cairo.Context(surface);
-  cr.scale(GLOW_SURFACE_SCALE, GLOW_SURFACE_SCALE);
-  cr.translate(GLOW_PADDING, GLOW_PADDING);
-  drawCursorGlowShape(cr, fillColor);
-  cr.$dispose();
-  return surface;
-}
+const DRAG_MOVEMENT = track([
+  [0, [64, 64]],
+  [8, [64, 64]],
+  [30, [71, 67]],
+  [40, [71, 67]],
+  [48, [64, 64]],
+]);
 
+/**
+ * Each action's animation (action_<name> in build_default_theme.py): its
+ * length in frames, the dart's keyframes, and its marks with their shapes,
+ * stroke width and keyframes.
+ */
+const THEME_ACTIONS = {
+  idle: { frames: 1, marks: [] },
+  observe: {
+    frames: 48,
+    marks: [
+      {
+        shapes: [
+          curve([38, 28], [-11, 1], [0, -11], [20, 49]),
+          curve([42, 19], [-19, 0], [0, -18], [11, 51]),
+        ],
+        width: 4,
+        position: [72, 54],
+        scale: track([[0, 88], [24, 100], [48, 108]]),
+        opacity: track([[0, 0], [7, 100], [34, 100], [44, 0], [48, 0]]),
+      },
+    ],
+  },
+  click: {
+    frames: 20,
+    cursor: { scale: track([[0, 100], [7, 93], [12, 103], [20, 100]]) },
+    marks: [
+      {
+        shapes: [polyline([35, 20], [34, 11]), polyline([27, 25], [19, 19]), polyline([25, 34], [15, 34])],
+        width: 4,
+        position: [74, 67],
+        scale: track([[0, 110], [8, 130], [20, 150]]),
+        opacity: track([[0, 0], [4, 100], [11, 100], [20, 0]]),
+      },
+    ],
+  },
+  drag: {
+    frames: 48,
+    cursor: { position: DRAG_MOVEMENT },
+    marks: [
+      {
+        shapes: [polyline([28, 38], [16, 35]), polyline([26, 48], [12, 45])],
+        width: 4,
+        position: DRAG_MOVEMENT,
+        opacity: track([[0, 20], [15, 100], [36, 100], [48, 20]]),
+      },
+    ],
+  },
+  scroll: {
+    frames: 48,
+    marks: [
+      {
+        shapes: [polyline([23, 31], [31, 22], [39, 31]), polyline([23, 49], [31, 58], [39, 49])],
+        width: 4,
+        position: track([[0, [59, 68]], [24, [59, 60]], [48, [59, 68]]]),
+        opacity: track([[0, 42], [24, 100], [48, 42]]),
+      },
+    ],
+  },
+  text: {
+    frames: 48,
+    marks: [
+      {
+        shapes: [polyline([31, 22], [31, 58]), polyline([24, 22], [38, 22]), polyline([24, 58], [38, 58])],
+        width: 4,
+        position: [60, 64],
+        opacity: track([[0, 100], [16, 100], [17, 18], [30, 18], [31, 100], [48, 100]], true),
+      },
+    ],
+  },
+  key: {
+    frames: 48,
+    marks: [
+      {
+        shapes: [
+          square(28, 39, 28, 6),
+          polyline([23, 32], [23, 46]),
+          polyline([24, 39], [33, 32]),
+          polyline([25, 39], [34, 46]),
+        ],
+        width: 3.5,
+        position: track([[0, [55, 64]], [8, [55, 67]], [17, [55, 63]], [26, [55, 64]], [48, [55, 64]]]),
+        scale: track([[0, 100], [8, 92], [17, 103], [26, 100], [48, 100]]),
+        opacity: track([[0, 0], [4, 100], [30, 100], [42, 0], [48, 0]]),
+      },
+    ],
+  },
+  navigate: {
+    frames: 48,
+    marks: [
+      {
+        shapes: [polyline([15, 29], [25, 40], [15, 51]), polyline([29, 29], [39, 40], [29, 51])],
+        width: 4,
+        position: track([[0, [54, 64]], [18, [59, 64]], [30, [63, 64]], [48, [63, 64]]]),
+        opacity: track([[0, 0], [8, 100], [28, 100], [42, 0], [48, 0]]),
+      },
+    ],
+  },
+  app: {
+    frames: 48,
+    marks: [
+      {
+        shapes: [[18, 31], [34, 31], [18, 47], [34, 47]].map(([x, y]) => square(x, y, 10, 2)),
+        width: 3.5,
+        position: [59, 64],
+        scale: track([[0, 20], [14, 112], [24, 100], [48, 100]]),
+        opacity: track([[0, 0], [8, 100], [34, 100], [44, 0], [48, 0]]),
+      },
+    ],
+  },
+  transfer: {
+    frames: 48,
+    marks: [
+      {
+        shapes: [
+          polyline([22, 50], [22, 20], [14, 28], [22, 20], [30, 28]),
+          polyline([37, 28], [37, 58], [29, 50], [37, 58], [45, 50]),
+        ],
+        width: 4,
+        position: track([[0, [55, 70]], [24, [55, 58]], [48, [55, 70]]]),
+        opacity: track([[0, 38], [24, 100], [48, 38]]),
+      },
+    ],
+  },
+  record: {
+    frames: 48,
+    marks: [
+      { shapes: [circle(29, 39, 34)], width: 4, position: [52, 64] },
+      {
+        shapes: [circle(29, 39, 10)],
+        filled: true,
+        position: [52, 64],
+        scale: track([[0, 72], [24, 114], [48, 72]]),
+        opacity: track([[0, 42], [24, 100], [48, 42]]),
+      },
+    ],
+  },
+  system: {
+    frames: 48,
+    marks: [
+      {
+        shapes: [
+          circle(29, 39, 24),
+          circle(29, 39, 8),
+          polyline([29, 20], [29, 25]),
+          polyline([29, 53], [29, 58]),
+          polyline([10, 39], [15, 39]),
+          polyline([43, 39], [48, 39]),
+          polyline([16, 26], [20, 30]),
+          polyline([38, 48], [42, 52]),
+          polyline([16, 52], [20, 48]),
+          polyline([38, 30], [42, 26]),
+        ],
+        width: 3.5,
+        position: [50, 64],
+        rotation: track([[0, -18], [22, 50], [34, 0], [48, 0]]),
+        opacity: track([[0, 0], [6, 100], [34, 100], [44, 0], [48, 0]]),
+      },
+    ],
+  },
+};
+
+/** The float every action shares (theme.rs shared_float_motion), in canvas units. */
 function sharedFloatMotion(progress) {
   const angle = progress * Math.PI * 2;
   return {
     dx: Math.sin(angle) * 5,
     dy: Math.cos(angle) * 6 - 5,
     rotation: Math.cos(angle) * ((2.5 * Math.PI) / 180),
-    scale: 1,
   };
 }
 
-function cursorBodyMotion(progress, action) {
-  let dx = 0;
-  let dy = 0;
-  let rotation = 0;
-  let scale = 1;
-
-  if (action === 'click') {
-    if (progress < 0.35) scale = 1 - easeInOut(progress / 0.35) * 0.07;
-    else if (progress < 0.6) scale = 0.93 + easeInOut((progress - 0.35) / 0.25) * 0.1;
-    else scale = 1.03 - easeInOut((progress - 0.6) / 0.4) * 0.03;
-  } else if (action === 'drag') {
-    const held = easeInOut(triangleWave(progress));
-    dx = held * 7;
-    dy = held * 3;
-  }
-
-  return { dx, dy, rotation, scale };
+/** effect_rgb: the session color lifted toward white. */
+function effectColor(color) {
+  return color.map((channel) => Math.round(channel + (255 - channel) * EFFECT_LIFT));
 }
 
-function applyCursorBodyMotion(cr, motion) {
-  cr.translate(64 + motion.dx, 64 + motion.dy);
-  cr.rotate(motion.rotation);
-  cr.scale(motion.scale, motion.scale);
-  cr.translate(-64, -64);
+/**
+ * effects::glow for a cursor moving at (vx, vy) px/s, relative to the
+ * pointer: a radial glow around the cursor's anchor, POINTER_ANCHOR_OFFSET
+ * behind the tip along its resting heading, pulled back against the motion.
+ * Null when the cursor is too slow for one.
+ */
+function speedGlow(vx, vy) {
+  const speed = Math.hypot(vx, vy);
+  const alpha = Math.min(speed * 0.00014, 0.42);
+  if (alpha <= 0.02) return null;
+  const pullback = Math.min(speed * 0.009, 18);
+  const anchor = POINTER_ANCHOR_OFFSET * Math.SQRT1_2;
+  return {
+    x: anchor - (vx / speed) * pullback,
+    y: anchor - (vy / speed) * pullback,
+    r: 30 * (1 + Math.min(speed * 0.00024, 0.44)),
+    alpha,
+  };
 }
 
-function drawCursorGlow(cr, progress, action, glowSurface) {
-  const motion = cursorBodyMotion(progress, action);
-  cr.save();
-  applyCursorBodyMotion(cr, motion);
-  cr.translate(-GLOW_PADDING, -GLOW_PADDING);
-  cr.scale(1 / GLOW_SURFACE_SCALE, 1 / GLOW_SURFACE_SCALE);
-  cr.setSourceSurface(glowSurface, 0, 0);
-  cr.paint();
-  cr.restore();
+function drawSpeedGlow(cr, glow, color) {
+  const gradient = new Cairo.RadialGradient(glow.x, glow.y, 0, glow.x, glow.y, glow.r);
+  const [r, g, b] = color.map((channel) => channel / 255);
+  // tiny-skia takes the center's alpha as a truncated byte.
+  gradient.addColorStopRGBA(0, r, g, b, Math.floor(glow.alpha * 255) / 255);
+  gradient.addColorStopRGBA(1, r, g, b, 0);
+  cr.newPath();
+  cr.arc(glow.x, glow.y, glow.r, 0, Math.PI * 2);
+  cr.setSource(gradient);
+  cr.fill();
 }
 
-function drawCursorBody(cr, progress, action, fillColor) {
-  const motion = cursorBodyMotion(progress, action);
-  cr.save();
-  applyCursorBodyMotion(cr, motion);
-  traceCursorBody(cr);
-  setFill(cr, fillColor);
-  cr.fillPreserve();
-  cr.setLineWidth(5);
-  cr.setLineCap(Cairo.LineCap.ROUND);
-  cr.setLineJoin(Cairo.LineJoin.ROUND);
-  setPaper(cr);
+/** effects::ripple: the click's ring, `age` seconds after it, around the origin. */
+function drawClickRipple(cr, age, color) {
+  if (age >= RIPPLE_SECONDS) return;
+  const k = age / RIPPLE_SECONDS;
+  cr.newPath();
+  cr.arc(0, 0, 8 + 44 * (1 - (1 - k) ** 3), 0, Math.PI * 2);
+  cr.setLineWidth(4 * (1 - k) + 1);
+  setFill(cr, color, Math.round(0.75 * (1 - k) * 255) / 255);
   cr.stroke();
-  cr.restore();
 }
 
-function drawActionCue(cr, action, progress, fillColor) {
-  const wave = triangleWave(progress);
-  const strokeCue = (width, alpha = 1) => strokePath(cr, width, alpha, fillColor);
-  const lineCue = (points, width = 4, alpha = 1) => linePath(cr, points, width, alpha, fillColor);
+/** effects::squish: how much the click shrinks the cursor, `age` seconds after it. */
+function clickSquish(age) {
+  const press = 0.09;
+  if (age < press) return SQUISH * Math.min(age / 0.05, 1);
+  const after = age - press;
+  return (
+    SQUISH *
+    Math.max(0, Math.cos(Math.min(after / 0.22, 1) * Math.PI * 1.5)) *
+    Math.max(0, 1 - after / 0.22)
+  );
+}
+
+/**
+ * One frame of the agent cursor, as render_state.rs paint_cursor draws it,
+ * with the pointer's point at the origin: the speed glow, then the theme's
+ * frame for `action` `elapsed` seconds in, squished about the hotspot and
+ * floating. `effects` comes from _effectFrame. The ripple, which paint_cursor
+ * draws last, is the ripple actor's.
+ */
+function drawAgentCursor(cr, action, elapsed, fillColor, effects) {
+  if (effects.glow) drawSpeedGlow(cr, effects.glow, effectColor(fillColor));
+  const animation = THEME_ACTIONS[action] ?? THEME_ACTIONS.idle;
+  const frame = Math.floor(Math.max(0, elapsed) * THEME_FPS) % animation.frames;
+  const scale = SCALE * (1 - effects.squish);
+  const float = sharedFloatMotion((Math.max(0, elapsed) % FLOAT_DURATION) / FLOAT_DURATION);
   cr.save();
-  switch (action) {
-    case 'observe': {
-      const opacity = Math.min(1, progress * 7);
-      cr.translate(8, -10);
-      cr.moveTo(38, 28);
-      cr.curveTo(27, 29, 20, 38, 20, 49);
-      strokeCue(4, opacity);
-      cr.moveTo(42, 19);
-      cr.curveTo(23, 19, 11, 33, 11, 51);
-      strokeCue(4, opacity);
-      break;
-    }
-    case 'click': {
-      const cueProgress = Math.max(0, Math.min(1, progress / 0.65));
-      const opacity = Math.max(
-        0,
-        Math.min(1, Math.min(1 - Math.pow(cueProgress, 1.35), cueProgress * 5))
-      );
-      const cueScale = 1.1 + easeInOut(cueProgress) * 0.4;
-      cr.translate(35, 28);
-      cr.scale(cueScale, cueScale);
-      cr.translate(-25, -25);
-      lineCue(
-        [
-          [35, 20],
-          [34, 11],
-        ],
-        4,
-        opacity
-      );
-      lineCue(
-        [
-          [27, 25],
-          [19, 19],
-        ],
-        4,
-        opacity
-      );
-      lineCue(
-        [
-          [25, 34],
-          [15, 34],
-        ],
-        4,
-        opacity
-      );
-      break;
-    }
-    case 'drag': {
-      const offset = easeInOut(wave) * 7;
-      cr.translate(offset, offset * 0.43);
-      lineCue(
-        [
-          [28, 38],
-          [16, 35],
-        ],
-        4,
-        0.2 + wave * 0.8
-      );
-      lineCue(
-        [
-          [26, 48],
-          [12, 45],
-        ],
-        4,
-        0.2 + wave * 0.8
-      );
-      break;
-    }
-    case 'scroll': {
-      cr.translate(-5, 4 - wave * 8);
-      lineCue(
-        [
-          [23, 31],
-          [31, 22],
-          [39, 31],
-        ],
-        4,
-        0.42 + wave * 0.58
-      );
-      lineCue(
-        [
-          [23, 49],
-          [31, 58],
-          [39, 49],
-        ],
-        4,
-        0.42 + wave * 0.58
-      );
-      break;
-    }
-    case 'text': {
-      const opacity = progress < 0.34 || progress > 0.64 ? 1 : 0.18;
-      cr.translate(-4, 0);
-      lineCue(
-        [
-          [31, 22],
-          [31, 58],
-        ],
-        4,
-        opacity
-      );
-      lineCue(
-        [
-          [24, 22],
-          [38, 22],
-        ],
-        4,
-        opacity
-      );
-      lineCue(
-        [
-          [24, 58],
-          [38, 58],
-        ],
-        4,
-        opacity
-      );
-      break;
-    }
-    case 'key': {
-      const bounce = Math.sin(progress * Math.PI * 2) * (1 - progress) * 3;
-      cr.translate(-9, bounce);
-      roundedRect(cr, 14, 25, 28, 28, 6);
-      strokeCue(3.5);
-      lineCue(
-        [
-          [23, 32],
-          [23, 46],
-          [23, 39],
-          [33, 32],
-          [24, 39],
-          [34, 46],
-        ],
-        3.5
-      );
-      break;
-    }
-    case 'navigate': {
-      cr.translate(-10 + easeInOut(progress) * 9, 0);
-      lineCue(
-        [
-          [15, 29],
-          [25, 40],
-          [15, 51],
-        ],
-        4,
-        0.2 + wave * 0.8
-      );
-      lineCue(
-        [
-          [29, 29],
-          [39, 40],
-          [29, 51],
-        ],
-        4,
-        0.2 + wave * 0.8
-      );
-      break;
-    }
-    case 'app': {
-      const s = 0.2 + easeInOut(Math.min(1, progress * 2)) * 0.8;
-      cr.translate(21, 39);
-      cr.scale(s, s);
-      cr.translate(-26, -39);
-      for (const [x, y] of [
-        [13, 26],
-        [29, 26],
-        [13, 42],
-        [29, 42],
-      ]) {
-        roundedRect(cr, x, y, 10, 10, 2);
-        strokeCue(3.5);
-      }
-      break;
-    }
-    case 'transfer':
-      cr.translate(-9, 6 - wave * 12);
-      lineCue(
-        [
-          [22, 50],
-          [22, 20],
-          [14, 28],
-          [22, 20],
-          [30, 28],
-        ],
-        4,
-        0.38 + wave * 0.62
-      );
-      lineCue(
-        [
-          [37, 28],
-          [37, 58],
-          [29, 50],
-          [37, 58],
-          [45, 50],
-        ],
-        4,
-        0.38 + wave * 0.62
-      );
-      break;
-    case 'record':
-      cr.translate(-12, 0);
-      cr.arc(29, 39, 17, 0, Math.PI * 2);
-      strokeCue(4);
-      cr.arc(29, 39, 3.6 + wave * 2.1, 0, Math.PI * 2);
-      fillPath(cr, (3.6 + wave * 2.1) * 1.25, 0.42 + wave * 0.58, fillColor);
-      break;
-    case 'system': {
-      cr.translate(15, 39);
-      cr.rotate(((easeInOut(progress) * 68 - 18) * Math.PI) / 180);
-      cr.translate(-29, -39);
-      for (const radius of [12, 4]) {
-        cr.arc(29, 39, radius, 0, Math.PI * 2);
-        strokeCue(3.5);
-      }
-      for (const points of [
-        [
-          [29, 20],
-          [29, 25],
-        ],
-        [
-          [29, 53],
-          [29, 58],
-        ],
-        [
-          [10, 39],
-          [15, 39],
-        ],
-        [
-          [43, 39],
-          [48, 39],
-        ],
-        [
-          [16, 26],
-          [20, 30],
-        ],
-        [
-          [38, 48],
-          [42, 52],
-        ],
-        [
-          [16, 52],
-          [20, 48],
-        ],
-        [
-          [38, 30],
-          [42, 26],
-        ],
-      ])
-        lineCue(points, 3.5);
-      break;
-    }
-    default:
-      break;
-  }
+  cr.translate(float.dx * scale, float.dy * scale);
+  cr.rotate(float.rotation);
+  cr.scale(scale, scale);
+  cr.translate(-HOTSPOT[0], -HOTSPOT[1]);
+  drawCursorLayers(cr, animation.cursor ?? {}, frame, fillColor);
+  for (const mark of animation.marks) drawMark(cr, mark, frame);
   cr.restore();
 }
 
@@ -987,9 +1065,12 @@ export default class WinRectsExtension extends Extension {
     this._target = '';
     this._actionStarted = nowSeconds();
     this._endingAt = null;
-    this._fillColor = [94, 192, 232];
-    this._fillColorCss = '#5ec0e8';
-    this._glowSurface = createGlowSurface(this._fillColor);
+    // The first session's color until Pincer sends one.
+    this._fillColor = [...DEFAULT_CURSOR_FILL];
+    this._fillColorCss = '#c95e48';
+    // The glide MoveCursor started and the last ClickPulse, for the effects.
+    this._glide = null;
+    this._clickAt = null;
     this._cursor = new St.DrawingArea({
       width: ACTOR_SIZE,
       height: ACTOR_SIZE,
@@ -999,19 +1080,15 @@ export default class WinRectsExtension extends Extension {
     });
     this._cursor.connect('repaint', (area) => {
       const cr = area.get_context();
-      const duration = ACTION_DURATIONS[this._action] ?? 1.6;
-      const elapsed = nowSeconds() - this._actionStarted;
-      const progress = (elapsed % duration) / duration;
-      const floatProgress = (elapsed % FLOAT_DURATION) / FLOAT_DURATION;
-      cr.save();
+      const now = nowSeconds();
       cr.translate(ACTOR_CENTER, ACTOR_CENTER);
-      cr.scale(SCALE, SCALE);
-      cr.translate(-CANVAS_SIZE / 2, -CANVAS_SIZE / 2);
-      applyCursorBodyMotion(cr, sharedFloatMotion(floatProgress));
-      drawCursorGlow(cr, progress, this._action, this._glowSurface);
-      drawActionCue(cr, this._action, progress, this._fillColor);
-      drawCursorBody(cr, progress, this._action, this._fillColor);
-      cr.restore();
+      drawAgentCursor(
+        cr,
+        this._action,
+        now - this._actionStarted,
+        this._fillColor,
+        this._effectFrame(now)
+      );
       cr.$dispose();
     });
     this._cursor.set_pivot_point(0.5, 0.5);
@@ -1022,6 +1099,27 @@ export default class WinRectsExtension extends Extension {
       this._stopTicking();
     });
     Main.layoutManager.addTopChrome(this._cursor);
+    // Over the cursor, under the badge, as paint_cursor layers them.
+    this._ripple = new St.DrawingArea({
+      width: RIPPLE_ACTOR_SIZE,
+      height: RIPPLE_ACTOR_SIZE,
+      visible: false,
+      reactive: false,
+      can_focus: false,
+    });
+    this._ripple.connect('repaint', (area) => {
+      const cr = area.get_context();
+      const age = this._clickAt === null ? -1 : nowSeconds() - this._clickAt;
+      if (age >= 0) {
+        cr.translate(RIPPLE_ACTOR_SIZE / 2, RIPPLE_ACTOR_SIZE / 2);
+        drawClickRipple(cr, age, effectColor(this._fillColor));
+      }
+      cr.$dispose();
+    });
+    this._ripple.connect('destroy', () => {
+      this._ripple = null;
+    });
+    Main.layoutManager.addTopChrome(this._ripple);
     this._badgeLabel = new St.Label({
       text: '',
       visible: false,
@@ -1149,15 +1247,14 @@ export default class WinRectsExtension extends Extension {
     this._captureClones.clear();
     // Each destroy handler forgets its own references.
     this._cursor?.destroy();
+    this._ripple?.destroy();
     this._badge?.destroy();
     this._chipPill?.destroy();
     this._keycaps?.destroy();
     this._minimalChip = null;
     this._keycapLayout = null;
-    if (this._glowSurface) {
-      this._glowSurface.finish();
-      this._glowSurface = null;
-    }
+    this._glide = null;
+    this._clickAt = null;
     if (this._impl) {
       this._impl.unexport();
       this._impl = null;
@@ -1182,6 +1279,45 @@ export default class WinRectsExtension extends Extension {
     GLib.source_remove(this._frameId);
     this._frameId = 0;
   }
+  /** Where the current glide has the pointer at `now`, as Clutter's ease-out cubic. */
+  _glidePoint(now) {
+    const glide = this._glide;
+    if (!glide) return null;
+    const t = Math.max(0, Math.min(1, (now - glide.start) / glide.seconds));
+    const eased = 1 - (1 - t) ** 3;
+    return [
+      glide.fromX + (glide.toX - glide.fromX) * eased,
+      glide.fromY + (glide.toY - glide.fromY) * eased,
+    ];
+  }
+  /** Whether the glide MoveCursor started is still under way at `now`. */
+  _gliding(now) {
+    return this._glide !== null && now - this._glide.start < this._glide.seconds;
+  }
+  /**
+   * The cursor's motion effects at `now`, as RenderStateCore.effect_frame
+   * gives them for the default motion style: the speed glow while a glide
+   * runs, and the squish for CLICK_FX_SECONDS after a ClickPulse.
+   */
+  _effectFrame(now) {
+    let glow = null;
+    const glide = this._glide;
+    const t = glide ? (now - glide.start) / glide.seconds : 1;
+    if (t >= 0 && t < 1) {
+      // The ease-out cubic's speed, as a share of the distance per second.
+      const rate = (3 * (1 - t) ** 2) / glide.seconds;
+      glow = speedGlow((glide.toX - glide.fromX) * rate, (glide.toY - glide.fromY) * rate);
+    }
+    const age = this._clickAt === null ? -1 : now - this._clickAt;
+    return { glow, squish: age >= 0 && age < CLICK_FX_SECONDS ? clickSquish(age) : 0 };
+  }
+  /** Show the ripple while it plays, and repaint it. */
+  _frameRipple(now) {
+    if (!this._ripple) return;
+    const age = this._clickAt === null ? -1 : now - this._clickAt;
+    this._ripple.visible = age >= 0 && age < RIPPLE_SECONDS;
+    if (this._ripple.visible) this._ripple.queue_repaint();
+  }
   /** One frame. Returns false once the cursor is gone or hidden. */
   _frame() {
     if (!this._cursor?.visible) return false;
@@ -1195,6 +1331,7 @@ export default class WinRectsExtension extends Extension {
     )
       this._setCursorState('idle', '', '');
     this._cursor.queue_repaint();
+    this._frameRipple(now);
     let labelAlpha = this._badgeRevealedAt === null ? 0 : 1;
     if (this._badgeRevealedAt !== null) {
       const badgeElapsed = now - this._badgeRevealedAt;
@@ -1479,9 +1616,22 @@ export default class WinRectsExtension extends Extension {
   MoveCursor(x, y) {
     if (!this._cursor) return;
     const revealBadge = !this._cursor.visible;
+    const now = nowSeconds();
     // Only a real move is a glide the minimal chip waits out.
     if (x !== this._cursorX || y !== this._cursorY)
-      this._glideEndsAt = nowSeconds() + CURSOR_GLIDE_MS / 1000;
+      this._glideEndsAt = now + CURSOR_GLIDE_MS / 1000;
+    // The ease below starts over from wherever the cursor is, and the speed
+    // glow follows it. Shell scales every ease's duration, and makes it 0
+    // while animations are off (adjustAnimationTime), so the glow does too.
+    const settings = St.Settings.get();
+    const seconds = settings.enable_animations
+      ? (settings.slow_down_factor * CURSOR_GLIDE_MS) / 1000
+      : 0;
+    const [fromX, fromY] = this._glidePoint(now) ?? [
+      this._cursor.x + ACTOR_CENTER,
+      this._cursor.y + ACTOR_CENTER,
+    ];
+    this._glide = seconds > 0 ? { fromX, fromY, toX: x, toY: y, start: now, seconds } : null;
     this._cursorX = x;
     this._cursorY = y;
     this._cursor.show();
@@ -1503,6 +1653,14 @@ export default class WinRectsExtension extends Extension {
     this._cursorY = y;
     this._cursor.set_position(x - ACTOR_CENTER, y - ACTOR_CENTER);
     this._glideEndsAt = 0;
+    // set_position leaves a running ease on its way, so a glide still under
+    // way keeps its glow, as a move settling on the click point does on X11.
+    const now = nowSeconds();
+    if (!this._gliding(now)) this._glide = null;
+    // The ripple stays where the click landed.
+    this._clickAt = now;
+    this._ripple?.set_position(x - RIPPLE_ACTOR_SIZE / 2, y - RIPPLE_ACTOR_SIZE / 2);
+    this._frameRipple(now);
     this._positionBadge(x, y, 0);
     this._positionMinimalChip(x, y);
     if (['idle', 'navigate', 'click'].includes(this._action))
@@ -1527,8 +1685,6 @@ export default class WinRectsExtension extends Extension {
     this._targetChip?.queue_repaint();
     this._chipForeground?.queue_repaint();
     this._keycaps?.queue_repaint();
-    if (this._glowSurface) this._glowSurface.finish();
-    this._glowSurface = createGlowSurface(this._fillColor);
     if (this._cursor) this._cursor.queue_repaint();
   }
   SetCursorState(action, delivery, target, active) {
@@ -1653,6 +1809,9 @@ export default class WinRectsExtension extends Extension {
   HideCursor() {
     this._stopTicking();
     if (this._cursor) this._cursor.hide();
+    this._ripple?.hide();
+    this._glide = null;
+    this._clickAt = null;
     if (this._badge) this._badge.hide();
     this._clearMinimalChip();
     this._badgeRevealedAt = null;

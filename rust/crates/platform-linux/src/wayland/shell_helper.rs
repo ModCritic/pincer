@@ -785,15 +785,6 @@ mod tests {
         assert!(EXTENSION_SOURCE.contains("SetCursorState"));
         assert!(EXTENSION_SOURCE.contains("SetCursorColor"));
         assert!(EXTENSION_SOURCE.contains("SetSessionLabel"));
-        assert!(EXTENSION_SOURCE.contains("const DISPLAY_SIZE = 42;"));
-        assert!(EXTENSION_SOURCE.contains("const GLOW_PADDING = 24;"));
-        assert!(EXTENSION_SOURCE.contains("function drawCursorGlowShape"));
-        assert!(EXTENSION_SOURCE.contains("function glowPath"));
-        assert!(EXTENSION_SOURCE.contains("strokePath(cr, width, alpha, fillColor)"));
-        assert!(EXTENSION_SOURCE.contains("width + 1.5"));
-        assert!(EXTENSION_SOURCE.contains("width - 1"));
-        assert!(EXTENSION_SOURCE.contains("createGlowSurface(this._fillColor)"));
-        assert!(EXTENSION_SOURCE.contains("cr.translate(-GLOW_PADDING, -GLOW_PADDING);"));
         assert!(EXTENSION_SOURCE.contains("function drawBadgeChip"));
         assert!(EXTENSION_SOURCE.contains("function badgeStyle(fillColor)"));
         assert!(EXTENSION_SOURCE.contains("this._badge.add_child(this._badgeLabel)"));
@@ -817,5 +808,100 @@ mod tests {
 
         assert!(!EXTENSION_SOURCE.contains("const VERTS"));
         assert!(!EXTENSION_SOURCE.contains("setSourceRGBA(0.10, 0.75, 1.00"));
+    }
+
+    /// `[[x, y], ...]` as the helper writes its path data.
+    fn js_points(points: &[[f32; 2]]) -> String {
+        let points: Vec<String> = points.iter().map(|[x, y]| format!("[{x}, {y}]")).collect();
+        format!("[{}]", points.join(", "))
+    }
+
+    fn js_rgb(color: [u8; 4]) -> String {
+        format!("[{}, {}, {}]", color[0], color[1], color[2])
+    }
+
+    /// The helper ports `pincer.default` by hand (build_default_theme.py says
+    /// so too). Its dart, palette, scale and frame counts must stay those of
+    /// the theme the Rust overlay draws.
+    #[test]
+    fn bundled_helper_draws_the_default_theme() {
+        use cursor_overlay::CompiledGeometry;
+        let theme = cursor_overlay::embedded_default_theme();
+        assert!(EXTENSION_SOURCE.contains(&format!(
+            "const HOTSPOT = [{}, {}];",
+            theme.hotspot[0], theme.hotspot[1]
+        )));
+        assert!(EXTENSION_SOURCE.contains(&format!(
+            "const DISPLAY_SIZE = {};",
+            cursor_overlay::theme::DISPLAY_SIZE
+        )));
+        assert!(EXTENSION_SOURCE.contains(&format!(
+            "const POINTER_ANCHOR_OFFSET = {};",
+            cursor_overlay::POINTER_ANCHOR_OFFSET
+        )));
+
+        // The idle frame: the dart's shadow, then its body's fill and outline.
+        let idle = &theme
+            .animation_for_action(cursor_overlay::CursorAction::Idle)
+            .expect("idle animation")
+            .frames[0];
+        let CompiledGeometry::Path {
+            vertices,
+            in_tangents,
+            out_tangents,
+            closed: true,
+        } = &idle.commands[0].geometries[0]
+        else {
+            panic!("the dart is a closed path");
+        };
+        assert!(EXTENSION_SOURCE.contains(&format!("  v: {},\n", js_points(vertices))));
+        assert!(EXTENSION_SOURCE.contains(&format!("  i: {},\n", js_points(in_tangents))));
+        assert!(EXTENSION_SOURCE.contains(&format!("  o: {},\n", js_points(out_tangents))));
+        let body = &idle.commands[idle.commands.len() - 2..];
+        assert_eq!(body[0].fill, Some(cursor_overlay::DEFAULT_CURSOR_FILL));
+        assert!(EXTENSION_SOURCE.contains(&format!(
+            "const DEFAULT_CURSOR_FILL = {};",
+            js_rgb(cursor_overlay::DEFAULT_CURSOR_FILL)
+        )));
+        let outline = body[1].stroke.expect("the dart's outline");
+        assert!(
+            EXTENSION_SOURCE.contains(&format!("const THEME_OUTLINE = {};", js_rgb(outline.color)))
+        );
+        assert!(EXTENSION_SOURCE.contains(&format!("const OUTLINE_WIDTH = {};", outline.width)));
+
+        // The marks' color, from the click's last command, and every
+        // action's length in frames.
+        let click = theme
+            .animation_for_action(cursor_overlay::CursorAction::Click)
+            .expect("click animation");
+        let mark = click.frames[8]
+            .commands
+            .last()
+            .unwrap()
+            .stroke
+            .expect("a stroked mark");
+        assert!(EXTENSION_SOURCE.contains(&format!("const THEME_ACCENT = {};", js_rgb(mark.color))));
+        let actions = &EXTENSION_SOURCE[EXTENSION_SOURCE
+            .find("const THEME_ACTIONS = {")
+            .expect("the helper's theme actions")..];
+        for action in cursor_overlay::CursorAction::ALL {
+            let animation = theme.animation_for_action(action).expect("every action");
+            let entry = &actions[actions
+                .find(&format!("\n  {}: {{", action.as_str()))
+                .unwrap_or_else(|| panic!("the helper draws {}", action.as_str()))..];
+            let frames = &entry[entry.find("frames: ").unwrap() + "frames: ".len()..];
+            let frames: usize = frames[..frames.find(',').unwrap()].parse().unwrap();
+            assert_eq!(frames, animation.frames.len(), "{} frames", action.as_str());
+        }
+
+        // Nothing of the old artwork: a white outline and a session-colored glow.
+        for retired in [
+            "function glowPath",
+            "createGlowSurface",
+            "function strokePath",
+            "setInk(",
+        ] {
+            assert!(!EXTENSION_SOURCE.contains(retired), "{retired}");
+        }
     }
 }
