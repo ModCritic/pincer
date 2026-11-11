@@ -474,7 +474,21 @@ impl Trajectory {
         if t >= last.t {
             return last;
         }
-        let idx = self.samples.partition_point(|s| s.t <= t);
+        // First sample after `t`. A plain branching binary search instead of
+        // `partition_point`: playback asks for steadily increasing times, so
+        // these branches predict well, while the standard library's
+        // branch-free search waits on every comparison. This was about 20% of
+        // the per-frame motion and effects time on x86-64.
+        let (mut lo, mut hi) = (0, self.samples.len());
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if self.samples[mid].t <= t {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        let idx = lo;
         let a = self.samples[idx - 1];
         let b = self.samples[idx];
         let f = (t - a.t) / (b.t - a.t);
