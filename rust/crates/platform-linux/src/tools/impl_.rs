@@ -13288,7 +13288,10 @@ impl Tool for DragTool {
             };
             let drag_result = tokio::task::spawn_blocking(move || {
                 let modifier_refs: Vec<&str> = modifiers.iter().map(String::as_str).collect();
-                crate::input::with_x11_foreground(xid, 80, || {
+                // Unobserved: the result below never reports the foreground
+                // observation. The agent cursor's drag runs alongside and is
+                // awaited on its own.
+                crate::input::with_x11_foreground_unobserved(xid, 80, || {
                     crate::input::send_drag_xtest_desktop_with_modifiers(
                         screen_from_x.round() as i32,
                         screen_from_y.round() as i32,
