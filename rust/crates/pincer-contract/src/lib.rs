@@ -234,7 +234,14 @@ pub fn manifest() -> ContractManifest {
 }
 
 pub fn tool_contract(name: &str) -> Option<ToolContract> {
-    manifest().tools.into_iter().find(|tool| tool.name == name)
+    // Argument checks call this on every tool call; build the manifest once.
+    static MANIFEST: OnceLock<ContractManifest> = OnceLock::new();
+    MANIFEST
+        .get_or_init(manifest)
+        .tools
+        .iter()
+        .find(|tool| tool.name == name)
+        .cloned()
 }
 
 #[derive(Debug)]

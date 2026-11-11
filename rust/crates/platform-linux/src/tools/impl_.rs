@@ -3820,52 +3820,9 @@ fn is_chromium_embedder(pid: u32) -> bool {
             .map(|raw| crate::at_point_policy::cmdline_is_chromium_helper(&raw))
             .unwrap_or(false)
     }
-    // Single-process / the embedder itself carrying a Chromium switch.
-    if argv_is_chromium_helper(pid) {
-        return true;
-    }
-    // Build PPid → children across /proc, then BFS the descendants of `pid`
-    // looking for a Chromium helper. Same /proc-walk shape as
-    // `terminal_descendant_ttys`.
-    let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
-    let entries = match fs::read_dir("/proc") {
-        Ok(e) => e,
-        Err(_) => return false,
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let child: u32 = match name.to_string_lossy().parse() {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-        let status = match fs::read_to_string(format!("/proc/{child}/status")) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        if let Some(ppid) = status
-            .lines()
-            .find(|l| l.starts_with("PPid:"))
-            .and_then(|l| l[5..].trim().parse::<u32>().ok())
-        {
-            children.entry(ppid).or_default().push(child);
-        }
-    }
-    let mut queue = std::collections::VecDeque::from([pid]);
-    let mut seen = std::collections::HashSet::new();
-    while let Some(cur) = queue.pop_front() {
-        if !seen.insert(cur) {
-            continue;
-        }
-        if let Some(kids) = children.get(&cur) {
-            for &kid in kids {
-                if argv_is_chromium_helper(kid) {
-                    return true;
-                }
-                queue.push_back(kid);
-            }
-        }
-    }
-    false
+    // Single-process / the embedder itself carrying a Chromium switch, or a
+    // Chromium helper anywhere below it.
+    argv_is_chromium_helper(pid) || descendant_pids(pid).into_iter().any(argv_is_chromium_helper)
 }
 
 fn is_webkitgtk_embedder(pid: u32) -> bool {
@@ -3877,10 +3834,64 @@ fn is_webkitgtk_embedder(pid: u32) -> bool {
             })
             .unwrap_or(false)
     }
+    argv_is_webkit_helper(pid) || descendant_pids(pid).into_iter().any(argv_is_webkit_helper)
+}
 
+/// `pid`'s descendants, breadth first. These checks run on every input
+/// call, so they read only the descendants' own child lists when the kernel
+/// keeps them (CONFIG_PROC_CHILDREN), instead of every process's status:
+/// with about 370 processes that was some 740 file reads per key press.
+fn descendant_pids(pid: u32) -> Vec<u32> {
+    let mut found = Vec::new();
+    let mut queue = std::collections::VecDeque::from([pid]);
+    let mut seen = std::collections::HashSet::from([pid]);
+    // Built once, only when the kernel has no child lists.
+    let mut by_parent: Option<std::collections::HashMap<u32, Vec<u32>>> = None;
+    while let Some(current) = queue.pop_front() {
+        let kids = match proc_children(current) {
+            Some(kids) => kids,
+            None => by_parent
+                .get_or_insert_with(children_by_parent)
+                .get(&current)
+                .cloned()
+                .unwrap_or_default(),
+        };
+        for kid in kids {
+            if seen.insert(kid) {
+                found.push(kid);
+                queue.push_back(kid);
+            }
+        }
+    }
+    found
+}
+
+/// Direct children of `pid` from `/proc/<pid>/task/<tid>/children`. `None`
+/// when the kernel doesn't provide those lists (or `pid` is gone).
+fn proc_children(pid: u32) -> Option<Vec<u32>> {
+    let tasks = fs::read_dir(format!("/proc/{pid}/task")).ok()?;
+    let mut kids = Vec::new();
+    let mut read_any = false;
+    for task in tasks.flatten() {
+        match fs::read_to_string(task.path().join("children")) {
+            Ok(list) => {
+                read_any = true;
+                kids.extend(list.split_whitespace().filter_map(|kid| kid.parse::<u32>().ok()));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && !task.path().exists() => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+            // A thread that exited between the listing and the read.
+            Err(_) => {}
+        }
+    }
+    read_any.then_some(kids)
+}
+
+/// Every process's children, keyed by parent pid, from each /proc/*/status.
+fn children_by_parent() -> std::collections::HashMap<u32, Vec<u32>> {
     let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
     let Ok(entries) = fs::read_dir("/proc") else {
-        return false;
+        return children;
     };
     for entry in entries.flatten() {
         let Ok(child) = entry.file_name().to_string_lossy().parse::<u32>() else {
@@ -3897,20 +3908,7 @@ fn is_webkitgtk_embedder(pid: u32) -> bool {
             children.entry(ppid).or_default().push(child);
         }
     }
-    let mut queue = std::collections::VecDeque::from([pid]);
-    let mut seen = std::collections::HashSet::new();
-    while let Some(current) = queue.pop_front() {
-        if !seen.insert(current) {
-            continue;
-        }
-        if argv_is_webkit_helper(current) {
-            return true;
-        }
-        if let Some(descendants) = children.get(&current) {
-            queue.extend(descendants.iter().copied());
-        }
-    }
-    false
+    children
 }
 
 fn maps_indicate_gtk(maps: &str) -> bool {
