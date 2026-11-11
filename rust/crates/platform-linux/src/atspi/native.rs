@@ -3906,57 +3906,40 @@ fn exact_menu_path_matches(visited: &[Visited<'_>], path: &[String]) -> Vec<usiz
 }
 
 /// Resolve and invoke an application menu one live hierarchy level at a time,
-/// scoped to the caller's native window. Every hop re-walks AT-SPI after the
-/// preceding menu has materialized; no snapshot index is retained across
-/// mutations. When the same menu path exists under several top-levels of the
-/// process (LibreOffice publishes every document window's menubar in one
-/// AT-SPI application), the hop under `xid`'s frame wins instead of the path
-/// being ambiguous.
+/// scoped to the caller's native window. Each hop first looks only where the
+/// segment can be ([`targeted_menu_hop`]: the window's menu bars, then the
+/// menu the previous hop opened), which costs tens of AT-SPI calls. When that
+/// finds no single answer, the hop walks the whole application instead
+/// ([`walked_menu_hop`], thousands of calls), and that walk decides every
+/// refusal. Either way each hop reads the live tree after the preceding menu
+/// has materialized; no snapshot index is retained across mutations. When the
+/// same menu path exists under several top-levels of the process
+/// (LibreOffice publishes every document window's menubar in one AT-SPI
+/// application), the hop under `xid`'s frame wins instead of the path being
+/// ambiguous.
 pub fn invoke_menu_path_in(pid: u32, xid: u64, path: &[String]) -> Result<()> {
     bounded(
         async {
             let conn = shared_connection().await?;
+            // The entry the previous hop activated: the next segment is
+            // looked for inside it first.
+            let mut anchor: Option<RawObjectRef> = None;
             for depth in 0..path.len() {
-                // The whole application: a GTK menu opens as a top-level of
-                // its own, outside the caller's window.
-                let options = WalkOptions {
-                    walk_closed_menus: true,
-                    other_windows: true,
-                    role_search: None,
-                };
-                let collected = collect_visited_bounded_opts(conn, pid, xid, None, None, options)
-                    .await?
-                    .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
-                let visited = collected.visited;
-                let mut matches = exact_menu_path_matches(&visited, &path[..=depth]);
-                if matches.len() > 1 {
-                    if let Some(scope) = collected.scoped_frame {
-                        let scoped: Vec<usize> = matches
-                            .iter()
-                            .copied()
-                            .filter(|index| visited[*index].frame_ordinal == scope)
-                            .collect();
-                        if !scoped.is_empty() {
-                            matches = scoped;
-                        }
+                let previous = depth.checked_sub(1).map(|index| path[index].as_str());
+                let targeted =
+                    targeted_menu_hop(conn, pid, xid, anchor.as_ref(), &path[depth], previous)
+                        .await;
+                let hop = match targeted {
+                    Some(hop) => hop,
+                    None => {
+                        dlog!("invoke_menu: segment {depth} walks the application");
+                        walked_menu_hop(conn, pid, xid, &path[..=depth]).await?
                     }
-                }
-                if matches.len() > 1 {
-                    matches = dedupe_menu_matches(&visited, matches);
-                }
-                let target_index = match matches.as_slice() {
-                    [index] => *index,
-                    [] => anyhow::bail!("menu path segment {depth} was not found"),
-                    _ => anyhow::bail!("menu path segment {depth} is ambiguous"),
                 };
-                let target = &visited[target_index];
-                if target.enabled == Some(false) {
-                    anyhow::bail!("menu path segment {depth} is disabled");
-                }
-                let chosen = activation_index(&target.role, &target.actions).ok_or_else(|| {
+                let chosen = activation_index(&hop.role, &hop.actions).ok_or_else(|| {
                     anyhow!("menu path segment {depth} has no safe activation action")
                 })?;
-                let proxies = target
+                let proxies = hop
                     .acc
                     .proxies()
                     .await
@@ -3972,6 +3955,7 @@ pub fn invoke_menu_path_in(pid: u32, xid: u64, path: &[String]) -> Result<()> {
                 if !accepted {
                     anyhow::bail!("menu path segment {depth} rejected its native action");
                 }
+                anchor = Some(hop.oref);
                 if depth + 1 != path.len() {
                     tokio::time::sleep(Duration::from_millis(80)).await;
                 }
@@ -3980,6 +3964,284 @@ pub fn invoke_menu_path_in(pid: u32, xid: u64, path: &[String]) -> Result<()> {
         },
         || Err(anyhow!("invoke_menu timed out for pid {pid}")),
     )
+}
+
+/// One resolved menu path segment, ready to activate.
+struct MenuHop<'a> {
+    acc: AccessibleProxy<'a>,
+    oref: RawObjectRef,
+    role: String,
+    actions: Vec<String>,
+}
+
+/// Resolve the last segment of `path` from a walk of the whole application,
+/// closed menus included: every match of the exact path, narrowed to the
+/// caller's frame and deduplicated, must leave one enabled entry.
+async fn walked_menu_hop<'a>(
+    conn: &'a AccessibilityConnection,
+    pid: u32,
+    xid: u64,
+    path: &[String],
+) -> Result<MenuHop<'a>> {
+    let depth = path.len() - 1;
+    // The whole application: a GTK menu opens as a top-level of its own,
+    // outside the caller's window.
+    let options = WalkOptions {
+        walk_closed_menus: true,
+        other_windows: true,
+        role_search: None,
+    };
+    let collected = collect_visited_bounded_opts(conn, pid, xid, None, None, options)
+        .await?
+        .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
+    let visited = collected.visited;
+    let mut matches = exact_menu_path_matches(&visited, path);
+    if matches.len() > 1 {
+        if let Some(scope) = collected.scoped_frame {
+            let scoped: Vec<usize> = matches
+                .iter()
+                .copied()
+                .filter(|index| visited[*index].frame_ordinal == scope)
+                .collect();
+            if !scoped.is_empty() {
+                matches = scoped;
+            }
+        }
+    }
+    if matches.len() > 1 {
+        matches = dedupe_menu_matches(&visited, matches);
+    }
+    let target_index = match matches.as_slice() {
+        [index] => *index,
+        [] => anyhow::bail!("menu path segment {depth} was not found"),
+        _ => anyhow::bail!("menu path segment {depth} is ambiguous"),
+    };
+    let target = &visited[target_index];
+    if target.enabled == Some(false) {
+        anyhow::bail!("menu path segment {depth} is disabled");
+    }
+    Ok(MenuHop {
+        acc: target.acc.clone(),
+        oref: RawObjectRef {
+            name: target.object_ref.bus.clone(),
+            path: target.object_ref.path.clone(),
+        },
+        role: target.role.clone(),
+        actions: target.actions.clone(),
+    })
+}
+
+/// How deep below a menu (or menu bar) the targeted lookup looks for the
+/// next entry, through unlabelled containers: Qt hangs a menu's items under
+/// a `popup menu`, one level down.
+const MENU_LOOKUP_DEPTH: usize = 3;
+/// Elements the targeted lookup reads for one segment before it gives up and
+/// the hop walks the application.
+const MENU_LOOKUP_NODES: usize = 400;
+/// How far below the window the menu-bar search looks where Collection is
+/// not used, and how many elements it reads.
+const MENU_BAR_SEARCH_DEPTH: usize = 4;
+const MENU_BAR_SEARCH_NODES: usize = 128;
+
+/// Resolve one segment by reading only where it can be: the children of the
+/// caller's window's menu bars for the first segment, the children of the
+/// entry the previous hop activated (`anchor`) for the rest. `None` unless
+/// exactly one enabled entry with a safe activation action matches, so the
+/// caller walks the application for every case that walk would refuse or
+/// narrow down (none or several matches, a disabled entry, a window without
+/// a menu bar, an unanswered call).
+async fn targeted_menu_hop<'a>(
+    conn: &'a AccessibilityConnection,
+    pid: u32,
+    xid: u64,
+    anchor: Option<&RawObjectRef>,
+    segment: &str,
+    previous: Option<&str>,
+) -> Option<MenuHop<'a>> {
+    let roots = match anchor {
+        Some(anchor) => vec![anchor.clone()],
+        None => window_menu_bars(conn, pid, xid).await?,
+    };
+    if roots.is_empty() {
+        return None;
+    }
+    let mut found = menu_entries_named(conn, &roots, segment, previous).await?;
+    if found.len() != 1 {
+        dlog!(
+            "invoke_menu: {} entries named {segment:?} where the lookup looked",
+            found.len()
+        );
+        return None;
+    }
+    let (acc, oref, role) = found.pop()?;
+    let proxies = call(acc.proxies()).await?.ok()?;
+    let action = call(proxies.action()).await?.ok()?;
+    let count = call(action.n_actions()).await?.ok()?;
+    let mut actions = Vec::new();
+    for index in 0..count {
+        // Keep the AT-SPI index even when one name read fails.
+        actions.push(
+            call(action.get_name(index))
+                .await
+                .and_then(|result| result.ok())
+                .unwrap_or_default(),
+        );
+    }
+    activation_index(&role, &actions)?;
+    Some(MenuHop {
+        acc,
+        oref,
+        role,
+        actions,
+    })
+}
+
+/// What the targeted lookup does with one element below a menu.
+#[derive(Debug, PartialEq, Eq)]
+enum MenuStep {
+    /// A menu entry with the segment's label.
+    Match,
+    /// No label of its own in the path (Qt's `popup menu`, an unnamed
+    /// container, a separator), or the previous segment's label again: its
+    /// children are entries of the same menu.
+    LookInside,
+    /// Another labelled entry: anything below it has that label in its path.
+    Skip,
+}
+
+/// The rules of [`exact_menu_path_matches`] for one element: an entry
+/// matches when its own label counts in the path and is the segment; an
+/// element whose label does not count is transparent, and so is a repeat of
+/// the previous segment's label (the walk collapses repeated labels).
+fn menu_step(role: &str, name: &str, segment: &str, previous: Option<&str>) -> MenuStep {
+    let label = name.trim();
+    if !counts_in_menu_lineage(role, name) {
+        return MenuStep::LookInside;
+    }
+    if label == segment {
+        MenuStep::Match
+    } else if previous == Some(label) {
+        MenuStep::LookInside
+    } else {
+        MenuStep::Skip
+    }
+}
+
+/// The enabled entries labelled `segment` below `roots` (breadth first,
+/// looking through transparent elements up to [`MENU_LOOKUP_DEPTH`]), with
+/// their roles. `None` when a read fails or the menu is larger than the
+/// lookup reads, so the caller walks the application instead.
+async fn menu_entries_named<'a>(
+    conn: &'a AccessibilityConnection,
+    roots: &[RawObjectRef],
+    segment: &str,
+    previous: Option<&str>,
+) -> Option<Vec<(AccessibleProxy<'a>, RawObjectRef, String)>> {
+    let zconn = conn.connection();
+    let mut queue = std::collections::VecDeque::new();
+    for root in roots {
+        let children = call(raw_children(zconn, root)).await?.ok()?;
+        queue.extend(children.into_iter().map(|child| (child, 1usize)));
+    }
+    let mut found = Vec::new();
+    let mut read = 0usize;
+    while let Some((oref, depth)) = queue.pop_front() {
+        read += 1;
+        if read > MENU_LOOKUP_NODES {
+            dlog!("invoke_menu: menu lookup for {segment:?} passed {MENU_LOOKUP_NODES} elements");
+            return None;
+        }
+        let acc = call(accessible_for(conn, &oref)).await?.ok()?;
+        let (role, name) = tokio::join!(call(acc.get_role_name()), call(acc.name()));
+        let (role, name) = (role?.ok()?, name?.ok()?);
+        match menu_step(&role, &name, segment, previous) {
+            MenuStep::Match => {
+                // The walk leaves a disabled entry out of its matches.
+                let enabled = call(acc.get_state())
+                    .await
+                    .and_then(|state| state.ok())
+                    .map(|state| is_enabled_state(&state));
+                if enabled != Some(false) {
+                    found.push((acc, oref, role));
+                }
+            }
+            MenuStep::LookInside if depth < MENU_LOOKUP_DEPTH => {
+                match call(raw_child_count(zconn, &oref)).await {
+                    Some(Ok(count)) if count <= 0 => continue,
+                    Some(Ok(count)) if count as usize > MENU_LOOKUP_NODES => return None,
+                    _ => {}
+                }
+                let children = call(raw_children(zconn, &oref)).await?.ok()?;
+                queue.extend(children.into_iter().map(|child| (child, depth + 1)));
+            }
+            MenuStep::LookInside | MenuStep::Skip => {}
+        }
+    }
+    Some(found)
+}
+
+/// The menu bars of the caller's window: one Collection search on Qt, a
+/// shallow breadth-first look below the window elsewhere (stopping at the
+/// depth of the first one found). `None` when the window's top-level cannot
+/// be resolved.
+async fn window_menu_bars(
+    conn: &AccessibilityConnection,
+    pid: u32,
+    xid: u64,
+) -> Option<Vec<RawObjectRef>> {
+    let ResolvedApp { app, children } = resolve_app_for_pid(conn, pid).await.ok()??;
+    let children = match children {
+        Some(children) => children,
+        None => call(app.get_children()).await?.ok()?,
+    };
+    let seeds: Vec<RawObjectRef> = children
+        .iter()
+        .filter_map(RawObjectRef::from_atspi)
+        .collect();
+    let frame = seeds
+        .get(resolve_window_frame(conn, pid, xid, &seeds).await?)?
+        .clone();
+    let zconn = conn.connection();
+    if is_collection_toolkit_app(&app).await {
+        return call(get_matches(zconn, &frame, &[atspi::Role::MenuBar as u32]))
+            .await?
+            .ok();
+    }
+    let mut queue = std::collections::VecDeque::from([(frame, 0usize)]);
+    let mut bars = Vec::new();
+    let mut found_at = None;
+    let mut read = 0usize;
+    while let Some((oref, depth)) = queue.pop_front() {
+        if found_at.is_some_and(|found| depth > found) {
+            break;
+        }
+        read += 1;
+        if read > MENU_BAR_SEARCH_NODES {
+            break;
+        }
+        let Some(Ok(acc)) = call(accessible_for(conn, &oref)).await else {
+            continue;
+        };
+        let Some(Ok(role)) = call(acc.get_role_name()).await else {
+            continue;
+        };
+        if role.trim().eq_ignore_ascii_case("menu bar") {
+            bars.push(oref);
+            found_at = Some(depth);
+            continue;
+        }
+        if depth >= MENU_BAR_SEARCH_DEPTH {
+            continue;
+        }
+        match call(raw_child_count(zconn, &oref)).await {
+            Some(Ok(count)) if count <= 0 || count as usize > MENU_BAR_SEARCH_NODES => continue,
+            _ => {}
+        }
+        if let Some(Ok(children)) = call(raw_children(zconn, &oref)).await {
+            queue.extend(children.into_iter().map(|child| (child, depth + 1)));
+        }
+    }
+    Some(bars)
 }
 
 /// Several nodes matched one menu path segment inside the scoped frame.
@@ -7999,9 +8261,10 @@ mod coord_tests {
         combine_wayland_content_offsets, counts_as_showing, counts_in_menu_lineage,
         hyprland_document_top_inset, is_activation_action, is_enabled_state,
         is_indexable_capabilities, is_passive_role, is_showing_state, is_web_process_bus,
-        listing_state, one_line, passive_marker, prefer_authoritative_wayland_origin,
+        listing_state, menu_step, one_line, passive_marker, prefer_authoritative_wayland_origin,
         project_screen_extents, rebase_renderer_window_offset, scoped_component_nodes,
         screen_extent_rebase, select_click_target, select_web_document, ApplicationSelection,
+        MenuStep,
     };
     use atspi::{State, StateSet};
     use std::time::Duration;
@@ -8718,6 +8981,48 @@ mod coord_tests {
         assert!(!counts_in_menu_lineage("popup menu", "Kate"));
         assert!(!counts_in_menu_lineage("menu", "  "));
         assert!(!counts_in_menu_lineage("push button", "Selection"));
+    }
+
+    #[test]
+    fn menu_lookup_steps_follow_the_walks_path_rules() {
+        // Qt: menu bar items, a menu's popup container and its entries.
+        assert_eq!(
+            menu_step("menu item", "View", "View", None),
+            MenuStep::Match
+        );
+        assert_eq!(menu_step("menu item", "Edit", "View", None), MenuStep::Skip);
+        assert_eq!(
+            menu_step("popup menu", "KWrite", "Borders", Some("View")),
+            MenuStep::LookInside
+        );
+        assert_eq!(
+            menu_step(
+                "check menu item",
+                " Show Line Numbers ",
+                "Show Line Numbers",
+                Some("Borders")
+            ),
+            MenuStep::Match
+        );
+        assert_eq!(
+            menu_step("separator", "", "Enlarge Font", Some("View")),
+            MenuStep::LookInside
+        );
+        // An unnamed menu is transparent, and so is one that repeats the
+        // previous segment's label (the walk collapses the repeat).
+        assert_eq!(
+            menu_step("menu", "", "Open", Some("File")),
+            MenuStep::LookInside
+        );
+        assert_eq!(
+            menu_step("menu", "File", "Open", Some("File")),
+            MenuStep::LookInside
+        );
+        // Only a menu role matches; anything else is looked through.
+        assert_eq!(
+            menu_step("push button", "View", "View", None),
+            MenuStep::LookInside
+        );
     }
 
     // Regression for 2026-10-25: invoke_menu(["Edit", "Select All"]) on Kate
