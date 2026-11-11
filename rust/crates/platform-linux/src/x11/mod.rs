@@ -7,10 +7,92 @@
 //! [`crate::x11_client_pid`]); otherwise its `pid` stays `None`.
 
 use anyhow::Result;
+use std::ffi::OsString;
+use std::os::fd::AsRawFd as _;
+use std::sync::{Arc, Mutex, PoisonError};
 use x11rb::connection::Connection;
+use x11rb::errors::ConnectError;
 use x11rb::protocol::res::{ClientIdMask, ClientIdSpec, ConnectionExt as _};
 use x11rb::protocol::xproto::*;
 use x11rb::rust_connection::RustConnection;
+
+/// One X connection shared by the read-only queries that used to open their
+/// own per call (window lists, window properties, geometry, coordinate
+/// translation, focus and pointer reads). The foreground route's
+/// window-change poll alone opened about six every 50 ms; each costs the
+/// socket, the auth file and the server's setup reply (every screen, depth
+/// and visual).
+///
+/// Only requests with replies go through it, and every reply or error is
+/// read or dropped with its cookie, so X errors still reach the caller and
+/// nothing queues up; it selects no events, creates no resources and holds
+/// no grabs. Anything else (input injection, sending events, windows of its
+/// own, screen size from the setup data, which a connection never updates)
+/// keeps its own connection.
+///
+/// Reused only while `DISPLAY` and `XAUTHORITY` are what they were when it
+/// was opened (both are read by every `RustConnection::connect(None)`) and the
+/// server has not closed it; otherwise a new one is opened the same way, so a
+/// restarted server or an unreachable display behaves and fails exactly as a
+/// per-call connection did, with the same `ConnectError`.
+pub fn query_connection() -> Result<(Arc<RustConnection>, usize), ConnectError> {
+    static SHARED: Mutex<QueryConnection> = Mutex::new(QueryConnection { open: None });
+    let key = (std::env::var_os("DISPLAY"), std::env::var_os("XAUTHORITY"));
+    SHARED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(key, || RustConnection::connect(None))
+}
+
+/// The cache behind [`query_connection`], keyed by the connect parameters.
+struct QueryConnection {
+    open: Option<(QueryConnectionKey, Arc<RustConnection>, usize)>,
+}
+
+type QueryConnectionKey = (Option<OsString>, Option<OsString>);
+
+impl QueryConnection {
+    fn get(
+        &mut self,
+        key: QueryConnectionKey,
+        connect: impl FnOnce() -> Result<(RustConnection, usize), ConnectError>,
+    ) -> Result<(Arc<RustConnection>, usize), ConnectError> {
+        if let Some((open_key, conn, screen)) = &self.open {
+            if *open_key == key && still_open(conn) {
+                return Ok((Arc::clone(conn), *screen));
+            }
+        }
+        self.open = None;
+        let (conn, screen) = connect()?;
+        let conn = Arc::new(conn);
+        self.open = Some((key, Arc::clone(&conn), screen));
+        Ok((conn, screen))
+    }
+}
+
+/// Whether the server still holds `conn` open. Also drops queued events:
+/// none is asked for, but the server sends some to every client
+/// (MappingNotify after a keymap change), and they would pile up for the
+/// life of the process.
+fn still_open(conn: &RustConnection) -> bool {
+    loop {
+        match conn.poll_for_event() {
+            Ok(Some(_)) => {}
+            Ok(None) => break,
+            Err(_) => return false,
+        }
+    }
+    let mut fd = libc::pollfd {
+        fd: conn.stream().as_raw_fd(),
+        events: libc::POLLIN | libc::POLLRDHUP,
+        revents: 0,
+    };
+    // SAFETY: one valid pollfd and a zero timeout; the fd stays open for the
+    // call because `conn` is borrowed.
+    let ready = unsafe { libc::poll(&mut fd, 1, 0) };
+    ready >= 0
+        && fd.revents & (libc::POLLRDHUP | libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) == 0
+}
 
 #[derive(Debug, Clone)]
 pub struct WindowInfo {
@@ -75,7 +157,7 @@ fn root_window_readable() -> bool {
 /// The window the window manager reports as active (`_NET_ACTIVE_WINDOW`
 /// on the root), if any.
 pub fn active_window() -> Option<u64> {
-    let (conn, screen_num) = RustConnection::connect(None).ok()?;
+    let (conn, screen_num) = query_connection().ok()?;
     let root = conn.setup().roots[screen_num].root;
     let atom = conn
         .intern_atom(true, b"_NET_ACTIVE_WINDOW")
@@ -105,7 +187,7 @@ pub fn window_exists(xid: u64) -> bool {
     let Ok(xid) = u32::try_from(xid) else {
         return false;
     };
-    let Ok((conn, _)) = RustConnection::connect(None) else {
+    let Ok((conn, _)) = query_connection() else {
         return false;
     };
     conn.get_window_attributes(xid)
@@ -131,7 +213,7 @@ pub fn window_presence(xid: u64) -> Option<WindowPresence> {
     let Ok(xid) = u32::try_from(xid) else {
         return Some(WindowPresence::Gone);
     };
-    let (conn, _) = RustConnection::connect(None).ok()?;
+    let (conn, _) = query_connection().ok()?;
     let reply = conn.get_window_attributes(xid).ok()?.reply();
     match reply {
         Ok(attributes)
@@ -154,7 +236,7 @@ pub fn window_belongs_to_pid(xid: u64, pid: u32) -> bool {
     let Ok(xid) = u32::try_from(xid) else {
         return false;
     };
-    let Ok((conn, _)) = RustConnection::connect(None) else {
+    let Ok((conn, _)) = query_connection() else {
         return false;
     };
     window_owner_matches(OwnerResolver::new(&conn).owner_pid(xid), pid)
@@ -165,7 +247,7 @@ fn window_owner_matches(owner: Option<u32>, requested_pid: u32) -> bool {
 }
 
 fn list_windows_inner(filter_pid: Option<u32>) -> Result<Vec<WindowInfo>> {
-    let (conn, screen_num) = RustConnection::connect(None)?;
+    let (conn, screen_num) = query_connection()?;
     let screen = &conn.setup().roots[screen_num];
     let root = screen.root;
 
@@ -357,7 +439,7 @@ fn moveresize_window_flags() -> u32 {
 /// if any: the focus usually sits on a child of the client window, so the
 /// ancestors are walked until one of `candidates` is met.
 pub fn focused_window_among(candidates: &[u64]) -> Option<u64> {
-    let (conn, screen_num) = RustConnection::connect(None).ok()?;
+    let (conn, screen_num) = query_connection().ok()?;
     let root = conn.setup().roots[screen_num].root;
     let focus = conn.get_input_focus().ok()?.reply().ok()?.focus;
     if focus <= 1 {
@@ -381,7 +463,7 @@ pub fn focused_window_among(candidates: &[u64]) -> Option<u64> {
 /// when unset or pointing at the root (group-transient utility windows).
 pub fn transient_for(xid: u64) -> Option<u64> {
     let xid = u32::try_from(xid).ok()?;
-    let (conn, screen_num) = RustConnection::connect(None).ok()?;
+    let (conn, screen_num) = query_connection().ok()?;
     let root = conn.setup().roots[screen_num].root;
     let reply = conn
         .get_property(
@@ -508,7 +590,7 @@ pub fn pick_pid_window(
 /// WM's client list. `None` when the window does not exist.
 pub fn window_info(xid: u64) -> Option<WindowInfo> {
     let window = u32::try_from(xid).ok()?;
-    let (conn, screen_num) = RustConnection::connect(None).ok()?;
+    let (conn, screen_num) = query_connection().ok()?;
     let root = conn.setup().roots[screen_num].root;
     let attributes = conn.get_window_attributes(window).ok()?.reply().ok()?;
     let geom = conn.get_geometry(window).ok()?.reply().ok()?;
@@ -577,7 +659,7 @@ pub fn window_is_modal(xid: u64) -> bool {
     let Ok(xid) = u32::try_from(xid) else {
         return false;
     };
-    let Ok((conn, _)) = RustConnection::connect(None) else {
+    let Ok((conn, _)) = query_connection() else {
         return false;
     };
     let (Ok(state_atom), Ok(modal_atom)) = (
@@ -605,7 +687,7 @@ pub fn window_is_viewable(xid: u64) -> bool {
 /// window manager. Client-list toplevels use [`OwnerResolver`] instead.
 pub fn window_pid(xid: u64) -> Option<u32> {
     let xid = u32::try_from(xid).ok()?;
-    let (conn, _) = RustConnection::connect(None).ok()?;
+    let (conn, _) = query_connection().ok()?;
     get_window_pid(&conn, xid).ok().flatten()
 }
 
@@ -761,7 +843,7 @@ pub(crate) fn get_window_title(conn: &RustConnection, window: Window) -> Result<
 /// Returns `None` when no X connection is available, the window has no
 /// WM_CLASS atom set, or the property could not be read.
 pub fn wm_class_for_window(xid: u64) -> Option<(String, String)> {
-    let (conn, _) = RustConnection::connect(None).ok()?;
+    let (conn, _) = query_connection().ok()?;
     get_window_class(&conn, xid as u32)
 }
 
@@ -792,6 +874,107 @@ pub(crate) fn get_window_class(conn: &RustConnection, xid: Window) -> Option<(St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An unreachable display fails with the error a per-call connection
+    /// gave, and leaves nothing cached.
+    #[test]
+    fn shared_query_connection_fails_like_a_fresh_connect() {
+        let _display = crate::test_env::unreachable_x11_display();
+        let fresh = RustConnection::connect(None).expect_err("display is unreachable");
+        let shared = query_connection().expect_err("display is unreachable");
+        assert_eq!(shared.to_string(), fresh.to_string());
+        let mut cache = QueryConnection { open: None };
+        let key = (Some(OsString::from(":9999999")), None);
+        assert!(cache.get(key, || RustConnection::connect(None)).is_err());
+        assert!(cache.open.is_none());
+    }
+
+    /// Reuse, events nobody asked for, a server restart on the same display
+    /// and a display change, against a private Xvfb. Run with
+    /// `PINCER_X11_RESTART_DISPLAY=:87 cargo test -- --ignored shared_query`.
+    #[test]
+    #[ignore = "starts and restarts Xvfb on PINCER_X11_RESTART_DISPLAY"]
+    fn shared_query_connection_survives_restart_and_display_change() {
+        use std::process::{Child, Command, Stdio};
+        let display = std::env::var("PINCER_X11_RESTART_DISPLAY").unwrap_or_else(|_| ":87".into());
+        let start = |display: &str| -> Child {
+            let mut child = Command::new("Xvfb")
+                .args([display, "-screen", "0", "640x480x24", "-nolisten", "tcp"])
+                .args(["-noreset"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start Xvfb");
+            for _ in 0..200 {
+                if RustConnection::connect(Some(display)).is_ok() {
+                    return child;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            let _ = child.kill();
+            panic!("Xvfb did not start on {display}");
+        };
+        let stop = |mut child: Child| {
+            let _ = child.kill();
+            let _ = child.wait();
+        };
+        let key = |display: &str| (Some(OsString::from(display)), None);
+        let connect = |display: &str| {
+            let display = display.to_owned();
+            move || RustConnection::connect(Some(&display))
+        };
+        let mut cache = QueryConnection { open: None };
+
+        let server = start(&display);
+        let (first, screen) = cache.get(key(&display), connect(&display)).unwrap();
+        let (again, _) = cache.get(key(&display), connect(&display)).unwrap();
+        assert!(Arc::ptr_eq(&first, &again), "same display: one connection");
+        let root = first.setup().roots[screen].root;
+        first.get_geometry(root).unwrap().reply().unwrap();
+
+        // A keymap change sends MappingNotify to every client; the next
+        // hand-out drains it instead of letting it queue.
+        let (other, _) = RustConnection::connect(Some(&display)).unwrap();
+        let (witness, _) = RustConnection::connect(Some(&display)).unwrap();
+        let min = other.setup().min_keycode;
+        let mapping = other.get_keyboard_mapping(min, 1).unwrap().reply().unwrap();
+        other
+            .change_keyboard_mapping(1, min, mapping.keysyms_per_keycode, &mapping.keysyms)
+            .unwrap();
+        other.get_input_focus().unwrap().reply().unwrap();
+        witness.get_input_focus().unwrap().reply().unwrap();
+        assert!(
+            matches!(
+                witness.poll_for_event().unwrap(),
+                Some(x11rb::protocol::Event::MappingNotify(_))
+            ),
+            "every client gets the MappingNotify"
+        );
+        first.get_input_focus().unwrap().reply().unwrap();
+        let (drained, _) = cache.get(key(&display), connect(&display)).unwrap();
+        assert!(Arc::ptr_eq(&first, &drained));
+        assert!(drained.poll_for_event().unwrap().is_none());
+
+        // Same display, new server: a new connection that works.
+        stop(server);
+        let server = start(&display);
+        let (restarted, screen) = cache.get(key(&display), connect(&display)).unwrap();
+        assert!(!Arc::ptr_eq(&first, &restarted), "closed connection reused");
+        let root = restarted.setup().roots[screen].root;
+        restarted.get_geometry(root).unwrap().reply().unwrap();
+
+        // Another display: a new connection; an unreachable one fails.
+        let (moved, _) = cache
+            .get(
+                key(&format!("{display}.0")),
+                connect(&format!("{display}.0")),
+            )
+            .unwrap();
+        assert!(!Arc::ptr_eq(&restarted, &moved));
+        assert!(cache.get(key(":9999999"), connect(":9999999")).is_err());
+        assert!(cache.open.is_none());
+        stop(server);
+    }
 
     #[test]
     fn empty_present_client_list_does_not_fall_back_to_query_tree() {

@@ -3112,8 +3112,7 @@ fn resolve_element_local_coords(
 
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::ConnectionExt as _;
-    use x11rb::rust_connection::RustConnection;
-    let (conn, screen_num) = RustConnection::connect(None)?;
+    let (conn, screen_num) = crate::x11::query_connection()?;
     let root = conn.setup().roots[screen_num].root;
     let reply = conn
         .translate_coordinates(xid as u32, root, 0, 0)?
@@ -3158,8 +3157,7 @@ fn checked_element_local_coords(
         return Ok((xid, lx, ly));
     }
     use x11rb::protocol::xproto::ConnectionExt as _;
-    use x11rb::rust_connection::RustConnection;
-    let (conn, _) = RustConnection::connect(None)?;
+    let (conn, _) = crate::x11::query_connection()?;
     let geom = conn.get_geometry(xid as u32)?.reply()?;
     let (w, h) = (u32::from(geom.width), u32::from(geom.height));
     if lx < 0.0 || ly < 0.0 || lx >= f64::from(w) || ly >= f64::from(h) {
@@ -3231,9 +3229,8 @@ fn coordinate_frame_is_desktop(args: &Value) -> bool {
 fn window_local_to_screen(xid: u64, x: f64, y: f64) -> anyhow::Result<(f64, f64)> {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::ConnectionExt as _;
-    use x11rb::rust_connection::RustConnection;
 
-    let (conn, screen_num) = RustConnection::connect(None)?;
+    let (conn, screen_num) = crate::x11::query_connection()?;
     let root = conn.setup().roots[screen_num].root;
     let reply = conn
         .translate_coordinates(xid as u32, root, 0, 0)?
@@ -4455,9 +4452,8 @@ fn chromium_background_must_refuse(
 fn window_screen_center(xid: u64) -> anyhow::Result<(i32, i32)> {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::ConnectionExt as _;
-    use x11rb::rust_connection::RustConnection;
 
-    let (conn, screen_num) = RustConnection::connect(None)?;
+    let (conn, screen_num) = crate::x11::query_connection()?;
     let root = conn.setup().roots[screen_num].root;
     let geom = conn.get_geometry(xid as u32)?.reply()?;
     let trans = conn
@@ -6576,9 +6572,8 @@ fn current_pointer_position() -> Option<(f64, f64)> {
 
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::ConnectionExt as _;
-    use x11rb::rust_connection::RustConnection;
 
-    let (connection, screen_num) = RustConnection::connect(None).ok()?;
+    let (connection, screen_num) = crate::x11::query_connection().ok()?;
     let root = connection.setup().roots[screen_num].root;
     let reply = connection.query_pointer(root).ok()?.reply().ok()?;
     Some((f64::from(reply.root_x), f64::from(reply.root_y)))
@@ -14963,8 +14958,7 @@ impl Tool for GetCursorPositionTool {
         let result = tokio::task::spawn_blocking(|| {
             use x11rb::connection::Connection;
             use x11rb::protocol::xproto::ConnectionExt as _;
-            use x11rb::rust_connection::RustConnection;
-            let (conn, screen_num) = RustConnection::connect(None)?;
+            let (conn, screen_num) = crate::x11::query_connection()?;
             let root = conn.setup().roots[screen_num].root;
             let reply = conn.query_pointer(root)?.reply()?;
             Ok::<(i32, i32), anyhow::Error>((reply.root_x as i32, reply.root_y as i32))
