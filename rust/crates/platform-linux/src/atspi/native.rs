@@ -605,6 +605,52 @@ async fn accessible_via_bus<'a>(
         .map_err(|e| anyhow!("AccessibleProxy build failed: {e}"))
 }
 
+/// The interface proxies of one object whose interface set is already
+/// known. atspi's `ProxyExt::proxies` asks GetInterfaces again before it
+/// hands out the same proxies; this builds them the way it does (uncached,
+/// on the object's connection, destination and path), from the set the
+/// caller read.
+struct KnownInterfaces<'p, 'a> {
+    acc: &'p AccessibleProxy<'a>,
+    interfaces: atspi::InterfaceSet,
+}
+
+impl<'p, 'a> KnownInterfaces<'p, 'a> {
+    fn new(acc: &'p AccessibleProxy<'a>, interfaces: atspi::InterfaceSet) -> Self {
+        Self { acc, interfaces }
+    }
+
+    /// Like `Proxies::action` and the rest: `InterfaceNotAvailable` when the
+    /// set lacks `interface`.
+    async fn build<T>(&self, interface: Interface, name: &'static str) -> atspi::Result<T>
+    where
+        T: From<atspi::zbus::Proxy<'a>> + atspi::zbus::proxy::Defaults,
+    {
+        if !self.interfaces.contains(interface) {
+            return Err(atspi::AtspiError::InterfaceNotAvailable(name));
+        }
+        let inner = self.acc.inner();
+        Ok(atspi::zbus::proxy::Builder::<T>::new(inner.connection())
+            .cache_properties(atspi::zbus::proxy::CacheProperties::No)
+            .destination(inner.destination())?
+            .path(inner.path())?
+            .build()
+            .await?)
+    }
+
+    async fn action(&self) -> atspi::Result<atspi::proxy::action::ActionProxy<'a>> {
+        self.build(Interface::Action, "Action").await
+    }
+
+    async fn value(&self) -> atspi::Result<atspi::proxy::value::ValueProxy<'a>> {
+        self.build(Interface::Value, "Value").await
+    }
+
+    async fn text(&self) -> atspi::Result<atspi::proxy::text::TextProxy<'a>> {
+        self.build(Interface::Text, "Text").await
+    }
+}
+
 async fn accessible_for<'a>(
     conn: &'a AccessibilityConnection,
     oref: &RawObjectRef,
@@ -2070,46 +2116,47 @@ async fn collect_visited_bounded_opts<'a>(
         let mut value: Option<String> = None;
         let mut text_content = String::new();
         if has_action || has_value || has_text {
-            if let Some(Ok(proxies)) = call(acc.proxies()).await {
-                if has_action {
-                    if let Some(Ok(ap)) = call(proxies.action()).await {
-                        let n = call(ap.n_actions()).await.and_then(|r| r.ok()).unwrap_or(0);
-                        for i in 0..n {
-                            // Preserve the AT-SPI action index even when an
-                            // individual name lookup fails. `do_action` takes
-                            // this original index, so compacting the vector
-                            // could otherwise actuate a different action than
-                            // the name we selected.
-                            actions.push(
-                                call(ap.get_name(i))
-                                    .await
-                                    .and_then(|result| result.ok())
-                                    .unwrap_or_default(),
-                            );
-                        }
+            // The interface set read above, not `acc.proxies()`, which would
+            // ask GetInterfaces again.
+            let proxies = KnownInterfaces::new(&acc, ifaces);
+            if has_action {
+                if let Some(Ok(ap)) = call(proxies.action()).await {
+                    let n = call(ap.n_actions()).await.and_then(|r| r.ok()).unwrap_or(0);
+                    for i in 0..n {
+                        // Preserve the AT-SPI action index even when an
+                        // individual name lookup fails. `do_action` takes
+                        // this original index, so compacting the vector
+                        // could otherwise actuate a different action than
+                        // the name we selected.
+                        actions.push(
+                            call(ap.get_name(i))
+                                .await
+                                .and_then(|result| result.ok())
+                                .unwrap_or_default(),
+                        );
                     }
                 }
-                if has_value {
-                    if let Some(Ok(vp)) = call(proxies.value()).await {
-                        value = call(vp.current_value())
-                            .await
-                            .and_then(|r| r.ok())
-                            .map(format_value);
-                    }
+            }
+            if has_value {
+                if let Some(Ok(vp)) = call(proxies.value()).await {
+                    value = call(vp.current_value())
+                        .await
+                        .and_then(|r| r.ok())
+                        .map(format_value);
                 }
-                // Text content is where editable/entry text (the typed string)
-                // lives; `name` is usually empty for such widgets.
-                if has_text {
-                    if let Some(Ok(tp)) = call(proxies.text()).await {
-                        let count = call(tp.character_count())
-                            .await
-                            .and_then(|r| r.ok())
-                            .unwrap_or(0);
-                        if count > 0 {
-                            let end = count.min(4096);
-                            if let Some(Ok(t)) = call(tp.get_text(0, end)).await {
-                                text_content = t;
-                            }
+            }
+            // Text content is where editable/entry text (the typed string)
+            // lives; `name` is usually empty for such widgets.
+            if has_text {
+                if let Some(Ok(tp)) = call(proxies.text()).await {
+                    let count = call(tp.character_count())
+                        .await
+                        .and_then(|r| r.ok())
+                        .unwrap_or(0);
+                    if count > 0 {
+                        let end = count.min(4096);
+                        if let Some(Ok(t)) = call(tp.get_text(0, end)).await {
+                            text_content = t;
                         }
                     }
                 }
