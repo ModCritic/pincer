@@ -2164,9 +2164,13 @@ async fn collect_visited_bounded_opts<'a>(
         // any menu that is not showing) keeps its child count and is not
         // walked: its items are hidden, never indexed, and cost a round-trip
         // each. Open menus (expanded / showing popup contents) still descend.
+        // Qt has no `menu` role here: its menubar entries are `menu item`
+        // and each one's items sit in a `popup menu`, SHOWING only while it
+        // is open. Without that case a Qt app's closed menus were walked in
+        // full: KWrite's took a read from 1,583 calls to 5,977.
         let mut closed_menu = !walk_closed_menus
-            && role_lower == "menu"
-            && (!showing || (under_menubar && !expanded));
+            && ((role_lower == "menu" && (!showing || (under_menubar && !expanded)))
+                || (role_lower == "popup menu" && !showing));
         if closed_menu && showing && under_menubar {
             // LibreOffice VCL never sets EXPANDED on an open menubar menu; its
             // items are simply SHOWING. gail (GTK2, e.g. GIMP 2.10) never sets
