@@ -15370,9 +15370,14 @@ impl Tool for MoveAlongPathTool {
                 }
                 Some((pid, xid)) => {
                     spawn_blocking_bounded("move_along_path", budget, move || {
+                        // The report is not used (the result is always
+                        // "unverifiable"), so skip the post-path observation:
+                        // with no window change it polled for up to 800 ms.
                         crate::input::with_x11_foreground_opts(
                             xid,
-                            crate::input::ForegroundOptions::pointer().for_pid(pid),
+                            crate::input::ForegroundOptions::pointer()
+                                .for_pid(pid)
+                                .without_observation(),
                             || crate::input::send_pointer_path_xtest(&gesture),
                         )
                         .map(|(elapsed, _report)| elapsed)
@@ -15391,10 +15396,19 @@ impl Tool for MoveAlongPathTool {
         );
         let result = if crate::overlay::renderer_configured() {
             tokio::pin!(run);
-            // A route that fails mid-path ends the follow with it.
+            tokio::pin!(follow);
             tokio::select! {
-                result = &mut run => result,
-                () = follow => run.await,
+                // The route returns once its last sample is sent, which can be
+                // a frame before the follow's own clock reaches the end: let
+                // the follow finish so the agent cursor's glide is drawn in
+                // full. A route that fails mid-path ends the follow with it.
+                result = &mut run => {
+                    if matches!(&result, Ok(Ok(_))) {
+                        follow.await;
+                    }
+                    result
+                }
+                () = &mut follow => run.await,
             }
         } else {
             run.await

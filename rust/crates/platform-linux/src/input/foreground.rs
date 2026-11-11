@@ -51,6 +51,12 @@ pub struct ForegroundOptions {
     /// on an open popup of the target's process makes the popup the target:
     /// see [`popup_target`].
     pub point: Option<(i32, i32)>,
+    /// Whether to observe the action's effect after the body: poll the
+    /// target process's window set for a change (up to
+    /// `WINDOW_CHANGE_DEADLINE` when nothing changes) and read where the
+    /// focus went. A caller that never reads the report's `focus_after` and
+    /// `window_change` turns this off; it then gets `Unknown` and `None`.
+    pub observe: bool,
 }
 
 impl ForegroundOptions {
@@ -61,6 +67,7 @@ impl ForegroundOptions {
             keyboard: false,
             target_pid: None,
             point: None,
+            observe: true,
         }
     }
 
@@ -72,6 +79,7 @@ impl ForegroundOptions {
             keyboard: true,
             target_pid: None,
             point: None,
+            observe: true,
         }
     }
 
@@ -91,6 +99,13 @@ impl ForegroundOptions {
     /// Name the screen point a pointer body presses (see `point`).
     pub fn at_point(mut self, x: i32, y: i32) -> Self {
         self.point = Some((x, y));
+        self
+    }
+
+    /// Skip the post-body observation (see `observe`), for a caller that
+    /// discards the report.
+    pub fn without_observation(mut self) -> Self {
+        self.observe = false;
         self
     }
 }
@@ -1122,6 +1137,22 @@ pub fn with_x11_foreground_opts<T>(
             opts.settle,
             outcome.active_after,
             outcome.focus_within
+        ));
+    }
+    if !opts.observe {
+        let value = body()?;
+        return Ok((
+            value,
+            ForegroundReport {
+                already_active: outcome.already_active,
+                retried_activation: outcome.retried,
+                confirm_ms: outcome.elapsed.as_millis() as u64,
+                focus_after: FocusAfter::Unknown,
+                window_change: None,
+                window_change_owned: false,
+                popup_target: popup.map(u64::from),
+                popup_closed: false,
+            },
         ));
     }
     let target_pid = crate::x11::window_pid(xid)
