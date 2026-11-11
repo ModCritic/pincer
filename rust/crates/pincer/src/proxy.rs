@@ -95,11 +95,11 @@ pub async fn run_direct(driver: Arc<pincer_sdk::Pincer>) -> anyhow::Result<()> {
             Ok(mut request) => {
                 let admission = protocol_session.validate(&request).and_then(|era| {
                     if request.method == "tools/call" {
-                        mcp_wire::validate_tool_call(
+                        mcp_wire::validate_tool_call_with(
                             &request,
                             request.id.clone().unwrap_or_default(),
                             era,
-                            &sdk.tools_list(),
+                            |name| mcp_wire::inventory_lists_tool(sdk.tools_list_ref(), name),
                         )?;
                     }
                     Ok(era)

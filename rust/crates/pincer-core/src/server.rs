@@ -18,6 +18,12 @@ use crate::tool::ToolRegistry;
 #[async_trait::async_trait]
 pub trait ToolProvider: Send + Sync {
     fn tools_list(&self) -> serde_json::Value;
+    /// Whether `tools_list()` names `name`. The default builds the list;
+    /// providers that keep it should look it up in place instead, since this
+    /// runs on every `tools/call`.
+    fn lists_tool(&self, name: &str) -> bool {
+        crate::mcp_wire::inventory_lists_tool(&self.tools_list(), name)
+    }
     async fn invoke_tool(
         &self,
         name: &str,
@@ -858,7 +864,9 @@ async fn handle_request_inner(
     };
     if req.method == "tools/call" {
         if let Err(response) =
-            crate::mcp_wire::validate_tool_call(&req, id.clone(), era, &provider.tools_list())
+            crate::mcp_wire::validate_tool_call_with(&req, id.clone(), era, |name| {
+                provider.lists_tool(name)
+            })
         {
             return response;
         }

@@ -147,6 +147,11 @@ impl SdkAdapter {
         self.tools_list.clone()
     }
 
+    /// The tool list without copying it.
+    pub fn tools_list_ref(&self) -> &Value {
+        &self.tools_list
+    }
+
     pub fn history(&self) -> Option<Arc<pincer_core::history::HistoryManager>> {
         self.driver.local_history_manager()
     }
@@ -459,6 +464,10 @@ fn daemon_tools_list_from(tools_list: &Value) -> Value {
 impl ToolProvider for SdkAdapter {
     fn tools_list(&self) -> Value {
         self.tools_list()
+    }
+
+    fn lists_tool(&self, name: &str) -> bool {
+        pincer_core::mcp_wire::inventory_lists_tool(&self.tools_list, name)
     }
 
     async fn invoke_tool(&self, name: &str, arguments: Value) -> Result<Value, String> {
