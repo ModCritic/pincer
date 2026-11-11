@@ -12304,16 +12304,23 @@ impl Tool for DoubleClickTool {
                                     .map(|()| PointerRoute::Wayland);
                             }
                             if delivery.is_foreground() {
-                                return crate::input::with_x11_foreground(xid, 80, || {
-                                    let (sx, sy) =
-                                        window_local_to_screen(xid, lxi as f64, lyi as f64)?;
-                                    crate::input::send_click_xtest_desktop(
-                                        sx.round() as i32,
-                                        sy.round() as i32,
-                                        1,
-                                        2,
-                                    )
-                                })
+                                // The result never reports the foreground
+                                // observation (`PointerRoute::Foreground`
+                                // carries none of it), so skip it.
+                                return crate::input::with_x11_foreground_unobserved(
+                                    xid,
+                                    80,
+                                    || {
+                                        let (sx, sy) =
+                                            window_local_to_screen(xid, lxi as f64, lyi as f64)?;
+                                        crate::input::send_click_xtest_desktop(
+                                            sx.round() as i32,
+                                            sy.round() as i32,
+                                            1,
+                                            2,
+                                        )
+                                    },
+                                )
                                 .map(|()| PointerRoute::Foreground);
                             }
                             x11_pixel_click_no_focus_steal(&cursor_id_for_task, xid, lxi, lyi, 1, 2)
@@ -12419,7 +12426,9 @@ impl Tool for DoubleClickTool {
                     .map(|()| PointerRoute::Wayland);
             }
             if delivery.is_foreground() {
-                return crate::input::with_x11_foreground(xid, 80, || {
+                // Unobserved: the result never reports the foreground
+                // observation (`PointerRoute::Foreground` carries none of it).
+                return crate::input::with_x11_foreground_unobserved(xid, 80, || {
                     // Real XTest double-click at the screen point — synthetic
                     // XSendEvent button events are dropped by GTK/Qt and the MPX
                     // uinput path needs /dev/uinput (absent on Xvfb/Xtigervnc), so

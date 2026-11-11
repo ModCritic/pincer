@@ -1361,6 +1361,25 @@ pub fn with_x11_foreground<T>(
         .map(|(value, _report)| value)
 }
 
+/// [`with_x11_foreground`] without the observation after `body`: the
+/// activation and its confirmation are the same, but the target's window set
+/// is not polled for a change (for up to 800 ms when nothing changes) and
+/// the focus is not read afterwards. For callers that drop the report
+/// anyway. The call then returns as soon as the input is sent, so a read
+/// made right after it no longer gets that poll's time to settle in.
+pub fn with_x11_foreground_unobserved<T>(
+    xid: u64,
+    settle_ms: u64,
+    body: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    with_x11_foreground_opts(
+        xid,
+        ForegroundOptions::from_settle_hint(settle_ms).without_observation(),
+        body,
+    )
+    .map(|(value, _report)| value)
+}
+
 /// Activate `xid` and LEAVE it active (no restore) — the persistent foreground
 /// swap behind `bring_to_front`. Returns the window that was active before, so
 /// the caller can report/inspect it. Best-effort; returns `None` prior on a

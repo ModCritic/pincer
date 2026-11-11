@@ -1604,4 +1604,34 @@ mod tests {
         let error = result.expect_err("connect must fail");
         assert!(error_code(&error).is_some(), "{error}");
     }
+
+    #[test]
+    fn without_observation_changes_nothing_else() {
+        let observed = ForegroundOptions::from_settle_hint(80)
+            .for_pid(7)
+            .at_point(3, 4);
+        assert!(observed.observe);
+        let quiet = observed.without_observation();
+        assert!(!quiet.observe);
+        assert_eq!(quiet.settle, observed.settle);
+        assert_eq!(quiet.keyboard, observed.keyboard);
+        assert_eq!(quiet.target_pid, observed.target_pid);
+        assert_eq!(quiet.point, observed.point);
+    }
+
+    /// The unobserved variant still activates first: with no display it
+    /// refuses with a structured code and never runs the body.
+    #[test]
+    fn unobserved_variant_still_requires_activation() {
+        let display = crate::test_env::unreachable_x11_display();
+        let mut ran = false;
+        let result = crate::input::with_x11_foreground_unobserved(0x1234, 80, || {
+            ran = true;
+            Ok(())
+        });
+        drop(display);
+        let error = result.expect_err("connect must fail");
+        assert!(error_code(&error).is_some(), "{error}");
+        assert!(!ran, "the body must not run without a confirmed activation");
+    }
 }
