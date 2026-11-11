@@ -15,6 +15,7 @@
 //! so session history and telemetry read the same result in either mode. Any
 //! other value of the variable, or none, leaves responses byte-identical.
 
+use std::cell::{Cell, OnceCell};
 use std::sync::LazyLock;
 
 use serde_json::{json, Map, Value};
@@ -129,8 +130,19 @@ pub fn render_tool_result(result: &mut Value) {
 ///   names such as `global_input` read as "the real pointer moved".
 /// - Anything else: the text, then every field.
 pub fn render_text(text: &str, structured: &Value, is_error: bool) -> String {
+    render_text_with(text, structured, is_error, TOKEN_SCANS_BEFORE_INDEX)
+}
+
+/// [`render_text`], with [`Shown::has_token`] indexing the text after
+/// `scans_before_index` scans (tests compare both paths).
+fn render_text_with(
+    text: &str,
+    structured: &Value,
+    is_error: bool,
+    scans_before_index: u32,
+) -> String {
     let mut lines = Vec::new();
-    let shown = Shown::new(text);
+    let shown = Shown::new(text, scans_before_index);
     let Value::Object(fields) = structured else {
         push_body(&mut lines, text);
         if let Some(value) = render_value(structured, &shown, false, false) {
@@ -152,7 +164,9 @@ pub fn render_text(text: &str, structured: &Value, is_error: bool) -> String {
             lines.push(format!("[code: {code}]"));
             push_fields(&mut lines, fields, &shown, &["code"]);
         }
-        (None, Some(effect)) if action => render_action(&mut lines, fields, effect, text),
+        (None, Some(effect)) if action => {
+            render_action(&mut lines, fields, effect, text, scans_before_index)
+        }
         _ => {
             push_body(&mut lines, text);
             push_fields(&mut lines, fields, &shown, &[]);
@@ -161,7 +175,13 @@ pub fn render_text(text: &str, structured: &Value, is_error: bool) -> String {
     lines.join("\n")
 }
 
-fn render_action(lines: &mut Vec<String>, fields: &Map<String, Value>, effect: &str, text: &str) {
+fn render_action(
+    lines: &mut Vec<String>,
+    fields: &Map<String, Value>,
+    effect: &str,
+    text: &str,
+    scans_before_index: u32,
+) {
     let summary = fields
         .get("summary")
         .and_then(Value::as_str)
@@ -176,7 +196,7 @@ fn render_action(lines: &mut Vec<String>, fields: &Map<String, Value>, effect: &
         format!("{summary}\n{text}")
     };
     push_body(lines, &body);
-    let shown = Shown::new(&body);
+    let shown = Shown::new(&body, scans_before_index);
 
     let delivery = fields.get("delivery").and_then(Value::as_object);
     let mut tags = vec![format!("effect: {effect}")];
@@ -228,18 +248,51 @@ fn push_body(lines: &mut Vec<String>, text: &str) {
     }
 }
 
+/// [`Shown::has_token`] scans the text this many times before it indexes
+/// it: an index costs a few scans to build, and most results check only a
+/// handful of tokens.
+const TOKEN_SCANS_BEFORE_INDEX: u32 = 16;
+
 /// The text the rendered result already shows, as written and normalized.
 struct Shown<'a> {
     raw: &'a str,
     normalized: String,
+    /// Scans [`Shown::has_token`] makes before it builds `starts`.
+    scans_left: Cell<u32>,
+    /// Where tokens may start in `raw`, built after `scans_left` scans. A
+    /// result checks each leaf of each container with `has_token`, which
+    /// scanned the whole text per leaf: about 3 ms for list_apps' 800
+    /// entries.
+    starts: OnceCell<TokenStarts>,
 }
 
 impl<'a> Shown<'a> {
-    fn new(raw: &'a str) -> Self {
+    fn new(raw: &'a str, scans_before_index: u32) -> Self {
         Self {
             raw,
             normalized: normalized(raw),
+            scans_left: Cell::new(scans_before_index),
+            starts: OnceCell::new(),
         }
+    }
+
+    /// Offsets in `raw` where `token` may start, ascending, a superset of
+    /// its matches. `None` (scan instead) for a token under three bytes and
+    /// until the scans before indexing are used up.
+    fn candidate_starts(&self, token: &str) -> Option<&[u32]> {
+        let key: [u8; 3] = token.as_bytes().get(..3)?.try_into().ok()?;
+        if self.starts.get().is_none() {
+            let left = self.scans_left.get();
+            if left > 0 || u32::try_from(self.raw.len()).is_err() {
+                self.scans_left.set(left.saturating_sub(1));
+                return None;
+            }
+        }
+        Some(
+            self.starts
+                .get_or_init(|| TokenStarts::new(self.raw))
+                .candidates(key),
+        )
     }
 
     /// A long string the text already says, allowing for case, spacing,
@@ -259,12 +312,89 @@ impl<'a> Shown<'a> {
         let (Some(first), Some(last)) = (token.chars().next(), token.chars().next_back()) else {
             return false;
         };
-        self.raw.match_indices(token).any(|(at, _)| {
+        let whole = |at: usize| {
             let before = self.raw[..at].chars().next_back();
             let after = self.raw[at + token.len()..].chars().next();
             !before.is_some_and(|c| continues(first, c))
                 && !after.is_some_and(|c| continues(last, c))
-        })
+        };
+        let Some(candidates) = self.candidate_starts(token) else {
+            return self.raw.match_indices(token).any(|(at, _)| whole(at));
+        };
+        // The same matches `match_indices` yields: leftmost first, and none
+        // overlapping the previous one ("a-a" in "xa-a-a" is only at 1).
+        let mut free_from = 0;
+        for &at in candidates {
+            let at = at as usize;
+            if at < free_from || !self.raw.as_bytes()[at..].starts_with(token.as_bytes()) {
+                continue;
+            }
+            if whole(at) {
+                return true;
+            }
+            free_from = at + token.len();
+        }
+        false
+    }
+}
+
+/// Every offset of a text where a UTF-8 character starts (and three bytes
+/// follow), grouped by a hash of those three bytes, each group ascending: a
+/// counting sort, two passes and no per-group allocation. A group can hold
+/// other byte triples that share its hash; callers compare the text anyway.
+struct TokenStarts {
+    /// Group `g` is `offsets[group_starts[g]..group_starts[g + 1]]`.
+    group_starts: Vec<u32>,
+    offsets: Vec<u32>,
+    bits: u32,
+}
+
+impl TokenStarts {
+    fn new(raw: &str) -> Self {
+        let bytes = raw.as_bytes();
+        let bits = bytes.len().next_power_of_two().max(2).trailing_zeros();
+        let starts = || {
+            bytes
+                .windows(3)
+                .enumerate()
+                // A UTF-8 continuation byte never starts a match.
+                .filter(|(_, window)| (window[0] as i8) >= -0x40)
+                .map(move |(at, window)| {
+                    (
+                        at as u32,
+                        Self::group([window[0], window[1], window[2]], bits),
+                    )
+                })
+        };
+        let mut group_starts = vec![0u32; (1 << bits) + 1];
+        for (_, group) in starts() {
+            group_starts[group + 1] += 1;
+        }
+        for group in 1..group_starts.len() {
+            group_starts[group] += group_starts[group - 1];
+        }
+        let mut next = group_starts.clone();
+        let mut offsets = vec![0u32; *group_starts.last().unwrap_or(&0) as usize];
+        for (at, group) in starts() {
+            offsets[next[group] as usize] = at;
+            next[group] += 1;
+        }
+        Self {
+            group_starts,
+            offsets,
+            bits,
+        }
+    }
+
+    /// Fibonacci hashing of the three bytes into `bits` bits.
+    fn group(key: [u8; 3], bits: u32) -> usize {
+        let value = u64::from(u32::from_le_bytes([key[0], key[1], key[2], 0]));
+        (value.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> (64 - bits)) as usize
+    }
+
+    fn candidates(&self, key: [u8; 3]) -> &[u32] {
+        let group = Self::group(key, self.bits);
+        &self.offsets[self.group_starts[group] as usize..self.group_starts[group + 1] as usize]
     }
 }
 
@@ -855,6 +985,225 @@ mod tests {
             text,
             "window_id=1 pid=2 elements=250\nelements_complete: false\ntotal_element_count: 900\ntruncated: true"
         );
+    }
+
+    /// Deterministic pseudo-random numbers (xorshift64), so the large-result
+    /// tests need no extra crate.
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+
+        fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
+            items[self.below(items.len())]
+        }
+
+        /// A short string from a small alphabet, so pieces of it recur, run
+        /// into each other and overlap ("a-a" inside "a-a-a").
+        fn scrap(&mut self) -> String {
+            let alphabet = ['a', '-', '1', '_', ' ', 'x', '.', '9', 'é', '/'];
+            (0..1 + self.below(9))
+                .map(|_| alphabet[self.below(alphabet.len())])
+                .collect()
+        }
+
+        fn word(&mut self) -> String {
+            const WORDS: &[&str] = &[
+                "kworker/R-rcu_gp",
+                "org.kde.kwrite",
+                "notes.txt  — KWrite",
+                "Ünïcödé Ñame",
+                "日本語テキスト",
+                "a-a",
+                "xa-a-a",
+                "x1354",
+                "1354",
+                "2560x1354",
+                "pid",
+                "launcher_pid",
+                "foo_bar",
+                "ab",
+                "(pid 90758)",
+                "90758",
+                "snapshot_id=s00000001",
+                "The quick brown fox jumps over the lazy dog",
+                "",
+            ];
+            match self.below(3) {
+                0 => self.scrap(),
+                1 => format!("{}{}", self.pick(WORDS), self.scrap()),
+                _ => self.pick(WORDS).to_owned(),
+            }
+        }
+
+        fn number(&mut self) -> Value {
+            match self.below(4) {
+                0 => json!(self.below(100)),
+                1 => json!(self.below(100_000)),
+                2 => json!(1354),
+                _ => json!(self.below(10_000) as f64 / 8.0),
+            }
+        }
+
+        fn leaf(&mut self) -> Value {
+            match self.below(6) {
+                0 | 1 => json!(self.word()),
+                2 | 3 => self.number(),
+                4 => json!(self.below(2) == 0),
+                _ => Value::Null,
+            }
+        }
+
+        fn value(&mut self, depth: usize) -> Value {
+            match if depth == 0 { 0 } else { self.below(4) } {
+                0 | 1 => self.leaf(),
+                2 => Value::Array((0..self.below(4)).map(|_| self.value(depth - 1)).collect()),
+                _ => {
+                    const KEYS: &[&str] = &[
+                        "name",
+                        "pid",
+                        "title",
+                        "id",
+                        "x",
+                        "width",
+                        "bundle_id",
+                        "error",
+                        "truncated",
+                        "bounds",
+                        "windows",
+                        "detail",
+                        "elements_complete",
+                    ];
+                    let mut fields = Map::new();
+                    for _ in 0..1 + self.below(5) {
+                        fields.insert(self.pick(KEYS).to_owned(), self.value(depth - 1));
+                    }
+                    Value::Object(fields)
+                }
+            }
+        }
+    }
+
+    /// A list_apps-sized result whose text mentions much of what its
+    /// structured half holds, whole, run into other tokens, or not at all.
+    fn large_varied_result(rng: &mut Rng) -> (String, Value) {
+        let mut text = String::from("Found many entries:\n");
+        let mut apps = Vec::new();
+        for _ in 0..900 {
+            let name = rng.word();
+            let pid = rng.number();
+            let joiner = rng.pick(&[" ", "", "-", "(", ")", "=", "x", "_", "\n", "  "]);
+            match rng.below(4) {
+                0 => text.push_str(&format!("- {name} (pid {pid}){joiner}")),
+                1 => text.push_str(&format!("{name}{joiner}{pid}{joiner}")),
+                2 => text.push_str(&format!("{}{joiner}", rng.word())),
+                _ => {}
+            }
+            if rng.below(8) == 0 {
+                text.push('\n');
+            }
+            let mut app = json!({"name": name, "pid": pid});
+            if rng.below(2) == 0 {
+                app["detail"] = rng.value(3);
+            }
+            apps.push(app);
+        }
+        let structured = json!({
+            "apps": apps,
+            "processes": (0..300).map(|_| rng.value(3)).collect::<Vec<_>>(),
+            "pid": rng.number(),
+            "since": rng.word(),
+            "summary": rng.word(),
+            "window": rng.value(4),
+        });
+        (text, structured)
+    }
+
+    /// The indexed `has_token` answers exactly what the plain scan answers,
+    /// including the scan's leftmost, non-overlapping matches.
+    #[test]
+    fn indexed_tokens_match_the_scan() {
+        let scan = Shown::new("xa-a-a 2560x1354 a-a-a", u32::MAX);
+        let indexed = Shown::new("xa-a-a 2560x1354 a-a-a", 0);
+        for token in ["a-a", "1354", "2560x1354", "a-a-a", "xa-", "-a-", "x13"] {
+            assert_eq!(indexed.has_token(token), scan.has_token(token), "{token}");
+        }
+        // The scan's non-overlapping matches miss the second "a-a" here.
+        assert!(!Shown::new("xa-a-a", u32::MAX).has_token("a-a"));
+        assert!(!Shown::new("xa-a-a", 0).has_token("a-a"));
+
+        let mut rng = Rng(0x5eed_1234_abcd_0001);
+        let (text, _) = large_varied_result(&mut rng);
+        assert!(text.len() > 10_000, "{}", text.len());
+        let scan = Shown::new(&text, u32::MAX);
+        let indexed = Shown::new(&text, 0);
+        let boundaries: Vec<usize> = text.char_indices().map(|(at, _)| at).collect();
+        let (mut found, mut missing) = (0, 0);
+        for _ in 0..20_000 {
+            let token = match rng.below(3) {
+                0 => {
+                    let start = boundaries[rng.below(boundaries.len())];
+                    let end = boundaries
+                        .get(boundaries.partition_point(|&at| at <= start) + rng.below(12))
+                        .copied()
+                        .unwrap_or(text.len());
+                    text[start..end].to_owned()
+                }
+                1 => rng.word(),
+                _ => rng.scrap(),
+            };
+            let expected = scan.has_token(&token);
+            assert_eq!(indexed.has_token(&token), expected, "{token:?}");
+            if expected {
+                found += 1;
+            } else {
+                missing += 1;
+            }
+        }
+        assert!(
+            found > 1000 && missing > 1000,
+            "{found} found, {missing} missing"
+        );
+    }
+
+    /// Large varied results render the same with and without the index, as
+    /// plain results, action results and refusals.
+    #[test]
+    fn large_results_render_the_same_with_the_token_index() {
+        let mut rng = Rng(0x0dd_ba11_c0ff_ee00);
+        for round in 0..6 {
+            let (text, mut structured) = large_varied_result(&mut rng);
+            let is_error = round == 2;
+            match round {
+                1 | 4 => {
+                    structured["effect"] = json!("unverifiable");
+                    structured["summary"] = json!(text.lines().nth(3).unwrap_or_default());
+                    structured["evidence"] = json!([{"detail": rng.word()}, {"detail": "pid"}]);
+                    structured["delivery"] = json!({"mode": "foreground", "delivered_count": 3});
+                }
+                2 => structured["code"] = json!("window_not_found"),
+                _ => {}
+            }
+            let scanned = render_text_with(&text, &structured, is_error, u32::MAX);
+            let indexed = render_text_with(&text, &structured, is_error, 0);
+            assert_eq!(indexed, scanned, "round {round}");
+            assert_eq!(render_text(&text, &structured, is_error), scanned);
+            // The text decides what is dropped: against unrelated text of the
+            // same length more rows stay.
+            let rows = |rendered: &str| rendered.lines().filter(|l| l.starts_with("- {")).count();
+            let unrelated = render_text_with(&"#".repeat(text.len()), &structured, is_error, 0);
+            assert!(
+                rows(&scanned) > 300 && rows(&scanned) < rows(&unrelated),
+                "round {round}: {} rows, {} against unrelated text",
+                rows(&scanned),
+                rows(&unrelated)
+            );
+        }
     }
 
     /// `key=value` is matched as a whole assignment, never inside another.
