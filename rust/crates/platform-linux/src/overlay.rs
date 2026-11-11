@@ -3050,13 +3050,27 @@ fn paint_x11_tiles(
 
     if !composited {
         for tile in tiles {
-            let (bgra, mut tile_shape) = bgra_and_visible_shape(&tile.pixmap, compositor_present);
+            let (mut tile_shape, pixels) =
+                visible_shape_and_pixels(&tile.pixmap, compositor_present);
             for rect in &mut tile_shape {
                 rect.x = rect.x.saturating_add(tile.bounds.x);
                 rect.y = rect.y.saturating_add(tile.bounds.y);
             }
             visible_shape.extend(tile_shape);
-            payloads.push((tile.bounds, bgra));
+            // Only the shape's bounding box is uploaded: the server never shows
+            // a pixel outside the shape, and this frame's box holds every pixel
+            // the frame shapes in. A tile with nothing visible uploads nothing.
+            if let Some((bbox, bgra)) = pixels {
+                payloads.push((
+                    X11TileBounds {
+                        x: tile.bounds.x.saturating_add(bbox.x),
+                        y: tile.bounds.y.saturating_add(bbox.y),
+                        width: bbox.width,
+                        height: bbox.height,
+                    },
+                    bgra,
+                ));
+            }
         }
     }
 
@@ -3204,7 +3218,118 @@ fn composited_bgra_and_visible_shape(
     Some((bgra, rectangles))
 }
 
+/// The visible shape of a tile (tile-local, one rect per run of visible pixels
+/// per row) and the BGRA pixels of that shape's bounding box, for the paths
+/// that do not software-composite. Returns no pixels when nothing is visible.
+///
+/// Visibility and pixel values are exactly those of the whole-tile conversion
+/// (`bgra_and_visible_shape` in the tests, which checks this byte for byte):
+/// with a compositor every pixel with alpha is visible and the bytes are the
+/// premultiplied pixel reordered to BGRA; without one, XShape has binary
+/// visibility and cannot show the translucent bloom, so only alpha >= 128 is
+/// visible and those pixels are unpremultiplied to opaque, or they would show
+/// as a dark disk on bare X11.
+///
+/// It is cheaper than converting the whole tile: transparent pixels are
+/// skipped four at a time, and only the bounding box is converted and sent
+/// (a quarter to two thirds of the tile in the glides measured).
 #[cfg(target_os = "linux")]
+fn visible_shape_and_pixels(
+    pm: &tiny_skia::Pixmap,
+    compositor_present: bool,
+) -> (
+    Vec<x11rb::protocol::xproto::Rectangle>,
+    Option<(X11TileBounds, Vec<u8>)>,
+) {
+    use x11rb::protocol::xproto::Rectangle;
+
+    let width = pm.width() as usize;
+    let height = pm.height() as usize;
+    let src = pm.data();
+    // Visible is alpha != 0 with a compositor and alpha >= 128 without one:
+    // any bit of the alpha byte, or its top bit.
+    const _: () = assert!(NONCOMPOSITED_ALPHA_CUTOFF == 0x80);
+    let alpha_bits: u8 = if compositor_present { 0xff } else { 0x80 };
+    let group_bits = (0..4).fold(0u128, |bits, pixel| {
+        bits | (u128::from(alpha_bits) << (pixel * 32 + 24))
+    });
+    let visible = |row: &[u8], x: usize| row[x * 4 + 3] & alpha_bits != 0;
+
+    let mut rectangles = Vec::new();
+    let (mut x0, mut y0, mut x1, mut y1) = (width, height, 0, 0);
+    for (y, row) in src.chunks_exact(width * 4).enumerate() {
+        let mut x = 0;
+        while x < width {
+            while x + 4 <= width {
+                let group = u128::from_le_bytes(row[x * 4..x * 4 + 16].try_into().unwrap());
+                if group & group_bits != 0 {
+                    break;
+                }
+                x += 4;
+            }
+            while x < width && !visible(row, x) {
+                x += 1;
+            }
+            if x == width {
+                break;
+            }
+            let start = x;
+            while x < width && visible(row, x) {
+                x += 1;
+            }
+            rectangles.push(Rectangle {
+                x: start as i16,
+                y: y as i16,
+                width: (x - start) as u16,
+                height: 1,
+            });
+            x0 = x0.min(start);
+            x1 = x1.max(x);
+            y0 = y0.min(y);
+            y1 = y + 1;
+        }
+    }
+    if rectangles.is_empty() {
+        return (rectangles, None);
+    }
+
+    let box_width = x1 - x0;
+    let mut bgra = vec![0u8; box_width * (y1 - y0) * 4];
+    for (out_row, y) in bgra.chunks_exact_mut(box_width * 4).zip(y0..y1) {
+        let in_row = &src[(y * width + x0) * 4..(y * width + x1) * 4];
+        for (out, pixel) in out_row.chunks_exact_mut(4).zip(in_row.chunks_exact(4)) {
+            let alpha = pixel[3];
+            if compositor_present || alpha & alpha_bits == 0 {
+                // RGBA to BGRA: swap the red and blue bytes.
+                let value = u32::from_le_bytes(pixel.try_into().unwrap());
+                let swapped =
+                    (value & 0xff00_ff00) | ((value & 0xff) << 16) | ((value >> 16) & 0xff);
+                out.copy_from_slice(&swapped.to_le_bytes());
+            } else {
+                let unpremultiply = |channel: u8| {
+                    (((channel as u32 * 255) + (alpha as u32 / 2)) / alpha as u32).min(255) as u8
+                };
+                out.copy_from_slice(&[
+                    unpremultiply(pixel[2]),
+                    unpremultiply(pixel[1]),
+                    unpremultiply(pixel[0]),
+                    255,
+                ]);
+            }
+        }
+    }
+    let bbox = X11TileBounds {
+        x: x0 as i16,
+        y: y0 as i16,
+        width: box_width as u16,
+        height: (y1 - y0) as u16,
+    };
+    (rectangles, Some((bbox, bgra)))
+}
+
+/// The whole-tile conversion the overlay used to upload, kept as the
+/// reference `visible_shape_and_pixels` must match byte for byte.
+#[cfg(all(test, target_os = "linux"))]
 fn bgra_and_visible_shape(
     pm: &tiny_skia::Pixmap,
     compositor_present: bool,
@@ -4910,6 +5035,127 @@ mod tests {
         assert_eq!(
             (rectangles[0].x, rectangles[0].y, rectangles[0].width),
             (1, 0, 3)
+        );
+    }
+
+    /// The upload the overlay sends now against the whole-tile conversion it
+    /// used to send: the same shape, a box that is exactly the shape's
+    /// bounding box, and inside it the same bytes. Returns the shape's rect
+    /// count.
+    fn assert_upload_matches_whole_tile(
+        pixmap: &tiny_skia::Pixmap,
+        compositor_present: bool,
+    ) -> usize {
+        let rect_fields = |rects: &[x11rb::protocol::xproto::Rectangle]| {
+            rects
+                .iter()
+                .map(|r| (r.x, r.y, r.width, r.height))
+                .collect::<Vec<_>>()
+        };
+        let (whole, whole_shape) = bgra_and_visible_shape(pixmap, compositor_present);
+        let (shape, pixels) = visible_shape_and_pixels(pixmap, compositor_present);
+        assert_eq!(rect_fields(&shape), rect_fields(&whole_shape));
+        match (pixels, shape_bounding_box(&whole_shape)) {
+            (None, None) => {}
+            (Some((bbox, bgra)), Some(expected)) => {
+                let bbox_edges = (
+                    bbox.x as usize,
+                    bbox.y as usize,
+                    bbox.x as usize + usize::from(bbox.width),
+                    bbox.y as usize + usize::from(bbox.height),
+                );
+                assert_eq!(bbox_edges, expected);
+                assert!(
+                    bgra == crop_tile_pixels(&whole, pixmap.width() as usize, expected),
+                    "uploaded pixels differ from the whole-tile conversion"
+                );
+            }
+            (pixels, expected) => panic!(
+                "upload box {:?} but shape box {expected:?}",
+                pixels.map(|(bbox, _)| bbox)
+            ),
+        }
+        shape.len()
+    }
+
+    #[test]
+    fn bounding_box_upload_matches_the_whole_tile_on_synthetic_tiles() {
+        // Widths around the four-pixel skip, alphas at both cutoffs, runs
+        // touching either edge, and all-transparent and all-opaque rows.
+        let mut seed = 0x2545_f491_u32;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed
+        };
+        const ALPHAS: [u8; 8] = [0, 0, 0, 1, 127, 128, 200, 255];
+        for width in 1..=13u32 {
+            for height in [1u32, 2, 5] {
+                for pattern in 0..6 {
+                    let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
+                    for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+                        let alpha = match pattern {
+                            0 => 0,
+                            1 => 255,
+                            _ => ALPHAS[(next() % 8) as usize],
+                        };
+                        // Premultiplied: no channel above alpha.
+                        for channel in &mut pixel[..3] {
+                            *channel = (next() % (u32::from(alpha) + 1)) as u8;
+                        }
+                        pixel[3] = alpha;
+                    }
+                    for compositor_present in [true, false] {
+                        assert_upload_matches_whole_tile(&pixmap, compositor_present);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bounding_box_upload_matches_the_whole_tile_through_a_glide() {
+        let mut map = default_render_map();
+        map.platform.scr_w = 2560;
+        map.platform.scr_h = 1440;
+        set_x11_effects_capable(&mut map, true);
+        let cursor = map.cursors.get_mut("default").unwrap();
+        cursor.core.badge_mode_override = Some(cursor_overlay::BadgeMode::Verbose);
+        cursor.apply_command(OverlayCommand::SetSessionLabel("bench".to_owned()));
+        cursor.apply_command(OverlayCommand::SnapTo {
+            x: 900.0,
+            y: 700.0,
+            heading_radians: None,
+        });
+        cursor.apply_command(OverlayCommand::BeginAction {
+            action: CursorAction::Navigate,
+            delivery: Some(cursor_overlay::DeliveryModifier::Foreground),
+            target: None,
+        });
+        cursor.apply_command(OverlayCommand::MoveTo {
+            x: 200.0,
+            y: 200.0,
+            end_heading_radians: -0.8,
+            target: None,
+        });
+        let (mut frames, mut rects) = (0, 0);
+        for frame in 0..90 {
+            if frame == 60 {
+                let cursor = map.cursors.get_mut("default").unwrap();
+                cursor.apply_command(OverlayCommand::ClickPulse { x: 200.0, y: 200.0 });
+            }
+            map.tick_all(1.0 / 60.0);
+            for tile in render_x11_tiles(&map) {
+                for compositor_present in [true, false] {
+                    rects += assert_upload_matches_whole_tile(&tile.pixmap, compositor_present);
+                }
+                frames += 1;
+            }
+        }
+        assert!(
+            frames >= 80 && rects > frames,
+            "{frames} tiles, {rects} rects"
         );
     }
 
