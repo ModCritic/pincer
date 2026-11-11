@@ -8,17 +8,22 @@ fn window_target(pid: u32, window_id: u64) -> CaptureTarget {
     CaptureTarget::Window { pid, window_id }
 }
 
+/// Publish `png_bytes` for later actions. `encoded_from` is the RGBA image
+/// the PNG was just encoded from, when there is one: admitting the capture
+/// then needs no second decode.
+#[allow(clippy::too_many_arguments)]
 fn publish(
     service: &CaptureService,
     args: &Value,
     png_bytes: &[u8],
+    encoded_from: Option<&image::RgbaImage>,
     target: CaptureTarget,
     encoded_dimensions: (u32, u32),
     native_action_dimensions: (u32, u32),
     screenshot_to_action: ScreenshotToActionTransform,
 ) -> anyhow::Result<String> {
     let binding = service.binding_from_args(args)?;
-    let capture_id = service.publish(CapturePublication {
+    let publication = CapturePublication {
         png_bytes: png_bytes.to_vec(),
         target,
         encoded_dimensions: EncodedScreenshotDimensions::new(
@@ -32,14 +37,20 @@ fn publish(
         screenshot_to_action,
         session_id: binding.session_id().into(),
         session_generation: binding.session_generation(),
-    })?;
+    };
+    let capture_id = match encoded_from {
+        Some(rgba) => service.publish_encoded_rgba(publication, rgba)?,
+        None => service.publish(publication)?,
+    };
     Ok(capture_id.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn publish_window(
     service: &CaptureService,
     args: &Value,
     png_bytes: &[u8],
+    encoded_from: Option<&image::RgbaImage>,
     pid: u32,
     window_id: u64,
     encoded_dimensions: (u32, u32),
@@ -49,6 +60,7 @@ pub fn publish_window(
         service,
         args,
         png_bytes,
+        encoded_from,
         window_target(pid, window_id),
         encoded_dimensions,
         native_action_dimensions,
@@ -60,6 +72,7 @@ pub fn publish_desktop(
     service: &CaptureService,
     args: &Value,
     png_bytes: &[u8],
+    encoded_from: Option<&image::RgbaImage>,
     encoded_dimensions: (u32, u32),
     native_action_dimensions: (u32, u32),
 ) -> anyhow::Result<String> {
@@ -68,6 +81,7 @@ pub fn publish_desktop(
         service,
         args,
         png_bytes,
+        encoded_from,
         CaptureTarget::PrimaryDesktop,
         encoded_dimensions,
         native_action_dimensions,
@@ -82,6 +96,7 @@ pub fn publish_desktop_region(
     service: &CaptureService,
     args: &Value,
     png_bytes: &[u8],
+    encoded_from: Option<&image::RgbaImage>,
     encoded_dimensions: (u32, u32),
     native_action_dimensions: (u32, u32),
     region: pincer_core::image_utils::PixelRect,
@@ -90,6 +105,7 @@ pub fn publish_desktop_region(
         service,
         args,
         png_bytes,
+        encoded_from,
         CaptureTarget::PrimaryDesktop,
         encoded_dimensions,
         native_action_dimensions,
@@ -197,12 +213,10 @@ fn live_action_dimensions(target: &CaptureTarget) -> anyhow::Result<NativeAction
                 identity_matches,
                 "native window identity changed after capture"
             );
-            let png = crate::wayland::screenshot_dispatch_with_pid(*window_id, *pid)?;
-            crate::capture::png_dimensions_pub(&png)?
+            crate::wayland::screenshot_image_dispatch_with_pid(*window_id, *pid)?.dimensions()?
         }
         CaptureTarget::PrimaryDesktop => {
-            let png = crate::capture::screenshot_display_bytes()?;
-            let native = crate::capture::png_dimensions_pub(&png)?;
+            let native = crate::capture::screenshot_display_image()?.dimensions()?;
             desktop_action_dimensions(native)?
         }
     };
@@ -339,6 +353,7 @@ mod tests {
             &service,
             &args("digest"),
             &delivered,
+            None,
             41,
             99,
             (2, 2),
@@ -353,6 +368,25 @@ mod tests {
         assert_eq!(capture.png_bytes().as_ref(), delivered.as_slice());
         let expected: [u8; 32] = Sha256::digest(&delivered).into();
         assert_eq!(capture.digest().as_bytes(), &expected);
+
+        // The same PNG published with the pixels it was encoded from.
+        let pixels = image::RgbaImage::from_pixel(2, 2, image::Rgba([0x41; 4]));
+        let id = publish_window(
+            &service,
+            &args("digest"),
+            &delivered,
+            Some(&pixels),
+            41,
+            99,
+            (2, 2),
+            (4, 4),
+        )
+        .expect("publish window capture with its pixels");
+        let capture = service
+            .read_for_perception(service.parse_capture_id(&id).unwrap(), &binding)
+            .expect("read published capture");
+        assert_eq!(capture.png_bytes().as_ref(), delivered.as_slice());
+        assert_eq!(capture.digest().as_bytes(), &expected);
     }
 
     #[test]
@@ -363,6 +397,7 @@ mod tests {
             &service,
             &call_args,
             &png(10, 10, 0x22),
+            None,
             7,
             11,
             (10, 10),
@@ -382,7 +417,8 @@ mod tests {
     fn retired_session_capture_is_stale() {
         let service = CaptureService::default();
         let call_args = args("retired");
-        let id = publish_desktop(&service, &call_args, &png(3, 2, 0x77), (3, 2), (3, 2)).unwrap();
+        let id =
+            publish_desktop(&service, &call_args, &png(3, 2, 0x77), None, (3, 2), (3, 2)).unwrap();
 
         let binding = service.binding_from_args(&call_args).unwrap();
         service.retire_session(&binding);
@@ -405,6 +441,7 @@ mod tests {
             &service,
             &call_args,
             &png(160, 30, 0x44),
+            None,
             (160, 30),
             (2560, 1440),
             region,
@@ -424,6 +461,7 @@ mod tests {
             &service,
             &call_args,
             &png(3, 2, 0x33),
+            None,
             8,
             13,
             (3, 2),
@@ -440,7 +478,7 @@ mod tests {
     fn another_session_cannot_admit_or_consume_a_capture() {
         let service = CaptureService::default();
         let owner = args("owner");
-        let id = publish_desktop(&service, &owner, &png(4, 3, 0x21), (4, 3), (4, 3)).unwrap();
+        let id = publish_desktop(&service, &owner, &png(4, 3, 0x21), None, (4, 3), (4, 3)).unwrap();
 
         let refusal = admit_desktop(&service, &args("other"), &id, (2.0, 1.0), (4, 3))
             .expect_err("cross-session admission must fail");
@@ -466,6 +504,7 @@ mod tests {
             &service,
             &call_args,
             &png(logical.0, logical.1, 0x31),
+            None,
             logical,
             logical,
         )
@@ -480,7 +519,8 @@ mod tests {
     fn downsized_desktop_capture_maps_back_to_the_action_frame() {
         let service = CaptureService::default();
         let call_args = args("downsized");
-        let id = publish_desktop(&service, &call_args, &png(4, 3, 0x42), (4, 3), (8, 6)).unwrap();
+        let id =
+            publish_desktop(&service, &call_args, &png(4, 3, 0x42), None, (4, 3), (8, 6)).unwrap();
         assert_eq!(
             admit_desktop(&service, &call_args, &id, (2.0, 1.5), (8, 6)).unwrap(),
             (4.0, 3.0)
@@ -491,7 +531,15 @@ mod tests {
     fn desktop_publication_uses_the_post_normalization_bytes() {
         let service = CaptureService::default();
         let normalized = png(4, 3, 0x18);
-        let id = publish_desktop(&service, &args("desktop"), &normalized, (4, 3), (4, 3)).unwrap();
+        let id = publish_desktop(
+            &service,
+            &args("desktop"),
+            &normalized,
+            None,
+            (4, 3),
+            (4, 3),
+        )
+        .unwrap();
         let binding = service.binding_from_args(&args("desktop")).unwrap();
         let capture = service
             .read_for_perception(service.parse_capture_id(&id).unwrap(), &binding)
@@ -512,6 +560,7 @@ mod tests {
             &service,
             &call_args,
             &png(4, 3, 0x44),
+            None,
             8,
             13,
             (4, 3),

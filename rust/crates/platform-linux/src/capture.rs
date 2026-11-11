@@ -20,6 +20,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use pincer_core::image_utils::CapturedImage;
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
@@ -36,6 +37,12 @@ const XSHM_INIT_RETRY_BACKOFF: Duration = Duration::from_secs(30);
 
 /// Capture a window by X11 XID. Returns raw PNG bytes.
 pub fn screenshot_window_bytes(xid: u64) -> Result<Vec<u8>> {
+    screenshot_window_image(xid)?.into_png()
+}
+
+/// Capture a window by X11 XID: RGBA pixels from MIT-SHM or `XGetImage`, or
+/// ImageMagick's PNG when both fail.
+pub fn screenshot_window_image(xid: u64) -> Result<CapturedImage> {
     capture_window_with_backends(
         xid,
         capture_via_xshm,
@@ -59,24 +66,24 @@ pub fn screenshot_window(xid: u64) -> Result<(String, u32, u32)> {
 /// `Send`/`Sync` bounds) so unit tests can drive them with `Rc`/`Cell`.
 fn capture_window_with_backends(
     xid: u64,
-    xshm: impl FnOnce(u64) -> Result<Vec<u8>>,
-    xgetimage: impl FnOnce(u64) -> Result<Vec<u8>>,
-    imagemagick: impl FnOnce(u64) -> Result<Vec<u8>>,
-) -> Result<Vec<u8>> {
+    xshm: impl FnOnce(u64) -> Result<CapturedImage>,
+    xgetimage: impl FnOnce(u64) -> Result<CapturedImage>,
+    imagemagick: impl FnOnce(u64) -> Result<CapturedImage>,
+) -> Result<CapturedImage> {
     let xshm_err = match xshm(xid) {
-        Ok(bytes) if !bytes.is_empty() => return Ok(bytes),
+        Ok(image) if !image.is_empty() => return Ok(image),
         Ok(_) => "XShm returned empty image".to_string(),
         Err(e) => format!("{e:#}"),
     };
 
     let xgetimage_err = match xgetimage(xid) {
-        Ok(bytes) if !bytes.is_empty() => return Ok(bytes),
+        Ok(image) if !image.is_empty() => return Ok(image),
         Ok(_) => "XGetImage returned empty image".to_string(),
         Err(e) => format!("{e:#}"),
     };
 
     let imagemagick_err = match imagemagick(xid) {
-        Ok(bytes) if !bytes.is_empty() => return Ok(bytes),
+        Ok(image) if !image.is_empty() => return Ok(image),
         Ok(_) => "ImageMagick returned empty image".to_string(),
         Err(e) => format!("{e:#}"),
     };
@@ -94,7 +101,7 @@ fn capture_window_with_backends(
 /// hangs with it until the process dies. Killing it releases the grab.
 const IMPORT_TIMEOUT: Duration = Duration::from_secs(5);
 
-fn capture_via_import(xid: u64) -> Result<Vec<u8>> {
+fn capture_via_import(xid: u64) -> Result<CapturedImage> {
     if !crate::x11::window_exists(xid) {
         bail!("window {xid} no longer exists");
     }
@@ -126,7 +133,7 @@ fn capture_via_import(xid: u64) -> Result<Vec<u8>> {
     if out.stdout.is_empty() {
         bail!("ImageMagick import returned empty stdout");
     }
-    Ok(out.stdout)
+    Ok(CapturedImage::Png(out.stdout))
 }
 
 // ── shared pixel conversion ───────────────────────────────────────────────
@@ -335,7 +342,51 @@ fn component_to_u8(pixel: u32, mask: u32) -> u8 {
     ((u64::from(value) * 255 + u64::from(shifted_mask) / 2) / u64::from(shifted_mask)) as u8
 }
 
-fn packed_zpixmap_to_png(data: &[u8], w: u32, h: u32, decoder: PixelDecoder) -> Result<Vec<u8>> {
+impl PixelDecoder {
+    /// 32 bits per pixel, least significant byte first, 8-bit red, green and
+    /// blue masks in the usual places and no DirectColor map: every pixel is
+    /// the bytes B, G, R, X. Nearly every X server and window uses this.
+    fn is_bgrx32(&self) -> bool {
+        self.layout.bytes_per_pixel == 4
+            && self.layout.byte_order == ImageOrder::LSB_FIRST
+            && self.red_mask == 0x00ff_0000
+            && self.green_mask == 0x0000_ff00
+            && self.blue_mask == 0x0000_00ff
+            && self.direct_colors.is_none()
+    }
+}
+
+/// B, G, R, X pixels to R, G, B, 255, as many as both slices hold. For
+/// 8-bit masks [`component_to_u8`] returns the component byte itself, so this
+/// gives what the generic conversion gives.
+fn bgrx_to_rgba(src: &[u8], dst: &mut [u8]) {
+    for (out, pixel) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+        out.copy_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+    }
+}
+
+/// RGBA pixels from a root-window `XGetImage`, which these paths read as
+/// B, G, R, X without looking at the visual. A buffer of the wrong size fails
+/// the way encoding it as a PNG did.
+fn root_bgrx_to_rgba(data: &[u8], w: u32, h: u32) -> Result<image::RgbaImage> {
+    let mut rgba = vec![0u8; data.len() / 4 * 4];
+    bgrx_to_rgba(data, &mut rgba);
+    if rgba.len() as u64 != u64::from(w) * u64::from(h) * 4 {
+        bail!(
+            "encode_rgba_to_png: buffer size {} != w({w}) * h({h}) * 4",
+            rgba.len()
+        );
+    }
+    image::RgbaImage::from_raw(w, h, rgba)
+        .ok_or_else(|| anyhow!("invalid RGBA buffer for w={w} h={h}"))
+}
+
+fn packed_zpixmap_to_rgba(
+    data: &[u8],
+    w: u32,
+    h: u32,
+    decoder: &PixelDecoder,
+) -> Result<image::RgbaImage> {
     if data.len() != decoder.layout.len {
         bail!(
             "pixel buffer length {} != expected {} ({}x{})",
@@ -349,6 +400,31 @@ fn packed_zpixmap_to_png(data: &[u8], w: u32, h: u32, decoder: PixelDecoder) -> 
         .checked_mul(h as usize)
         .and_then(|pixels| pixels.checked_mul(4))
         .ok_or_else(|| anyhow!("window geometry {w}x{h} overflows RGBA length"))?;
+    let rgba = if decoder.is_bgrx32() {
+        let mut rgba = vec![0u8; rgba_len];
+        let row_len = w as usize * 4;
+        for (out, row) in rgba
+            .chunks_exact_mut(row_len)
+            .zip(data.chunks_exact(decoder.layout.stride))
+        {
+            bgrx_to_rgba(&row[..row_len], out);
+        }
+        rgba
+    } else {
+        packed_zpixmap_to_rgba_generic(data, w, h, decoder, rgba_len)?
+    };
+    image::RgbaImage::from_raw(w, h, rgba)
+        .ok_or_else(|| anyhow!("invalid RGBA buffer for w={w} h={h}"))
+}
+
+/// Any layout and masks the catalog accepts, one pixel at a time.
+fn packed_zpixmap_to_rgba_generic(
+    data: &[u8],
+    w: u32,
+    h: u32,
+    decoder: &PixelDecoder,
+    rgba_len: usize,
+) -> Result<Vec<u8>> {
     let mut rgba = Vec::with_capacity(rgba_len);
     for y in 0..h as usize {
         let row = &data[y * decoder.layout.stride..(y + 1) * decoder.layout.stride];
@@ -379,7 +455,7 @@ fn packed_zpixmap_to_png(data: &[u8], w: u32, h: u32, decoder: PixelDecoder) -> 
             rgba.push(255);
         }
     }
-    pincer_core::image_utils::encode_rgba_to_png(&rgba, w, h)
+    Ok(rgba)
 }
 
 fn xid_to_window(xid: u64) -> Result<u32> {
@@ -712,14 +788,14 @@ fn xshm_state() -> &'static Mutex<XShmState> {
     STATE.get_or_init(|| Mutex::new(XShmState::Uninit))
 }
 
-fn capture_via_xshm(xid: u64) -> Result<Vec<u8>> {
+fn capture_via_xshm(xid: u64) -> Result<CapturedImage> {
     let display = current_display();
     let mut guard = lock_mutex(xshm_state());
     let frame = capture_raw_via_xshm_state(&mut guard, &display, xid)?;
 
-    // Release the session mutex before pixel conversion and PNG encode.
+    // Release the session mutex before pixel conversion.
     drop(guard);
-    packed_zpixmap_to_png(&frame.data, frame.w, frame.h, frame.decoder)
+    packed_zpixmap_to_rgba(&frame.data, frame.w, frame.h, &frame.decoder).map(CapturedImage::Rgba)
 }
 
 fn capture_raw_via_xshm_state(guard: &mut XShmState, display: &str, xid: u64) -> Result<RawFrame> {
@@ -817,7 +893,7 @@ fn xgetimage_state() -> &'static Mutex<Option<XGetImageSession>> {
     STATE.get_or_init(|| Mutex::new(None))
 }
 
-fn capture_via_persistent_xgetimage(xid: u64) -> Result<Vec<u8>> {
+fn capture_via_persistent_xgetimage(xid: u64) -> Result<CapturedImage> {
     let display = current_display();
     let mut guard = lock_mutex(xgetimage_state());
 
@@ -848,7 +924,7 @@ fn capture_via_persistent_xgetimage(xid: u64) -> Result<Vec<u8>> {
     };
 
     drop(guard);
-    packed_zpixmap_to_png(&frame.data, frame.w, frame.h, frame.decoder)
+    packed_zpixmap_to_rgba(&frame.data, frame.w, frame.h, &frame.decoder).map(CapturedImage::Rgba)
 }
 
 fn ensure_xgetimage_ready(guard: &mut Option<XGetImageSession>, display: &str) -> Result<()> {
@@ -957,11 +1033,21 @@ pub fn screenshot_display_bytes() -> Result<Vec<u8>> {
     )
 }
 
-fn screenshot_display_bytes_with_dispatch(
+/// [`screenshot_display_bytes`], with the pixels instead of a PNG when the
+/// X11 root window was read directly.
+pub fn screenshot_display_image() -> Result<CapturedImage> {
+    screenshot_display_bytes_with_dispatch(
+        crate::wayland::is_wayland(),
+        || crate::wayland::screenshot_display_dispatch().map(CapturedImage::Png),
+        screenshot_display_image_x11,
+    )
+}
+
+fn screenshot_display_bytes_with_dispatch<T>(
     wayland_enabled: bool,
-    wayland_capture: impl FnOnce() -> Result<Vec<u8>>,
-    x11_capture: impl FnOnce() -> Result<Vec<u8>>,
-) -> Result<Vec<u8>> {
+    wayland_capture: impl FnOnce() -> Result<T>,
+    x11_capture: impl FnOnce() -> Result<T>,
+) -> Result<T> {
     if wayland_enabled {
         wayland_capture()
     } else {
@@ -974,6 +1060,10 @@ fn screenshot_display_bytes_with_dispatch(
 /// fallback without re-entering [`screenshot_display_bytes`] (which would
 /// loop forever once we're on Wayland).
 pub(crate) fn screenshot_display_bytes_x11() -> Result<Vec<u8>> {
+    screenshot_display_image_x11()?.into_png()
+}
+
+fn screenshot_display_image_x11() -> Result<CapturedImage> {
     if crate::x11::rootless_xwayland() {
         anyhow::bail!(crate::x11::ROOTLESS_XWAYLAND_CAPTURE);
     }
@@ -983,7 +1073,7 @@ pub(crate) fn screenshot_display_bytes_x11() -> Result<Vec<u8>> {
         .output();
     if let Ok(o) = out {
         if o.status.success() && !o.stdout.is_empty() {
-            return Ok(o.stdout);
+            return Ok(CapturedImage::Png(o.stdout));
         }
     }
     // Fallback: x11rb XGetImage on the root window.
@@ -1011,24 +1101,23 @@ pub(crate) fn screenshot_display_bytes_x11() -> Result<Vec<u8>> {
     let img = conn
         .get_image(ImageFormat::Z_PIXMAP, root, 0, 0, w as u16, h as u16, !0u32)?
         .reply()?;
-    let bytes = img.data;
-    let bpp = match img.depth {
-        32 | 24 => 4usize,
+    match img.depth {
+        32 | 24 => {}
         _ => anyhow::bail!("Unsupported depth"),
-    };
-    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
-    for chunk in bytes.chunks_exact(bpp) {
-        let (b, g, r) = (chunk[0], chunk[1], chunk[2]);
-        rgba.extend_from_slice(&[r, g, b, 255]);
     }
-    pincer_core::image_utils::encode_rgba_to_png(&rgba, w, h)
+    root_bgrx_to_rgba(&img.data, w, h).map(CapturedImage::Rgba)
 }
 
 /// Capture a rectangle of the root window (what is on the screen there,
-/// override-redirect popups and transient dialogs included) as PNG. Used
+/// override-redirect popups and transient dialogs included) as RGBA. Used
 /// for a window whose own drawable would hide the menu or dialog open over
 /// it. The rectangle is clipped to the screen.
-pub fn screenshot_root_region_png(x: i32, y: i32, width: u32, height: u32) -> Result<Vec<u8>> {
+pub fn screenshot_root_region_rgba(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<image::RgbaImage> {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::*;
     use x11rb::rust_connection::RustConnection;
@@ -1058,16 +1147,11 @@ pub fn screenshot_root_region_png(x: i32, y: i32, width: u32, height: u32) -> Re
             !0u32,
         )?
         .reply()?;
-    let bpp = match img.depth {
-        32 | 24 => 4usize,
+    match img.depth {
+        32 | 24 => {}
         _ => anyhow::bail!("Unsupported depth"),
-    };
-    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
-    for chunk in img.data.chunks_exact(bpp) {
-        let (b, g, r) = (chunk[0], chunk[1], chunk[2]);
-        rgba.extend_from_slice(&[r, g, b, 255]);
     }
-    pincer_core::image_utils::encode_rgba_to_png(&rgba, w, h)
+    root_bgrx_to_rgba(&img.data, w, h)
 }
 
 /// Capture the primary display, returning (base64_png, width, height).
@@ -1135,14 +1219,71 @@ mod tests {
             0x33, 0x22, 0x11, 0x66, 0x55, 0x44, 0x99, 0x88, 0x77, 0xde, 0xad, 0xbe, 0xcc, 0xbb,
             0xaa, 0xff, 0xee, 0xdd, 0x03, 0x02, 0x01, 0xef, 0xca, 0xfe,
         ];
-        let png = packed_zpixmap_to_png(&packed, 3, 2, decoder).expect("decode little-endian");
+        let rgba = packed_zpixmap_to_rgba(&packed, 3, 2, &decoder).expect("decode little-endian");
         assert_eq!(
-            decode_png_rgba(&png),
+            rgba.into_raw(),
             vec![
                 0x11, 0x22, 0x33, 0xff, 0x44, 0x55, 0x66, 0xff, 0x77, 0x88, 0x99, 0xff, 0xaa, 0xbb,
                 0xcc, 0xff, 0xdd, 0xee, 0xff, 0xff, 0x01, 0x02, 0x03, 0xff,
             ]
         );
+    }
+
+    fn bgrx32_decoder(w: usize, h: usize) -> PixelDecoder {
+        PixelDecoder {
+            layout: PackedLayout {
+                byte_order: ImageOrder::LSB_FIRST,
+                bytes_per_pixel: 4,
+                stride: w * 4,
+                len: w * h * 4,
+            },
+            red_mask: 0x00ff_0000,
+            green_mask: 0x0000_ff00,
+            blue_mask: 0x0000_00ff,
+            direct_colors: None,
+        }
+    }
+
+    #[test]
+    fn bgrx32_fast_path_matches_the_generic_conversion() {
+        let (w, h) = (37usize, 11usize);
+        let mut state = 0x2545_f491u32;
+        let packed: Vec<u8> = (0..w * h * 4)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                (state >> 24) as u8
+            })
+            .collect();
+        let decoder = bgrx32_decoder(w, h);
+        assert!(decoder.is_bgrx32());
+        let fast = packed_zpixmap_to_rgba(&packed, w as u32, h as u32, &decoder).unwrap();
+        let generic =
+            packed_zpixmap_to_rgba_generic(&packed, w as u32, h as u32, &decoder, w * h * 4)
+                .unwrap();
+        assert_eq!(fast.as_raw(), &generic);
+        assert_eq!(&fast.as_raw()[..4], &[packed[2], packed[1], packed[0], 255]);
+
+        // Anything else takes the generic path.
+        let mut msb = bgrx32_decoder(w, h);
+        msb.layout.byte_order = ImageOrder::MSB_FIRST;
+        let mut bgr_masks = bgrx32_decoder(w, h);
+        (bgr_masks.red_mask, bgr_masks.blue_mask) = (0x0000_00ff, 0x00ff_0000);
+        let mut direct = bgrx32_decoder(w, h);
+        direct.direct_colors = Some(vec![[0, 0, 0]; 256]);
+        let mut packed24 = bgrx32_decoder(w, h);
+        packed24.layout.bytes_per_pixel = 3;
+        for decoder in [msb, bgr_masks, direct, packed24] {
+            assert!(!decoder.is_bgrx32());
+        }
+    }
+
+    #[test]
+    fn root_bgrx_conversion_refuses_a_short_buffer() {
+        let rgba = root_bgrx_to_rgba(&[1, 2, 3, 0, 4, 5, 6, 0], 2, 1).unwrap();
+        assert_eq!(rgba.into_raw(), vec![3, 2, 1, 255, 6, 5, 4, 255]);
+        assert!(root_bgrx_to_rgba(&[1, 2, 3, 0], 2, 1).is_err());
     }
 
     #[test]
@@ -1160,8 +1301,8 @@ mod tests {
             direct_colors: None,
         };
         let packed = [0xf8, 0x00, 0x07, 0xe0];
-        let png = packed_zpixmap_to_png(&packed, 2, 1, decoder).expect("decode big-endian");
-        assert_eq!(decode_png_rgba(&png), vec![255, 0, 0, 255, 0, 255, 0, 255]);
+        let rgba = packed_zpixmap_to_rgba(&packed, 2, 1, &decoder).expect("decode big-endian");
+        assert_eq!(rgba.into_raw(), vec![255, 0, 0, 255, 0, 255, 0, 255]);
     }
 
     #[test]
@@ -1229,9 +1370,9 @@ mod tests {
                     .collect())
             })
             .expect("DirectColor decoder");
-        let png = packed_zpixmap_to_png(&[0x08, 0x43, 0xde, 0xad], 1, 1, decoder)
+        let rgba = packed_zpixmap_to_rgba(&[0x08, 0x43, 0xde, 0xad], 1, 1, &decoder)
             .expect("decode independently indexed channels and skip padding");
-        assert_eq!(decode_png_rgba(&png), vec![101, 198, 6, 255]);
+        assert_eq!(rgba.into_raw(), vec![101, 198, 6, 255]);
     }
 
     #[test]
@@ -1410,7 +1551,7 @@ mod tests {
         let xshm_calls_c = Rc::clone(&xshm_calls);
         let xgetimage_calls_c = Rc::clone(&xgetimage_calls);
         let imagemagick_calls_c = Rc::clone(&imagemagick_calls);
-        let png_ret = png.clone();
+        let png_ret = CapturedImage::Png(png.clone());
 
         let result = capture_window_with_backends(
             42,
@@ -1429,7 +1570,7 @@ mod tests {
             },
         );
 
-        assert_eq!(result.expect("xshm success"), png);
+        assert_eq!(result.expect("xshm success"), CapturedImage::Png(png));
         assert_eq!(xshm_calls.get(), 1);
         assert_eq!(xgetimage_calls.get(), 0);
         assert_eq!(imagemagick_calls.get(), 0);
@@ -1452,11 +1593,11 @@ mod tests {
 
     #[test]
     fn empty_fast_paths_fall_through_to_imagemagick() {
-        let png = vec![1, 2, 3];
+        let png = CapturedImage::Png(vec![1, 2, 3]);
         let result = capture_window_with_backends(
             42,
-            |_| Ok(Vec::new()),
-            |_| Ok(Vec::new()),
+            |_| Ok(CapturedImage::Png(Vec::new())),
+            |_| Ok(CapturedImage::Rgba(image::RgbaImage::new(0, 0))),
             |_| Ok(png.clone()),
         )
         .expect("fallback succeeds");
@@ -1725,7 +1866,9 @@ mod tests {
     }
 
     fn raw_frame_png(frame: RawFrame) -> Vec<u8> {
-        packed_zpixmap_to_png(&frame.data, frame.w, frame.h, frame.decoder)
+        let rgba = packed_zpixmap_to_rgba(&frame.data, frame.w, frame.h, &frame.decoder)
+            .expect("convert raw frame");
+        pincer_core::image_utils::encode_rgba_to_png(rgba.as_raw(), frame.w, frame.h)
             .expect("encode raw frame")
     }
 
@@ -1795,6 +1938,7 @@ mod tests {
                 .expect("initial XGetImage capture"),
         );
         let import_png = capture_via_import(u64::from(fixture.window))
+            .and_then(CapturedImage::into_png)
             .expect("initial ImageMagick capture oracle");
         let shm_rgba = decode_png_rgba(&shm_png);
         assert_eq!(shm_rgba, decode_png_rgba(&xget_png));
@@ -1852,6 +1996,7 @@ mod tests {
                 .expect("resized XGetImage capture"),
         );
         let resized_import = capture_via_import(u64::from(fixture.window))
+            .and_then(CapturedImage::into_png)
             .expect("resized ImageMagick capture oracle");
         assert_eq!(
             decode_png_rgba(&resized_shm),

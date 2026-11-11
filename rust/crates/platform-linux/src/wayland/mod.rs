@@ -1103,6 +1103,35 @@ pub fn screenshot_dispatch_with_pid(xid: u64, pid: u32) -> anyhow::Result<Vec<u8
     screenshot_dispatch_for_pid(xid, Some(pid))
 }
 
+/// [`screenshot_dispatch_with_pid`], with the pixels instead of a PNG when
+/// the X11 capture read them itself.
+pub fn screenshot_image_dispatch_with_pid(
+    xid: u64,
+    pid: u32,
+) -> anyhow::Result<pincer_core::image_utils::CapturedImage> {
+    screenshot_image_dispatch_for_pid(xid, Some(pid))
+}
+
+/// [`screenshot_window_dispatch`], with the pixels instead of a PNG when the
+/// X11 capture read them itself.
+pub fn screenshot_window_image_dispatch(
+    xid: u64,
+) -> anyhow::Result<pincer_core::image_utils::CapturedImage> {
+    screenshot_image_dispatch_for_pid(xid, None)
+}
+
+fn screenshot_image_dispatch_for_pid(
+    xid: u64,
+    pid: Option<u32>,
+) -> anyhow::Result<pincer_core::image_utils::CapturedImage> {
+    // Off Wayland, screenshot_dispatch_for_pid goes straight to the X11
+    // window capture.
+    if !is_wayland() {
+        return crate::capture::screenshot_window_image(xid);
+    }
+    screenshot_dispatch_for_pid(xid, pid).map(pincer_core::image_utils::CapturedImage::Png)
+}
+
 fn screenshot_dispatch_for_pid(xid: u64, pid: Option<u32>) -> anyhow::Result<Vec<u8>> {
     if is_wayland() && hyprland::is_session() {
         return hyprland::capture(xid, pid).map_err(|error| {

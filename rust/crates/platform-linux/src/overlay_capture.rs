@@ -318,21 +318,7 @@ pub fn verify_hidden_capture_at(
     let Some(hidden) = hidden.filter(|hidden| !hidden.residual.is_empty()) else {
         return (png, ResidualCheck::Clean);
     };
-    let shifted;
-    let patches = if origin == (0, 0) {
-        &hidden.residual
-    } else {
-        shifted = hidden
-            .residual
-            .iter()
-            .map(|patch| ResidualPatch {
-                x: patch.x.saturating_sub(origin.0),
-                y: patch.y.saturating_sub(origin.1),
-                ..patch.clone()
-            })
-            .collect::<Vec<_>>();
-        &shifted
-    };
+    let patches = residual_patches_at(hidden, origin);
     let decoded = match image::load_from_memory(&png) {
         Ok(decoded) => decoded.to_rgba8(),
         Err(error) => {
@@ -349,7 +335,7 @@ pub fn verify_hidden_capture_at(
     };
     let (width, height) = decoded.dimensions();
     let mut rgba = decoded.into_raw();
-    let replaced = scrub_residual_overlay(&mut rgba, width as usize, height as usize, patches);
+    let replaced = scrub_residual_overlay(&mut rgba, width as usize, height as usize, &patches);
     if replaced == 0 {
         return (png, ResidualCheck::Clean);
     }
@@ -370,6 +356,64 @@ pub fn verify_hidden_capture_at(
             },
         ),
     }
+}
+
+/// [`verify_hidden_capture_at`] for a capture that may still be pixels: they
+/// are scrubbed in place, which is what decoding, scrubbing and re-encoding
+/// their PNG gives.
+#[cfg(target_os = "linux")]
+pub fn verify_hidden_image_at(
+    image: pincer_core::image_utils::CapturedImage,
+    hidden: Option<&HiddenOverlay>,
+    origin: (i32, i32),
+) -> (
+    pincer_core::image_utils::CapturedImage,
+    cursor_overlay::capture_exclusion::ResidualCheck,
+) {
+    use cursor_overlay::capture_exclusion::ResidualCheck;
+    use pincer_core::image_utils::CapturedImage;
+    let mut rgba = match image {
+        CapturedImage::Png(png) => {
+            let (png, check) = verify_hidden_capture_at(png, hidden, origin);
+            return (CapturedImage::Png(png), check);
+        }
+        CapturedImage::Rgba(rgba) => rgba,
+    };
+    let Some(hidden) = hidden.filter(|hidden| !hidden.residual.is_empty()) else {
+        return (CapturedImage::Rgba(rgba), ResidualCheck::Clean);
+    };
+    let patches = residual_patches_at(hidden, origin);
+    let (width, height) = rgba.dimensions();
+    let replaced = scrub_residual_overlay(&mut rgba, width as usize, height as usize, &patches);
+    let check = if replaced == 0 {
+        ResidualCheck::Clean
+    } else {
+        ResidualCheck::Repaired {
+            method: X11_SAVE_UNDER_REPAIR,
+        }
+    };
+    (CapturedImage::Rgba(rgba), check)
+}
+
+/// The hidden overlay's leftover patches, moved into the coordinates of a
+/// capture whose top-left pixel is at `origin`.
+#[cfg(target_os = "linux")]
+fn residual_patches_at(
+    hidden: &HiddenOverlay,
+    origin: (i32, i32),
+) -> std::borrow::Cow<'_, [ResidualPatch]> {
+    if origin == (0, 0) {
+        return std::borrow::Cow::Borrowed(&hidden.residual);
+    }
+    hidden
+        .residual
+        .iter()
+        .map(|patch| ResidualPatch {
+            x: patch.x.saturating_sub(origin.0),
+            y: patch.y.saturating_sub(origin.1),
+            ..patch.clone()
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -408,6 +452,46 @@ mod tests {
         };
         assert_eq!(scrub_residual_overlay(&mut capture, 3, 1, &[patch]), 1);
         assert_eq!(capture, rgba(&[DESK, DESK, DESK]));
+    }
+
+    #[test]
+    fn pixel_and_png_captures_get_the_same_residual_repair() {
+        use cursor_overlay::capture_exclusion::ResidualCheck;
+        use pincer_core::image_utils::CapturedImage;
+        // A 4x1 capture of the screen from x = 1; the patch is in screen
+        // coordinates and painted the pixel at screen x = 2.
+        let hidden = HiddenOverlay {
+            residual: vec![ResidualPatch {
+                x: 0,
+                y: 0,
+                width: 5,
+                height: 1,
+                under: bgrx(&[DESK; 5]),
+                uploaded: bgrx(&[DESK, DESK, CURSOR, DESK, DESK]),
+            }],
+            ..Default::default()
+        };
+        for (pixels, expected_check) in [
+            (
+                rgba(&[DESK, CURSOR, DESK, REPAINTED]),
+                ResidualCheck::Repaired {
+                    method: X11_SAVE_UNDER_REPAIR,
+                },
+            ),
+            (rgba(&[DESK, DESK, DESK, REPAINTED]), ResidualCheck::Clean),
+        ] {
+            let image = image::RgbaImage::from_raw(4, 1, pixels).unwrap();
+            let png = pincer_core::image_utils::encode_rgba_to_png(image.as_raw(), 4, 1).unwrap();
+            let (from_png, png_check) = verify_hidden_capture_at(png, Some(&hidden), (1, 0));
+            let (from_pixels, pixel_check) =
+                verify_hidden_image_at(CapturedImage::Rgba(image), Some(&hidden), (1, 0));
+            assert_eq!(pixel_check, expected_check);
+            assert_eq!(png_check, expected_check);
+            assert_eq!(from_pixels.into_png().unwrap(), from_png);
+        }
+        let image = CapturedImage::Rgba(image::RgbaImage::new(2, 2));
+        let (same, check) = verify_hidden_image_at(image.clone(), None, (0, 0));
+        assert_eq!((same, check), (image, ResidualCheck::Clean));
     }
 
     #[test]

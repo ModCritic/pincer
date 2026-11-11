@@ -17,7 +17,98 @@
 //! the same function names so existing callers keep compiling.
 
 use anyhow::{anyhow, bail, Result};
-use image::{ColorType, DynamicImage, ImageBuffer, ImageDecoder, ImageFormat};
+use image::{
+    ColorType, DynamicImage, ExtendedColorType, ImageBuffer, ImageDecoder, ImageEncoder,
+    ImageFormat, RgbImage, RgbaImage,
+};
+
+// ── Captured image ────────────────────────────────────────────────────────
+
+/// A screenshot as its capture backend produced it. A backend that converts
+/// the frame itself hands over RGBA pixels, so callers resize or crop them and
+/// encode a PNG once; a backend that only gives a PNG (a compositor helper,
+/// ImageMagick) keeps its bytes. Every method gives the same result for an
+/// `Rgba` image as the PNG helpers below give for the PNG of those pixels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CapturedImage {
+    Png(Vec<u8>),
+    Rgba(RgbaImage),
+}
+
+impl CapturedImage {
+    /// No PNG bytes, or no pixels.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Png(png) => png.is_empty(),
+            Self::Rgba(image) => image.width() == 0 || image.height() == 0,
+        }
+    }
+
+    pub fn dimensions(&self) -> Result<(u32, u32)> {
+        match self {
+            Self::Png(png) => png_dimensions(png),
+            Self::Rgba(image) => Ok(image.dimensions()),
+        }
+    }
+
+    /// [`resize_png_if_needed`], size rounding included.
+    pub fn fit_long_edge(self, max_dim: u32) -> Result<Self> {
+        match self {
+            Self::Png(png) => {
+                if max_dim == 0 {
+                    return Ok(Self::Png(png));
+                }
+                let (w, h) = png_dimensions(&png)?;
+                if w <= max_dim && h <= max_dim {
+                    return Ok(Self::Png(png));
+                }
+                resize_png_if_needed(&png, max_dim).map(Self::Png)
+            }
+            Self::Rgba(image) => Ok(Self::Rgba(resize_rgba8_if_needed(image, max_dim))),
+        }
+    }
+
+    /// [`crop_png`].
+    pub fn crop(self, rect: PixelRect) -> Result<Self> {
+        match self {
+            Self::Png(png) => crop_png(&png, rect).map(Self::Png),
+            Self::Rgba(image) => crop_rgba8(&image, rect).map(Self::Rgba),
+        }
+    }
+
+    /// The pixels, decoding a PNG with [`decode_png_to_rgba8`].
+    pub fn into_rgba8(self) -> Result<RgbaImage> {
+        match self {
+            Self::Png(png) => decode_png_to_rgba8(&png),
+            Self::Rgba(image) => Ok(image),
+        }
+    }
+
+    /// The image in its own color type, decoding a PNG the way
+    /// `image::load_from_memory_with_format(.., Png)` does.
+    pub fn into_dynamic(self) -> Result<DynamicImage> {
+        match self {
+            Self::Png(png) => Ok(image::load_from_memory_with_format(&png, ImageFormat::Png)?),
+            Self::Rgba(image) => Ok(DynamicImage::ImageRgba8(image)),
+        }
+    }
+
+    pub fn into_png(self) -> Result<Vec<u8>> {
+        self.into_png_and_rgba().map(|(png, _)| png)
+    }
+
+    /// The PNG, plus the pixels it was just encoded from when there were any
+    /// (see `CaptureService::publish_encoded_rgba`).
+    pub fn into_png_and_rgba(self) -> Result<(Vec<u8>, Option<RgbaImage>)> {
+        match self {
+            Self::Png(png) => Ok((png, None)),
+            Self::Rgba(image) => {
+                let png = encode_rgba_to_png(image.as_raw(), image.width(), image.height())?;
+                Ok((png, Some(image)))
+            }
+        }
+    }
+}
 
 // ── PNG → JPEG ────────────────────────────────────────────────────────────
 
@@ -78,7 +169,7 @@ impl ImageDimensionLimits {
 ///
 /// `max_dim == 0` is treated as "no cap"; the original bytes are
 /// returned unchanged. Aspect ratio is preserved. The resampler is
-/// Lanczos3 — same choice the platform crates made before extraction.
+/// Lanczos3 (see [`lanczos3_resize_rgba8`]).
 pub fn resize_png_if_needed(png_bytes: &[u8], max_dim: u32) -> Result<Vec<u8>> {
     if max_dim == 0 {
         return Ok(png_bytes.to_vec());
@@ -87,9 +178,7 @@ pub fn resize_png_if_needed(png_bytes: &[u8], max_dim: u32) -> Result<Vec<u8>> {
     if w <= max_dim && h <= max_dim {
         return Ok(png_bytes.to_vec());
     }
-    let scale = (max_dim as f64) / (w.max(h) as f64);
-    let new_w = (w as f64 * scale).round() as u32;
-    let new_h = (h as f64 * scale).round() as u32;
+    let (new_w, new_h) = png_fit_dimensions(w, h, max_dim);
 
     let cursor = std::io::Cursor::new(png_bytes);
     let decoder = image::codecs::png::PngDecoder::new(cursor)?;
@@ -97,20 +186,239 @@ pub fn resize_png_if_needed(png_bytes: &[u8], max_dim: u32) -> Result<Vec<u8>> {
     let mut buf = vec![0u8; decoder.total_bytes() as usize];
     decoder.read_image(&mut buf)?;
 
-    let img = match color {
-        ColorType::Rgba8 => DynamicImage::ImageRgba8(
-            ImageBuffer::from_raw(w, h, buf).ok_or_else(|| anyhow!("invalid RGBA buffer"))?,
-        ),
-        ColorType::Rgb8 => DynamicImage::ImageRgb8(
-            ImageBuffer::from_raw(w, h, buf).ok_or_else(|| anyhow!("invalid RGB buffer"))?,
-        ),
+    match color {
+        ColorType::Rgba8 => {
+            let image: RgbaImage =
+                ImageBuffer::from_raw(w, h, buf).ok_or_else(|| anyhow!("invalid RGBA buffer"))?;
+            let resized = lanczos3_resize_rgba8(&image, new_w, new_h);
+            encode_rgba_to_png(resized.as_raw(), new_w, new_h)
+        }
+        ColorType::Rgb8 => {
+            let image: RgbImage =
+                ImageBuffer::from_raw(w, h, buf).ok_or_else(|| anyhow!("invalid RGB buffer"))?;
+            let resized = lanczos3_resize_rgb8(&image, new_w, new_h);
+            let mut out = Vec::new();
+            image::codecs::png::PngEncoder::new(&mut out).write_image(
+                resized.as_raw(),
+                new_w,
+                new_h,
+                ExtendedColorType::Rgb8,
+            )?;
+            Ok(out)
+        }
         _ => bail!("unsupported color type for resize: {color:?}"),
-    };
+    }
+}
 
-    let resized = img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3);
-    let mut out = Vec::new();
-    resized.write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::Png)?;
-    Ok(out)
+/// [`resize_png_if_needed`] for RGBA pixels: the same output size and pixels,
+/// with no PNG on either side.
+pub fn resize_rgba8_if_needed(image: RgbaImage, max_dim: u32) -> RgbaImage {
+    let (w, h) = image.dimensions();
+    if max_dim == 0 || (w <= max_dim && h <= max_dim) {
+        return image;
+    }
+    let (new_w, new_h) = png_fit_dimensions(w, h, max_dim);
+    lanczos3_resize_rgba8(&image, new_w, new_h)
+}
+
+/// The size [`resize_png_if_needed`] resizes a `w`x`h` image to when one edge
+/// exceeds `max_dim`. It used to call `DynamicImage::resize(new_w, new_h, ..)`,
+/// which fits the image inside that box again (image 0.25.10,
+/// `math::utils::resize_dimensions` with `fill = false`), so a short edge that
+/// rounded down can shrink the long edge too. That second step is kept here so
+/// the output size does not change.
+fn png_fit_dimensions(w: u32, h: u32, max_dim: u32) -> (u32, u32) {
+    let scale = (max_dim as f64) / (w.max(h) as f64);
+    let new_w = (w as f64 * scale).round() as u32;
+    let new_h = (h as f64 * scale).round() as u32;
+    if (new_w, new_h) == (w, h) {
+        return (w, h);
+    }
+    let ratio = f64::min(
+        f64::from(new_w) / f64::from(w),
+        f64::from(new_h) / f64::from(h),
+    );
+    // image clamps a result above u32::MAX; a downscale never gets there.
+    let fit_w = ((f64::from(w) * ratio).round() as u64).max(1);
+    let fit_h = ((f64::from(h) * ratio).round() as u64).max(1);
+    (fit_w as u32, fit_h as u32)
+}
+
+// ── Lanczos3 resampling ───────────────────────────────────────────────────
+
+/// `image::imageops::resize(image, new_w, new_h, FilterType::Lanczos3)`,
+/// byte for byte, in plain loops the compiler can vectorize.
+pub fn lanczos3_resize_rgba8(image: &RgbaImage, new_w: u32, new_h: u32) -> RgbaImage {
+    let (w, h) = image.dimensions();
+    let pixels = &image.as_raw()[..w as usize * h as usize * 4];
+    ImageBuffer::from_raw(
+        new_w,
+        new_h,
+        lanczos3_resize::<4>(pixels, w, h, new_w, new_h),
+    )
+    .expect("the resize fills new_w x new_h pixels")
+}
+
+/// [`lanczos3_resize_rgba8`] for RGB pixels.
+pub fn lanczos3_resize_rgb8(image: &RgbImage, new_w: u32, new_h: u32) -> RgbImage {
+    let (w, h) = image.dimensions();
+    let pixels = &image.as_raw()[..w as usize * h as usize * 3];
+    ImageBuffer::from_raw(
+        new_w,
+        new_h,
+        lanczos3_resize::<3>(pixels, w, h, new_w, new_h),
+    )
+    .expect("the resize fills new_w x new_h pixels")
+}
+
+/// `DynamicImage::resize_exact(new_w, new_h, FilterType::Lanczos3)`: the
+/// plain loops for 8-bit RGB and RGBA, the image crate for anything else.
+pub fn lanczos3_resize_exact(image: &DynamicImage, new_w: u32, new_h: u32) -> DynamicImage {
+    match image {
+        DynamicImage::ImageRgba8(image) => {
+            DynamicImage::ImageRgba8(lanczos3_resize_rgba8(image, new_w, new_h))
+        }
+        DynamicImage::ImageRgb8(image) => {
+            DynamicImage::ImageRgb8(lanczos3_resize_rgb8(image, new_w, new_h))
+        }
+        other => other.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3),
+    }
+}
+
+/// image 0.25.10's `sinc` and `lanczos3_kernel` (src/imageops/sample.rs).
+fn lanczos3_kernel(x: f32) -> f32 {
+    fn sinc(t: f32) -> f32 {
+        let a = t * std::f32::consts::PI;
+        if t == 0.0 {
+            1.0
+        } else {
+            a.sin() / a
+        }
+    }
+    if x.abs() < 3.0 {
+        sinc(x) * sinc(x / 3.0)
+    } else {
+        0.0
+    }
+}
+
+/// Normalized Lanczos3 weights for resampling `src` pixels to `dst` along one
+/// axis. Output pixel `i` reads input pixels `left[i]..` with the weights in
+/// `weights[start[i]..start[i + 1]]`.
+struct Lanczos3Axis {
+    left: Vec<usize>,
+    start: Vec<usize>,
+    weights: Vec<f32>,
+}
+
+impl Lanczos3Axis {
+    /// The window and weights image's `vertical_sample` and
+    /// `horizontal_sample` compute, in the same f32 steps and order.
+    fn new(src: u32, dst: u32) -> Self {
+        let ratio = src as f32 / dst as f32;
+        let sratio = if ratio < 1.0 { 1.0 } else { ratio };
+        let src_support = 3.0 * sratio;
+        let mut axis = Self {
+            left: Vec::with_capacity(dst as usize),
+            start: Vec::with_capacity(dst as usize + 1),
+            weights: Vec::new(),
+        };
+        for out in 0..dst {
+            let input = (out as f32 + 0.5) * ratio;
+            let left = ((input - src_support).floor() as i64).clamp(0, i64::from(src) - 1);
+            let right = ((input + src_support).ceil() as i64).clamp(left + 1, i64::from(src));
+            let center = input - 0.5;
+            let start = axis.weights.len();
+            let mut sum = 0.0f32;
+            for i in left..right {
+                let weight = lanczos3_kernel((i as u32 as f32 - center) / sratio);
+                axis.weights.push(weight);
+                sum += weight;
+            }
+            for weight in &mut axis.weights[start..] {
+                *weight /= sum;
+            }
+            axis.left.push(left as usize);
+            axis.start.push(start);
+        }
+        axis.start.push(axis.weights.len());
+        axis
+    }
+
+    fn taps(&self, out: usize) -> (usize, &[f32]) {
+        (
+            self.left[out],
+            &self.weights[self.start[out]..self.start[out + 1]],
+        )
+    }
+}
+
+/// image's float-to-u8 step: clamp to 0..=255, then round half away from
+/// zero. `f32::round` is a libm call and `as u8` a scalar conversion per
+/// channel, so this stays in float operations the compiler can vectorize:
+/// adding and subtracting 2^23 rounds a value in 0..=255 to the nearest
+/// integer (ties to even), stepping back where that went up gives the floor,
+/// `v - floor` is exact, and `x + 2^23` holds an integer `x` in its low
+/// mantissa bits.
+fn lanczos3_round_u8(v: f32) -> u8 {
+    const TWO_POW_23: f32 = 8_388_608.0;
+    let v = if v < 0.0 { 0.0 } else { v };
+    let v = if v > 255.0 { 255.0 } else { v };
+    let nearest = (v + TWO_POW_23) - TWO_POW_23;
+    let floor = if nearest > v { nearest - 1.0 } else { nearest };
+    let rounded = if v - floor >= 0.5 { floor + 1.0 } else { floor };
+    (rounded + TWO_POW_23).to_bits() as u8
+}
+
+/// `image::imageops::resize(.., Lanczos3)` for 8-bit pixels with `N`
+/// interleaved channels. Like image, it resamples columns into an f32 buffer
+/// first and rows second, summing each output value over the same inputs in
+/// the same order, so every result rounds to the same byte.
+fn lanczos3_resize<const N: usize>(src: &[u8], w: u32, h: u32, new_w: u32, new_h: u32) -> Vec<u8> {
+    let (sw, dw, dh) = (w as usize, new_w as usize, new_h as usize);
+    assert_eq!(src.len(), sw * h as usize * N, "pixel buffer size");
+    if w == 0 || h == 0 || new_w == 0 || new_h == 0 {
+        return vec![0; dw * dh * N];
+    }
+    if (new_w, new_h) == (w, h) {
+        return src.to_vec();
+    }
+
+    let src_row = sw * N;
+    let mut columns = vec![0f32; src_row * dh];
+    let vertical = Lanczos3Axis::new(h, new_h);
+    for (y, row) in columns.chunks_exact_mut(src_row).enumerate() {
+        let (top, weights) = vertical.taps(y);
+        for (i, &weight) in weights.iter().enumerate() {
+            let line = &src[(top + i) * src_row..(top + i + 1) * src_row];
+            for (acc, &value) in row.iter_mut().zip(line) {
+                *acc += f32::from(value) * weight;
+            }
+        }
+    }
+
+    let mut out = vec![0u8; dw * dh * N];
+    let horizontal = Lanczos3Axis::new(w, new_w);
+    for (row, line) in out
+        .chunks_exact_mut(dw * N)
+        .zip(columns.chunks_exact(src_row))
+    {
+        for (x, pixel) in row.chunks_exact_mut(N).enumerate() {
+            let (left, weights) = horizontal.taps(x);
+            let taps = &line[left * N..(left + weights.len()) * N];
+            let mut acc = [0f32; N];
+            for (&weight, input) in weights.iter().zip(taps.chunks_exact(N)) {
+                let input: &[f32; N] = input.try_into().expect("chunks of N");
+                for c in 0..N {
+                    acc[c] += input[c] * weight;
+                }
+            }
+            for c in 0..N {
+                pixel[c] = lanczos3_round_u8(acc[c]);
+            }
+        }
+    }
+    out
 }
 
 // ── Crosshair ─────────────────────────────────────────────────────────────
@@ -312,7 +620,7 @@ pub fn fit_rgba8_long_edge(
     let scale = f64::from(max_dim) / f64::from(w.max(h));
     let new_w = ((f64::from(w) * scale).round() as u32).max(1);
     let new_h = ((f64::from(h) * scale).round() as u32).max(1);
-    image::imageops::resize(&image, new_w, new_h, image::imageops::FilterType::Lanczos3)
+    lanczos3_resize_rgba8(&image, new_w, new_h)
 }
 
 // ── PNG dimensions ────────────────────────────────────────────────────────
@@ -358,11 +666,16 @@ pub fn encode_rgba_to_png(rgba: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
             rgba.len()
         );
     }
-    let buf: ImageBuffer<image::Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(w, h, rgba.to_vec())
-        .ok_or_else(|| anyhow!("invalid RGBA buffer for w={w} h={h}"))?;
+    // The encoder `DynamicImage::write_to(.., ImageFormat::Png)` uses, with
+    // its default settings, so the bytes are the same without copying the
+    // pixels into an image first.
     let mut out = Vec::new();
-    DynamicImage::ImageRgba8(buf)
-        .write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::Png)?;
+    image::codecs::png::PngEncoder::new(&mut out).write_image(
+        rgba,
+        w,
+        h,
+        ExtendedColorType::Rgba8,
+    )?;
     Ok(out)
 }
 
@@ -485,6 +798,228 @@ mod tests {
         let png = encode_rgba_to_png(image.as_raw(), 300, 100).unwrap();
         let resized = resize_png_if_needed(&png, 200).unwrap();
         assert_eq!(png_dimensions(&resized).unwrap(), (200, 67));
+    }
+
+    /// Deterministic pixel noise with `channels` per pixel; alpha (the 4th
+    /// channel) varies too, so it is resampled like the others.
+    fn noise(w: u32, h: u32, channels: usize, seed: u32) -> Vec<u8> {
+        let mut state = seed.wrapping_mul(2_654_435_761).max(1);
+        (0..w as usize * h as usize * channels)
+            .map(|i| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                // Mix smooth gradients with hard edges, like a screenshot.
+                if (i / channels) % 7 < 3 {
+                    (i % 251) as u8
+                } else {
+                    (state >> 24) as u8
+                }
+            })
+            .collect()
+    }
+
+    const RESIZE_CASES: [(u32, u32, u32, u32); 14] = [
+        (64, 40, 54, 34),    // shrink, the window screenshot's ratio
+        (37, 23, 13, 9),     // odd sizes, strong shrink
+        (31, 17, 30, 16),    // shrink by one pixel
+        (40, 30, 1, 1),      // to a single pixel
+        (1, 1, 5, 3),        // from a single pixel
+        (1, 40, 1, 7),       // one pixel wide
+        (40, 1, 9, 1),       // one pixel high
+        (9, 7, 9, 3),        // one axis only
+        (5, 3, 17, 11),      // upscale
+        (12, 50, 29, 23),    // upscale one axis, shrink the other
+        (16, 16, 16, 16),    // same size
+        (300, 200, 7, 5),    // very strong shrink
+        (8, 8, 0, 4),        // empty result
+        (1600, 10, 1356, 8), // the screenshot's width
+    ];
+
+    #[test]
+    fn lanczos3_resize_matches_image_crate_byte_for_byte() {
+        let filter = image::imageops::FilterType::Lanczos3;
+        for (seed, (w, h, nw, nh)) in RESIZE_CASES.into_iter().enumerate() {
+            let rgba: RgbaImage = ImageBuffer::from_raw(w, h, noise(w, h, 4, seed as u32)).unwrap();
+            let expected = image::imageops::resize(&rgba, nw, nh, filter);
+            let actual = lanczos3_resize_rgba8(&rgba, nw, nh);
+            assert_eq!(
+                actual.dimensions(),
+                expected.dimensions(),
+                "{w}x{h} -> {nw}x{nh}"
+            );
+            assert!(
+                actual.as_raw() == expected.as_raw(),
+                "RGBA {w}x{h} -> {nw}x{nh} differs from image::imageops::resize"
+            );
+
+            let rgb: RgbImage = ImageBuffer::from_raw(w, h, noise(w, h, 3, seed as u32)).unwrap();
+            let expected = image::imageops::resize(&rgb, nw, nh, filter);
+            let actual = lanczos3_resize_rgb8(&rgb, nw, nh);
+            assert!(
+                actual.as_raw() == expected.as_raw(),
+                "RGB {w}x{h} -> {nw}x{nh} differs from image::imageops::resize"
+            );
+        }
+        // A buffer longer than the image, which ImageBuffer allows.
+        let mut long = noise(6, 4, 4, 99);
+        long.extend_from_slice(&[7; 12]);
+        let rgba: RgbaImage = ImageBuffer::from_raw(6, 4, long).unwrap();
+        assert_eq!(
+            lanczos3_resize_rgba8(&rgba, 4, 3),
+            image::imageops::resize(&rgba, 4, 3, filter)
+        );
+    }
+
+    #[test]
+    fn lanczos3_resize_exact_matches_dynamic_image() {
+        let rgba: RgbaImage = ImageBuffer::from_raw(23, 19, noise(23, 19, 4, 5)).unwrap();
+        let gray = DynamicImage::ImageRgba8(rgba.clone()).to_luma8();
+        for image in [
+            DynamicImage::ImageRgba8(rgba.clone()),
+            DynamicImage::ImageRgb8(DynamicImage::ImageRgba8(rgba).to_rgb8()),
+            DynamicImage::ImageLuma8(gray),
+        ] {
+            let expected = image.resize_exact(10, 13, image::imageops::FilterType::Lanczos3);
+            assert_eq!(lanczos3_resize_exact(&image, 10, 13), expected);
+        }
+    }
+
+    #[test]
+    fn lanczos3_rounding_matches_f32_round() {
+        let expected = |v: f32| v.clamp(0.0, 255.0).round() as u8;
+        // Every eighth from -2 to 258 and the floats right around each.
+        let mut v = -2.0f32;
+        while v < 258.0 {
+            let mut near = v;
+            for _ in 0..4 {
+                near = near.next_down();
+            }
+            for _ in 0..9 {
+                assert_eq!(lanczos3_round_u8(near), expected(near), "{near}");
+                near = near.next_up();
+            }
+            v += 0.125;
+        }
+        // A spread of other values, the tiny and huge ones included.
+        let mut bits = 0x2545_f491u32;
+        for _ in 0..100_000 {
+            bits ^= bits << 13;
+            bits ^= bits >> 17;
+            bits ^= bits << 5;
+            let v = f32::from_bits(bits);
+            if v.is_finite() {
+                assert_eq!(lanczos3_round_u8(v), expected(v), "{v}");
+            }
+        }
+        assert_eq!(lanczos3_round_u8(0.499_999_97), 0);
+        assert_eq!(lanczos3_round_u8(254.5), 255);
+        assert_eq!(lanczos3_round_u8(-0.0), 0);
+    }
+
+    /// What `resize_png_if_needed` did before the plain-loop resize.
+    fn resize_png_with_image_crate(png: &[u8], max_dim: u32) -> Vec<u8> {
+        let (w, h) = png_dimensions(png).unwrap();
+        if max_dim == 0 || (w <= max_dim && h <= max_dim) {
+            return png.to_vec();
+        }
+        let scale = (max_dim as f64) / (w.max(h) as f64);
+        let new_w = (w as f64 * scale).round() as u32;
+        let new_h = (h as f64 * scale).round() as u32;
+        let resized = image::load_from_memory_with_format(png, ImageFormat::Png)
+            .unwrap()
+            .resize(new_w, new_h, image::imageops::FilterType::Lanczos3);
+        let mut out = Vec::new();
+        resized
+            .write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
+    #[test]
+    fn png_and_rgba_resizes_match_the_image_crate_path() {
+        // (w, h, max_dim): 1000x333 at 100 comes out 99x33, not 100x33,
+        // because DynamicImage::resize fits the rounded box again.
+        for (w, h, max_dim) in [
+            (160, 100, 136),
+            (1000, 333, 100),
+            (333, 1000, 100),
+            (301, 7, 50),
+            (2000, 1, 10),
+            (40, 30, 0),
+            (40, 30, 40),
+        ] {
+            let rgba = noise(w, h, 4, w ^ h);
+            let png = encode_rgba_to_png(&rgba, w, h).unwrap();
+            let expected = resize_png_with_image_crate(&png, max_dim);
+            assert!(
+                resize_png_if_needed(&png, max_dim).unwrap() == expected,
+                "RGBA PNG {w}x{h} at {max_dim}"
+            );
+            let image = RgbaImage::from_raw(w, h, rgba).unwrap();
+            let fitted = CapturedImage::Rgba(image).fit_long_edge(max_dim).unwrap();
+            assert!(
+                fitted.into_png().unwrap() == expected,
+                "RGBA pixels {w}x{h} at {max_dim}"
+            );
+
+            let rgb = noise(w, h, 3, w ^ h);
+            let mut rgb_png = Vec::new();
+            image::codecs::png::PngEncoder::new(&mut rgb_png)
+                .write_image(&rgb, w, h, ExtendedColorType::Rgb8)
+                .unwrap();
+            assert!(
+                resize_png_if_needed(&rgb_png, max_dim).unwrap()
+                    == resize_png_with_image_crate(&rgb_png, max_dim),
+                "RGB PNG {w}x{h} at {max_dim}"
+            );
+        }
+        assert_eq!(png_fit_dimensions(1000, 333, 100), (99, 33));
+    }
+
+    #[test]
+    fn encode_rgba_to_png_matches_dynamic_image_write_to() {
+        let rgba = noise(37, 21, 4, 3);
+        let mut expected = Vec::new();
+        DynamicImage::ImageRgba8(RgbaImage::from_raw(37, 21, rgba.clone()).unwrap())
+            .write_to(&mut std::io::Cursor::new(&mut expected), ImageFormat::Png)
+            .unwrap();
+        assert_eq!(encode_rgba_to_png(&rgba, 37, 21).unwrap(), expected);
+    }
+
+    #[test]
+    fn captured_rgba_matches_its_png() {
+        let image = RgbaImage::from_raw(30, 20, noise(30, 20, 4, 8)).unwrap();
+        let png = encode_rgba_to_png(image.as_raw(), 30, 20).unwrap();
+        let from_png = CapturedImage::Png(png.clone());
+        let from_rgba = CapturedImage::Rgba(image.clone());
+        assert_eq!(from_rgba.dimensions().unwrap(), (30, 20));
+        assert!(!from_rgba.is_empty() && !from_png.is_empty());
+        assert!(CapturedImage::Png(Vec::new()).is_empty());
+
+        let rect = PixelRect {
+            x: 3,
+            y: 4,
+            width: 11,
+            height: 9,
+        };
+        assert_eq!(
+            from_rgba.clone().crop(rect).unwrap().into_png().unwrap(),
+            crop_png(&png, rect).unwrap()
+        );
+        assert_eq!(
+            from_png.clone().fit_long_edge(12).unwrap(),
+            CapturedImage::Png(resize_png_if_needed(&png, 12).unwrap())
+        );
+        assert_eq!(from_png.clone().fit_long_edge(30).unwrap(), from_png);
+        assert_eq!(
+            from_rgba.clone().into_dynamic().unwrap(),
+            from_png.clone().into_dynamic().unwrap()
+        );
+        assert_eq!(from_png.into_rgba8().unwrap(), image);
+        let (encoded, pixels) = from_rgba.into_png_and_rgba().unwrap();
+        assert_eq!(encoded, png);
+        assert_eq!(pixels, Some(image));
     }
 
     #[test]

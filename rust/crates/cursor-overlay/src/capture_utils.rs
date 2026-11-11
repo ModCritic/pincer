@@ -3,7 +3,7 @@
 //! All three platform crates depend on cursor-overlay, so this is the natural
 //! home for a pure-Rust crop + JPEG-encode helper.
 
-use image::{imageops::FilterType, DynamicImage, GenericImageView};
+use image::{DynamicImage, GenericImageView};
 
 /// Result of a crop-and-encode operation; carries coordinate metadata so callers
 /// can translate zoom-image pixel coordinates back to full-window pixel coordinates.
@@ -44,6 +44,18 @@ pub fn crop_png_to_jpeg(
     max_width: u32,
 ) -> anyhow::Result<CropResult> {
     let img = image::load_from_memory_with_format(png_bytes, image::ImageFormat::Png)?;
+    crop_image_to_jpeg(&img, x1, y1, x2, y2, max_width)
+}
+
+/// [`crop_png_to_jpeg`] for an image that is already decoded.
+pub fn crop_image_to_jpeg(
+    img: &DynamicImage,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    max_width: u32,
+) -> anyhow::Result<CropResult> {
     let (img_w, img_h) = img.dimensions();
 
     // Region dimensions (at least 1px to avoid divide-by-zero).
@@ -68,7 +80,7 @@ pub fn crop_png_to_jpeg(
     let out: DynamicImage = if cw > max_width {
         let scale = max_width as f64 / cw as f64;
         let new_h = ((ch as f64) * scale).round().max(1.0) as u32;
-        cropped.resize_exact(max_width, new_h, FilterType::Lanczos3)
+        pincer_core::image_utils::lanczos3_resize_exact(&cropped, max_width, new_h)
     } else {
         cropped
     };
@@ -91,4 +103,27 @@ pub fn crop_png_to_jpeg(
         origin_y: cy1 as f64,
         scale_inv,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decoded_and_png_input_give_the_same_jpeg() {
+        let image = image::RgbaImage::from_fn(900, 400, |x, y| {
+            image::Rgba([(x % 251) as u8, (y % 241) as u8, ((x * y) % 239) as u8, 255])
+        });
+        let png = pincer_core::image_utils::encode_rgba_to_png(image.as_raw(), 900, 400).unwrap();
+        // Wide enough to be scaled down to 500 pixels.
+        let from_png = crop_png_to_jpeg(&png, 10.0, 20.0, 700.0, 300.0, 500).unwrap();
+        let decoded = DynamicImage::ImageRgba8(image);
+        let from_image = crop_image_to_jpeg(&decoded, 10.0, 20.0, 700.0, 300.0, 500).unwrap();
+        assert_eq!(from_png.out_w, 500);
+        assert_eq!(from_png.jpeg_bytes, from_image.jpeg_bytes);
+        assert_eq!(
+            (from_png.out_h, from_png.origin_x, from_png.scale_inv),
+            (from_image.out_h, from_image.origin_x, from_image.scale_inv)
+        );
+    }
 }

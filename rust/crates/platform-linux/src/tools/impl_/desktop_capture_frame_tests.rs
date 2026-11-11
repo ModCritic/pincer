@@ -1,8 +1,11 @@
 use super::{capture_admission_error, normalize_desktop_capture_for_action_frame};
+use pincer_core::image_utils::CapturedImage;
 
-fn png(width: u32, height: u32) -> Vec<u8> {
+fn png(width: u32, height: u32) -> CapturedImage {
     let rgba = vec![0x7f; (width * height * 4) as usize];
-    pincer_core::image_utils::encode_rgba_to_png(&rgba, width, height).expect("encode fixture")
+    CapturedImage::Png(
+        pincer_core::image_utils::encode_rgba_to_png(&rgba, width, height).expect("encode fixture"),
+    )
 }
 
 #[test]
@@ -12,11 +15,16 @@ fn native_wayland_capture_is_resized_to_the_reported_action_frame() {
             .expect("normalize 2x capture");
 
     assert_eq!((width, height), (1600, 1000));
-    assert_eq!(
-        pincer_core::image_utils::png_dimensions(&normalized).unwrap(),
-        (1600, 1000)
-    );
+    assert_eq!(normalized.dimensions().unwrap(), (1600, 1000));
+    assert!(matches!(normalized, CapturedImage::Png(_)));
     assert_eq!(scale, 2.0);
+
+    // Pixels at the action frame's size are passed through untouched.
+    let pixels = CapturedImage::Rgba(image::RgbaImage::new(16, 10));
+    let (same, width, height, scale) =
+        normalize_desktop_capture_for_action_frame(pixels.clone(), 16, 10)
+            .expect("normalize 1x capture");
+    assert_eq!((same, width, height, scale), (pixels, 16, 10, 1.0));
 }
 
 #[test]

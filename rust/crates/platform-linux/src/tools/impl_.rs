@@ -1107,19 +1107,24 @@ fn cross_pid_dialog_owner(pid: u32, xid: u64) -> Option<u32> {
         .filter(|owner| *owner != pid)
 }
 
-/// Native-size PNG of one window. When a same-pid popup or dialog covers the
-/// window, the screen rectangle is read instead, since the window's own
+/// Native-size image of one window. When a same-pid popup or dialog covers
+/// the window, the screen rectangle is read instead, since the window's own
 /// drawable never shows them. Shared by `get_window_state` and
 /// `capture_series`.
-fn capture_window_png(xid: u64, pid: u32, overlays: &WindowOverlays) -> anyhow::Result<Vec<u8>> {
+fn capture_window_image(
+    xid: u64,
+    pid: u32,
+    overlays: &WindowOverlays,
+) -> anyhow::Result<pincer_core::image_utils::CapturedImage> {
     if overlays.covers_window {
         overlays
             .window_rect
             .ok_or_else(|| anyhow::anyhow!("window geometry unavailable"))
-            .and_then(|(x, y, w, h)| crate::capture::screenshot_root_region_png(x, y, w, h))
-            .or_else(|_| crate::wayland::screenshot_dispatch_with_pid(xid, pid))
+            .and_then(|(x, y, w, h)| crate::capture::screenshot_root_region_rgba(x, y, w, h))
+            .map(pincer_core::image_utils::CapturedImage::Rgba)
+            .or_else(|_| crate::wayland::screenshot_image_dispatch_with_pid(xid, pid))
     } else {
-        crate::wayland::screenshot_dispatch_with_pid(xid, pid)
+        crate::wayland::screenshot_image_dispatch_with_pid(xid, pid)
     }
 }
 
@@ -1609,18 +1614,23 @@ impl Tool for GetWindowStateTool {
                     None
                 };
                 let captured = if let Some((png, width, height)) = preview {
-                    Ok((png, Some((width, height))))
+                    Ok((
+                        pincer_core::image_utils::CapturedImage::Png(png),
+                        Some((width, height)),
+                    ))
                 } else {
-                    capture_window_png(xid, pid, &overlays).map(|png| (png, None))
+                    capture_window_image(xid, pid, &overlays).map(|image| (image, None))
                 };
                 match captured {
                     Ok((raw, original_size)) => {
+                        // Resized as pixels when the capture produced them,
+                        // so the PNG is encoded once, at the delivered size.
                         let (orig_w, orig_h) = match original_size {
                             Some(size) => size,
-                            None => crate::capture::png_dimensions_pub(&raw)?,
+                            None => raw.dimensions()?,
                         };
-                        let png = crate::capture::resize_png_if_needed(&raw, max_dim)?;
-                        let (w, h) = crate::capture::png_dimensions_pub(&png)?;
+                        let image = raw.fit_long_edge(max_dim)?;
+                        let (w, h) = image.dimensions()?;
                         // An explicit per-call max_image_dimension (0 = native)
                         // is authoritative; the model-safe cap applies otherwise.
                         let cap = if explicit_max_image_dimension {
@@ -1628,11 +1638,12 @@ impl Tool for GetWindowStateTool {
                         } else {
                             megapixel_long_edge_cap(w, h, WINDOW_SCREENSHOT_MAX_PIXELS)
                         };
-                        let png = match cap {
-                            Some(edge) => crate::capture::resize_png_if_needed(&png, edge)?,
-                            None => png,
+                        let image = match cap {
+                            Some(edge) => image.fit_long_edge(edge)?,
+                            None => image,
                         };
-                        let (w, h) = crate::capture::png_dimensions_pub(&png)?;
+                        let (w, h) = image.dimensions()?;
+                        let (png, encoded_from) = image.into_png_and_rgba()?;
                         let original_w = if w < orig_w { Some(orig_w) } else { None };
                         let (b64, file_path) = if let Some(ref path) = screenshot_out_file {
                             std::fs::write(path, &png)?;
@@ -1648,6 +1659,7 @@ impl Tool for GetWindowStateTool {
                                 &state_for_capture.capture_service,
                                 &args,
                                 &png,
+                                encoded_from.as_ref(),
                                 pid,
                                 xid,
                                 (w, h),
@@ -14489,15 +14501,15 @@ fn x11_screen_size() -> anyhow::Result<(u32, u32)> {
 /// the screenshot-to-action contract and makes every vision-grounded action
 /// miss by the output scale.
 fn normalize_desktop_capture_for_action_frame(
-    png: Vec<u8>,
+    image: pincer_core::image_utils::CapturedImage,
     action_width: u32,
     action_height: u32,
-) -> anyhow::Result<(Vec<u8>, u32, u32, f64)> {
+) -> anyhow::Result<(pincer_core::image_utils::CapturedImage, u32, u32, f64)> {
     if action_width == 0 || action_height == 0 {
         anyhow::bail!("desktop action frame is empty: {action_width}x{action_height}");
     }
 
-    let (capture_width, capture_height) = crate::capture::png_dimensions_pub(&png)?;
+    let (capture_width, capture_height) = image.dimensions()?;
     let scale_x = f64::from(capture_width) / f64::from(action_width);
     let scale_y = f64::from(capture_height) / f64::from(action_height);
     if (scale_x - scale_y).abs() > 0.01 {
@@ -14508,9 +14520,10 @@ fn normalize_desktop_capture_for_action_frame(
     }
 
     if capture_width == action_width && capture_height == action_height {
-        return Ok((png, action_width, action_height, 1.0));
+        return Ok((image, action_width, action_height, 1.0));
     }
 
+    let png = image.into_png()?;
     let image = image::load_from_memory_with_format(&png, image::ImageFormat::Png)?;
     let resized = image.resize_exact(
         action_width,
@@ -14519,13 +14532,18 @@ fn normalize_desktop_capture_for_action_frame(
     );
     let mut encoded = std::io::Cursor::new(Vec::new());
     resized.write_to(&mut encoded, image::ImageFormat::Png)?;
-    Ok((encoded.into_inner(), action_width, action_height, scale_x))
+    Ok((
+        pincer_core::image_utils::CapturedImage::Png(encoded.into_inner()),
+        action_width,
+        action_height,
+        scale_x,
+    ))
 }
 
 /// One full-display capture in the desktop action coordinate frame. Shared by
 /// `get_desktop_state` and `capture_series`.
 struct DesktopActionFrame {
-    png: Vec<u8>,
+    image: pincer_core::image_utils::CapturedImage,
     width: u32,
     height: u32,
     /// Capture pixels per action-frame pixel before normalization.
@@ -14550,22 +14568,26 @@ fn capture_desktop_action_frame() -> anyhow::Result<DesktopActionFrame> {
     } else {
         None
     };
-    let (native_png, overlay_capture) =
+    let (native_image, overlay_capture) =
         cursor_overlay::capture_exclusion::capture_excluding_overlays(
             &crate::overlay_capture::OverlayExcluder,
             |hidden| {
                 // A multi-monitor layout is composed from the frame
                 // read above, so the image is exactly that frame.
-                let png = match &hyprland_plan {
-                    Some(plan) if plan.composite => {
-                        crate::wayland::hyprland::compose_desktop_capture(&plan.frame)?
-                    }
-                    _ => crate::capture::screenshot_display_bytes()?,
+                let image = match &hyprland_plan {
+                    Some(plan) if plan.composite => pincer_core::image_utils::CapturedImage::Png(
+                        crate::wayland::hyprland::compose_desktop_capture(&plan.frame)?,
+                    ),
+                    _ => crate::capture::screenshot_display_image()?,
                 };
-                Ok::<_, anyhow::Error>(crate::overlay_capture::verify_hidden_capture(png, hidden))
+                Ok::<_, anyhow::Error>(crate::overlay_capture::verify_hidden_image_at(
+                    image,
+                    hidden,
+                    (0, 0),
+                ))
             },
         )?;
-    let (native_w, native_h) = crate::capture::png_dimensions_pub(&native_png)?;
+    let (native_w, native_h) = native_image.dimensions()?;
     // True screen size. On a pure-Wayland session (native backend
     // opted in, no X11 DISPLAY) the capture above came from the
     // wlroots `zwlr_screencopy` cascade, whose full-display buffer is
@@ -14583,10 +14605,10 @@ fn capture_desktop_action_frame() -> anyhow::Result<DesktopActionFrame> {
     } else {
         x11_screen_size()?
     };
-    let (png, width, height, scale_factor) =
-        normalize_desktop_capture_for_action_frame(native_png, screen_w, screen_h)?;
+    let (image, width, height, scale_factor) =
+        normalize_desktop_capture_for_action_frame(native_image, screen_w, screen_h)?;
     Ok(DesktopActionFrame {
-        png,
+        image,
         width,
         height,
         scale_factor,
@@ -14649,7 +14671,7 @@ impl Tool for GetDesktopStateTool {
 
         let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
             let DesktopActionFrame {
-                png,
+                image,
                 width: screen_w,
                 height: screen_h,
                 scale_factor,
@@ -14657,26 +14679,26 @@ impl Tool for GetDesktopStateTool {
                 hyprland_frame,
             } = capture_desktop_action_frame()?;
             // Optional crop, in action-frame pixels, before the cap.
-            let (png, shot_w, shot_h) = match region {
+            let (image, shot_w, shot_h) = match region {
                 Some(region) => {
                     pincer_core::capture_series::check_region(region, (screen_w, screen_h))
                         .map_err(|message| anyhow::anyhow!(message))?;
-                    let png = pincer_core::image_utils::crop_png(&png, region)?;
-                    (png, region.width, region.height)
+                    (image.crop(region)?, region.width, region.height)
                 }
-                None => (png, screen_w, screen_h),
+                None => (image, screen_w, screen_h),
             };
             // Opt-in long-edge cap: the full-size capture is the desktop
             // action frame; a capped image is mapped back at dispatch
             // (pincer_core::desktop_capture_scale) and by its capture_id.
-            let (png, shot_w, shot_h) = match max_image_dimension.filter(|cap| *cap > 0) {
+            let (image, shot_w, shot_h) = match max_image_dimension.filter(|cap| *cap > 0) {
                 Some(cap) if shot_w.max(shot_h) > cap => {
-                    let png = crate::capture::resize_png_if_needed(&png, cap)?;
-                    let (w, h) = crate::capture::png_dimensions_pub(&png)?;
-                    (png, w, h)
+                    let image = image.fit_long_edge(cap)?;
+                    let (w, h) = image.dimensions()?;
+                    (image, w, h)
                 }
-                _ => (png, shot_w, shot_h),
+                _ => (image, shot_w, shot_h),
             };
+            let (png, encoded_from) = image.into_png_and_rgba()?;
             // Optional: write PNG to disk instead of returning base64.
             let written = if let Some(path) = out_file.as_deref() {
                 std::fs::write(path, &png)?;
@@ -14710,6 +14732,7 @@ impl Tool for GetDesktopStateTool {
                     &capture_service,
                     &capture_args,
                     &png,
+                    encoded_from.as_ref(),
                     (shot_w, shot_h),
                     (screen_w, screen_h),
                     region,
@@ -14718,6 +14741,7 @@ impl Tool for GetDesktopStateTool {
                     &capture_service,
                     &capture_args,
                     &png,
+                    encoded_from.as_ref(),
                     (shot_w, shot_h),
                     (screen_w, screen_h),
                 )?,
@@ -16127,8 +16151,8 @@ impl Tool for ZoomTool {
             // pure-Wayland sessions surface a typed "per-window capture not
             // supported yet" error instead of accidentally calling the
             // X11-only path with a foreign-toplevel id.
-            let png = crate::wayland::screenshot_window_dispatch(xid)?;
-            cursor_overlay::capture_utils::crop_png_to_jpeg(&png, x1, y1, x2, y2, 500)
+            let image = crate::wayland::screenshot_window_image_dispatch(xid)?.into_dynamic()?;
+            cursor_overlay::capture_utils::crop_image_to_jpeg(&image, x1, y1, x2, y2, 500)
         })
         .await;
 
@@ -16198,29 +16222,31 @@ impl pincer_core::capture_series::FrameSource for DesktopFrameSource {
             // only the region from it instead of the whole screen.
             let frame_size = x11_screen_size()?;
             let origin = (i32::try_from(region.x)?, i32::try_from(region.y)?);
-            let (png, _) = cursor_overlay::capture_exclusion::capture_excluding_overlays(
+            let (image, _) = cursor_overlay::capture_exclusion::capture_excluding_overlays(
                 &crate::overlay_capture::OverlayExcluder,
                 |hidden| {
-                    let png = crate::capture::screenshot_root_region_png(
+                    let rgba = crate::capture::screenshot_root_region_rgba(
                         origin.0,
                         origin.1,
                         region.width,
                         region.height,
                     )?;
-                    Ok::<_, anyhow::Error>(crate::overlay_capture::verify_hidden_capture_at(
-                        png, hidden, origin,
+                    Ok::<_, anyhow::Error>(crate::overlay_capture::verify_hidden_image_at(
+                        pincer_core::image_utils::CapturedImage::Rgba(rgba),
+                        hidden,
+                        origin,
                     ))
                 },
             )?;
             return Ok(pincer_core::capture_series::SourceFrame {
-                png,
+                image,
                 origin: (region.x, region.y),
                 frame_size,
             });
         }
         let frame = capture_desktop_action_frame()?;
         Ok(pincer_core::capture_series::SourceFrame {
-            png: frame.png,
+            image: frame.image,
             origin: (0, 0),
             frame_size: (frame.width, frame.height),
         })
@@ -16238,13 +16264,13 @@ struct WindowFrameSource {
 }
 
 impl WindowFrameSource {
-    fn grab(&self) -> anyhow::Result<Vec<u8>> {
+    fn grab(&self) -> anyhow::Result<pincer_core::image_utils::CapturedImage> {
         let overlays = if crate::wayland::is_wayland() {
             WindowOverlays::default()
         } else {
             window_overlays(self.pid, self.xid)
         };
-        capture_window_png(self.xid, self.pid, &overlays).map_err(|error| {
+        capture_window_image(self.xid, self.pid, &overlays).map_err(|error| {
             if !crate::wayland::is_wayland() && !crate::x11::window_exists(self.xid) {
                 anyhow::anyhow!(
                     "Window target pid {}, window_id {} is stale or no longer running; refresh list_windows.",
@@ -16261,18 +16287,17 @@ impl WindowFrameSource {
 impl pincer_core::capture_series::FrameSource for WindowFrameSource {
     fn frame_size(&self) -> anyhow::Result<Option<(u32, u32)>> {
         // Only a capture tells the exact native size, so probe once.
-        let png = self.grab()?;
-        crate::capture::png_dimensions_pub(&png).map(Some)
+        self.grab()?.dimensions().map(Some)
     }
 
     fn capture(
         &self,
         _region: Option<pincer_core::image_utils::PixelRect>,
     ) -> anyhow::Result<pincer_core::capture_series::SourceFrame> {
-        let png = self.grab()?;
-        let frame_size = crate::capture::png_dimensions_pub(&png)?;
+        let image = self.grab()?;
+        let frame_size = image.dimensions()?;
         Ok(pincer_core::capture_series::SourceFrame {
-            png,
+            image,
             origin: (0, 0),
             frame_size,
         })

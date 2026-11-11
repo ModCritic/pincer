@@ -693,35 +693,72 @@ impl CaptureRegistry {
     }
 
     pub fn store(&self, registration: CaptureRegistration) -> Result<CaptureId, CaptureStoreError> {
+        self.store_checked(registration, None)
+    }
+
+    /// [`store`](Self::store), or with `encoded_from`, a store of a PNG this
+    /// process just encoded from those pixels. They already show what the PNG
+    /// decodes to, so the limits and sizes are checked against them and the
+    /// PNG is not decoded again.
+    fn store_checked(
+        &self,
+        registration: CaptureRegistration,
+        encoded_from: Option<&image::RgbaImage>,
+    ) -> Result<CaptureId, CaptureStoreError> {
         registration.target.validate()?;
         if registration.png_bytes.len() > self.config.max_total_bytes {
             return Err(CaptureStoreError::CaptureTooLarge);
         }
-        let mut limits = Limits::default();
-        limits.max_image_width = Some(self.config.max_encoded_width);
-        limits.max_image_height = Some(self.config.max_encoded_height);
-        limits.max_alloc = Some(self.config.max_decoded_bytes);
-        let decoder = image::codecs::png::PngDecoder::with_limits(
-            Cursor::new(&registration.png_bytes),
-            limits,
-        )
-        .map_err(map_png_admission_error)?;
-        let decoded_dimensions = decoder.dimensions();
-        if decoded_dimensions
-            != (
-                registration.encoded_dimensions.width,
-                registration.encoded_dimensions.height,
-            )
-        {
-            return Err(CaptureStoreError::InvalidEncodedDimensions);
-        }
-        if decoder.total_bytes() > self.config.max_decoded_bytes {
-            return Err(CaptureStoreError::PngDecodeLimitExceeded);
-        }
+        let encoded_dimensions = (
+            registration.encoded_dimensions.width,
+            registration.encoded_dimensions.height,
+        );
+        let decoder = match encoded_from {
+            Some(rgba) => {
+                // The same refusals the decoder below gives, in its order.
+                let (width, height) = rgba.dimensions();
+                let header = crate::image_utils::png_dimensions(&registration.png_bytes)
+                    .map_err(|_| CaptureStoreError::InvalidPng)?;
+                if header != (width, height) {
+                    return Err(CaptureStoreError::InvalidPng);
+                }
+                if width > self.config.max_encoded_width || height > self.config.max_encoded_height
+                {
+                    return Err(CaptureStoreError::PngDecodeLimitExceeded);
+                }
+                if (width, height) != encoded_dimensions {
+                    return Err(CaptureStoreError::InvalidEncodedDimensions);
+                }
+                if u64::from(width) * u64::from(height) * 4 > self.config.max_decoded_bytes {
+                    return Err(CaptureStoreError::PngDecodeLimitExceeded);
+                }
+                None
+            }
+            None => {
+                let mut limits = Limits::default();
+                limits.max_image_width = Some(self.config.max_encoded_width);
+                limits.max_image_height = Some(self.config.max_encoded_height);
+                limits.max_alloc = Some(self.config.max_decoded_bytes);
+                let decoder = image::codecs::png::PngDecoder::with_limits(
+                    Cursor::new(&registration.png_bytes),
+                    limits,
+                )
+                .map_err(map_png_admission_error)?;
+                if decoder.dimensions() != encoded_dimensions {
+                    return Err(CaptureStoreError::InvalidEncodedDimensions);
+                }
+                if decoder.total_bytes() > self.config.max_decoded_bytes {
+                    return Err(CaptureStoreError::PngDecodeLimitExceeded);
+                }
+                Some(decoder)
+            }
+        };
         registration
             .screenshot_to_action
             .validate_extent(registration.encoded_dimensions)?;
-        image::DynamicImage::from_decoder(decoder).map_err(map_png_admission_error)?;
+        if let Some(decoder) = decoder {
+            image::DynamicImage::from_decoder(decoder).map_err(map_png_admission_error)?;
+        }
         let png_bytes: Arc<[u8]> = registration.png_bytes.into();
         let byte_len = png_bytes.len();
         let digest = ContentDigest(Sha256::digest(&png_bytes).into());
@@ -1149,15 +1186,36 @@ impl CaptureService {
     }
 
     pub fn publish(&self, publication: CapturePublication) -> Result<CaptureId, CaptureStoreError> {
+        self.publish_checked(publication, None)
+    }
+
+    /// [`publish`](Self::publish) for a PNG this process just encoded from
+    /// `rgba`, which spares decoding it again to admit it.
+    pub fn publish_encoded_rgba(
+        &self,
+        publication: CapturePublication,
+        rgba: &image::RgbaImage,
+    ) -> Result<CaptureId, CaptureStoreError> {
+        self.publish_checked(publication, Some(rgba))
+    }
+
+    fn publish_checked(
+        &self,
+        publication: CapturePublication,
+        encoded_from: Option<&image::RgbaImage>,
+    ) -> Result<CaptureId, CaptureStoreError> {
         let binding = self.binding(publication.session_id, publication.session_generation)?;
-        self.registry.store(CaptureRegistration {
-            png_bytes: publication.png_bytes,
-            target: publication.target,
-            encoded_dimensions: publication.encoded_dimensions,
-            native_action_dimensions: publication.native_action_dimensions,
-            screenshot_to_action: publication.screenshot_to_action,
-            binding,
-        })
+        self.registry.store_checked(
+            CaptureRegistration {
+                png_bytes: publication.png_bytes,
+                target: publication.target,
+                encoded_dimensions: publication.encoded_dimensions,
+                native_action_dimensions: publication.native_action_dimensions,
+                screenshot_to_action: publication.screenshot_to_action,
+                binding,
+            },
+            encoded_from,
+        )
     }
 
     pub fn parse_capture_id(&self, value: &str) -> Result<CaptureId, CaptureIdParseError> {
@@ -1433,6 +1491,65 @@ mod tests {
             registry.store(registration(bytes, target, owner)),
             Err(CaptureStoreError::PngDecodeLimitExceeded)
         );
+    }
+
+    #[test]
+    fn encoded_rgba_admission_refuses_what_the_decoder_refuses() {
+        let owner = binding(1, "session-a", 1);
+        let target = CaptureTarget::PrimaryDesktop;
+        let pixels = |width: u32, height: u32| {
+            image::RgbaImage::from_pixel(width, height, image::Rgba([1, 1, 1, 1]))
+        };
+        let registry = CaptureRegistry::new(config(4, 10_000)).unwrap();
+        let stored = registry
+            .store_checked(
+                registration(png(2, 2, 1), target.clone(), owner.clone()),
+                Some(&pixels(2, 2)),
+            )
+            .unwrap();
+        assert_eq!(
+            registry
+                .read_for_perception(stored, &owner, &target)
+                .unwrap()
+                .png_bytes()
+                .as_ref(),
+            png(2, 2, 1).as_slice()
+        );
+        for (bytes, rgba, expected) in [
+            (
+                b"not a png".to_vec(),
+                pixels(2, 2),
+                CaptureStoreError::InvalidPng,
+            ),
+            (png(2, 2, 1), pixels(3, 2), CaptureStoreError::InvalidPng),
+            (
+                png(3, 2, 1),
+                pixels(3, 2),
+                CaptureStoreError::InvalidEncodedDimensions,
+            ),
+        ] {
+            assert_eq!(
+                registry.store_checked(
+                    registration(bytes, target.clone(), owner.clone()),
+                    Some(&rgba)
+                ),
+                Err(expected)
+            );
+        }
+
+        let mut dimension_config = config(2, 10_000);
+        dimension_config.max_encoded_width = 1;
+        let mut allocation_config = config(2, 10_000);
+        allocation_config.max_decoded_bytes = 8;
+        for config in [dimension_config, allocation_config] {
+            assert_eq!(
+                CaptureRegistry::new(config).unwrap().store_checked(
+                    registration(png(2, 2, 1), target.clone(), owner.clone()),
+                    Some(&pixels(2, 2))
+                ),
+                Err(CaptureStoreError::PngDecodeLimitExceeded)
+            );
+        }
     }
 
     #[test]

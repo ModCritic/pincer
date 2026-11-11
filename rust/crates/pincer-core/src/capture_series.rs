@@ -101,9 +101,9 @@ pub struct SeriesRequest {
 
 /// One raw frame from a platform capture.
 pub struct SourceFrame {
-    /// PNG bytes.
-    pub png: Vec<u8>,
-    /// Position of the PNG's top-left pixel in the full frame: (0, 0) for a
+    /// The captured pixels, or the PNG a backend returned.
+    pub image: image_utils::CapturedImage,
+    /// Position of the image's top-left pixel in the full frame: (0, 0) for a
     /// whole frame, the region origin when the source captured only the
     /// requested region.
     pub origin: (u32, u32),
@@ -451,7 +451,7 @@ pub fn prepare_frame(
     if let Some(region) = region {
         check_region(region, source.frame_size).map_err(|message| anyhow!(message))?;
     }
-    let image = image_utils::decode_png_to_rgba8(&source.png)?;
+    let image = source.image.into_rgba8()?;
     let (origin_x, origin_y) = source.origin;
     let wanted = region.unwrap_or(PixelRect {
         x: 0,
@@ -1089,8 +1089,10 @@ mod tests {
         ImageBuffer::from_fn(width, height, |x, y| Rgba(f(x, y)))
     }
 
-    fn png_of(image: &Rgba8Image) -> Vec<u8> {
-        image_utils::encode_rgba_to_png(image.as_raw(), image.width(), image.height()).unwrap()
+    fn png_of(image: &Rgba8Image) -> image_utils::CapturedImage {
+        image_utils::CapturedImage::Png(
+            image_utils::encode_rgba_to_png(image.as_raw(), image.width(), image.height()).unwrap(),
+        )
     }
 
     #[test]
@@ -1104,7 +1106,7 @@ mod tests {
             height: 10,
         };
         let whole = SourceFrame {
-            png: png_of(&frame),
+            image: png_of(&frame),
             origin: (0, 0),
             frame_size: (100, 50),
         };
@@ -1116,7 +1118,7 @@ mod tests {
         // A source that captured only the region returns it unchanged.
         let only_region = image::imageops::crop_imm(&frame, 60, 20, 30, 10).to_image();
         let at_source = SourceFrame {
-            png: png_of(&only_region),
+            image: png_of(&only_region),
             origin: (60, 20),
             frame_size: (100, 50),
         };
@@ -1125,7 +1127,7 @@ mod tests {
         // The long-edge cap applies after the crop.
         let capped = prepare_frame(
             SourceFrame {
-                png: png_of(&frame),
+                image: png_of(&frame),
                 origin: (0, 0),
                 frame_size: (100, 50),
             },
@@ -1138,7 +1140,7 @@ mod tests {
         // No region: the whole frame, capped.
         let full = prepare_frame(
             SourceFrame {
-                png: png_of(&frame),
+                image: png_of(&frame),
                 origin: (0, 0),
                 frame_size: (100, 50),
             },
@@ -1147,6 +1149,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(full.dimensions(), (50, 25));
+
+        // Pixels handed over without a PNG give the same frames.
+        let from_pixels = SourceFrame {
+            image: image_utils::CapturedImage::Rgba(frame.clone()),
+            origin: (0, 0),
+            frame_size: (100, 50),
+        };
+        assert_eq!(
+            prepare_frame(from_pixels, Some(region), 15).unwrap(),
+            capped
+        );
     }
 
     #[test]
@@ -1160,7 +1173,7 @@ mod tests {
         };
         let error = prepare_frame(
             SourceFrame {
-                png: png_of(&frame),
+                image: png_of(&frame),
                 origin: (0, 0),
                 frame_size: (100, 50),
             },
@@ -1172,7 +1185,7 @@ mod tests {
         // The source captured a different area than the one asked for.
         let error = prepare_frame(
             SourceFrame {
-                png: png_of(&rgba(10, 10, |_, _| [0, 0, 0, 255])),
+                image: png_of(&rgba(10, 10, |_, _| [0, 0, 0, 255])),
                 origin: (50, 0),
                 frame_size: (100, 50),
             },
@@ -1379,7 +1392,7 @@ mod tests {
                 .pop()
                 .ok_or_else(|| anyhow!("fake source ran out of frames"))?;
             Ok(SourceFrame {
-                png: png_of(&frame),
+                image: png_of(&frame),
                 origin: (0, 0),
                 frame_size: frame.dimensions(),
             })
