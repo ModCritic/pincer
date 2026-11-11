@@ -68,6 +68,21 @@ impl CapturedImage {
         }
     }
 
+    /// Resample to exactly `new_w`x`new_h` with Lanczos3 in one pass; the
+    /// same size returns the image as it is. A PNG keeps its color type, as
+    /// in [`resize_png_if_needed`]. Two size limits in a row (see
+    /// [`fit_long_edge_dimensions`]) go through here once instead of
+    /// resampling twice.
+    pub fn resize_to(self, new_w: u32, new_h: u32) -> Result<Self> {
+        if self.dimensions()? == (new_w, new_h) {
+            return Ok(self);
+        }
+        match self {
+            Self::Png(png) => resize_png_to(&png, new_w, new_h).map(Self::Png),
+            Self::Rgba(image) => Ok(Self::Rgba(lanczos3_resize_rgba8(&image, new_w, new_h))),
+        }
+    }
+
     /// [`crop_png`].
     pub fn crop(self, rect: PixelRect) -> Result<Self> {
         match self {
@@ -179,9 +194,15 @@ pub fn resize_png_if_needed(png_bytes: &[u8], max_dim: u32) -> Result<Vec<u8>> {
         return Ok(png_bytes.to_vec());
     }
     let (new_w, new_h) = png_fit_dimensions(w, h, max_dim);
+    resize_png_to(png_bytes, new_w, new_h)
+}
 
+/// Decode a PNG, resample it to `new_w`x`new_h` with Lanczos3 and encode it
+/// again in its own color type (RGBA or RGB).
+fn resize_png_to(png_bytes: &[u8], new_w: u32, new_h: u32) -> Result<Vec<u8>> {
     let cursor = std::io::Cursor::new(png_bytes);
     let decoder = image::codecs::png::PngDecoder::new(cursor)?;
+    let (w, h) = decoder.dimensions();
     let color = decoder.color_type();
     let mut buf = vec![0u8; decoder.total_bytes() as usize];
     decoder.read_image(&mut buf)?;
@@ -219,6 +240,16 @@ pub fn resize_rgba8_if_needed(image: RgbaImage, max_dim: u32) -> RgbaImage {
     }
     let (new_w, new_h) = png_fit_dimensions(w, h, max_dim);
     lanczos3_resize_rgba8(&image, new_w, new_h)
+}
+
+/// The size [`CapturedImage::fit_long_edge`] gives a `w`x`h` image: the same
+/// size when `max_dim` is 0 or both edges already fit, otherwise the
+/// rounding of [`png_fit_dimensions`].
+pub fn fit_long_edge_dimensions(w: u32, h: u32, max_dim: u32) -> (u32, u32) {
+    if max_dim == 0 || (w <= max_dim && h <= max_dim) {
+        return (w, h);
+    }
+    png_fit_dimensions(w, h, max_dim)
 }
 
 /// The size [`resize_png_if_needed`] resizes a `w`x`h` image to when one edge
@@ -975,6 +1006,71 @@ mod tests {
             );
         }
         assert_eq!(png_fit_dimensions(1000, 333, 100), (99, 33));
+    }
+
+    #[test]
+    fn resize_to_the_fitted_size_matches_fit_long_edge() {
+        for (w, h, max_dim) in [
+            (160, 100, 136),
+            (1000, 333, 100),
+            (333, 1000, 100),
+            (301, 7, 50),
+            (40, 30, 0),
+            (40, 30, 40),
+        ] {
+            let (new_w, new_h) = fit_long_edge_dimensions(w, h, max_dim);
+
+            let image = RgbaImage::from_raw(w, h, noise(w, h, 4, w ^ h)).unwrap();
+            let rgba = CapturedImage::Rgba(image.clone());
+            let fitted = rgba.clone().fit_long_edge(max_dim).unwrap();
+            assert_eq!(fitted.dimensions().unwrap(), (new_w, new_h));
+            assert_eq!(
+                rgba.resize_to(new_w, new_h).unwrap(),
+                fitted,
+                "RGBA {w}x{h} at {max_dim}"
+            );
+
+            let png = CapturedImage::Png(encode_rgba_to_png(image.as_raw(), w, h).unwrap());
+            assert_eq!(
+                png.clone().resize_to(new_w, new_h).unwrap(),
+                png.fit_long_edge(max_dim).unwrap(),
+                "RGBA PNG {w}x{h} at {max_dim}"
+            );
+
+            let mut rgb_png = Vec::new();
+            image::codecs::png::PngEncoder::new(&mut rgb_png)
+                .write_image(&noise(w, h, 3, w ^ h), w, h, ExtendedColorType::Rgb8)
+                .unwrap();
+            let rgb_png = CapturedImage::Png(rgb_png);
+            assert_eq!(
+                rgb_png.clone().resize_to(new_w, new_h).unwrap(),
+                rgb_png.fit_long_edge(max_dim).unwrap(),
+                "RGB PNG {w}x{h} at {max_dim}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_limits_resample_once_from_the_source() {
+        // The second limit is applied to the first one's size, but the
+        // pixels come from one pass over the original.
+        let image = RgbaImage::from_raw(160, 100, noise(160, 100, 4, 5)).unwrap();
+        let (w1, h1) = fit_long_edge_dimensions(160, 100, 150);
+        let (w2, h2) = fit_long_edge_dimensions(w1, h1, 120);
+        let once = CapturedImage::Rgba(image.clone())
+            .resize_to(w2, h2)
+            .unwrap();
+        let twice = CapturedImage::Rgba(image.clone())
+            .fit_long_edge(150)
+            .unwrap()
+            .fit_long_edge(120)
+            .unwrap();
+        assert_eq!(once.dimensions().unwrap(), twice.dimensions().unwrap());
+        assert_eq!(
+            once,
+            CapturedImage::Rgba(lanczos3_resize_rgba8(&image, w2, h2))
+        );
+        assert_ne!(once, twice);
     }
 
     #[test]
