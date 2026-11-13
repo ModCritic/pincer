@@ -436,7 +436,7 @@ async fn real_proxies_recover_from_control_loss_without_waiting_for_stdin() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn idle_reclaimed_unnamed_session_is_recreated_through_the_daemon() {
+async fn idle_reclaimed_sessions_are_recreated_through_the_daemon() {
     #[cfg(unix)]
     let directory = tempfile::Builder::new()
         .prefix("pincer-idle-")
@@ -484,17 +484,38 @@ async fn idle_reclaimed_unnamed_session_is_recreated_through_the_daemon() {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
 
-    client.call("get_config", json!({}));
+    // Since d8e6d5e the next call on each session starts it again, and only
+    // that first call's result says so.
+    let first_text = |response: &Value| {
+        response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned()
+    };
+    let unnamed = client.request("tools/call", json!({"name": "get_config", "arguments": {}}));
+    assert_ne!(unnamed["result"]["isError"], true, "{unnamed}");
+    assert!(
+        first_text(&unnamed).starts_with("This connection's unnamed session had ended after"),
+        "the unnamed session must say it started again: {unnamed}"
+    );
     let named = client.request(
         "tools/call",
         json!({"name": "get_config", "arguments": {"session": "named-idle"}}),
     );
-    assert_eq!(named["result"]["isError"], true, "{named}");
-    let text = named["result"]["content"][0]["text"].as_str().unwrap_or("");
+    assert_ne!(named["result"]["isError"], true, "{named}");
+    let text = first_text(&named);
     assert!(
-        text.contains("start_session with session 'named-idle'"),
-        "named refusal must name its working recovery: {named}"
+        text.starts_with("Session 'named-idle' had ended after")
+            && text.contains("so this call started it again, fresh"),
+        "a restarted label must say it started again: {named}"
     );
-    client.call("start_session", json!({"session": "named-idle"}));
-    client.call("get_config", json!({"session": "named-idle"}));
+    let again = client.request(
+        "tools/call",
+        json!({"name": "get_config", "arguments": {"session": "named-idle"}}),
+    );
+    assert_ne!(again["result"]["isError"], true, "{again}");
+    assert!(
+        !first_text(&again).contains("had ended after"),
+        "only the first call after a restart carries the note: {again}"
+    );
 }

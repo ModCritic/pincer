@@ -34,9 +34,11 @@ from" notes, and upstream compositor names (`cua-compositor`,
 - `cargo test --release -p pincer-core -p pincer-contract`: 1128 passed, 2 ignored.
 - `cargo test --release -p pincer`: 212 passed, 1 ignored, 1 failed. The failure,
   `protocol_proxy_recovery_test::idle_reclaimed_unnamed_session_is_recreated_through_the_daemon`
-  (`rust/crates/pincer/tests/protocol_proxy_recovery_test.rs:492`), predates this audit:
+  (`rust/crates/pincer/tests/protocol_proxy_recovery_test.rs:492`), predated this audit:
   d8e6d5e (11/09/26) made the daemon restart a session label the idle sweep ended, and the
-  test still expects the old refusal. This audit touches neither file.
+  test still expected the old refusal. A follow-up commit renamed it
+  `idle_reclaimed_sessions_are_recreated_through_the_daemon` and made it expect the restart
+  note; both tests in that file pass.
 - `pincer-contract-gen all --check`: `contract/manifest.json` is current.
 - `cargo check --release --target x86_64-pc-windows-gnu -p platform-windows --lib --examples`: clean
   (two pre-existing dead-code warnings).
