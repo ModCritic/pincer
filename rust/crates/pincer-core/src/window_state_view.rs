@@ -460,15 +460,16 @@ pub const VALUE_PREVIEW_CHARS: usize = 200;
 /// Cut every `value="..."` longer than [`VALUE_PREVIEW_CHARS`] to its start
 /// plus `..." (N chars)`. A text area's value is its whole document: a
 /// 300-line file cost about 2,500 tokens on every read (desc-test round 3).
-/// The value ends at a count the platform wrote after it (`" (24492 chars`),
-/// else at the last `" [actions=[` of the row (values are not quote-escaped),
-/// else at the row's last quote. A count the platform wrote is kept as it is:
-/// it is the field's real length, where counting the shown text would count
-/// each escaped line break twice and stop at what the platform read.
+/// The value is the first ` value="` outside every quoted field, so a name
+/// that contains ` value="` cannot hide the real one. The cut never ends
+/// inside an escape (see [`escape_safe_prefix`]). A count the platform wrote
+/// is kept as it is: it is the field's real length, where counting the
+/// shown text would count each escape (`\n`, `\"`) twice and stop at what
+/// the platform read.
 pub fn shorten_long_values(md: &str) -> std::borrow::Cow<'_, str> {
     const OPEN: &str = " value=\"";
     if !md.lines().any(|line| {
-        line.find(OPEN).is_some_and(|start| {
+        find_unquoted(line, OPEN).is_some_and(|start| {
             value_end(line, start + OPEN.len()).is_some_and(|end| {
                 line[start + OPEN.len()..end].chars().count() > VALUE_PREVIEW_CHARS
             })
@@ -481,13 +482,13 @@ pub fn shorten_long_values(md: &str) -> std::borrow::Cow<'_, str> {
         if i > 0 {
             out.push('\n');
         }
-        let cut = line.find(OPEN).and_then(|start| {
+        let cut = find_unquoted(line, OPEN).and_then(|start| {
             let from = start + OPEN.len();
             let end = value_end(line, from)?;
             let value = &line[from..end];
             let chars = value.chars().count();
             (chars > VALUE_PREVIEW_CHARS).then(|| {
-                let keep: String = value.chars().take(VALUE_PREVIEW_CHARS).collect();
+                let keep = escape_safe_prefix(value, VALUE_PREVIEW_CHARS);
                 let rest = &line[end + 1..];
                 if platform_count_len(rest).is_some() {
                     format!("{}{keep}...\"{rest}", &line[..from])
@@ -507,7 +508,19 @@ pub fn shorten_long_values(md: &str) -> std::borrow::Cow<'_, str> {
 /// Byte offset of the quote that closes a value starting at `from`.
 fn value_end(line: &str, from: usize) -> Option<usize> {
     let tail = &line[from..];
-    // A count that ends the row or comes right before its actions, so text
+    // A Linux row escapes its value, so its first unescaped quote ends it,
+    // and the row's end, its actions block, or a count followed by one of
+    // those comes right after that quote.
+    if let Some(end) = escaped_closing_quote(tail) {
+        let after = &tail[end + 1..];
+        let ends_row = |rest: &str| rest.is_empty() || rest.starts_with(" [actions=[");
+        if ends_row(after) || platform_count_len(after).is_some_and(|len| ends_row(&after[len..]))
+        {
+            return Some(from + end);
+        }
+    }
+    // A value with raw quotes in it, from a row that does not escape: a
+    // count that ends the row or comes right before its actions, so text
     // inside the value that only looks like one is not taken for it.
     tail.rmatch_indices("\" (")
         .map(|(at, _)| at)
@@ -520,6 +533,96 @@ fn value_end(line: &str, from: usize) -> Option<usize> {
         .or_else(|| tail.rfind("\" [actions=["))
         .or_else(|| tail.rfind('"'))
         .map(|end| from + end)
+}
+
+/// Byte offset of the `"` that closes a quoted row field whose text starts
+/// at the start of `text`. Linux rows escape every field
+/// (`untrusted_text::inline`), so `\"` and `\\` never close one. macOS and
+/// Windows rows do not escape: when no unescaped quote follows (a title
+/// that ends in a backslash, `"C:\"`), the first quote closes the field, as
+/// before. Such a title followed by another quoted field is still misread;
+/// only an escaping producer avoids that.
+pub fn closing_quote(text: &str) -> Option<usize> {
+    escaped_closing_quote(text).or_else(|| text.find('"'))
+}
+
+/// The first `"` in `text` that no backslash escapes. A backslash takes the
+/// byte after it, which in escaped text is the escape's ASCII letter, so the
+/// scan never stops inside a multi-byte character.
+fn escaped_closing_quote(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'\\' => at += 2,
+            b'"' => return Some(at),
+            _ => at += 1,
+        }
+    }
+    None
+}
+
+/// Byte offset of the first `pattern` in `line` outside every quoted field
+/// (escape-aware, as [`closing_quote`] reads fields). `pattern` starts with
+/// an ASCII byte, so the offset is a character boundary.
+fn find_unquoted(line: &str, pattern: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut at = 0;
+    let mut quoted = false;
+    while at < bytes.len() {
+        if !quoted && bytes[at..].starts_with(pattern.as_bytes()) {
+            return Some(at);
+        }
+        match bytes[at] {
+            b'\\' => {
+                at += 2;
+                continue;
+            }
+            b'"' => quoted = !quoted,
+            _ => {}
+        }
+        at += 1;
+    }
+    None
+}
+
+/// The longest start of escaped `value` of at most `max_chars` characters
+/// that does not end inside an escape: `\"`, `\\`, `\n` and `\u{202e}` stay
+/// whole or go whole.
+fn escape_safe_prefix(value: &str, max_chars: usize) -> &str {
+    let mut at = 0;
+    let mut shown = 0;
+    while at < value.len() {
+        let (bytes, chars) = escape_unit(&value[at..]);
+        if shown + chars > max_chars {
+            break;
+        }
+        shown += chars;
+        at += bytes;
+    }
+    &value[..at]
+}
+
+/// Bytes and characters of the first unit of non-empty `text`: one escape
+/// (`\u{hex}` or a backslash and the character after it), or one character.
+fn escape_unit(text: &str) -> (usize, usize) {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return (0, 0);
+    };
+    if first == '\\' {
+        if let Some(hex) = text.strip_prefix("\\u{") {
+            if let Some(close) = hex.find('}') {
+                if (1..=6).contains(&close) && hex[..close].bytes().all(|b| b.is_ascii_hexdigit()) {
+                    return (close + 4, close + 4);
+                }
+            }
+        }
+        if let Some(next) = chars.next() {
+            return (1 + next.len_utf8(), 2);
+        }
+    }
+    (first.len_utf8(), 1)
 }
 
 /// Length of a character count the platform wrote right after a value
@@ -850,7 +953,7 @@ fn menu_path_in(markdown: &str, index: u64) -> Option<Vec<String>> {
         let label = rest
             .trim_start()
             .strip_prefix('"')
-            .and_then(|r| r.split_once('"').map(|(label, _)| label.to_owned()))
+            .and_then(|r| closing_quote(r).map(|end| r[..end].to_owned()))
             .unwrap_or_default();
         Some((role.to_owned(), label))
     };
@@ -1047,7 +1150,8 @@ fn parse_rows(md: &str) -> Vec<Row> {
 
 fn identity_of(indent: usize, after_index: &str) -> String {
     let role = after_index.split_whitespace().next().unwrap_or("");
-    let id = after_index.find("id=").map(|p| {
+    // Outside quoted fields: a name or value can say `id=` too.
+    let id = find_unquoted(after_index, "id=").map(|p| {
         let tail = &after_index[p + 3..];
         let end = tail
             .find(|c: char| c.is_whitespace() || c == ']')
@@ -1060,7 +1164,7 @@ fn identity_of(indent: usize, after_index: &str) -> String {
         .split_once(char::is_whitespace)
         .map(|(_, tail)| tail.trim_start())
         .and_then(|tail| tail.strip_prefix('"'))
-        .and_then(|tail| tail.split('"').next());
+        .map(|tail| closing_quote(tail).map_or(tail, |end| &tail[..end]));
     format!("{indent}|{role}|{}", id.or(label).unwrap_or(""))
 }
 
@@ -1178,11 +1282,15 @@ fn diff_markdown(
 }
 
 /// `push button "Open Menu"` out of a row key (role, then its first quoted
-/// string).
+/// string, as the row escapes it).
 fn row_label(key: &str) -> String {
-    let role = key.split('"').next().unwrap_or("").trim();
+    let open = closing_quote(key);
+    let role = key[..open.unwrap_or(key.len())].trim();
     let role = role.split(" [").next().unwrap_or(role).trim();
-    match key.split('"').nth(1) {
+    let name = open
+        .map(|open| &key[open + 1..])
+        .map(|rest| closing_quote(rest).map_or(rest, |end| &rest[..end]));
+    match name {
         Some(name) if !name.is_empty() => format!("{role} \"{name}\""),
         _ => role.to_owned(),
     }
@@ -2141,5 +2249,92 @@ mod tests {
         );
         assert!(s.get("background_input").is_some());
         assert!(s.get("_note").is_some());
+    }
+}
+
+/// Rows from the Linux AT-SPI walk escape every app string inside a quoted
+/// field with `untrusted_text::inline`, so `\"` and `\\` never end a field.
+/// macOS and Windows rows do not escape.
+#[cfg(test)]
+mod escaped_row_tests {
+    use super::*;
+
+    #[test]
+    fn a_value_written_inside_a_name_does_not_hide_the_real_value() {
+        // RENDER-5: the name carries ` value="` and 250 characters, so a
+        // cutter that takes the first ` value="` cuts inside the name and the
+        // real value (an IBAN) never shows.
+        let row = format!(
+            "- [5] text \"Total value=\"{}\" value=\"Pay 5000 EUR to DE00 1234\" [actions=[]]",
+            "A".repeat(250)
+        );
+        let short = shorten_long_values(&row);
+        assert!(short.contains("DE00 1234"), "{short}");
+    }
+
+    #[test]
+    fn a_cut_value_never_ends_inside_an_escape() {
+        // A quote at character 200 of the shown value: the cut kept the
+        // backslash of `\"` and dropped its quote.
+        let shown = format!("{}\\\"{}", "A".repeat(199), "B".repeat(100));
+        let row = format!("- [5] text \"f\" value=\"{shown}\" (300 chars) [actions=[]]");
+        let short = shorten_long_values(&row);
+        assert!(
+            short.contains(&format!("value=\"{}...\" (300 chars) [actions=[]]", "A".repeat(199))),
+            "{short}"
+        );
+        // A bidi override escaped as `\u{202e}` across the cut.
+        let shown = format!("{}\\u{{202e}}{}", "A".repeat(197), "B".repeat(100));
+        let row = format!("- [5] text \"f\" value=\"{shown}\" (298 chars) [actions=[]]");
+        let short = shorten_long_values(&row);
+        assert!(
+            short.contains(&format!("value=\"{}...\" (298 chars)", "A".repeat(197))),
+            "{short}"
+        );
+    }
+
+    #[test]
+    fn an_escaped_quote_does_not_end_a_label() {
+        assert_eq!(
+            identity_of(2, "frame \"Pay \\\"Bob\\\" now\" [actions=[]]"),
+            "2|frame|Pay \\\"Bob\\\" now"
+        );
+        assert_eq!(
+            row_label("push button \"Send \\\"now\\\"\" [actions=[press]]"),
+            "push button \"Send \\\"now\\\"\""
+        );
+        let md = "- [27] AXMenuBar\n  - [700] AXMenuBarItem \"Say \\\"Hi\\\"\" [actions=[press]]\n";
+        assert_eq!(
+            menu_path_in(md, 700),
+            Some(vec!["Say \\\"Hi\\\"".to_owned()])
+        );
+    }
+
+    // macOS and Windows rows do not escape; a title that ends in a
+    // backslash still reads as before.
+    #[test]
+    fn unescaped_rows_still_parse() {
+        assert_eq!(
+            identity_of(0, "AXButton \"C:\\\" [actions=[press]]"),
+            "0|AXButton|C:\\"
+        );
+        assert_eq!(
+            row_label("Button \"C:\\\" [actions=[invoke]]"),
+            "Button \"C:\\\""
+        );
+        assert_eq!(
+            identity_of(0, "Edit \"Address\" [value=\"C:\\Users\" id=addr actions=[]]"),
+            "0|Edit|addr"
+        );
+        assert_eq!(closing_quote("plain\" rest"), Some(5));
+        assert_eq!(closing_quote("C:\\"), None);
+    }
+
+    #[test]
+    fn an_id_written_inside_a_name_is_not_the_row_id() {
+        assert_eq!(
+            identity_of(0, "AXButton \"see id=fake\" [id=real actions=[press]]"),
+            "0|AXButton|real"
+        );
     }
 }
