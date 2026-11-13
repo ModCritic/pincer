@@ -6,8 +6,10 @@
 //! `pincer/src/main.rs`).  AppKit MUST run on the **main thread**.
 //! The two sides communicate through a global lock-free channel:
 //!
-//! - MCP tool calls → `send_command(OverlayCommand)` → `CMD_TX` (SyncSender)
-//! - main thread → `run_on_main_thread()` → drains `CMD_RX` every frame
+//! - MCP tool calls → `send_command(key, OverlayCommand)` → `CMD_TX`
+//!   (`SyncSender<OverlayMsg>`)
+//! - main thread → `run_on_main_thread()` → drains the receiver in
+//!   `CMD_RX_CELL` every frame
 //!
 //! The render loop uses a GCD background thread at ~60 fps.  Each tick it
 //! renders the animation state into a `tiny_skia::Pixmap`, converts to a
@@ -24,9 +26,9 @@
 //!
 //! Animation state + render pipeline live in `cursor_overlay::render_state`
 //! (`RenderStateCore`, `tick_motion`, `apply_command_base`,
-//! `render_frame`).  macOS uses the hardcoded Swift reference constants
-//! (peakSpeed=900, springK=400, overshoot=0.8) and the sentinel-snap
-//! variants of MoveTo / ClickPulse — see the wrapper around
+//! `render_frame`).  macOS drives it with each cursor's `MotionConfig`
+//! (`current_motion`: defaults, saved config and set_agent_cursor_motion
+//! overrides) and the sentinel-snap variants of MoveTo / ClickPulse; see the wrapper around
 //! `apply_command_base` below.
 
 use std::collections::HashMap;

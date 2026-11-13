@@ -84,10 +84,10 @@ pub fn register_tools() -> ToolRegistry {
     register_tools_with_compat(false)
 }
 
-/// Same as `register_tools` but lets the caller pick the Claude Code
-/// computer-use compat mode. `compat=true` swaps the regular `screenshot`
-/// tool for the window-scoped variant (pid + window_id required,
-/// JPEG @ 85%, text note pointing at pixel tools).
+/// Same as `register_tools` but takes the Claude Code computer-use compat
+/// flag. `compat` has no effect: the `screenshot` tool it used to swap was
+/// removed, and `get_window_state` / `get_desktop_state` are the screenshot
+/// paths. It is accepted so older setup commands keep working.
 pub fn register_tools_with_compat(compat: bool) -> ToolRegistry {
     #[cfg(target_os = "macos")]
     {
@@ -108,10 +108,8 @@ pub fn register_tools_with_compat(compat: bool) -> ToolRegistry {
 /// `platform_macos::cursor::overlay::run_on_main_thread()` on the OS
 /// main thread to actually display the overlay.
 ///
-/// `compat=true` enables Claude Code computer-use compatibility mode:
-/// the regular `screenshot` tool is replaced by a window-scoped variant
-/// (pid + window_id required, JPEG @ 85%, text note pointing at pixel
-/// tools). See `tools::screenshot_compat`.
+/// `compat` is accepted for older setup commands and has no effect (the
+/// `screenshot` tool it used to swap was removed).
 pub fn register_tools_with_cursor(
     cfg: cursor_overlay::CursorConfig,
     compat: bool,

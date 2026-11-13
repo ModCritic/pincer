@@ -48,7 +48,7 @@ fn def() -> &'static ToolDef {
         name: "set_value".into(),
         description: "Set an element's value by `element_token`. A popup button / select dropdown: selects the menu item whose title or value matches `value` (case-insensitive). Safari `<select>` is set through the DOM; AppKit and Chromium popups list items only while open, so the menu is opened, the item pressed and the menu closed again (in the background the user's front window keeps key focus). An unknown value lists the options. Any other element: writes AXValue (sliders, steppers, date pickers, native text fields).\n\
             \n\
-            A Finder file name cell (list or icon view, not being edited) is renamed through Finder's scripting interface with Finder left in the background, and the new name is read back from disk; the value is the full new name with its extension. macOS asks the user once to allow Pincer to control Finder. Finder's Get Info `Name` field is refused with `file_name_needs_rename`. For free-form text in web inputs use `type_text_chars`: WebKit ignores AXValue writes.".into(),
+            A Finder file name cell (list or icon view, not being edited) is renamed through Finder's scripting interface with Finder left in the background, and the new name is read back from disk; the value is the full new name with its extension. macOS asks the user once to allow Pincer to control Finder. Finder's Get Info `Name` field is refused with `file_name_needs_rename`. For free-form text in web inputs use type_text (or browser_type for a browser tab): WebKit ignores AXValue writes.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "required": ["value"],

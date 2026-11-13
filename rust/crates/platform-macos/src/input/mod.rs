@@ -1,7 +1,7 @@
 //! Background input synthesis for macOS.
 //!
 //! Two strategies:
-//! 1. **AX action** (`element_index` path): `AXUIElementPerformAction` — pure
+//! 1. **AX action** (`element_token` path): `AXUIElementPerformAction`. Pure
 //!    RPC, works on hidden/backgrounded windows, no cursor move, no focus steal.
 //! 2. **CGEvent / SkyLight** (`x, y` path): synthesize CGEvents and post them
 //!    to the target pid. Prefers `SLEventPostToPid` (SkyLight SPI) over the

@@ -21,9 +21,9 @@ mod set_value;
 mod set_window_frame;
 mod type_text;
 // `screenshot` / `screenshot_compat` modules removed in PR #1692 —
-// `get_window_state` is the canonical screenshot path. The capture functions they wrapped (ScreenCaptureKit, CGWindow,
-// etc.) live elsewhere under PincerCore::Capture and are reached
-// through GetWindowStateTool.
+// `get_window_state` is the canonical screenshot path. The capture functions
+// they wrapped (ScreenCaptureKit, CGWindow, etc.) live in `crate::capture`
+// and are reached through `get_window_state`.
 mod check_permissions;
 mod cursor_tools;
 mod desktop_pointer_guard;
@@ -269,7 +269,7 @@ pub use pincer_core::snapshot_store::ZoomContext;
 /// restores the prior frontmost (see
 /// [`crate::input::skylight::with_foreground_assist`]). It is the only way
 /// `click` reaches a foreground rung and is orthogonal to addressing
-/// (`element_index` vs `x/y`, which selects AX vs pixel).
+/// (`element_token` vs `x/y`, which selects AX vs pixel).
 pub use pincer_core::delivery::DeliveryMode;
 
 /// Convert a pure background-input refusal into the structured refusal result
@@ -300,9 +300,6 @@ pub(crate) fn background_refusal_result(
     .with_structured(structured)
 }
 
-/// Exclusive per-process ownership of one background mutation. Callers must
-/// keep this value alive through actuator dispatch, focus restoration, and
-/// target-bound verification.
 /// The window a pid-only call means: the app's focused window, else its
 /// frontmost on-screen window. Fills `window_id` for tools that need one
 /// when the caller named only the app's pid.
@@ -336,6 +333,9 @@ pub(crate) fn default_window_for_pid(args: &mut serde_json::Value) {
     }
 }
 
+/// Exclusive per-process ownership of one background mutation. Callers must
+/// keep this value alive through actuator dispatch, focus restoration, and
+/// target-bound verification.
 pub(crate) struct BackgroundMutationLease {
     pid: i32,
     _guard: tokio::sync::OwnedMutexGuard<()>,
@@ -779,7 +779,7 @@ pub struct ToolState {
     /// Per-MCP-session in-memory config overrides layered over `config`.
     pub session_config: Arc<SessionConfigRegistry>,
     /// Open CDP connections, one per port, reused across `insert_text` /
-    /// `type_keystrokes` calls instead of reconnecting fresh every time —
+    /// `dispatch_keystrokes` calls instead of reconnecting fresh every time;
     /// see `CdpSessionCache` for why (Chrome's "allow remote debugging"
     /// popup fires on every new connection, not once per session).
     pub cdp_sessions: Arc<crate::browser::CdpSessionCache>,
@@ -901,10 +901,9 @@ pub(crate) fn cursor_overlay_unavailable() -> pincer_core::protocol::ToolResult 
     }))
 }
 
-/// Register all macOS tools into the registry. `compat=true` swaps the
-/// regular `screenshot` tool for the Claude Code computer-use compat
-/// variant — same name, stricter args, window-scoped JPEG @ 85% + a text
-/// note telling the caller to use pixel-addressed tools.
+/// Register all macOS tools into the registry. `compat` is accepted for
+/// older setup commands and has no effect (the `screenshot` tool it used
+/// to swap was removed).
 pub fn register_all(
     registry: &mut ToolRegistry,
     compat: bool,
@@ -1107,13 +1106,11 @@ pub fn register_all(
     registry.register(Box::new(zoom::ZoomTool {
         state: state.clone(),
     }));
-    // `type_text_chars` is intentionally NOT registered — Swift treats it as
-    // a deprecated alias for `type_text` resolved at invoke time in
-    // mcp-server's `ToolRegistry::invoke`. Keeping it out of the registry
-    // means it doesn't show up in `tools/list` either, matching Swift's
-    // ToolRegistry.swift (`type_text_chars` not in `handlers`) and the
-    // platform-windows::build_registry which uses the same convention.
-    // Touch the struct so it stays in this crate for the alias resolver.
+    // `type_text_chars` is intentionally NOT registered: it is a deprecated
+    // alias that `pincer_core::tool::ToolRegistry::invoke` rewrites to
+    // `type_text`, so it never shows up in `tools/list` (as in upstream's
+    // ToolRegistry.swift and platform-windows::build_registry). Nothing
+    // calls the struct; the reference below only keeps it compiling.
     let _: &type_text_chars::TypeTextCharsTool =
         &type_text_chars::TypeTextCharsTool::new(state.clone());
     let browser_engine = pincer_core::browser::BrowserEngine::new_with_runtime_services(

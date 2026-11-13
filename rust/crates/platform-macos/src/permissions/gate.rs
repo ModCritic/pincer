@@ -281,9 +281,10 @@ pub struct GateTelemetryContext {
 }
 
 /// Bounded progress signals emitted while an interactive permissions-gate
-/// episode is in flight. The binary owns telemetry delivery; this platform
-/// module reports only content-free state transitions plus the existing
-/// bounded gate context.
+/// episode is in flight, for an optional observer. This platform module
+/// reports only content-free state transitions plus the existing bounded
+/// gate context. Telemetry was removed, so nothing in this workspace
+/// consumes them today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GateProgress {
     Started,
@@ -294,7 +295,8 @@ fn has_internal_arg(value: &str) -> bool {
     std::env::args_os().any(|arg| arg == value)
 }
 
-/// Return only the bounded state needed by the binary's telemetry layer.
+/// Return only the bounded gate state. Its telemetry consumer was removed;
+/// nothing in this workspace reads it today.
 pub fn telemetry_context() -> GateTelemetryContext {
     let engaged = GATE_ENGAGED.load(Ordering::Relaxed);
     let missing_accessibility = GATE_MISSING_ACCESSIBILITY.load(Ordering::Relaxed);
@@ -501,7 +503,7 @@ fn progress_for_presentation(presentation: PanelPresentation) -> Option<GateProg
 /// [`run_if_needed`] — see comments at the call site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PanelPresentation {
-    /// Panel could not be shown (opt-out env var, bare-binary launch,
+    /// Panel could not be shown (`PINCER_PERMISSIONS_PANEL` not set, bare-binary launch,
     /// headless, etc.). Caller should fall back to the terminal banner.
     NotShown,
     /// Panel shown; user clicked "Open System Settings".

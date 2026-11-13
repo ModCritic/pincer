@@ -1,7 +1,7 @@
 //! AX tree walker: produces the treeMarkdown string and element cache.
 //!
-//! Format (matching libs/cua-driver exactly):
-//!   `INDENT- [N] AXRole "Title" [value="..." actions=[...]]`
+//! Format (upstream's layout, since extended):
+//!   `INDENT- [N] AXRole "Title" = "value" (description) [id=... help="..." actions=[...]]`
 //!   `INDENT- AXStaticText = "value"`  (non-indexed)
 //!
 //! Rules (from pincer reference):
@@ -648,7 +648,7 @@ unsafe fn walk_element(
 
     // Track this node as the parent for its descendants only when it was
     // assigned an element_index (mirrors what the markdown shows: only
-    // indexed rows are addressable in click(element_index=N)).
+    // indexed rows are addressable by element_token).
     let next_parent = node.element_index.or(parent_index);
 
     // A closed menu of the menu bar stays collapsed when the caller asked for

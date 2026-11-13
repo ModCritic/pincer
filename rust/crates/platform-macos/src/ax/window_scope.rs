@@ -7,7 +7,7 @@
 //! **Structural invariant:** the walk set is non-empty ONLY for
 //! [`WindowScope::Matched`]. Every failure variant walks nothing, so no
 //! unresolved scope can produce a healthy-looking tree of some *other* surface
-//! (the app's menu bar) that a caller would then click by `element_index`.
+//! (the app's menu bar) that a caller would then click by `element_token`.
 
 use crate::windows::WindowOwner;
 

@@ -52,7 +52,7 @@ impl Tool for GetConfigTool {
         };
         // Report the CALLING session's own cursor enabled-state, not a
         // nondeterministic HashMap.first(). Resolve the same key the click /
-        // cursor tools use (cursor_id > _session_id > "default"); fall back to
+        // cursor tools use (session > _session_id > "default"); fall back to
         // the seeded "default" cursor when this session hasn't materialised its
         // own cursor yet, and finally to `true` (the overlay default).
         let cursor_key = super::cursor_tools::resolve_cursor_key(&args);

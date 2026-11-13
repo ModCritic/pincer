@@ -50,11 +50,8 @@ const kCGNullWindowID: u32 = 0;
 
 // ── Internal CGWindowInfo parsing ─────────────────────────────────────────────
 //
-// We use `system_profiler` workaround via `CGWindowListCopyWindowInfo` which
-// returns a plist-like structure. The simplest cross-compile-safe approach
-// is to dump via `osascript` or use the Objective-C runtime.
-//
-// For the initial version we use the `core-foundation` crate + direct C linkage.
+// We call `CGWindowListCopyWindowInfo`, which returns a plist-like
+// structure, directly through the `core-foundation` crate and C linkage.
 
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {

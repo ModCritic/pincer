@@ -3,8 +3,8 @@
 //! # AX element indexing
 //! Every *actionable* element in the tree is assigned an `element_index` (0-based,
 //! depth-first). The index is stable within a single `get_window_state` snapshot
-//! and is passed to `click`, `type_text`, etc. to identify the target element
-//! without requiring pixel coordinates.
+//! and is carried by the `element_token` (`<snapshot_id>:N`) passed to `click`,
+//! `type_text`, etc. to identify the target element without pixel coordinates.
 //!
 //! # Tree format (treeMarkdown)
 //! ```text

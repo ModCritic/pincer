@@ -7,8 +7,9 @@
 //!
 //! The gate is a Rust port of Swift's `PermissionsGate` (SwiftUI panel).
 //! Two presentation surfaces:
-//! - native NSPanel (`panel`, Phase 1+) — used when the daemon is launched
-//!   from the bundled `.app` and the env-var opt-out is not set;
+//! - native NSPanel (`panel`, Phase 1+): opt-in, used only when
+//!   `PINCER_PERMISSIONS_PANEL` is on and the daemon runs from the bundled
+//!   `.app` on the main thread;
 //! - terminal banner (`gate::wait_for_grants`) — fallback for bare-binary
 //!   invocations, headless environments, CI, and explicit opt-outs.
 //!

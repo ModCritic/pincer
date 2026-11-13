@@ -50,8 +50,8 @@ fn def() -> &'static ToolDef {
             "properties": {
                 "session": { "type": "string", "description": "For multi-call work, prefer a short public session label and repeat it on every call that accepts it. Omit it to use the authenticated transport's implicit lifecycle session." },
                 "pid":           { "type": "integer", "description": "Target process ID. Optional with element_token (the token carries the pid)." },
-                "x":             { "type": "number",  "description": "Screen X coordinate (pixel path)." },
-                "y":             { "type": "number",  "description": "Screen Y coordinate (pixel path)." },
+                "x":             { "type": "number",  "description": "X in window-local screenshot pixels (get_window_state PNG)." },
+                "y":             { "type": "number",  "description": "Y in window-local screenshot pixels (get_window_state PNG)." },
                 "window_id":     { "type": "integer", "description": "CGWindowID. Omit when element_token is supplied (the token carries it)." },
                 "element_token": pincer_core::tool_schema::element_token_schema(),
                 "delivery_mode": pincer_core::tool_schema::delivery_mode_schema()

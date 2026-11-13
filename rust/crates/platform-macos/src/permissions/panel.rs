@@ -42,8 +42,8 @@
 //! threads spawn or NSApp.run() is called by the cursor overlay, so
 //! the gate already runs on the main thread. `panel_enabled()`
 //! double-checks and falls back to the terminal banner if anything
-//! is off (not main thread, headless, opt-out env var, non-`.app`
-//! invocation).
+//! is off (not main thread, headless, `PINCER_PERMISSIONS_PANEL` not set,
+//! non-`.app` invocation).
 //!
 //! All UI updates run on the main thread because `NSTimer` callbacks
 //! dispatch through the main run loop. We do not touch UI from any

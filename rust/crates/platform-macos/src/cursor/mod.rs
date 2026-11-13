@@ -3,7 +3,8 @@
 //! Public surface:
 //! - `overlay::init(cfg)` — called from `register_tools_with_cursor`
 //! - `overlay::run_on_main_thread()` — called from `main()` on the main thread
-//! - `overlay::send_command(cmd)` — called from tool implementations
+//! - `overlay::send_command(key, cmd)` / `overlay::send_command_default(cmd)`:
+//!   called from tool implementations
 
 pub mod overlay;
 /// System cursor shape reporting (what the OS draws, not what Pincer draws).

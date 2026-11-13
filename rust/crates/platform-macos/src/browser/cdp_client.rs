@@ -1,5 +1,5 @@
 //! Legacy-compatible CDP client for Electron and other Chromium apps.
-//! HTTP discovery stays compatible with the page tool; WebSocket calls use
+//! HTTP discovery predates the browser_* tools; WebSocket calls use
 //! pincer-core's shared event-aware `CdpConnection` transport.
 
 use pincer_core::browser::cdp_ws::CdpConnection;
@@ -114,11 +114,11 @@ impl CdpClient {
 ///
 /// This exists because Chrome's own "allow remote debugging" toggle
 /// (`chrome://inspect/#remote-debugging`, the only way to reach a user's
-/// real/default profile — see `resolve_cdp_port` in `tools/page.rs`) pops up
+/// real/default profile) pops up
 /// a live "Allow remote debugging?" confirmation on every *new* WebSocket
 /// connection to the browser endpoint — confirmed by testing live,
 /// repeatedly, against a real Chrome session: three separate
-/// `insert_text`/`type_keystrokes` calls, each opening its own connection,
+/// `insert_text`/`dispatch_keystrokes` calls, each opening its own connection,
 /// each got its own popup. Reusing one already-approved connection across
 /// calls (re-attaching to a different tab on it via `Target.getTargets` +
 /// `Target.attachToTarget` when needed, never opening a new socket) avoids

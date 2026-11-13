@@ -18,7 +18,7 @@
 //! report success while the shell sees nothing. We go straight to
 //! CGEvent key-event synthesis (`path: "key_events"`).
 //!
-//! Use `type_text_chars` when you explicitly need per-character pacing
+//! Use `delay_ms` when you explicitly need per-character pacing
 //! (e.g., to trigger live-search debounce handlers).
 
 use async_trait::async_trait;
@@ -59,7 +59,7 @@ fn def() -> &'static ToolDef {
         name: "type_text".into(),
         description: "Insert text via `AXSetAttribute(kAXSelectedText)` into the element given by `element_token`, or the pid's focused element. Does not press keys: use `press_key` / `hotkey` for Return, Escape, arrows. If AX insertion is unsupported (Chromium/Electron), it falls back to CGEvent typing when the route fits the transport budget; longer routes are refused with a safe chunk size.\n\
             \n\
-            Web content (browser tabs, Slack, VS Code): AXValue is not proof the DOM saw the text, so the result is `effect:\"unverifiable\"` and Electron web content refuses background delivery. For a browser tab use the `page` tool. For an embedded web view pass `x, y` (no element_token) to pixel-click the field then type in one call; a pixel click will not reliably open a closed control, so AX-press it open first. Confirm from the screenshot, and use `delivery_mode:\"foreground\"` only if background still drops the text.".into(),
+            Web content (browser tabs, Slack, VS Code): AXValue is not proof the DOM saw the text, so the result is `effect:\"unverifiable\"` and Electron web content refuses background delivery. For a browser tab use the browser tools (get_browser_state, then browser_type). For an embedded web view pass `x, y` (no element_token) to pixel-click the field then type in one call; a pixel click will not reliably open a closed control, so AX-press it open first. Confirm from the screenshot, and use `delivery_mode:\"foreground\"` only if background still drops the text.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "required": ["text"],
@@ -459,8 +459,8 @@ impl Tool for TypeTextTool {
                         "The pixel-focus rung already ran, so do not repeat it; verify the \
                          result via the screenshot."
                     } else {
-                        "For a browser tab use the `page` tool (it drives the DOM); for an \
-                         embedded web view, re-type with the px form (x,y)."
+                        "For a browser tab use the browser tools (get_browser_state, then \
+                         browser_type); for an embedded web view, re-type with the px form (x,y)."
                     };
                     (
                         "📨 Sent (unverified)",
@@ -509,7 +509,7 @@ impl Tool for TypeTextTool {
                     }
                     if untrusted_web_readback {
                         // Web-content AXValue read-back. A real browser TAB → the
-                        // `page` tool (drives the DOM via CDP) is the reliable rung;
+                        // browser tools (drive the DOM via CDP) are the reliable rung;
                         // an embedded web view (Electron, no CDP) → the element px
                         // action. It's a renderer/DOM-focus problem, never a
                         // foreground one.
@@ -527,14 +527,9 @@ impl Tool for TypeTextTool {
                                     "page",
                                     "Browser web content — AXValue read-back cannot prove \
                                  that the DOM observed the input (and AX type_text on a \
-                                 contenteditable is racy). Drive the tab's DOM with the \
-                                 `page` tool: execute_javascript + el.value/innerText for a \
-                                 plain input; for a rich-text contenteditable \
-                                 (Draft.js/Lexical/Slate-style editors can silently discard \
-                                 a one-shot DOM write on their next render) try insert_text \
-                                 first (one CDP call, cheap), then type_keystrokes if that \
-                                 also gets discarded (real per-character keyboard events, \
-                                 slower but most durable). Or confirm via the screenshot.",
+                                 contenteditable is racy). Type into the tab with the \
+                                 browser tools (get_browser_state, then browser_type), or \
+                                 confirm via the screenshot.",
                                 )),
                                 _ => None,
                             };

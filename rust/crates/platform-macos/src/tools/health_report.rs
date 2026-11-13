@@ -354,7 +354,7 @@ fn sw_vers_product_version() -> Option<String> {
     }
 }
 
-/// `arm64` / `x86_64`. Matches the label scheme used by `telemetry::arch`.
+/// `arm64` / `x86_64`.
 fn arch_label() -> &'static str {
     match std::env::consts::ARCH {
         "aarch64" => "arm64",

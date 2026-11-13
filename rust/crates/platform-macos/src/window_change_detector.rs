@@ -451,7 +451,7 @@ impl Snapshot {
     /// over the blocking `detect()`.
     pub async fn detect_async(self) -> Changes {
         // Move the Snapshot (and its embedded lease) onto the blocking
-        // thread; the lease's Drop runs there when detect_with returns.
+        // thread; the lease's Drop runs there when detect_bounded_with returns.
         tokio::task::spawn_blocking(move || self.detect())
             .await
             .unwrap_or_else(|_| Changes::not_polled())
@@ -630,7 +630,7 @@ mod tests {
     }
 
     /// Regression for trycua/cua#1592 Bug 2. This exercises the same `diff`
-    /// path used by `detect_with`, rather than separately testing a predicate
+    /// path used by `detect_bounded_with`, rather than separately testing a predicate
     /// that production could accidentally stop applying.
     #[test]
     fn diff_excludes_new_windows_owned_by_the_daemon() {

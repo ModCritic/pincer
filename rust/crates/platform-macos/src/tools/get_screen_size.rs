@@ -16,7 +16,7 @@ fn def() -> &'static ToolDef {
         // Matches `GetScreenSizeTool.swift` description verbatim.
         name: "get_screen_size".into(),
         description: "Return the logical size of the main display in points plus its backing \
-            scale factor. Agents click in points; Retina displays have scale_factor 2.0. \
+            scale factor. Pixel actions take screenshot pixels; Retina displays have scale_factor 2.0. \
             Requires no TCC permissions."
             .into(),
         input_schema: serde_json::json!({"type":"object","properties":{
