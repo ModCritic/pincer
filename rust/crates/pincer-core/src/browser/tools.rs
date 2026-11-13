@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use crate::protocol::{Content, ToolResult};
 use crate::tool::{ProtectedResourceOwnership, Tool, ToolDef, ToolRegistry};
 use crate::tool_args::ArgsExt;
+use crate::untrusted_text;
 
 use super::cdp_ws::{CallOrDialog, CdpConnection, CdpDialogState};
 use super::download::BrowserDownloadTool;
@@ -51,6 +52,23 @@ pub fn register_browser_tools(engine: &Arc<BrowserEngine>, registry: &mut ToolRe
 }
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
+
+// Bounds for page-authored strings in results (survey finding BROWSE-7). A
+// page sets its own URL through `history.pushState` (Chrome accepts about
+// 2 MB), its title, and the attributes a dom_refs_v1 label joins; a bind
+// result lists every tab, background tabs included.
+const MAX_RESULT_URL_CHARS: usize = 1_000;
+const MAX_SUMMARY_URL_CHARS: usize = 200;
+const MAX_RESULT_TITLE_CHARS: usize = 300;
+const MAX_REF_LABEL_CHARS: usize = 1_000;
+const MAX_REF_NODE_NAME_CHARS: usize = 100;
+
+/// Page-authored text for one result field: cut to `max_chars` with the
+/// original length stated, then controls and invisible characters shown as
+/// `\u{hex}` escapes.
+fn page_text(text: &str, max_chars: usize) -> String {
+    untrusted_text::invisible(&untrusted_text::clip(text, max_chars)).into_owned()
+}
 
 /// The public caller session id, falling back to the daemon's internal mirror.
 fn session_of(args: &Value) -> String {
@@ -458,7 +476,7 @@ impl Tool for GetBrowserStateTool {
                         let mut summary = format!(
                             "semantic snapshot p{} of {}: {} action ref(s), {} content ref(s)",
                             outcome.snapshot_id,
-                            outcome.url,
+                            page_text(&outcome.url, MAX_SUMMARY_URL_CHARS),
                             refs.len(),
                             content_refs.len()
                         );
@@ -491,8 +509,8 @@ impl Tool for GetBrowserStateTool {
                                 "continuation": outcome.continuation,
                             },
                             "page": {
-                                "url": outcome.url,
-                                "title": outcome.title,
+                                "url": page_text(&outcome.url, MAX_RESULT_URL_CHARS),
+                                "title": page_text(&outcome.title, MAX_RESULT_TITLE_CHARS),
                             },
                             "outline": outcome.outline,
                             "refs": refs,
@@ -535,8 +553,11 @@ impl Tool for GetBrowserStateTool {
                         .map(|(ext, entry)| {
                             json!({
                                 "ref": ext,
-                                "node": entry.node_name,
-                                "label": entry.label,
+                                "node": page_text(&entry.node_name, MAX_REF_NODE_NAME_CHARS),
+                                "label": entry
+                                    .label
+                                    .as_deref()
+                                    .map(|label| page_text(label, MAX_REF_LABEL_CHARS)),
                                 "frame": entry.frame.kind.as_str(),
                             })
                         })
@@ -544,7 +565,7 @@ impl Tool for GetBrowserStateTool {
                     ToolResult::text(format!(
                         "snapshot p{} of {}: {} interactive element(s)",
                         outcome.snapshot_id,
-                        outcome.url,
+                        page_text(&outcome.url, MAX_SUMMARY_URL_CHARS),
                         ref_list.len()
                     ))
                     .with_structured(json!({
@@ -553,7 +574,7 @@ impl Tool for GetBrowserStateTool {
                         "target_id": target_id,
                         "tab_id": tab_id,
                         "snapshot_id": format!("p{}", outcome.snapshot_id),
-                        "url": outcome.url,
+                        "url": page_text(&outcome.url, MAX_RESULT_URL_CHARS),
                         "refs": ref_list,
                         "truncated": outcome.truncated,
                         "oopif": {
@@ -604,8 +625,8 @@ impl Tool for GetBrowserStateTool {
                     .map(|t| {
                         json!({
                             "tab_id": t.tab_id,
-                            "title": t.title,
-                            "url": t.url,
+                            "title": page_text(&t.title, MAX_RESULT_TITLE_CHARS),
+                            "url": page_text(&t.url, MAX_RESULT_URL_CHARS),
                             "active": t.active,
                         })
                     })
@@ -632,7 +653,7 @@ impl Tool for GetBrowserStateTool {
                     "endpoint_transport": record.endpoint_transport,
                     "endpoint_access_class": record.endpoint_access_class,
                     "mutation_allowed": record.quality == BindingQuality::Exact,
-                    "native_title": record.native_title,
+                    "native_title": page_text(&record.native_title, MAX_RESULT_TITLE_CHARS),
                     "tabs": tabs,
                 }))
             }
@@ -2382,7 +2403,7 @@ impl BrowserDialogTool {
         Self {
             def: ToolDef {
                 name: "browser_dialog".into(),
-                description: "Inspect or resolve a page-owned JavaScript alert, confirm, prompt, or beforeunload dialog on one exactly-bound tab. Never handles browser permission UI, extension UI, native dialogs, or file pickers. inspect returns kind, message, a prompt's default_prompt, and the dialog_id. accept and dismiss need the current dialog_id: the one inspect returns, or the one the browser_click that opened the dialog already printed (\"the click opened an alert dialog (dialog-1)\"); a stale id is refused. Linux refuses accept and dismiss in the default background delivery: pass delivery_mode \"foreground\".".into(),
+                description: "Inspect or resolve a page-owned JavaScript alert, confirm, prompt, or beforeunload dialog on one exactly-bound tab. Never handles browser permission UI, extension UI, native dialogs, or file pickers. inspect returns kind, the page's message, a prompt's default_prompt, the origin of the frame that opened the dialog, and the dialog_id. accept and dismiss need the current dialog_id: the one inspect returns, or the one the browser_click that opened the dialog already printed (\"the click opened an alert dialog (dialog-1)\"); a stale id is refused. Linux refuses accept and dismiss in the default background delivery: pass delivery_mode \"foreground\".".into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -2530,14 +2551,17 @@ impl Tool for BrowserDialogTool {
             // same class as a snapshot's page text. They go only in the
             // structured result, which the MCP client shows; the text line
             // stays generic because session recordings keep it as the
-            // result summary.
+            // result summary. `source` and the opener's `origin` say who
+            // wrote them, and escaping keeps controls and invisible
+            // characters visible (survey findings BROWSE-2, CDP-7).
             let mut structured = json!({
                 "status": "ok", "target_id": target_id, "tab_id": tab_id,
                 "present": true, "dialog_id": dialog_id, "kind": dialog.kind,
-                "message": dialog.message,
+                "source": "page", "origin": dialog.origin,
+                "message": untrusted_text::block(&dialog.message),
             });
             if let Some(default_prompt) = &dialog.default_prompt {
-                structured["default_prompt"] = json!(default_prompt);
+                structured["default_prompt"] = json!(untrusted_text::inline(default_prompt));
             }
             return ToolResult::text(format!(
                 "{} dialog ({dialog_id}) is open in {tab_id}",
@@ -2602,7 +2626,7 @@ impl BrowserSetInputFilesTool {
         Self {
             def: ToolDef {
                 name: "browser_set_input_files".into(),
-                description: "Assign one or more absolute local files to a page's file input through CDP, without the native file picker. Pass the ref whose actions include upload: a semantic snapshot lists an <input type=file> as a button (for example button \"Attachment\": No file chosen, actions [click, upload, pointer]), and other refs are refused. Rejects symlinks and non-regular files. Returns the assigned file count, never the paths.".into(),
+                description: "Assign one or more absolute local files to a page's file input through CDP, without the native file picker. Pass the ref whose actions include upload: a semantic snapshot lists an <input type=file> as a button (for example button \"Attachment\": \"No file chosen\", actions [click, upload, pointer]), and other refs are refused. Rejects symlinks and non-regular files. Returns the assigned file count, never the paths.".into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {

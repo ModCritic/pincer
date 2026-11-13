@@ -22,6 +22,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, watch, Mutex};
+use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -85,19 +86,36 @@ impl CdpMethodPolicy {
 /// to loopback — is rejected; the endpoint contract is a literal
 /// loopback address handed over by the platform adapter.
 pub fn validate_loopback_ws_url(url: &str) -> Result<(), String> {
-    let rest = url
-        .strip_prefix("ws://")
-        .ok_or_else(|| format!("endpoint URL must use the ws:// scheme: {url}"))?;
-    let authority = rest.split('/').next().unwrap_or("");
-    let host = if let Some(bracketed) = authority.strip_prefix('[') {
-        // [::1]:9222 form.
-        bracketed.split(']').next().unwrap_or("")
-    } else {
-        authority.rsplit_once(':').map_or(authority, |(h, _)| h)
-    };
-    match host {
-        "127.0.0.1" | "::1" | "localhost" => Ok(()),
-        other => Err(format!("endpoint host {other:?} is not loopback: {url}")),
+    parse_loopback_ws_url(url).map(|_| ())
+}
+
+/// Parse `url` with the parser the dialer uses (tungstenite reads the host
+/// and port through `http::Uri`) and accept it only as a plain-`ws` URL
+/// whose host is exactly `127.0.0.1`, `[::1]` or `localhost`, with an
+/// explicit nonzero port and no userinfo. `http::Uri` takes the host after
+/// the last `@`, so `ws://127.0.0.1:@evil.example/x` dials `evil.example`
+/// (survey finding CDP-3), and a missing port dials 80. `localhost` stays
+/// because the platform adapters accept it in discovered endpoint URLs.
+fn parse_loopback_ws_url(url: &str) -> Result<Uri, String> {
+    if !url.starts_with("ws://") {
+        return Err(format!("endpoint URL must use the ws:// scheme: {url}"));
+    }
+    let uri: Uri = url
+        .parse()
+        .map_err(|_| format!("endpoint URL does not parse: {url}"))?;
+    let authority = uri
+        .authority()
+        .ok_or_else(|| format!("endpoint URL names no host: {url}"))?;
+    if authority.as_str().contains('@') {
+        return Err(format!("endpoint URL must not carry userinfo: {url}"));
+    }
+    let host = authority.host();
+    if !matches!(host, "127.0.0.1" | "[::1]" | "localhost") {
+        return Err(format!("endpoint host {host:?} is not loopback: {url}"));
+    }
+    match authority.port_u16() {
+        Some(port) if port != 0 => Ok(uri),
+        _ => Err(format!("endpoint URL must name a nonzero port: {url}")),
     }
 }
 
@@ -111,11 +129,12 @@ pub struct CdpEvent {
     pub params: Value,
 }
 
-/// Bounded state for one page-owned JavaScript dialog. The page URL is not
-/// retained. The message and a prompt's default text are kept, cut to
-/// [`MAX_DIALOG_TEXT_CHARS`], only so `browser_dialog` inspect can show them
-/// to the caller (the same page-authored text a snapshot shows); `Debug`
-/// leaves them out so logs never carry page text.
+/// Bounded state for one page-owned JavaScript dialog. Of the opener's URL
+/// only its origin is retained. The message and a prompt's default text are
+/// kept, cut to [`MAX_DIALOG_TEXT_CHARS`], only so `browser_dialog` inspect
+/// can show them to the caller (the same page-authored text a snapshot
+/// shows); `Debug` leaves them and the origin out so logs never carry page
+/// text or sites.
 #[derive(Clone, PartialEq, Eq)]
 pub struct CdpDialogState {
     pub generation: u64,
@@ -124,6 +143,10 @@ pub struct CdpDialogState {
     pub message: String,
     /// A prompt's default answer; `None` for other kinds.
     pub default_prompt: Option<String>,
+    /// The origin of the frame that opened the dialog (see
+    /// `dialog_origin`), so a third-party frame's dialog is not mistaken
+    /// for the main site's. `None` when the event named no URL.
+    pub origin: Option<String>,
 }
 
 impl std::fmt::Debug for CdpDialogState {
@@ -140,13 +163,31 @@ impl std::fmt::Debug for CdpDialogState {
 /// Longest dialog message or prompt default kept, in characters.
 pub const MAX_DIALOG_TEXT_CHARS: usize = 2_000;
 
+/// Dialog text cut to [`MAX_DIALOG_TEXT_CHARS`], with the original length
+/// stated after the cut.
 fn bounded_dialog_text(value: Option<&Value>) -> String {
-    value
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .take(MAX_DIALOG_TEXT_CHARS)
-        .collect()
+    let text = value.and_then(Value::as_str).unwrap_or_default();
+    crate::untrusted_text::clip(text, MAX_DIALOG_TEXT_CHARS).into_owned()
+}
+
+/// The origin of a dialog opener's URL, never its path, query, fragment or
+/// userinfo: `scheme://host[:port]` for web URLs (the port only when it is
+/// not the scheme's default), `scheme://host` for other URLs with a host
+/// such as `chrome-extension://<id>`, and the scheme alone (`data:`,
+/// `about:`, `file:`) otherwise.
+fn dialog_origin(url: Option<&Value>) -> Option<String> {
+    let parsed = url::Url::parse(url?.as_str()?).ok()?;
+    let origin = parsed.origin();
+    Some(if origin.is_tuple() {
+        origin.ascii_serialization()
+    } else {
+        match parsed.host_str() {
+            Some(host) if !host.is_empty() && parsed.scheme() != "file" => {
+                format!("{}://{host}", parsed.scheme())
+            }
+            _ => format!("{}:", parsed.scheme()),
+        }
+    })
 }
 
 /// What [`CdpConnection::call_until_dialog`] ended with.
@@ -258,6 +299,7 @@ async fn read_loop(mut read: SplitStream<WsStream>, demux: Arc<Demux>) {
                                     default_prompt: (kind == "prompt").then(|| {
                                         bounded_dialog_text(event.params.get("defaultPrompt"))
                                     }),
+                                    origin: dialog_origin(event.params.get("url")),
                                 },
                             );
                             demux.dialog_opened.send_replace(generation);
@@ -299,9 +341,11 @@ impl Drop for CdpConnection {
 
 impl CdpConnection {
     pub async fn connect(ws_url: &str) -> anyhow::Result<Self> {
-        validate_loopback_ws_url(ws_url).map_err(|e| anyhow::anyhow!(e))?;
+        // Dial the URI that was checked, so the check and the dialer cannot
+        // read the string two ways.
+        let uri = parse_loopback_ws_url(ws_url).map_err(|e| anyhow::anyhow!(e))?;
         let (ws, _resp) =
-            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(ws_url))
+            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(uri))
                 .await
                 .map_err(|_| anyhow::anyhow!("CDP connect to {ws_url} timed out"))??;
         let (write, read) = ws.split();
@@ -1008,10 +1052,64 @@ mod tests {
             "ws://127.0.0.1:9222/devtools/browser/abc",
             "ws://localhost:9222/devtools/browser/abc",
             "ws://[::1]:9222/devtools/browser/abc",
-            "ws://127.0.0.1/devtools/browser/abc",
+            "ws://127.0.0.1:9222",
         ] {
             assert!(validate_loopback_ws_url(ok).is_ok(), "{ok}");
         }
+    }
+
+    /// Survey finding CDP-3 (2026-11-13): the check took the host before
+    /// any `@`, while the dialer connects to the host after the last `@`,
+    /// so a userinfo URL passed as loopback and dialed a remote host.
+    #[test]
+    fn userinfo_and_portless_urls_are_rejected() {
+        for bad in [
+            "ws://127.0.0.1:@evil.example/devtools/browser/x",
+            "ws://[::1]@evil.example:9222/x",
+            "ws://localhost:9222@evil.example/x",
+            "ws://user@127.0.0.1:9222/x",
+            // The dialer would fall back to port 80.
+            "ws://127.0.0.1/devtools/browser/abc",
+            "ws://127.0.0.1:/x",
+            "ws://127.0.0.1:0/x",
+        ] {
+            assert!(validate_loopback_ws_url(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn dialog_origin_keeps_scheme_host_and_port_only() {
+        let origin = |url: &str| dialog_origin(Some(&json!(url)));
+        assert_eq!(
+            origin("https://user:pw@pay.example:8443/a?token=1#f").as_deref(),
+            Some("https://pay.example:8443")
+        );
+        assert_eq!(origin("https://pay.example:443/a").as_deref(), Some("https://pay.example"));
+        assert_eq!(
+            origin("blob:https://pay.example/0d3c").as_deref(),
+            Some("https://pay.example")
+        );
+        assert_eq!(
+            origin("chrome-extension://abcdef/popup.html?x=1").as_deref(),
+            Some("chrome-extension://abcdef")
+        );
+        assert_eq!(origin("file:///home/u/secret.html").as_deref(), Some("file:"));
+        assert_eq!(origin("data:text/html,<script>").as_deref(), Some("data:"));
+        assert_eq!(origin("about:blank").as_deref(), Some("about:"));
+        assert_eq!(origin("not a url"), None);
+        assert_eq!(dialog_origin(None), None);
+    }
+
+    /// Pins how the dialer (tungstenite through the `http` crate) reads a
+    /// userinfo authority, which the check above must match.
+    #[test]
+    fn the_dialer_reads_the_host_after_the_userinfo() {
+        use tokio_tungstenite::tungstenite::http::Uri;
+        let uri: Uri = "ws://127.0.0.1:@evil.example/x".parse().unwrap();
+        assert_eq!(uri.host(), Some("evil.example"));
+        let uri: Uri = "ws://[::1]:9222/x".parse().unwrap();
+        assert_eq!(uri.host(), Some("[::1]"));
+        assert_eq!(uri.port_u16(), Some(9222));
     }
 
     #[test]
@@ -1425,12 +1523,47 @@ mod tests {
         assert_eq!(dialog.session_id, "tab-session-a");
         assert_eq!(dialog.message, "private dialog text");
         assert_eq!(dialog.default_prompt.as_deref(), Some("private default"));
+        assert_eq!(dialog.origin.as_deref(), Some("https://private.example"));
         // Logs never carry page text.
         assert!(!format!("{dialog:?}").contains("private"));
         conn.call(Some("tab-session-a"), "Dialog.close", json!({}))
             .await
             .unwrap();
         assert!(conn.dialog_state("page-target").is_none());
+    }
+
+    /// Survey findings BROWSE-7 and CDP-7 (2026-11-13): dialog text was cut
+    /// at the bound without saying so.
+    #[tokio::test]
+    async fn cut_dialog_text_states_its_original_length() {
+        let server = MockCdpServer::start(StdArc::new(|call| match call.method.as_str() {
+            "Dialog.open" => MockReply::ok(json!({})).with_events(vec![MockEvent {
+                method: "Page.javascriptDialogOpening".into(),
+                session_id: call.session_id.clone(),
+                params: json!({
+                    "type": "prompt",
+                    "message": "m".repeat(2_500),
+                    "defaultPrompt": "d".repeat(2_001),
+                    "url": "https://fixture.test/"
+                }),
+            }]),
+            _ => MockReply::ok(json!({})),
+        }))
+        .await;
+        let conn = CdpConnection::connect(&server.ws_url()).await.unwrap();
+        conn.register_dialog_session("tab-session-a", "page-target");
+        conn.call(Some("tab-session-a"), "Dialog.open", json!({}))
+            .await
+            .unwrap();
+        let dialog = conn.dialog_state("page-target").expect("dialog journaled");
+        assert_eq!(
+            dialog.message,
+            format!("{} ... (2500 chars)", "m".repeat(MAX_DIALOG_TEXT_CHARS))
+        );
+        assert_eq!(
+            dialog.default_prompt,
+            Some(format!("{} ... (2001 chars)", "d".repeat(MAX_DIALOG_TEXT_CHARS)))
+        );
     }
 
     // Regression for 2026-10-25: a click whose handler called confirm()

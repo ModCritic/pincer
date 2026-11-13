@@ -495,8 +495,8 @@ driver refuses that mode before dispatch; retry explicitly with
 ### File inputs
 
 Use a current semantic ref whose `actions` contains `upload` (a snapshot lists
-`<input type=file>` as a button, for example `button "Attachment": No file
-chosen` with actions `[click, upload, pointer]`), then call
+`<input type=file>` as a button, for example `button "Attachment": "No file
+chosen"` with actions `[click, upload, pointer]`), then call
 `browser_set_input_files` with one to 32 absolute regular-file paths. The tool
 rejects symlinks and directories, bypasses the native file picker, and returns
 only the assigned file count. Paths are redacted from trajectory arguments.
