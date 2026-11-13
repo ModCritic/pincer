@@ -2345,15 +2345,366 @@ mod appimage;
 mod launch_child;
 use launch_child::{LaunchExit, LaunchedChild};
 
-/// Spawn a launcher command line (an executable plus arguments, e.g. an XDG
-/// `Exec=` value with field codes stripped) in the background. The child's
+/// What one launch_app call starts, resolved once for the `process_launch`
+/// attestation and again, the same way, for the launch itself.
+#[derive(Debug, Clone)]
+enum LaunchPlan {
+    /// Exec one program.
+    Program {
+        /// The canonical path that is exec'd: the attested executable.
+        executable: std::path::PathBuf,
+        /// The launch command's words: an installed entry's Exec= (as
+        /// list_apps shows it) or the caller's launch_path. The first is
+        /// argv[0] as spelled.
+        command: Vec<String>,
+        /// The caller's `additional_arguments`, then its `urls`.
+        appended: Vec<String>,
+        /// The installed .desktop entry the launch resolved through.
+        entry: Option<crate::installed_apps::InstalledApp>,
+        /// The caller's urls, for the result's "Opened ..." note.
+        urls: Vec<String>,
+        /// The caller's spelling: its launch_path, bundle_id or name.
+        query: String,
+        options: bool,
+        argument_count: usize,
+    },
+    /// Open targets in their default apps with xdg-open.
+    Open {
+        executable: std::path::PathBuf,
+        targets: Vec<String>,
+        /// The caller's `name` when it was itself the first target.
+        named: Option<String>,
+        options: bool,
+    },
+}
+
+impl LaunchPlan {
+    /// The resource the `process_launch` adapter admits. Deterministic for
+    /// the same arguments and installed entries, so dispatch can re-prove it.
+    ///
+    /// xdg-open launches attest `installed_app: true` with no desktop entry:
+    /// each target opens in the default app the user installed for it.
+    /// A target that could run a program (an option, a .desktop file, an
+    /// executable file) is attested as an option instead.
+    fn scope(&self) -> Value {
+        match self {
+            Self::Program {
+                executable,
+                entry,
+                options,
+                argument_count,
+                ..
+            } => json!({
+                "kind": "program_launch",
+                "executable": executable.to_string_lossy(),
+                "installed_app": entry.is_some(),
+                "desktop_entry": entry.as_ref().map(|entry| entry.bundle_id.clone()),
+                "options": options,
+                "argument_count": argument_count,
+            }),
+            Self::Open {
+                executable,
+                targets,
+                options,
+                ..
+            } => json!({
+                "kind": "program_launch",
+                "executable": executable.to_string_lossy(),
+                "installed_app": true,
+                "desktop_entry": Value::Null,
+                "options": options,
+                "argument_count": targets.len(),
+            }),
+        }
+    }
+
+    /// Every string the caller or the entry puts on the command line, for
+    /// the debugger-switch guard.
+    fn words(&self) -> Vec<&str> {
+        match self {
+            Self::Program {
+                command, appended, ..
+            } => command.iter().chain(appended).map(String::as_str).collect(),
+            Self::Open { targets, .. } => targets.iter().map(String::as_str).collect(),
+        }
+    }
+}
+
+/// The installed entries a launch resolves against when a test installed a
+/// fixture on this thread; `None` reads the machine's own .desktop files.
+/// Read on the calling thread, before any blocking hand-off.
+fn launch_installed_fixture() -> Option<Vec<crate::installed_apps::InstalledApp>> {
+    #[cfg(test)]
+    {
+        TEST_INSTALLED_APPS.with(|apps| apps.borrow().clone())
+    }
+    #[cfg(not(test))]
+    {
+        None
+    }
+}
+
+/// [`plan_launch`] against the fixture, or the installed .desktop entries.
+fn plan_launch_with(
+    args: &Value,
+    fixture: Option<Vec<crate::installed_apps::InstalledApp>>,
+) -> Result<LaunchPlan, String> {
+    let installed = fixture.unwrap_or_else(crate::installed_apps::list_installed_apps);
+    plan_launch(args, &installed)
+}
+
+/// Resolve a launch_app call to the exact program it starts.
+///
+/// `launch_path` (highest precedence) runs as written, split on spaces; it
+/// counts as an installed app only when its words are exactly an entry's
+/// list_apps launch_path. `bundle_id` and `name` resolve only through
+/// installed .desktop entries and never run a program from PATH by name. A
+/// `name` that is a URL or an existing path, or `urls` alone, open with
+/// xdg-open.
+fn plan_launch(
+    args: &Value,
+    installed: &[crate::installed_apps::InstalledApp],
+) -> Result<LaunchPlan, String> {
+    use pincer_core::tool_args::ArgsExt;
+    let present = |key: &str| args.opt_str(key).filter(|value| !value.trim().is_empty());
+    let urls = args.str_array("urls");
+    let additional = args.str_array("additional_arguments");
+    // list_installed_apps orders by display name only, and equal names come
+    // out in hash order. Sort fully so the same call resolves the same way
+    // for attestation and dispatch.
+    let mut apps = installed.to_vec();
+    apps.sort_by(|a, b| {
+        (a.name.to_lowercase(), &a.bundle_id).cmp(&(b.name.to_lowercase(), &b.bundle_id))
+    });
+    let words = |command: &str| -> Vec<String> {
+        command.split_whitespace().map(str::to_owned).collect()
+    };
+
+    if let Some(launch_path) = present("launch_path") {
+        let command = words(&launch_path);
+        let entry = apps
+            .iter()
+            .find(|app| app.launch_path.split_whitespace().eq(command.iter().map(String::as_str)))
+            .cloned();
+        return program_plan(command, entry, additional, urls, launch_path.trim().to_owned());
+    }
+    if let Some(bundle_id) = present("bundle_id") {
+        let bundle_id = bundle_id.trim();
+        let entry = apps
+            .iter()
+            .find(|app| app.bundle_id == bundle_id)
+            .or_else(|| {
+                apps.iter()
+                    .find(|app| app.bundle_id.eq_ignore_ascii_case(bundle_id))
+            })
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "bundle_id '{bundle_id}' matches no installed .desktop application; call \
+                     list_apps and pass an app's bundle_id, name or launch_path"
+                )
+            })?;
+        let command = words(&entry.launch_path);
+        return program_plan(command, Some(entry), additional, urls, bundle_id.to_owned());
+    }
+    if let Some(name) = present("name") {
+        let name = name.trim().to_owned();
+        if let Some(entry) = match_installed_app(&apps, &name).cloned() {
+            let command = words(&entry.launch_path);
+            return program_plan(command, Some(entry), additional, urls, name);
+        }
+        if name.contains("://") || std::path::Path::new(&name).exists() {
+            let mut targets = vec![name.clone()];
+            targets.extend(urls);
+            return open_plan(targets, Some(name));
+        }
+        return Err(format!(
+            "'{name}' matches no installed .desktop application (by display name, desktop-file \
+             id or Exec name), and launch_app never runs a name from PATH. Call list_apps and \
+             pass an installed app's name, bundle_id or launch_path. To run another program, \
+             pass its path as launch_path; standard mode refuses programs that are not \
+             installed apps"
+        ));
+    }
+    if !urls.is_empty() {
+        return open_plan(urls, None);
+    }
+    Err("Provide at least one of: launch_path, bundle_id, name, or urls.".to_owned())
+}
+
+fn program_plan(
+    command: Vec<String>,
+    entry: Option<crate::installed_apps::InstalledApp>,
+    additional: Vec<String>,
+    urls: Vec<String>,
+    query: String,
+) -> Result<LaunchPlan, String> {
+    let first = command
+        .first()
+        .ok_or_else(|| "the launch command is empty".to_owned())?;
+    let executable = resolve_program(first).ok_or_else(|| match &entry {
+        Some(entry) => format!(
+            "installed app {} launches with {}, which is not an executable on PATH",
+            quote_untrusted(&entry.name, SHOWN_NAME_CHARS),
+            quote_untrusted(first, SHOWN_COMMAND_CHARS)
+        ),
+        None => format!("'{first}' is not an executable file or a program on PATH"),
+    })?;
+    let mut appended = additional;
+    appended.extend(urls.iter().cloned());
+    // An entry's own Exec= words are the app's; a raw launch_path's words
+    // after the program are the caller's, like additional_arguments.
+    let caller: Vec<&String> = if entry.is_some() {
+        appended.iter().collect()
+    } else {
+        command[1..].iter().chain(&appended).collect()
+    };
+    let terminal = command.iter().any(|word| names_a_terminal(word))
+        || entry.as_ref().is_some_and(|entry| {
+            names_a_terminal(&entry.bundle_id)
+                || entry.startup_wm_class.as_deref().is_some_and(names_a_terminal)
+        });
+    // A terminal runs its positional arguments as a command (kitty, foot,
+    // st), so any argument to one is an option.
+    let options =
+        caller.iter().any(|word| word.starts_with('-')) || (terminal && !caller.is_empty());
+    let argument_count = caller.len();
+    Ok(LaunchPlan::Program {
+        executable,
+        command,
+        appended,
+        entry,
+        urls,
+        query,
+        options,
+        argument_count,
+    })
+}
+
+fn open_plan(targets: Vec<String>, named: Option<String>) -> Result<LaunchPlan, String> {
+    let executable = resolve_program("xdg-open")
+        .ok_or_else(|| "xdg-open is not installed, so files and URLs cannot be opened".to_owned())?;
+    let options = targets
+        .iter()
+        .any(|target| target.starts_with('-') || target_can_run_a_program(target));
+    Ok(LaunchPlan::Open {
+        executable,
+        targets,
+        named,
+        options,
+    })
+}
+
+/// The canonical path of the program a launch command's first word names:
+/// a path (absolute, or relative to the driver's directory) or a name looked
+/// up on PATH, executable either way.
+fn resolve_program(word: &str) -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let runnable = |path: &std::path::Path| -> Option<std::path::PathBuf> {
+        let metadata = std::fs::metadata(path).ok()?;
+        (metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+            .then(|| std::fs::canonicalize(path).ok())
+            .flatten()
+    };
+    if word.contains('/') {
+        return runnable(std::path::Path::new(word));
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .find_map(|dir| runnable(&dir.join(word)))
+}
+
+/// Terminal emulators that `crate::terminal`'s lists miss. Several run
+/// their positional arguments as a command (foot, st, kgx).
+const LAUNCH_EXTRA_TERMINALS: &[&str] = &[
+    "contour",
+    "cool-retro-term",
+    "foot",
+    "footclient",
+    "guake",
+    "kgx",
+    "ptyxis",
+    "rio",
+    "rxvt",
+    "sakura",
+    "st",
+    "terminator",
+    "terminology",
+    "tilda",
+    "urxvt",
+    "urxvtc",
+    "x-terminal-emulator",
+    "xdg-terminal-exec",
+    "yakuake",
+];
+
+/// Whether a command word, desktop-file id or window class names a terminal
+/// emulator, by its file name or its app id's last part.
+fn names_a_terminal(word: &str) -> bool {
+    let lower = word.to_ascii_lowercase();
+    let base = std::path::Path::new(&lower)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&lower);
+    let is_terminal = |name: &str| {
+        crate::terminal::is_terminal_process_name(name)
+            || crate::terminal::wm_class_matches_terminal(name, "")
+            || LAUNCH_EXTRA_TERMINALS.contains(&name)
+    };
+    is_terminal(base) || app_id_last(base).is_some_and(is_terminal)
+}
+
+/// Whether xdg-open could run a program for this target: a local .desktop
+/// file (it may launch its Exec= line) or an executable file.
+fn target_can_run_a_program(target: &str) -> bool {
+    let local = if target.contains("://") {
+        match url::Url::parse(target) {
+            Ok(url) if url.scheme() == "file" => match url.to_file_path() {
+                Ok(path) => path,
+                Err(()) => return true,
+            },
+            _ => return false,
+        }
+    } else {
+        std::path::PathBuf::from(target)
+    };
+    if local
+        .to_string_lossy()
+        .to_ascii_lowercase()
+        .ends_with(".desktop")
+    {
+        return true;
+    }
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(&local)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+/// Remove every PINCER_* variable from a launched program's environment:
+/// the permission mode and approval bypass, capability manifest and policy
+/// files, launch grants and tokens. A Pincer started inside the app (from a
+/// terminal, say) would otherwise run with the daemon's authority.
+fn scrub_driver_environment(command: &mut std::process::Command) {
+    for (key, _) in std::env::vars_os() {
+        if key.as_encoded_bytes().starts_with(b"PINCER_") {
+            command.env_remove(key);
+        }
+    }
+}
+
+/// Spawn a launch in the background: exec `executable`, the attested
+/// program, with `argv` (argv[0] kept as the command spelled it, so a
+/// multi-call binary behind a symlink still sees its name). The child's
 /// exit and the end of its output are recorded for the launch result.
-fn spawn_launch_command(
-    cmd: &str,
-    additional_arguments: &[String],
-) -> std::io::Result<LaunchedChild> {
-    let mut words: Vec<String> = cmd.split_whitespace().map(str::to_owned).collect();
-    words.extend(additional_arguments.iter().cloned());
+fn spawn_launch(executable: &std::path::Path, argv: &[String]) -> std::io::Result<LaunchedChild> {
+    use std::os::unix::process::CommandExt;
+    let mut words = argv.to_vec();
+    if words.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "empty launch command",
+        ));
+    }
     // A type-2 AppImage that can't mount with FUSE here (root unmapped in a
     // user namespace) unpacks and runs instead of failing with exit 127. It
     // unpacks into a folder of its own on disk, which the reaper deletes once
@@ -2377,10 +2728,11 @@ fn spawn_launch_command(
             run_dir: run_dir.as_ref().map(|dir| dir.path().to_path_buf()),
         }
     });
-    let prog = words.first().map(String::as_str).unwrap_or(cmd);
-    let rest = words.get(1..).unwrap_or_default();
-    let mut launch = std::process::Command::new(prog);
+    let prog = words[0].clone();
+    let rest = &words[1..];
+    let mut launch = std::process::Command::new(executable);
     launch
+        .arg0(&prog)
         .args(rest)
         // The child must not inherit the driver's stdio: in private-worker mode
         // stdout is the JSON-RPC stream to the SDK, and a chatty app (Chromium's
@@ -2393,7 +2745,8 @@ fn spawn_launch_command(
         // toolkits ignore these when they do not need them.
         .env("ACCESSIBILITY_ENABLED", "1")
         .env("NO_AT_BRIDGE", "0");
-    if chromium_family_program(prog)
+    scrub_driver_environment(&mut launch);
+    if chromium_family_program(&prog)
         && !rest
             .iter()
             .any(|arg| arg == "--force-renderer-accessibility")
@@ -2534,35 +2887,6 @@ fn with_appimage_note(
     result
 }
 
-/// Collect a launched child's exit status in the background.
-///
-/// `std::process::Child` does not reap on drop and the driver never waits on
-/// an app it launches, so every launched app used to linger as a zombie for
-/// the daemon's lifetime: it held a pid slot, and — because the pid stays
-/// present — made "does this pid exist" liveness checks report a terminated
-/// app as still running.
-///
-/// Reaping is scoped to one thread per child rather than setting
-/// `SIGCHLD` to `SIG_IGN`, which is process-global and would break every
-/// caller that needs an exit status, including the `xdg-open` check below
-/// and any `Command::status()`/`output()` elsewhere in the daemon. The
-/// thread blocks in `wait` until the app exits, so it costs nothing while
-/// the app runs and never delays the launch itself.
-fn reap_in_background(mut child: std::process::Child) {
-    let pid = child.id();
-    let reaper = std::thread::Builder::new()
-        .name(format!("pincer-reap-{pid}"))
-        .stack_size(64 * 1024)
-        .spawn(move || {
-            if let Err(e) = child.wait() {
-                tracing::debug!(pid, "launched app could not be reaped: {e}");
-            }
-        });
-    if let Err(e) = reaper {
-        tracing::debug!(pid, "could not start reaper thread for launched app: {e}");
-    }
-}
-
 /// Match a launch_app `name` that failed direct exec against installed XDG
 /// .desktop applications: exact display name, desktop-file id, or `Exec=`
 /// basename first, then a display-name substring when it is unambiguous.
@@ -2595,41 +2919,46 @@ fn match_installed_app<'a>(
 /// xdg-open's generic fallback can `exec` the target app and stay alive for
 /// its whole lifetime, so a child still running after the grace period counts
 /// as success; a quick non-zero exit (2 = file not found, 3 = no handler
-/// tool, 4 = action failed) is the only reliable failure signal.
-fn xdg_open_failure(mut child: std::process::Child) -> Option<String> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
-    loop {
-        // A branch that observes an exit status has already reaped the child;
-        // one that gives up on it still owes that, so hand it to the reaper
-        // instead of dropping it and leaving a zombie behind.
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return None,
-            Ok(Some(status)) => return Some(format!("xdg-open failed ({status})")),
-            Ok(None) if std::time::Instant::now() >= deadline => {
-                reap_in_background(child);
-                return None;
-            }
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
-            Err(e) => {
-                reap_in_background(child);
-                return Some(format!("could not observe xdg-open: {e}"));
-            }
+/// tool, 4 = action failed) is the only reliable failure signal. The reaper
+/// of [`launch_child::spawn_watched`] keeps watching a child still running.
+fn xdg_open_failure(child: &LaunchedChild) -> Option<String> {
+    match child.exit_within(std::time::Duration::from_millis(1500)) {
+        Some(exit) if exit.status.success() => None,
+        Some(exit) => {
+            let tail = child.output_tail();
+            Some(if tail.is_empty() {
+                format!("xdg-open {}", exit.describe())
+            } else {
+                format!(
+                    "xdg-open {}. The end of its output (program text):\n{}",
+                    exit.describe(),
+                    fenced_output(&tail)
+                )
+            })
         }
+        None => None,
     }
 }
 
-/// Open each target with `xdg-open` in its default app, all started before
-/// any is watched, and refuse on the first fast failure.
-fn open_with_xdg(targets: &[String]) -> anyhow::Result<()> {
+/// Open each target with `xdg-open` (the attested `executable`) in its
+/// default app, all started before any is watched, and refuse on the first
+/// fast failure. Like a launched app, xdg-open gets no stdin, a private
+/// capture for stdout and stderr (in private-worker mode the driver's stdout
+/// is the JSON-RPC stream), and no PINCER_* variables.
+fn open_with_xdg(executable: &std::path::Path, targets: &[String]) -> anyhow::Result<()> {
+    use std::os::unix::process::CommandExt;
     let mut children = Vec::new();
     for target in targets {
-        children.push((
-            target,
-            std::process::Command::new("xdg-open").arg(target).spawn()?,
-        ));
+        let mut command = std::process::Command::new(executable);
+        command
+            .arg0("xdg-open")
+            .arg(target)
+            .stdin(std::process::Stdio::null());
+        scrub_driver_environment(&mut command);
+        children.push((target, launch_child::spawn_watched(command, None)?));
     }
     for (target, child) in children {
-        if let Some(reason) = xdg_open_failure(child) {
+        if let Some(reason) = xdg_open_failure(&child) {
             anyhow::bail!("could not open '{target}': {reason}");
         }
     }
@@ -2638,6 +2967,17 @@ fn open_with_xdg(targets: &[String]) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod launch_app_tests;
+#[cfg(test)]
+mod launch_scope_tests;
+
+// Test-only stand-in for the installed .desktop entries a launch resolves
+// against, per thread, so launch tests do not depend on the apps installed on
+// the machine that runs them.
+#[cfg(test)]
+thread_local! {
+    static TEST_INSTALLED_APPS: std::cell::RefCell<Option<Vec<crate::installed_apps::InstalledApp>>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 #[async_trait]
 impl Tool for LaunchAppTool {
@@ -2654,17 +2994,38 @@ impl Tool for LaunchAppTool {
                 `additional_arguments`): they are appended to its command line, for example \
                 {name:\"KWrite\", urls:[\"/path/notes.txt\"]}. `urls` without launch_path or \
                 name go to xdg-open, which opens each in its default app and returns no pid. \
+                Standard mode starts installed apps only (by name, bundle_id or their list_apps \
+                launch_path), with no argument or url starting with '-' and no arguments at all \
+                for a terminal; other programs need unrestricted mode or a capability manifest. \
                 Refused when the name matches nothing launchable."
                 .into(),
             input_schema: json!({"type":"object","properties":{
-                "launch_path":{"type":"string","description":"Round-trip the `launch_path` returned by `list_apps`: the Exec= command from the .desktop file with XDG field codes already stripped. Highest precedence on Linux; split on spaces and run directly, without a shell."},
-                "name":{"type":"string","description":"App name or command to launch. Tried as a direct command first, then matched against installed .desktop applications (exact display name, desktop-file id, or Exec basename; else an unambiguous display-name substring). A URL or existing file path here is opened with xdg-open."},
-                "bundle_id":{"type":"string","description":"Ignored on Linux (macOS/Windows concept)."},
+                "launch_path":{"type":"string","description":"Round-trip the `launch_path` returned by `list_apps`: the Exec= command from the .desktop file with XDG field codes already stripped. Highest precedence on Linux; split on spaces and run directly, without a shell. Any other command line runs a program that is not an installed app, which standard mode refuses."},
+                "name":{"type":"string","description":"Installed app to launch, matched against installed .desktop applications (exact display name, desktop-file id, or Exec basename; else an unambiguous display-name substring). Never runs a program from PATH: pass a path as launch_path for that. A URL or existing file path here is opened with xdg-open."},
+                "bundle_id":{"type":"string","description":"Desktop-file id of an installed app, as list_apps returns it (e.g. org.kde.kwrite). Used when launch_path is absent."},
                 "urls":{"type":"array","items":{"type":"string"},"description":"Files or URLs to open. With launch_path or name, appended to that app's arguments (after additional_arguments); alone, each is opened with xdg-open in its default app."},
                 "additional_arguments":{"type":"array","items":{"type":"string"},"description":"Extra command-line arguments passed to the launched process."}
             },"additionalProperties":false}),
             read_only: false, destructive: false, idempotent: false, open_world: true,
         })
+    }
+
+    /// The exact program this call starts, for the `process_launch` adapter.
+    async fn protected_resource_scope(
+        &self,
+        adapter_id: &str,
+        args: &Value,
+    ) -> Result<Option<Value>, String> {
+        if adapter_id != "process_launch" {
+            return Ok(None);
+        }
+        let args = args.clone();
+        let fixture = launch_installed_fixture();
+        tokio::task::spawn_blocking(move || {
+            plan_launch_with(&args, fixture).map(|plan| Some(plan.scope()))
+        })
+        .await
+        .map_err(|error| format!("launch resolution failed: {error}"))?
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
@@ -2691,8 +3052,42 @@ impl Tool for LaunchAppTool {
             return ToolResult::error(pincer_core::launch_guard::REMOTE_DEBUGGING_LAUNCH_REFUSAL);
         }
 
-        if launch_path_opt.is_none() && name_opt.is_none() && urls.is_empty() {
-            return ToolResult::error("Provide at least one of: launch_path, name, or urls.");
+        // Resolve the exact program, the same way the attestation did. The
+        // registry passes the scope it admitted as `_protected_launch_scope`
+        // (callers cannot set reserved fields); the launch runs only that.
+        let approved = args
+            .get("_protected_launch_scope")
+            .filter(|scope| !scope.is_null())
+            .cloned();
+        let fixture = launch_installed_fixture();
+        let plan_args = args.clone();
+        let plan = match tokio::task::spawn_blocking(move || plan_launch_with(&plan_args, fixture))
+            .await
+        {
+            Ok(Ok(plan)) => plan,
+            Ok(Err(message)) => return ToolResult::error(format!("Failed to launch: {message}")),
+            Err(error) => return ToolResult::error(format!("Task error: {error}")),
+        };
+        if let Some(approved) = approved {
+            if plan.scope() != approved {
+                return ToolResult::error(
+                    "Failed to launch: the program this launch_app call resolves to changed \
+                     after it was approved; call launch_app again",
+                )
+                .with_structured(json!({
+                    "code": "launch_target_changed",
+                    "effect": "none",
+                }));
+            }
+        }
+        // An installed entry's own Exec= words get the same guard as the
+        // caller's arguments.
+        if plan
+            .words()
+            .into_iter()
+            .any(pincer_core::launch_guard::contains_remote_debugging_flag)
+        {
+            return ToolResult::error(pincer_core::launch_guard::REMOTE_DEBUGGING_LAUNCH_REFUSAL);
         }
 
         // Snapshot the top-levels before spawning so a window created by an
@@ -2706,97 +3101,90 @@ impl Tool for LaunchAppTool {
                 .collect();
         let result = tokio::task::spawn_blocking(
             move || -> anyhow::Result<(String, Option<LaunchedChild>, String)> {
-                // launch_path > name. Both go through the same direct-exec path
-                // (so XDG `Exec=` commands round-trip), but launch_path is the
-                // canonical form preferred by list_apps callers.
-                let command = launch_path_opt.as_deref().or(name_opt.as_deref());
-                if command.is_none() {
-                    // `urls` alone: each opens in its default app.
-                    open_with_xdg(&urls)?;
-                    return Ok((
-                        format!("Opened {} URL(s) via xdg-open.", urls.len()),
-                        None,
-                        "xdg-open".to_owned(),
-                    ));
-                }
-                // With an app named, `urls` are its open targets, as on macOS.
-                // They used to go to xdg-open while the named app was silently
-                // dropped. Assumption: appending them after
-                // `additional_arguments` matches where a .desktop Exec= line's
-                // trailing %U/%F field code puts them; list_apps strips those
-                // codes from launch_path.
-                let mut app_arguments = additional_arguments;
-                app_arguments.extend(urls.iter().cloned());
-                let opened_note = match urls.len() {
-                    0 => String::new(),
-                    1 => format!(" Opened {} in it.", urls[0]),
-                    n => format!(" Opened {n} files or URLs in it."),
-                };
-                if let Some(cmd) = command {
-                    match spawn_launch_command(cmd, &app_arguments) {
-                        Ok(child) => {
-                            return Ok((
-                                format!("✅ Launched {cmd} (pid {}).{opened_note}", child.pid),
-                                Some(child),
-                                cmd.to_owned(),
-                            ));
-                        }
-                        Err(_) => {
-                            // Not an executable on PATH. Resolve the name against
-                            // installed XDG .desktop applications — the same
-                            // source list_apps reads — and run the match's Exec=.
-                            let installed = crate::installed_apps::list_installed_apps();
-                            if let Some(app) = match_installed_app(&installed, cmd) {
-                                let child = spawn_launch_command(&app.launch_path, &app_arguments)
-                                    .map_err(|e| {
-                                        anyhow::anyhow!(
-                                            "'{cmd}' matched installed app '{}' but its \
-                                             launcher `{}` failed to start: {e}",
-                                            app.name,
-                                            app.launch_path
-                                        )
-                                    })?;
-                                return Ok((
-                                    format!(
-                                        "✅ Launched {} (`{}`, pid {}), resolved from \
-                                         '{cmd}' by its desktop entry.{opened_note}",
-                                        app.name, app.launch_path, child.pid
-                                    ),
-                                    Some(child),
-                                    format!("{}\u{0}{cmd}\u{0}{}", app.name, app.launch_path),
-                                ));
-                            }
-                            // xdg-open handles URLs and file paths, not app
-                            // names — only fall through for something it can
-                            // plausibly open, and surface its fast non-zero
-                            // exit instead of reporting a launch that never
-                            // happened.
-                            if !cmd.contains("://") && !std::path::Path::new(cmd).exists() {
-                                anyhow::bail!(
-                                    "'{cmd}' is not an executable on PATH and matches no \
-                                     installed .desktop application. Call list_apps and \
-                                     round-trip its launch_path."
-                                );
-                            }
-                            // `name` is itself a file or URL, so no app was
-                            // named: any `urls` open beside it.
-                            let mut targets = vec![cmd.to_owned()];
-                            targets.extend(urls.iter().cloned());
-                            open_with_xdg(&targets)?;
-                            // xdg-open may spawn a helper and exit, so do not
-                            // claim its pid is the app pid.
-                            return Ok((
-                                match urls.len() {
-                                    0 => format!("Opened '{cmd}' via xdg-open."),
-                                    n => format!("Opened '{cmd}' and {n} URL(s) via xdg-open."),
+                match plan {
+                    LaunchPlan::Open {
+                        executable,
+                        targets,
+                        named,
+                        ..
+                    } => {
+                        open_with_xdg(&executable, &targets)?;
+                        // xdg-open may spawn a helper and exit, so do not
+                        // claim its pid is the app pid.
+                        Ok(match named {
+                            None => (
+                                format!("Opened {} URL(s) via xdg-open.", targets.len()),
+                                None,
+                                "xdg-open".to_owned(),
+                            ),
+                            Some(name) => (
+                                match targets.len() - 1 {
+                                    0 => format!("Opened '{name}' via xdg-open."),
+                                    n => format!("Opened '{name}' and {n} URL(s) via xdg-open."),
                                 },
                                 None,
-                                cmd.to_owned(),
-                            ));
-                        }
+                                name,
+                            ),
+                        })
+                    }
+                    LaunchPlan::Program {
+                        executable,
+                        command,
+                        appended,
+                        entry,
+                        urls,
+                        query,
+                        ..
+                    } => {
+                        // With an app named, `urls` are its open targets, as
+                        // on macOS. Assumption: appending them after
+                        // `additional_arguments` matches where a .desktop
+                        // Exec= line's trailing %U/%F field code puts them;
+                        // list_apps strips those codes from launch_path.
+                        let opened_note = match urls.len() {
+                            0 => String::new(),
+                            1 => format!(" Opened {} in it.", urls[0]),
+                            n => format!(" Opened {n} files or URLs in it."),
+                        };
+                        let mut argv = command.clone();
+                        argv.extend(appended);
+                        let child = spawn_launch(&executable, &argv).map_err(|error| match &entry {
+                            Some(app) => anyhow::anyhow!(
+                                "'{query}' matched installed app {} but its launcher {} failed \
+                                 to start: {error}",
+                                quote_untrusted(&app.name, SHOWN_NAME_CHARS),
+                                quote_untrusted(&app.launch_path, SHOWN_COMMAND_CHARS)
+                            ),
+                            None => anyhow::anyhow!("'{query}' failed to start: {error}"),
+                        })?;
+                        Ok(match entry {
+                            Some(app) => {
+                                // Match keys for the window: display name, the
+                                // caller's spelling, StartupWMClass, and last
+                                // the command that ran.
+                                let mut keys = vec![app.name.clone(), query.clone()];
+                                keys.extend(app.startup_wm_class.clone());
+                                keys.push(app.launch_path.clone());
+                                (
+                                    format!(
+                                        "✅ Launched {} ({}, pid {}), resolved from '{query}' \
+                                         by its desktop entry.{opened_note}",
+                                        quote_untrusted(&app.name, SHOWN_NAME_CHARS),
+                                        quote_untrusted(&app.launch_path, SHOWN_COMMAND_CHARS),
+                                        child.pid
+                                    ),
+                                    Some(child),
+                                    keys.join("\u{0}"),
+                                )
+                            }
+                            None => (
+                                format!("✅ Launched {query} (pid {}).{opened_note}", child.pid),
+                                Some(child),
+                                query,
+                            ),
+                        })
                     }
                 }
-                unreachable!()
             },
         )
         .await;
@@ -2964,7 +3352,7 @@ fn launch_handoff_timeout_result(
             });
             let named = windows
                 .first()
-                .map(|window| format!(" (window {} \"{}\")", window.xid, window.title))
+                .map(|window| format!(" (window {} {})", window.xid, quoted_title(&window.title)))
                 .unwrap_or_default();
             format!(
                 "'{name}' (pid {launcher_pid}) exited cleanly{after} and no new window appeared \
@@ -2985,6 +3373,18 @@ fn launch_handoff_timeout_result(
         }
     };
     ToolResult::error(text).with_structured(structured)
+}
+
+/// A launched program's output as result text: escaped by
+/// `untrusted_text::block` (controls, terminal escapes and invisible
+/// characters shown as `\u{..}`) and every line fenced with `| `, so it can
+/// neither forge a line of Pincer's own nor reach the client's terminal raw.
+fn fenced_output(tail: &str) -> String {
+    pincer_core::untrusted_text::block(tail)
+        .lines()
+        .map(|line| format!("| {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// "40 ms" under a second, "1.0 s" from there.
@@ -3014,7 +3414,10 @@ fn launch_exited_result(
     let mut text =
         format!("'{name}' (pid {launcher_pid}) {how} without opening a window; it is not running.");
     if !output_tail.is_empty() {
-        text.push_str(&format!(" The end of its output:\n{output_tail}"));
+        text.push_str(&format!(
+            " The end of its output (program text):\n{}",
+            fenced_output(output_tail)
+        ));
     } else if output_captured {
         text.push_str(" It printed nothing.");
     }
@@ -3028,7 +3431,11 @@ fn launch_exited_result(
         "exit_code": exit.and_then(|exit| exit.status.code()),
         "signal": exit.and_then(|exit| exit.status.signal()),
         "exited_after_ms": exit.map(|exit| exit.after.as_millis() as u64),
-        "output_tail": if output_captured { json!(output_tail) } else { Value::Null },
+        "output_tail": if output_captured {
+            json!(pincer_core::untrusted_text::block(output_tail))
+        } else {
+            Value::Null
+        },
     }))
 }
 
@@ -3092,41 +3499,23 @@ fn process_exited(pid: u32) -> bool {
     }
 }
 
-/// Case-insensitive identity match between a launch query
-/// (`nautilus`, `org.gnome.Nautilus`, `gnome-control-center`, a display
-/// name) and a window's WM_CLASS / app id.
+/// Whether a new window is the launch's, by its WM_CLASS / app id: the
+/// class, or an app-id class's last part, is one of the launch's names
+/// whole ([`window_is_launched_app`]), or starts with one of them followed
+/// by `-` (`libreoffice` opens `libreoffice-writer`). Never part of a name:
+/// a window of class "e" is not a "kwrite" launch, and "plasmashell" is not
+/// an "sh" one.
 fn window_matches_launch(window: &crate::x11::WindowInfo, query: &str) -> bool {
-    query
-        .split('\u{0}')
-        .filter(|key| !key.trim().is_empty())
-        .any(|key| window_matches_launch_key(window, key))
-}
-
-fn window_matches_launch_key(window: &crate::x11::WindowInfo, query: &str) -> bool {
-    let class = window.app_name.to_ascii_lowercase();
-    if class.is_empty() {
-        return false;
+    if window_is_launched_app(window, query) {
+        return true;
     }
-    let query = query.to_ascii_lowercase();
-    let stem = query
-        .rsplit('/')
-        .next()
-        .unwrap_or(&query)
-        .trim_end_matches(".desktop")
-        .to_owned();
-    // Only an app id's last part names the app: "org.gnome.Nautilus" is
-    // "nautilus", but "hi.sh" is not "sh", which every class containing
-    // "sh" (plasmashell, gnome-shell) matched.
-    let last = app_id_last(&stem).unwrap_or(&stem).to_owned();
-    let class_last = class.rsplit('.').next().unwrap_or(&class).to_owned();
-    class == stem
-        || class_last == last
-        || class.contains(&last)
-        || last.contains(&class_last)
-        || stem
-            .split_whitespace()
-            .next()
-            .is_some_and(|word| class.contains(word))
+    let class = window.app_name.trim().to_ascii_lowercase();
+    !class.is_empty()
+        && launch_identity_names(query).iter().any(|name| {
+            class
+                .strip_prefix(name.as_str())
+                .is_some_and(|rest| rest.starts_with('-'))
+        })
 }
 
 /// The last part of a reverse-DNS app id ("org.gnome.Nautilus" ->

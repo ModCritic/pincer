@@ -176,10 +176,13 @@ pub(super) fn spawn_watched_in(
     Ok(launched)
 }
 
-/// The reaper of [`spawn_watched`]: like `reap_in_background`, one thread
-/// per child, blocked until the child exits; it also records the exit and
-/// keeps the output capture under its cap while the child runs. After the
-/// exit it releases the launch's `run_dir`, if any.
+/// The reaper of [`spawn_watched`]: one thread per child, blocked until the
+/// child exits (the driver never waits on what it launches, so without it
+/// every launch would linger as a zombie). It records the exit and keeps the
+/// output capture under its cap while the child runs. After the exit it
+/// releases the launch's `run_dir`, if any. A thread per child rather than
+/// `SIGCHLD` set to `SIG_IGN`, which is process-global and would break every
+/// caller that needs an exit status.
 fn reap_recording(
     mut child: Child,
     started: Instant,
