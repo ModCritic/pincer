@@ -3918,10 +3918,11 @@ mod runtime_isolation_tests {
 
     fn replay_registry(hits: Arc<AtomicUsize>) -> Arc<super::ToolRegistry> {
         let mut registry = super::ToolRegistry::new();
+        // A replayable name: replay_trajectory refuses tools that are not single actions.
         registry.register(Box::new(ReplayProbe {
             hits,
             def: super::ToolDef {
-                name: "probe".into(),
+                name: "bring_to_front".into(),
                 description: "runtime-local replay probe".into(),
                 input_schema: serde_json::json!({
                     "type": "object",
@@ -4034,7 +4035,7 @@ mod runtime_isolation_tests {
         std::fs::create_dir(&turn).unwrap();
         std::fs::write(
             turn.join("action.json"),
-            serde_json::json!({"tool": "probe", "arguments": {}}).to_string(),
+            serde_json::json!({"tool": "bring_to_front", "arguments": {}}).to_string(),
         )
         .unwrap();
 
@@ -4064,15 +4065,15 @@ mod runtime_isolation_tests {
         for (turn, action) in [
             (
                 "turn-00001",
-                serde_json::json!({"tool": "probe", "arguments": {}, "result_error": false}),
+                serde_json::json!({"tool": "bring_to_front", "arguments": {}, "result_error": false}),
             ),
             (
                 "turn-00002",
-                serde_json::json!({"tool": "probe", "arguments": {}, "result_error": true}),
+                serde_json::json!({"tool": "bring_to_front", "arguments": {}, "result_error": true}),
             ),
             (
                 "turn-00003",
-                serde_json::json!({"tool": "probe", "arguments": {}}),
+                serde_json::json!({"tool": "bring_to_front", "arguments": {}}),
             ),
         ] {
             let dir = trajectory.path().join(turn);
