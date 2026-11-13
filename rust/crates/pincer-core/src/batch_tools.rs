@@ -18,11 +18,12 @@ use crate::{
     protocol::{Content, ToolResult},
     recording_tools::ReplayRegistrySlot,
     tool::{Tool, ToolDef, ToolRegistry},
+    untrusted_text,
 };
 
 pub mod locate;
 
-use locate::{Check, ElementSpec, Locator, Window, WindowSpec};
+use locate::{quote_untrusted, Check, ElementSpec, Locator, Source, Window, WindowSpec};
 
 /// Public name of the batch tool.
 pub const RUN_STEPS_TOOL: &str = "run_steps";
@@ -191,7 +192,10 @@ impl Tool for RunStepsTool {
                 checked state, and the selected or checked state of a radio button, list item, \
                 menu item or tab). `text` matches any tree row that contains it, \
                 case-insensitive, static text included; \
-                `gone:true` waits for it to disappear. A failed step is reported with its phase \
+                `gone:true` waits for it to disappear. Each check reports its `source`: \"app\" \
+                when the app's own UI satisfied it, \"page\" when only web page or document \
+                content did (its author controls that text, so it is no proof the app acted); \
+                the step line says \"held on page content\" then. A failed step is reported with its phase \
                 (wait_for, find, action, expect) and what was found. A step refused because its \
                 app ignores background input says how to re-send it. After a failure caused by \
                 a dialog holding focus, that dialog is read even without `observe`.\n\n\
@@ -904,10 +908,18 @@ async fn run_step(
                     "ok": true,
                     "waited_ms": checked.waited.as_millis() as u64,
                 });
+                if let Some(source) = checked.source {
+                    report["wait_for"]["source"] = json!(source.as_str());
+                }
                 notes.push(format!(
-                    "waited {} ms for {}",
+                    "waited {} ms for {}{}",
                     checked.waited.as_millis(),
-                    check.describe()
+                    check.describe(),
+                    if checked.source == Some(Source::Page) {
+                        " (held on page content)"
+                    } else {
+                        ""
+                    }
                 ));
             }
             Err(miss) => {
@@ -1062,6 +1074,20 @@ async fn run_step(
             {
                 report["code"] = Value::String(code.to_owned());
             }
+            // A refusal that names the window holding the app's focus says so
+            // in this field; Recovery reads it instead of parsing the text.
+            if let Some(holder) = result
+                .structured_content
+                .as_ref()
+                .and_then(|value| {
+                    value
+                        .get(FOCUS_HOLDER_FIELD)
+                        .or_else(|| value.get("refusal")?.get(FOCUS_HOLDER_FIELD))
+                })
+                .and_then(Value::as_u64)
+            {
+                report[FOCUS_HOLDER_FIELD] = json!(holder);
+            }
             return StepOutcome {
                 line: format!("{}. {label} ERROR (action): {message}", index + 1),
                 report: with_phase(report, Phase::Action),
@@ -1088,6 +1114,8 @@ async fn run_step(
         fallback
     };
     let mut checked = Vec::new();
+    // 1-based numbers of the expects that held only on page content.
+    let mut held_on_page = Vec::new();
     for (nth, check) in step.expect.iter().enumerate() {
         match locator.check(check, &fallback).await {
             Ok(outcome) => {
@@ -1102,12 +1130,19 @@ async fn run_step(
                 if !check.window.is_empty() && step_has_no_action {
                     *context = check.window.clone();
                 }
-                checked.push(json!({
+                let mut entry = json!({
                     "ok": true,
                     "check": check.describe(),
                     "observed": outcome.observed,
                     "waited_ms": outcome.waited.as_millis() as u64,
-                }));
+                });
+                if let Some(source) = outcome.source {
+                    entry["source"] = json!(source.as_str());
+                }
+                if outcome.source == Some(Source::Page) {
+                    held_on_page.push(nth + 1);
+                }
+                checked.push(entry);
             }
             Err(miss) => {
                 if let Some(window) = &miss.window {
@@ -1131,7 +1166,21 @@ async fn run_step(
         }
     }
     if !checked.is_empty() {
-        notes.push(format!("{} check(s) held", checked.len()));
+        let count = checked.len();
+        notes.push(if held_on_page.is_empty() {
+            format!("{count} check(s) held")
+        } else if held_on_page.len() == count {
+            format!("{count} check(s) held on page content")
+        } else {
+            format!(
+                "{count} check(s) held (expect {} held on page content)",
+                held_on_page
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        });
         report["expect"] = Value::Array(checked);
     }
     report["ok"] = json!(true);
@@ -1347,9 +1396,24 @@ impl Recovery {
     /// holds focus (read that dialog), or a pixel target in a window with no
     /// screenshot yet (capture it, so the next pixel step has a frame).
     fn after(report: &Value, last: Option<&Window>) -> Option<Self> {
-        let message = report.get("message").and_then(Value::as_str)?;
+        let message = report
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         let last = last?;
-        if let Some(holder) = focus_holder(message).filter(|id| *id != last.window_id) {
+        let code = report.get("code").and_then(Value::as_str);
+        // The structured field when the refusal carries one. Otherwise only
+        // the macOS refusal's own wording, read by `focus_holder`; never the
+        // ambiguous-window refusal, whose text is a list of candidate titles.
+        let holder = report
+            .get(FOCUS_HOLDER_FIELD)
+            .and_then(Value::as_u64)
+            .or_else(|| {
+                (code != Some("ambiguous_window_target"))
+                    .then(|| focus_holder(message))
+                    .flatten()
+            });
+        if let Some(holder) = holder.filter(|id| *id != last.window_id) {
             return Some(Self {
                 window: Window {
                     pid: last.pid,
@@ -1364,7 +1428,6 @@ impl Recovery {
                 ),
             });
         }
-        let code = report.get("code").and_then(Value::as_str);
         if code == Some("screenshot_context_missing") || message.starts_with("No screenshot") {
             return Some(Self {
                 window: last.clone(),
@@ -1379,15 +1442,46 @@ impl Recovery {
     }
 }
 
-/// The window id in "window_id N \"…\" of the same app holds focus".
+/// Structured field of a refusal (top level or under `refusal`) naming the
+/// window that holds the app's focus. run_steps copies it into the step
+/// report and reads the recovery window from it.
+const FOCUS_HOLDER_FIELD: &str = "focus_holder_window_id";
+
+/// The window id in the macOS foreground refusal, which says it only in
+/// text: "... did not become focused ...: window_id N \"<title>\" of the same
+/// app holds focus ...". Only what Pincer wrote before the first quote is
+/// trusted: that text must say the window did not become focused and end
+/// with `window_id N`. Titles are quoted and come later, so a title holding
+/// "window_id 99" or the focus phrase cannot choose the window, and text
+/// that quotes a title before naming a window (the ambiguous-window
+/// refusal's candidate list among them) names no holder.
 fn focus_holder(message: &str) -> Option<u64> {
-    let end = message.find("of the same app holds focus")?;
-    let start = message[..end].rfind("window_id ")? + "window_id ".len();
-    let digits: String = message[start..]
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect();
-    digits.parse().ok()
+    let quote = message.find('"')?;
+    let before_title = message[..quote].strip_suffix(' ')?;
+    let (lead, digits) = before_title.rsplit_once("window_id ")?;
+    if !lead.contains("did not become focused")
+        || digits.is_empty()
+        || !digits.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let holder = digits.parse().ok()?;
+    message[quote..]
+        .contains("of the same app holds focus")
+        .then_some(holder)
+}
+
+/// Whether `phrase` is in `text` before any double quote of the text's own
+/// (the phrase may hold quotes). Untrusted titles, labels and names in tool
+/// text are quoted, so text before the first quote is the tool's own words;
+/// a phrase inside a quoted title is not.
+///
+/// Assumption: producers that write this phrase without structured fields
+/// (macOS AX refusals, checked in platform-macos 2026-11-13) put no
+/// unquoted app or page text before it.
+fn said_before_any_quote(text: &str, phrase: &str) -> bool {
+    text.find(phrase)
+        .is_some_and(|at| !text[..at].contains('"'))
 }
 
 /// Most text characters a failed batch returns. MCP clients cut long error
@@ -1425,8 +1519,22 @@ fn fit_error_text(content: &mut Vec<Content>, budget: usize) {
     }
 }
 
+/// A refusal's `code`, at the top level or under `refusal`.
+fn refusal_code(result: &ToolResult) -> Option<&str> {
+    result.structured_content.as_ref().and_then(|value| {
+        value
+            .get("code")
+            .or_else(|| value.pointer("/refusal/code"))
+            .and_then(Value::as_str)
+    })
+}
+
 /// Whether a refusal names foreground delivery as the route that works:
 /// the target ignores background input (Electron, LibreOffice VCL, ...).
+/// Decided by the structured `escalation.recommended` or the refusal code;
+/// text from a producer without them counts only when the retry sentence
+/// comes before any quoted title or label, so a window title cannot ask
+/// for the foreground retry.
 fn wants_foreground(result: &ToolResult) -> bool {
     let structured = result.structured_content.as_ref();
     let recommended = structured
@@ -1436,7 +1544,8 @@ fn wants_foreground(result: &ToolResult) -> bool {
                 .or_else(|| value.pointer("/refusal/escalation/recommended"))
         })
         .and_then(Value::as_str);
-    if recommended == Some("foreground") {
+    if recommended == Some("foreground") || refusal_code(result) == Some("background_unavailable")
+    {
         return true;
     }
     let text = result
@@ -1447,21 +1556,21 @@ fn wants_foreground(result: &ToolResult) -> bool {
             _ => None,
         })
         .unwrap_or("");
-    text.contains("Retry this action with delivery_mode:\"foreground\"")
-        || text.contains("Retry with delivery_mode:\"foreground\"")
+    [
+        "Retry this action with delivery_mode:\"foreground\"",
+        "Retry with delivery_mode:\"foreground\"",
+    ]
+    .iter()
+    .any(|phrase| said_before_any_quote(text, phrase))
 }
 
 /// Whether an action failed because its element target died: the element
-/// was re-rendered or its snapshot was replaced.
+/// was re-rendered or its snapshot was replaced. Decided by the refusal
+/// code; text from a producer without one counts only before any quoted
+/// title or label, as in [`wants_foreground`].
 fn stale_element(result: &ToolResult) -> bool {
-    let code = result.structured_content.as_ref().and_then(|value| {
-        value
-            .get("code")
-            .or_else(|| value.pointer("/refusal/code"))
-            .and_then(Value::as_str)
-    });
     if matches!(
-        code,
+        refusal_code(result),
         Some("element_outside_target_window" | "stale_element_token")
     ) {
         return true;
@@ -1473,7 +1582,7 @@ fn stale_element(result: &ToolResult) -> bool {
         "-25202",
     ]
     .iter()
-    .any(|needle| message.contains(needle))
+    .any(|needle| said_before_any_quote(&message, needle))
 }
 
 /// Act again on a target whose element token went stale: find the element
@@ -1488,20 +1597,13 @@ async fn refind_stale_target(
         return None;
     }
     let token = args.get("element_token").and_then(Value::as_str)?;
-    let (snapshot_id, row) = token.split_once(':')?;
-    let row: u64 = row.parse().ok()?;
-    let stored = crate::window_state_view::snapshot_row(snapshot_id, row)?;
-    let (role, label) = row_role_and_label(&stored.line)?;
+    let (role, label, pid, window_id) = token_role_and_label(token)?;
     let window = WindowSpec {
-        pid: Some(
-            args.get("pid")
-                .and_then(Value::as_i64)
-                .unwrap_or(stored.pid),
-        ),
+        pid: Some(args.get("pid").and_then(Value::as_i64).unwrap_or(pid)),
         window_id: Some(
             args.get("window_id")
                 .and_then(Value::as_u64)
-                .unwrap_or(stored.window_id),
+                .unwrap_or(window_id),
         ),
         ..Default::default()
     };
@@ -1509,9 +1611,34 @@ async fn refind_stale_target(
     Some((
         retry,
         format!(
-            "element {token} went stale (the window changed); acted on the same {role} \"{label}\", found again as {found}"
+            "element {token} went stale (the window changed); acted on the same {} {}, found \
+             again as {found}",
+            untrusted_text::inline(&role),
+            quote_untrusted(&label, locate::LABEL_SHOWN_CHARS)
         ),
     ))
+}
+
+/// Role, label, pid and window of the element `token` named. The role and
+/// label a run_steps or run_script lookup read returned come first, as that
+/// read gave them; else they are read back from the token's row in the
+/// caller's own read. `None` when neither is remembered or the row has no
+/// label it can be sure of.
+fn token_role_and_label(token: &str) -> Option<(String, String, i64, u64)> {
+    if let Some(element) = locate::resolved_token_element(token) {
+        let role = element.get("role").and_then(Value::as_str);
+        let label = element.get("label").and_then(Value::as_str);
+        let pid = element.get("pid").and_then(Value::as_i64);
+        let window_id = element.get("window_id").and_then(Value::as_u64);
+        if let (Some(role), Some(label), Some(pid), Some(window_id)) = (role, label, pid, window_id)
+        {
+            return Some((role.to_owned(), label.to_owned(), pid, window_id));
+        }
+    }
+    let (snapshot_id, row) = token.split_once(':')?;
+    let stored = crate::window_state_view::snapshot_row(snapshot_id, row.parse().ok()?)?;
+    let (role, label) = row_role_and_label(&stored.line)?;
+    Some((role, label, stored.pid, stored.window_id))
 }
 
 /// The single element with `role` and exactly `label` in `window`: `args`
@@ -1574,7 +1701,11 @@ pub(crate) async fn refind_recorded_element(
     let (fresh, found) = refind_in_window(&locator, args, &window, role, label).await?;
     Some((
         fresh,
-        format!("found the recorded {role} \"{label}\" again as {found}"),
+        format!(
+            "found the recorded {} {} again as {found}",
+            untrusted_text::inline(role),
+            quote_untrusted(label, locate::LABEL_SHOWN_CHARS)
+        ),
     ))
 }
 
@@ -1602,9 +1733,14 @@ fn menu_bar_route(args: &Value, result: &ToolResult) -> Option<(Value, String)> 
     if let Some(session) = args.get("session") {
         menu_args["session"] = session.clone();
     }
+    // Menu labels come from the app: escaped, so one cannot end the line.
+    let shown: Vec<String> = path
+        .iter()
+        .map(|label| untrusted_text::inline_clipped(label, locate::LABEL_SHOWN_CHARS).into_owned())
+        .collect();
     let note = format!(
         "{token} is a menu-bar item, so it ran as invoke_menu {}",
-        path.join(" > ")
+        shown.join(" > ")
     );
     Some((menu_args, note))
 }
@@ -1613,6 +1749,14 @@ fn menu_bar_route(args: &Value, result: &ToolResult) -> Option<(Value, String)> 
 /// `[17] AXButton (Delete draft)`, or an AT-SPI role of several words,
 /// `[9] push button "Save"`. None for a row without a label, such as a
 /// value row `[12] AXStaticText = "Total"`.
+///
+/// A quoted label is read the way [`untrusted_text::inline`] wrote it:
+/// `\"` and `\\` (and `\n`, `\r`, `\t`, `\u{hex}`) stand for the
+/// characters they escape, so a quote inside a name does not end the
+/// label. When a raw quote ends it early instead (a row from a producer
+/// that does not escape names), the text after it is not how a row goes
+/// on, and the label's real end is unknown: `None`, so a stale-token retry
+/// never acts on an element named after a cut label.
 pub(crate) fn row_role_and_label(line: &str) -> Option<(String, String)> {
     let rest = line.trim().strip_prefix("- ")?.trim_start();
     let rest = rest.strip_prefix('[')?;
@@ -1625,7 +1769,18 @@ pub(crate) fn row_role_and_label(line: &str) -> Option<(String, String)> {
     }
     let rest = &rest[role_end..];
     let label = if let Some(quoted) = rest.strip_prefix('"') {
-        quoted[..quoted.find('"')?].to_owned()
+        let (label, after) = unescape_quoted(quoted)?;
+        // What follows a row's name: nothing, its value (` = "..."`,
+        // ` value="..."`), its description (` (...)`) or its attributes
+        // (` [...]`), on every platform's rows.
+        let row_goes_on = after.is_empty()
+            || [" =", " value=", " (", " ["]
+                .iter()
+                .any(|next| after.starts_with(next));
+        if !row_goes_on {
+            return None;
+        }
+        label
     } else {
         let inner = rest.strip_prefix('(')?;
         let mut depth = 1usize;
@@ -1645,7 +1800,64 @@ pub(crate) fn row_role_and_label(line: &str) -> Option<(String, String)> {
         }
         inner[..end?].to_owned()
     };
-    (!label.trim().is_empty()).then_some((role, label))
+    // A label the tree cut short (` ... (N chars)`, as untrusted_text::clip
+    // writes it) is not the element's name: finding "the same" element by
+    // it would match on a prefix.
+    (!label.trim().is_empty() && !clipped(&label)).then_some((role, label))
+}
+
+/// Whether `text` ends with the ` ... (N chars)` mark of
+/// [`untrusted_text::clip`].
+fn clipped(text: &str) -> bool {
+    text.strip_suffix(" chars)")
+        .and_then(|rest| rest.rsplit_once(" ... ("))
+        .is_some_and(|(_, count)| !count.is_empty() && count.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// A quoted row field from just after its opening quote: the text up to the
+/// closing quote with the escapes of [`untrusted_text::inline`] undone, and
+/// what follows the closing quote. A backslash before any other character
+/// is kept as it is. `None` without a closing quote.
+fn unescape_quoted(text: &str) -> Option<(String, &str)> {
+    let mut out = String::new();
+    let mut chars = text.char_indices();
+    while let Some((at, c)) = chars.next() {
+        match c {
+            '"' => return Some((out, &text[at + 1..])),
+            '\\' => match chars.next()?.1 {
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                'u' => {
+                    let rest = chars.as_str();
+                    let decoded = rest
+                        .strip_prefix('{')
+                        .and_then(|hex| hex.split_once('}'))
+                        .and_then(|(hex, _)| {
+                            Some((hex.len(), char::from_u32(u32::from_str_radix(hex, 16).ok()?)?))
+                        });
+                    match decoded {
+                        Some((hex_len, decoded)) => {
+                            out.push(decoded);
+                            // Skip `{`, the hex digits and `}`.
+                            for _ in 0..hex_len + 2 {
+                                chars.next();
+                            }
+                        }
+                        None => out.push_str("\\u"),
+                    }
+                }
+                other => {
+                    out.push('\\');
+                    out.push(other);
+                }
+            },
+            _ => out.push(c),
+        }
+    }
+    None
 }
 
 fn parse_step(

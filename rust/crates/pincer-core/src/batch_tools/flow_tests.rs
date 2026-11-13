@@ -28,6 +28,10 @@ struct Ui {
     /// The window of each current snapshot, as a platform snapshot store
     /// keeps it: a newer read of a window replaces its snapshot.
     snapshot_windows: Vec<(String, u64)>,
+    /// Web page content shown in the main window under an AXWebArea:
+    /// AXStaticText rows are display-only, other roles are elements marked
+    /// `in_web_content`.
+    page: Vec<(&'static str, String)>,
     calls: Vec<(String, Value)>,
 }
 
@@ -134,6 +138,40 @@ impl Tool for Fake {
                 }
                 if ui.screen == 1 && window_id == 7 {
                     markdown.push_str("  - AXStaticText \"Step 2 of 2\"\n");
+                }
+                if window_id == 7 && !ui.page.is_empty() {
+                    let area = rows.len() + 1;
+                    markdown.push_str(&format!("  - [{area}] AXWebArea \"Inbox\"\n"));
+                    elements.push(json!({
+                        "element_index": area,
+                        "element_token": format!("s{snapshot:08x}:{area}"),
+                        "role": "AXWebArea",
+                        "depth": 1,
+                        "label": "Inbox",
+                        "frame": {"x": 0, "y": 0, "w": 10, "h": 10},
+                    }));
+                    let page = ui.page.clone();
+                    let mut index = area;
+                    for (role, label) in page {
+                        if role == "AXStaticText" {
+                            markdown.push_str(&format!("    - {role} \"{label}\"\n"));
+                            continue;
+                        }
+                        index += 1;
+                        markdown.push_str(&format!("    - [{index}] {role} \"{label}\"\n"));
+                        elements.push(json!({
+                            "element_index": index,
+                            "element_token": format!("s{snapshot:08x}:{index}"),
+                            "role": role,
+                            "depth": 2,
+                            "label": label,
+                            "in_web_content": true,
+                            "parent_index": area,
+                            "frame": {"x": 0, "y": 0, "w": 10, "h": 10},
+                        }));
+                        ui.last_labels
+                            .push((format!("s{snapshot:08x}:{index}"), label.clone()));
+                    }
                 }
                 ToolResult::text(markdown.clone()).with_structured(json!({
                     "pid": 42,
@@ -720,4 +758,101 @@ async fn a_desktop_scope_step_checks_the_apps_windows_and_observes_where_its_che
     );
     let observed = harness.calls("get_window_state").last().cloned().unwrap();
     assert_eq!(observed["window_id"], 8, "{observed}");
+}
+
+// ── where a check held (TOOL-1) ──────────────────────────────────────────
+
+/// A web page can show any text, so a check that only page content
+/// satisfied says so: `source:"page"` in the report and "held on page
+/// content" in the step line. Text rows and page elements both count.
+#[tokio::test]
+async fn a_check_held_only_by_page_content_says_where_it_held() {
+    let harness = Harness::new();
+    harness.ui.lock().unwrap().page = vec![("AXStaticText", "Message sent".into())];
+    let result = harness
+        .run(json!({"steps": [
+            {"click": {"app": "Demo", "role": "button", "name": "Next"},
+             "expect": [{"text": "Message sent"}]}
+        ]}))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let structured = result.structured_content.clone().unwrap();
+    assert_eq!(
+        structured["steps"][0]["expect"][0]["source"], "page",
+        "{structured}"
+    );
+    assert!(
+        text(&result).contains("1 check(s) held on page content"),
+        "{}",
+        text(&result)
+    );
+
+    let harness = Harness::new();
+    harness.ui.lock().unwrap().page = vec![("AXLink", "Message sent".into())];
+    let result = harness
+        .run(json!({"steps": [
+            {"expect": [{"app": "Demo", "role": "link", "name": "Message sent"}]}
+        ]}))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let structured = result.structured_content.clone().unwrap();
+    assert_eq!(
+        structured["steps"][0]["expect"][0]["source"], "page",
+        "{structured}"
+    );
+    assert!(
+        text(&result).contains("held on page content"),
+        "{}",
+        text(&result)
+    );
+}
+
+/// The app's own UI showing the text is the evidence that counts, even with
+/// a page beside it showing the same text.
+#[tokio::test]
+async fn a_check_held_by_the_apps_own_ui_is_labelled_app() {
+    let harness = Harness::new();
+    harness.ui.lock().unwrap().page = vec![("AXStaticText", "Step 2 of 2".into())];
+    let result = harness
+        .run(json!({"steps": [
+            {"click": {"app": "Demo", "role": "button", "name": "Next"},
+             "expect": [{"text": "Step 2"}, {"role": "button", "name": "Back"}]}
+        ]}))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let structured = result.structured_content.clone().unwrap();
+    for nth in 0..2 {
+        assert_eq!(
+            structured["steps"][0]["expect"][nth]["source"], "app",
+            "{structured}"
+        );
+    }
+    assert!(
+        !text(&result).contains("page content"),
+        "{}",
+        text(&result)
+    );
+}
+
+#[tokio::test]
+async fn a_wait_for_held_only_by_page_content_says_where_it_held() {
+    let harness = Harness::new();
+    harness.ui.lock().unwrap().page = vec![("AXStaticText", "Ready".into())];
+    let result = harness
+        .run(json!({"steps": [
+            {"click": {"app": "Demo", "role": "button", "name": "Next"},
+             "wait_for": {"app": "Demo", "text": "Ready"}}
+        ]}))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let structured = result.structured_content.clone().unwrap();
+    assert_eq!(
+        structured["steps"][0]["wait_for"]["source"], "page",
+        "{structured}"
+    );
+    assert!(
+        text(&result).contains("(held on page content)"),
+        "{}",
+        text(&result)
+    );
 }

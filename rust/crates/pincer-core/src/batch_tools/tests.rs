@@ -30,7 +30,11 @@ impl Tool for Probe {
     async fn invoke(&self, args: Value) -> ToolResult {
         self.calls.lock().unwrap().push(args.clone());
         if let Some(message) = args["fail_message"].as_str() {
-            return ToolResult::error(message.to_owned());
+            let result = ToolResult::error(message.to_owned());
+            return match args.get("fail_structured") {
+                Some(structured) => result.with_structured(structured.clone()),
+                None => result,
+            };
         }
         if args["fail"] == true {
             ToolResult::error(format!("{} refused: probe asked to fail", self.def.name))
@@ -68,6 +72,7 @@ impl Harness {
                             "text": {"type": "string"},
                             "fail": {"type": "boolean"},
                             "fail_message": {"type": "string"},
+                            "fail_structured": {"type": "object"},
                             "element_token": {"type": "string"},
                             "value": {"type": "string"},
                             "key": {"type": "string"},
