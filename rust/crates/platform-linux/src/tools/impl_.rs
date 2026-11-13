@@ -12077,7 +12077,10 @@ impl Tool for ScrollTool {
                 exists (a GTK3 canvas, for example) background delivery is refused with \
                 background_unavailable: retry with delivery_mode foreground. Window x,y need a \
                 get_window_state screenshot of the window earlier in the session \
-                (screenshot_context_missing otherwise).".into(),
+                (screenshot_context_missing otherwise). modifier holds keys during the wheel \
+                steps (ctrl+wheel zooms in most editors, canvases and browsers); X11 only. A \
+                modified scroll is not checked against the scroll bars, since it usually zooms \
+                instead of scrolling: its result is unverifiable.".into(),
             input_schema: json!({
                 // `pid` is conditionally required (validated in code), so only
                 // `direction` is pinned — matches the scroll→["direction"] canon
@@ -12091,6 +12094,7 @@ impl Tool for ScrollTool {
                     "amount":{"type":"integer","minimum":1,"maximum":50,"description":"Wheel steps, or pages with by:\"page\". Default: 3."},
                     "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                     "element_token": pincer_core::tool_schema::element_token_schema(),
+                    "modifier": pincer_core::tool_schema::modifier_schema(),
                     "x":{"type":"number","description":"Window-local screenshot-pixel X of the scroll target. Pass with y and without element_token."},
                     "y":{"type":"number","description":"Window-local screenshot-pixel Y of the scroll target. Pass with x and without element_token."},
                     "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"Use \"desktop\" with x,y and no pid/window_id for get_desktop_state screen coordinates. Default \"window\"."},
@@ -12104,6 +12108,16 @@ impl Tool for ScrollTool {
 
     async fn invoke(&self, args: Value) -> ToolResult {
         let cursor_id = resolve_cursor_key(&args);
+        // Keys held around the wheel steps (ctrl+wheel to zoom). Only the X11
+        // XTest and XSendEvent routes can carry them.
+        let modifiers: Vec<String> = args.str_array("modifier");
+        if !modifiers.is_empty() && crate::wayland::wayland_input_enabled() {
+            return ToolResult::error(
+                "scroll with modifier is unavailable on native Wayland: the wheel route \
+                 cannot carry keyboard modifier state. Use press_key or hotkey for the \
+                 app's keyboard zoom instead.",
+            );
+        }
         if args.opt_str("scope").as_deref() == Some("desktop")
             && args.get("pid").is_none()
             && args.get("window_id").is_none()
@@ -12135,19 +12149,32 @@ impl Tool for ScrollTool {
                 )
                 .await;
             }
+            let modifiers_for_task = modifiers.clone();
             let result = tokio::task::spawn_blocking(move || {
                 if wayland {
                     crate::wayland::scroll_desktop(&space, x, y, &direction, amount as u32)
-                } else {
+                } else if modifiers_for_task.is_empty() {
                     crate::input::send_scroll_xtest_desktop(x, y, &direction, amount)
+                } else {
+                    let refs: Vec<&str> = modifiers_for_task.iter().map(String::as_str).collect();
+                    crate::input::send_click_xtest_desktop_with_modifiers(
+                        x,
+                        y,
+                        wheel_button(&direction),
+                        amount,
+                        &refs,
+                    )
                 }
             })
             .await;
+            let held = held_note(&modifiers);
             return match result {
-                Ok(Ok(())) => ToolResult::text(format!("Scrolled desktop {display} × {amount}."))
-                    .with_structured(
-                        json!({"scope":"desktop","path":path,"effect":"unverifiable"}),
-                    ),
+                Ok(Ok(())) => {
+                    ToolResult::text(format!("Scrolled desktop {display} × {amount}{held}."))
+                        .with_structured(
+                            json!({"scope":"desktop","path":path,"effect":"unverifiable"}),
+                        )
+                }
                 Ok(Err(error)) => ToolResult::error(error.to_string()),
                 Err(error) => ToolResult::error(format!("Task error: {error}")),
             };
@@ -12306,8 +12333,20 @@ impl Tool for ScrollTool {
                 return refusal;
             }
         }
-        if let pincer_core::element_token::ResolvedElement::Element { element_index, .. } =
-            &resolved
+        if !modifiers.is_empty()
+            && (isolated_background
+                || hyprland_foreground(delivery)
+                || crate::wayland::is_inject_mode())
+        {
+            return ToolResult::error(
+                "scroll with modifier needs X11 input: this route cannot carry keyboard \
+                 modifier state. Use press_key or hotkey for the app's keyboard zoom instead.",
+            );
+        }
+        // An AT-SPI scroll moves the view and cannot hold keys, so a modified
+        // scroll goes to the wheel over the element instead.
+        if let (pincer_core::element_token::ResolvedElement::Element { element_index, .. }, true) =
+            (&resolved, modifiers.is_empty())
         {
             let idx = *element_index;
             // WebKitGTK acknowledges the AT-SPI scroll action without moving
@@ -12522,12 +12561,7 @@ impl Tool for ScrollTool {
         };
 
         // X11 scroll buttons: 4=up, 5=down, 6=left, 7=right
-        let button: u8 = match direction.as_str() {
-            "up" => 4,
-            "left" => 6,
-            "right" => 7,
-            _ => 5,
-        };
+        let button = wheel_button(&direction);
         // X11 has no page step: a page is WHEEL_STEPS_PER_PAGE wheel steps,
         // the approximation the Hyprland route documents.
         let steps = match by {
@@ -12537,7 +12571,8 @@ impl Tool for ScrollTool {
         // The window's scroll bars as the last snapshot indexed them, read
         // before and after: the only way to tell a scroll from wheel events
         // the toolkit ignored.
-        let before = if crate::wayland::wayland_input_enabled() {
+        // A modified wheel usually zooms: the scroll bars say nothing about it.
+        let before = if crate::wayland::wayland_input_enabled() || !modifiers.is_empty() {
             Vec::new()
         } else {
             tokio::task::spawn_blocking(move || crate::atspi::scroll_bar_ranges(pid, xid))
@@ -12547,7 +12582,9 @@ impl Tool for ScrollTool {
         let cursor_id_for_task = cursor_id.clone();
         let direction_for_wayland = direction.clone();
         let steps_u32 = steps as u32;
+        let modifiers_for_task = modifiers.clone();
         let result = tokio::task::spawn_blocking(move || -> anyhow::Result<&'static str> {
+            let modifier_refs: Vec<&str> = modifiers_for_task.iter().map(String::as_str).collect();
             if crate::wayland::wayland_input_enabled() {
                 return crate::wayland::scroll(xid, &direction_for_wayland, steps_u32)
                     .map(|()| "wayland");
@@ -12563,7 +12600,9 @@ impl Tool for ScrollTool {
                 // without stealing focus. Falls back to the legacy XSendEvent
                 // Button4-7 path on Xvfb / unsupported servers.
                 // Button → axis/sign: 4=up(+v) 5=down(-v) 6=left(-h) 7=right(+h).
-                if crate::input::real_pointer_input_available() {
+                // The virtual pointer has no keyboard: a modified scroll goes
+                // as XSendEvent wheel buttons with the modifier state set.
+                if modifier_refs.is_empty() && crate::input::real_pointer_input_available() {
                     let pointer_point = element_point
                         .and_then(|(_, screen)| screen)
                         .map(|(x, y)| (x as i32, y as i32))
@@ -12602,8 +12641,15 @@ impl Tool for ScrollTool {
                         })
                     })
                     .unwrap_or((0.0, 0.0));
-                crate::input::send_click(xid, local_x as i32, local_y as i32, steps, button)
-                    .map(|()| "x11_xsendevent")
+                crate::input::send_click_with_modifiers(
+                    xid,
+                    local_x as i32,
+                    local_y as i32,
+                    steps,
+                    button,
+                    &modifier_refs,
+                )
+                .map(|()| "x11_xsendevent")
             };
             if delivery.is_foreground() {
                 let point = element_point
@@ -12615,11 +12661,12 @@ impl Tool for ScrollTool {
                     })
                     .ok_or_else(|| anyhow::anyhow!("could not resolve foreground scroll point"))?;
                 crate::input::with_x11_foreground(xid, 80, || {
-                    crate::input::send_click_xtest_desktop(
+                    crate::input::send_click_xtest_desktop_with_modifiers(
                         point.0 as i32,
                         point.1 as i32,
                         button,
                         steps,
+                        &modifier_refs,
                     )
                 })
                 .map(|()| "x11_xtest_fg")
@@ -12634,6 +12681,14 @@ impl Tool for ScrollTool {
             "background"
         };
         match result {
+            Ok(Ok(path)) if !modifiers.is_empty() => modified_scroll_result(
+                &direction,
+                steps,
+                &modifiers,
+                path,
+                mode_label,
+                path == "x11_xsendevent" && synthetic_pointer_is_dropped(pid),
+            ),
             Ok(Ok(path)) => {
                 let after = if before.is_empty() {
                     Vec::new()
@@ -12665,6 +12720,89 @@ impl Tool for ScrollTool {
 
 /// Wheel steps for one `by: "page"` step on X11 (Hyprland's documented
 /// approximation).
+/// X11 wheel button for a scroll direction: 4 up, 5 down, 6 left, 7 right.
+fn wheel_button(direction: &str) -> u8 {
+    match direction {
+        "up" => 4,
+        "left" => 6,
+        "right" => 7,
+        _ => 5,
+    }
+}
+
+/// " with ctrl+shift held" for a result line, or nothing.
+fn held_note(modifiers: &[String]) -> String {
+    if modifiers.is_empty() {
+        String::new()
+    } else {
+        format!(" with {} held", modifiers.join("+"))
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn modified_scroll_reports_unverifiable_with_the_held_keys() {
+    let modifiers = vec!["ctrl".to_owned()];
+    let result = modified_scroll_result("up", 4, &modifiers, "x11_xtest_fg", "foreground", false);
+    assert!(!result.is_error.unwrap_or(false));
+    let text = format!("{:?}", result.content);
+    assert!(text.contains("Sent 4 wheel steps up with ctrl held"), "{text}");
+    let structured = result.structured_content.expect("structured result");
+    assert_eq!(structured["effect"], "unverifiable");
+    assert_eq!(structured["verified"], false);
+    assert_eq!(structured["modifier"], json!(["ctrl"]));
+    assert_eq!(structured["path"], "x11_xtest_fg");
+
+    let ignored = modified_scroll_result("down", 1, &modifiers, "x11_xsendevent", "background", true);
+    let text = format!("{:?}", ignored.content);
+    assert!(text.contains("1 wheel step down"), "{text}");
+    assert!(text.contains("retry with delivery_mode"), "{text}");
+}
+
+#[cfg(test)]
+#[test]
+fn wheel_buttons_match_x11_numbering() {
+    assert_eq!(
+        ["up", "down", "left", "right"].map(wheel_button),
+        [4, 5, 6, 7]
+    );
+    assert_eq!(held_note(&[]), "");
+    assert_eq!(held_note(&["ctrl".to_owned(), "shift".to_owned()]), " with ctrl+shift held");
+}
+
+/// Result of a wheel scroll sent with keys held. Ctrl+wheel zooms in most
+/// apps, so the scroll bars are no evidence either way: report it sent and
+/// unverified, and name the toolkits that drop the synthetic route.
+fn modified_scroll_result(
+    direction: &str,
+    steps: usize,
+    modifiers: &[String],
+    path: &str,
+    mode_label: &str,
+    synthetic_wheel_ignored: bool,
+) -> ToolResult {
+    let what = format!("{steps} wheel step{}", if steps == 1 { "" } else { "s" });
+    let mut text = format!(
+        "Sent {what} {direction}{} (delivery_mode={mode_label}, path={path}); not verified: \
+         a modified wheel usually zooms or does something other than scroll, so check the \
+         window with get_window_state.",
+        held_note(modifiers)
+    );
+    if synthetic_wheel_ignored {
+        text.push_str(
+            " This toolkit (Qt, GTK or LibreOffice) ignores synthetic wheel events, so this \
+             most likely did nothing: retry with delivery_mode:\"foreground\".",
+        );
+    }
+    ToolResult::text(text).with_structured(json!({
+        "verified": false,
+        "effect": "unverifiable",
+        "delivery_mode": mode_label,
+        "path": path,
+        "modifier": modifiers,
+    }))
+}
+
 const WHEEL_STEPS_PER_PAGE: usize = 3;
 
 /// What a wheel scroll did to the window's scroll bars.
