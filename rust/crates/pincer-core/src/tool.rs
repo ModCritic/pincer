@@ -2101,6 +2101,49 @@ impl ToolRegistry {
                 args["_protected_process_fingerprint"] = approved_scope["fingerprint"].clone();
             }
         }
+        if has_adapter("process_launch") {
+            // Every launch_app call is attested: the concrete tool resolves
+            // the exact program and reports whether it is an installed
+            // desktop app and whether any argument or url is an option.
+            // Unrestricted mode without a manifest skips attestation, as
+            // before this adapter existed.
+            let approved_scope = match self
+                .authorize_attested_resource(
+                    tool.as_ref(),
+                    "process_launch",
+                    crate::authorization::RiskClass::R3,
+                    &public_args,
+                    context,
+                    runtime_session.as_deref(),
+                    "Allow Pincer to start this exact program",
+                    Duration::from_secs(2 * 60),
+                    Duration::from_secs(10 * 60),
+                )
+                .await
+            {
+                Ok(scope) => scope,
+                Err(refusal) => return refusal,
+            };
+            if let Err(refusal) = self
+                .validate_attested_resource(
+                    tool.as_ref(),
+                    "process_launch",
+                    &public_args,
+                    context,
+                    runtime_session.as_deref(),
+                    &approved_scope,
+                )
+                .await
+            {
+                return refusal;
+            }
+            // The tool must start exactly what was admitted. Reserved
+            // fields are stripped from caller arguments at the top of this
+            // function, so only this attestation can arrive here.
+            if !approved_scope.is_null() {
+                args["_protected_launch_scope"] = approved_scope;
+            }
+        }
         if has_adapter("driver_configuration") {
             if let Err(refusal) = self
                 .authorize_driver_configuration(
@@ -2764,11 +2807,14 @@ impl ToolRegistry {
         context: &crate::session_authorization::EffectiveAuthorizationContext,
         lifecycle_session: Option<&str>,
     ) -> Result<(), ToolResult> {
-        if context.mode() == crate::authorization::PermissionMode::Unrestricted
-            && context.capability_manifest().is_none()
-        {
+        let unscoped = context.mode() == crate::authorization::PermissionMode::Unrestricted
+            && context.capability_manifest().is_none();
+        // Unrestricted mode without a manifest still resolves paths when a
+        // policy is configured, so the policy below can judge the real path.
+        if unscoped && !crate::policy::policy_configured() {
             return Ok(());
         }
+        let caller_args = args.clone();
         let (resource, summary) = match tool_name {
             "browser_set_input_files" => {
                 let files = canonical_upload_files(args)?;
@@ -2924,6 +2970,17 @@ impl ToolRegistry {
             }
         };
 
+        // The policy ran on the caller's spelling of each path. Run it again
+        // on the resolved paths, so `~`, a relative path, `..` or a symlink
+        // cannot carry a path past a rule written for the real location.
+        if *args != caller_args {
+            crate::policy::authorize_tool_call(tool_name, args)
+                .map_err(|error| permission_denied_result(error.to_string()))?;
+        }
+        if unscoped {
+            return Ok(());
+        }
+
         self.protected_resource_grants
             .authorize(
                 context,
@@ -2975,6 +3032,18 @@ impl ToolRegistry {
                         .is_driver_owned_pid(session, pid)
                 });
             resource["driver_owned"] = Value::Bool(driver_owned);
+        }
+        // The grant store below denies the same launches; refusing here
+        // first gives the model the forms standard mode does run instead of
+        // a generic adapter denial.
+        if adapter_id == "process_launch"
+            && context.mode() == crate::authorization::PermissionMode::Standard
+            && !crate::consent::standard_allows_program_launch(&resource)
+        {
+            return Err(protected_refusal(
+                "program_launch_denied",
+                &program_launch_refusal_message(&resource),
+            ));
         }
         self.protected_resource_grants
             .authorize(
@@ -3356,6 +3425,28 @@ const FOREIGN_PROCESS_TERMINATION_MESSAGE: &str =
      session has ended; this pid is not one of those. Close the app through its own Quit \
      item instead (invoke_menu, e.g. [\"File\",\"Quit\"])";
 
+/// The forms of launch_app that standard mode runs, and what the rest need.
+const PROGRAM_LAUNCH_ALLOWED_FORMS: &str =
+    "Standard mode starts installed desktop apps only: name one by `name` or `bundle_id`, \
+     or pass the exact `launch_path` that list_apps returned for it, optionally with files or \
+     URLs in `urls` or `additional_arguments`, none of them starting with '-'. Any other \
+     program, and any option, needs permission mode unrestricted, or bounded mode with a \
+     capability manifest that declares the program under resources.apps with launch: true \
+     (and launch_options: true for options)";
+
+/// Actionable standard-mode refusal for an attested launch outside the
+/// installed-app carve-out. Names which half of the carve-out failed and
+/// never echoes the program path or the arguments.
+fn program_launch_refusal_message(resource: &Value) -> String {
+    let installed = resource.get("installed_app").and_then(Value::as_bool) == Some(true);
+    let reason = if !installed {
+        "this launch_app call does not resolve to an installed desktop app"
+    } else {
+        "this launch_app call passes an argument or url that starts with '-'"
+    };
+    format!("{reason}. {PROGRAM_LAUNCH_ALLOWED_FORMS}")
+}
+
 /// Bucket that owns the processes a call is allowed to terminate.
 ///
 /// A call that declares a session keys its launches to that session, so
@@ -3643,6 +3734,84 @@ mod runtime_isolation_tests {
         scope: serde_json::Value,
         stale_before_dispatch: bool,
         def: super::ToolDef,
+    }
+
+    /// A launch_app stand-in that attests a fixed program launch and records
+    /// what dispatch handed it.
+    struct LaunchProbe {
+        hits: Arc<AtomicUsize>,
+        scope: serde_json::Value,
+        last_args: Arc<Mutex<Option<serde_json::Value>>>,
+        def: super::ToolDef,
+    }
+
+    #[async_trait::async_trait]
+    impl super::Tool for LaunchProbe {
+        fn def(&self) -> &super::ToolDef {
+            &self.def
+        }
+
+        async fn protected_resource_scope(
+            &self,
+            adapter_id: &str,
+            _args: &serde_json::Value,
+        ) -> Result<Option<serde_json::Value>, String> {
+            Ok((adapter_id == "process_launch").then(|| self.scope.clone()))
+        }
+
+        async fn invoke(&self, args: serde_json::Value) -> crate::protocol::ToolResult {
+            self.hits.fetch_add(1, Ordering::SeqCst);
+            self.last_args.lock().unwrap().replace(args);
+            crate::protocol::ToolResult::text("launched")
+        }
+    }
+
+    fn launch_scope(
+        executable: &str,
+        desktop_entry: Option<&str>,
+        options: bool,
+        argument_count: usize,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "program_launch",
+            "executable": executable,
+            "installed_app": desktop_entry.is_some(),
+            "desktop_entry": desktop_entry,
+            "options": options,
+            "argument_count": argument_count,
+        })
+    }
+
+    fn launch_registry(
+        scope: serde_json::Value,
+        provider: Option<Arc<dyn ProtectedConsentProvider>>,
+        hits: Arc<AtomicUsize>,
+        last_args: Arc<Mutex<Option<serde_json::Value>>>,
+    ) -> Arc<super::ToolRegistry> {
+        let mut registry = super::ToolRegistry::new_with_protected_consent_provider(provider);
+        registry.register(Box::new(LaunchProbe {
+            hits,
+            scope,
+            last_args,
+            def: super::ToolDef {
+                name: "launch_app".into(),
+                description: "test program launch".into(),
+                input_schema: serde_json::json!({"type": "object"}),
+                read_only: false,
+                destructive: false,
+                idempotent: false,
+                open_world: true,
+            },
+        }));
+        Arc::new(registry)
+    }
+
+    fn refusal_code(result: &ToolResult) -> Option<&str> {
+        result
+            .structured_content
+            .as_ref()
+            .and_then(|value| value.pointer("/refusal/code"))
+            .and_then(serde_json::Value::as_str)
     }
 
     #[async_trait::async_trait]
@@ -5509,6 +5678,270 @@ resources:
             .await;
         assert_ne!(result.is_error, Some(true), "{result:?}");
         assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    // LXTOOLS-1: launch_app had no adapter, so standard mode ran any
+    // program with any arguments, e.g. `sh -c 'cat ~/.ssh/id_ed25519'`.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn standard_launch_of_other_programs_or_options_is_refused_with_the_allowed_forms() {
+        for (scope, args) in [
+            (
+                launch_scope("/usr/bin/sh", None, false, 1),
+                serde_json::json!({"name": "bash", "urls": ["/tmp/x.sh"], "session": "launch"}),
+            ),
+            (
+                launch_scope("/usr/bin/sh", None, true, 2),
+                serde_json::json!({
+                    "name": "sh",
+                    "additional_arguments": ["-c", "cat ~/.ssh/id_ed25519"],
+                    "session": "launch",
+                }),
+            ),
+            (
+                launch_scope("/usr/bin/konsole", Some("org.kde.konsole"), true, 3),
+                serde_json::json!({
+                    "name": "Konsole",
+                    "urls": ["-e", "sh", "-c"],
+                    "session": "launch",
+                }),
+            ),
+        ] {
+            let hits = Arc::new(AtomicUsize::new(0));
+            let provider = Arc::new(AcceptingProvider {
+                requests: AtomicUsize::new(0),
+            });
+            let registry = launch_registry(
+                scope,
+                Some(provider.clone()),
+                hits.clone(),
+                Arc::new(Mutex::new(None)),
+            );
+            let result = registry
+                .invoke_with_context("launch_app", args.clone(), standard_context())
+                .await;
+            assert_eq!(hits.load(Ordering::SeqCst), 0, "{args}");
+            assert_eq!(provider.requests.load(Ordering::SeqCst), 0, "{args}");
+            assert_eq!(refusal_code(&result), Some("program_launch_denied"), "{args}");
+            let message = result
+                .structured_content
+                .as_ref()
+                .and_then(|value| value.pointer("/refusal/message"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            for named in ["list_apps", "launch_path", "unrestricted", "launch: true"] {
+                assert!(message.contains(named), "{args}: {message}");
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn standard_launch_of_an_installed_app_runs_the_attested_program_without_prompting() {
+        let scope = launch_scope("/usr/bin/kwrite", Some("org.kde.kwrite"), false, 1);
+        let hits = Arc::new(AtomicUsize::new(0));
+        let last_args = Arc::new(Mutex::new(None));
+        let provider = Arc::new(AcceptingProvider {
+            requests: AtomicUsize::new(0),
+        });
+        let registry = launch_registry(
+            scope.clone(),
+            Some(provider.clone()),
+            hits.clone(),
+            last_args.clone(),
+        );
+        let result = registry
+            .invoke_with_context(
+                "launch_app",
+                serde_json::json!({
+                    "name": "KWrite",
+                    "urls": ["/home/u/notes.txt"],
+                    "session": "launch",
+                    "_protected_launch_scope": {"executable": "/usr/bin/sh"},
+                }),
+                standard_context(),
+            )
+            .await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.requests.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            last_args.lock().unwrap().as_ref().unwrap()["_protected_launch_scope"],
+            scope,
+            "dispatch must carry the exact attested launch, never a caller's copy"
+        );
+    }
+
+    // AUTH-2: a manifest that allowed launch_app let it start any program;
+    // `apps[].launch` was parsed and ignored.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn bounded_launch_runs_only_declared_launch_apps() {
+        let manifest = format!(
+            r#"
+version: 2
+mode: bounded
+expires_after: 1h
+idle_timeout: 30m
+allow:
+  tools: [launch_app]
+resources:
+  apps:
+    - executable: {executable}
+      launch: true
+"#,
+            executable = serde_json::to_string(&fixture_executable()).unwrap()
+        );
+        for (scope, admitted) in [
+            (launch_scope(&fixture_executable(), None, false, 0), true),
+            (launch_scope("/usr/bin/sh", None, false, 0), false),
+            (launch_scope(&fixture_executable(), None, true, 2), false),
+        ] {
+            let hits = Arc::new(AtomicUsize::new(0));
+            let registry = launch_registry(
+                scope.clone(),
+                None,
+                hits.clone(),
+                Arc::new(Mutex::new(None)),
+            );
+            let result = registry
+                .invoke_with_context(
+                    "launch_app",
+                    serde_json::json!({"launch_path": "program", "session": "launch"}),
+                    bounded_context(&manifest),
+                )
+                .await;
+            assert_eq!(hits.load(Ordering::SeqCst), usize::from(admitted), "{scope}");
+            if !admitted {
+                assert_eq!(
+                    refusal_code(&result),
+                    Some("bounded_resource_outside_manifest"),
+                    "{scope}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unrestricted_launch_without_a_manifest_needs_no_attestation() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let registry = launch_registry(
+            serde_json::Value::Null,
+            None,
+            hits.clone(),
+            Arc::new(Mutex::new(None)),
+        );
+        let result = registry
+            .invoke_with_context(
+                "launch_app",
+                serde_json::json!({"launch_path": "/usr/bin/env", "session": "launch"}),
+                unrestricted_context(),
+            )
+            .await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    // AUTH-2: invoke_menu took any pid and window under a manifest scoped to
+    // one window, because it selected no adapter.
+    #[tokio::test]
+    async fn capability_manifest_scopes_native_menu_invocation() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let registry = observation_registry_for("invoke_menu", None, hits.clone());
+        let context = bounded_context(
+            r#"
+version: 2
+mode: bounded
+expires_after: 1h
+idle_timeout: 30m
+allow:
+  tools: [invoke_menu]
+resources:
+  desktop:
+    windows:
+      - pid: 42
+        window_id: 7
+"#,
+        );
+        // The probe returns no action record, so an admitted call ends in a
+        // post-dispatch outcome error. Only the manifest refusal before
+        // dispatch matters here.
+        for (window, expected_calls) in [(7, 1), (8, 1)] {
+            let result = registry
+                .invoke_with_context(
+                    "invoke_menu",
+                    serde_json::json!({
+                        "pid": 42, "window_id": window, "path": ["File", "Quit"],
+                        "session": "menus",
+                    }),
+                    context.clone(),
+                )
+                .await;
+            assert_eq!(
+                refusal_code(&result) == Some("bounded_resource_outside_manifest"),
+                window != 7,
+                "window {window}: {result:?}"
+            );
+            assert_eq!(
+                hits.load(Ordering::SeqCst),
+                expected_calls,
+                "window {window}"
+            );
+        }
+    }
+
+    // AUTH-3: the policy saw the caller's spelling of a path, and the file
+    // adapter resolved `..` only afterwards, so a path-prefix rule passed a
+    // path outside its prefix.
+    #[cfg(all(feature = "yaml", unix))]
+    #[tokio::test]
+    async fn policy_runs_again_on_canonical_file_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let root_path = std::fs::canonicalize(root.path()).unwrap();
+        let downloads = root_path.join("Downloads");
+        let inside = downloads.join("inside");
+        let outside = root_path.join("autostart");
+        std::fs::create_dir_all(&inside).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let pattern = format!(
+            "^{}/",
+            regex::escape(downloads.to_str().unwrap())
+        );
+        let _policy = crate::policy::install_test_yaml_policy(&format!(
+            "allow:\n  rules:\n    - tool: browser_download\n      constraints:\n        destination_root: {{ pattern: {} }}\n",
+            serde_json::to_string(&pattern).unwrap()
+        ));
+
+        for context in [standard_context(), unrestricted_context()] {
+            let hits = Arc::new(AtomicUsize::new(0));
+            let registry = argument_registry("browser_download", None, hits.clone());
+            let escaped = format!("{}/../autostart", downloads.display());
+            let refused = registry
+                .invoke_with_context(
+                    "browser_download",
+                    serde_json::json!({
+                        "target_id": "browser", "tab_id": "tab", "ref": "p1:0",
+                        "destination_root": escaped,
+                    }),
+                    context.clone(),
+                )
+                .await;
+            assert_eq!(hits.load(Ordering::SeqCst), 0, "{refused:?}");
+            assert_eq!(refusal_code(&refused), Some("permission_denied"));
+
+            let admitted = registry
+                .invoke_with_context(
+                    "browser_download",
+                    serde_json::json!({
+                        "target_id": "browser", "tab_id": "tab", "ref": "p1:0",
+                        "destination_root": inside,
+                    }),
+                    context,
+                )
+                .await;
+            assert_ne!(admitted.is_error, Some(true), "{admitted:?}");
+            assert_eq!(hits.load(Ordering::SeqCst), 1);
+        }
     }
 
     #[test]

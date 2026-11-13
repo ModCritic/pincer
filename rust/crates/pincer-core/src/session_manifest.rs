@@ -59,8 +59,13 @@ pub struct SessionManifest {
 struct ApplicationGrant {
     bundle_id: Option<String>,
     executable: Option<String>,
-    #[allow(dead_code)]
+    /// launch_app may start this application (the `process_launch`
+    /// adapter, Linux only for now).
     launch: bool,
+    /// launch_app may pass it arguments or `urls` that start with `-`.
+    /// Off by default: options such as a terminal's `-e` or a browser's
+    /// command-prefix switches run other programs.
+    launch_options: bool,
     all_windows: bool,
     terminate: TerminationGrant,
 }
@@ -256,6 +261,12 @@ impl SessionManifest {
                     ))
                 }
             }
+            "process_launch" => {
+                if kind != "program_launch" {
+                    return refused();
+                }
+                self.authorize_program_launch(resource)
+            }
             "driver_configuration" => {
                 let changes = resource
                     .get("exact_changes")
@@ -280,6 +291,56 @@ impl SessionManifest {
             }
             _ => refused(),
         }
+    }
+
+    /// Admit the exact program a launch_app call resolved to only when an
+    /// application declared with `launch: true` names it, by canonical
+    /// executable or, for an installed desktop entry, by bundle id. Options
+    /// (an argument or url starting with `-`) need `launch_options: true`
+    /// as well. Missing attestation fields fail closed.
+    fn authorize_program_launch(&self, resource: &serde_json::Value) -> Result<(), String> {
+        let executable = resource
+            .get("executable")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "program launch did not attest an executable".to_owned())?;
+        let options = resource
+            .get("options")
+            .and_then(serde_json::Value::as_bool)
+            .ok_or_else(|| "program launch did not attest whether it passes options".to_owned())?;
+        let installed_entry = resource
+            .get("installed_app")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+            .then(|| resource.get("desktop_entry").and_then(serde_json::Value::as_str))
+            .flatten();
+        let mut declared = self
+            .applications
+            .iter()
+            .filter(|application| {
+                application.launch
+                    && (application.executable.as_deref() == Some(executable)
+                        || application
+                            .bundle_id
+                            .as_deref()
+                            .zip(installed_entry)
+                            .is_some_and(|(allowed, entry)| allowed == entry))
+            })
+            .peekable();
+        if declared.peek().is_none() {
+            return Err(
+                "the program this launch_app call resolves to is not an application declared \
+                 with launch: true under resources.apps"
+                    .to_owned(),
+            );
+        }
+        if options && !declared.any(|application| application.launch_options) {
+            return Err(
+                "this launch passes arguments or urls that start with '-', and its application \
+                 is not declared with launch_options: true; drop the options"
+                    .to_owned(),
+            );
+        }
+        Ok(())
     }
 
     fn authorize_desktop_window(&self, resource: &serde_json::Value) -> Result<(), String> {
@@ -582,6 +643,8 @@ struct RawApplicationResource {
     executable: Option<String>,
     #[serde(default)]
     launch: bool,
+    #[serde(default)]
+    launch_options: bool,
     #[serde(default)]
     windows: Option<String>,
     #[serde(default)]
@@ -894,7 +957,8 @@ pub fn load_manifest(path: &Path) -> Result<SessionManifest, String> {
         }
         let mut browser_origins = HashSet::new();
         for raw_origin in raw_browser_origins {
-            let origin = canonical_origin(&raw_origin)?;
+            let origin = canonical_origin(&raw_origin)
+                .map_err(|error| format!("browser origin '{raw_origin}': {error}"))?;
             if origin != raw_origin.trim().trim_end_matches('/') {
                 return Err(format!(
                     "browser origin '{raw_origin}' must be an exact canonical origin without a path"
@@ -1135,10 +1199,14 @@ fn validate_applications(
         }) {
             return Err("application resources repeat an identity".to_owned());
         }
+        if raw.launch_options && !raw.launch {
+            return Err("application launch_options: true also needs launch: true".to_owned());
+        }
         validated.push(ApplicationGrant {
             bundle_id,
             executable,
             launch: raw.launch,
+            launch_options: raw.launch_options,
             all_windows,
             terminate,
         });
@@ -1302,21 +1370,50 @@ fn canonical_manifest_path(path: &Path) -> Result<String, String> {
     Ok(canonical.to_string_lossy().into_owned())
 }
 
+/// URL schemes a refusal may name. Any other scheme is reported as "a
+/// non-web scheme", because a live page chooses its own URL.
+const NAMED_NON_WEB_SCHEMES: &[&str] = &[
+    "about",
+    "blob",
+    "chrome",
+    "chrome-extension",
+    "data",
+    "devtools",
+    "file",
+    "filesystem",
+    "ftp",
+    "javascript",
+    "moz-extension",
+    "view-source",
+    "ws",
+    "wss",
+];
+
+/// Canonical `scheme://host[:port]` origin of a URL or origin string.
+///
+/// Errors never quote `raw`: the live top-level URL of a page reaches this
+/// function, and its refusal is printed in tool results, so the page could
+/// otherwise place its own text there. Only a scheme from a short list is
+/// named. Manifest loading adds the operator's own spelling to the error.
 fn canonical_origin(raw: &str) -> Result<String, String> {
     let value = raw.trim();
     if value == "about:blank" {
         return Ok(value.to_owned());
     }
     let parsed =
-        url::Url::parse(value).map_err(|_| format!("invalid browser URL or origin '{raw}'"))?;
+        url::Url::parse(value).map_err(|_| "the browser URL or origin is not a valid URL".to_owned())?;
     if !matches!(parsed.scheme(), "http" | "https") {
+        let scheme = NAMED_NON_WEB_SCHEMES
+            .iter()
+            .find(|named| **named == parsed.scheme())
+            .map_or_else(|| "a non-web scheme".to_owned(), |named| format!("the '{named}' scheme"));
         return Err(format!(
-            "browser URL or origin '{raw}' must use http or https"
+            "the browser URL or origin uses {scheme}; it must use http or https"
         ));
     }
     let host = parsed
         .host_str()
-        .ok_or_else(|| format!("browser URL or origin '{raw}' has no host"))?;
+        .ok_or_else(|| "the browser URL or origin has no host".to_owned())?;
     let mut origin = format!("{}://{}", parsed.scheme(), host);
     if let Some(port) = parsed.port() {
         origin.push(':');
@@ -1641,6 +1738,123 @@ allow:
         assert!(manifest
             .authorize_browser_url("https://evil.example/redirect")
             .is_err());
+    }
+
+    // AUTH-6: a refusal for a live page URL quoted the whole URL, so a page
+    // could put its own text into a Pincer refusal.
+    #[cfg(feature = "yaml")]
+    #[test]
+    fn browser_url_refusals_name_only_the_scheme() {
+        let manifest = manifest(
+            r#"
+version: 1
+mode: bounded
+expires_after: 8h
+idle_timeout: 30m
+resources:
+  browser:
+    origins: [https://app.example.com]
+allow:
+  tools: [browser_navigate]
+"#,
+        )
+        .unwrap();
+        for (url, named) in [
+            ("blob:https://approved.attacker.example/0b1c", Some("blob")),
+            ("file:///home/u/approved.attacker.example.html", Some("file")),
+            ("x-approved-attacker-example:run", None),
+            ("approved attacker example, not a URL", None),
+        ] {
+            let error = manifest.authorize_browser_url(url).unwrap_err();
+            assert!(
+                !error.contains("approved") && !error.contains("attacker"),
+                "{url}: {error}"
+            );
+            if let Some(scheme) = named {
+                assert!(error.contains(&format!("'{scheme}'")), "{url}: {error}");
+            }
+        }
+    }
+
+    // AUTH-2: `apps[].launch` was parsed and ignored, and no adapter scoped
+    // launch_app, so a manifest that allowed launch_app let it start any
+    // program.
+    #[cfg(feature = "yaml")]
+    #[test]
+    fn launch_resources_require_a_declared_launch_app() {
+        let root = tempfile::tempdir().unwrap();
+        let editor = root.path().join("editor");
+        let viewer = root.path().join("viewer");
+        let tool = root.path().join("tool");
+        for path in [&editor, &viewer, &tool] {
+            std::fs::write(path, b"").unwrap();
+        }
+        let editor = canonical_manifest_path(&editor).unwrap();
+        let viewer = canonical_manifest_path(&viewer).unwrap();
+        let tool = canonical_manifest_path(&tool).unwrap();
+        let loaded = manifest(&format!(
+            r#"
+version: 2
+mode: bounded
+expires_after: 1h
+idle_timeout: 30m
+resources:
+  apps:
+    - executable: {editor:?}
+      launch: true
+    - executable: {viewer:?}
+    - executable: {tool:?}
+      launch: true
+      launch_options: true
+    - bundle_id: org.example.Browser
+      launch: true
+allow:
+  tools: [launch_app]
+"#
+        ))
+        .unwrap();
+        let launch = |executable: &str, desktop_entry: Option<&str>, options: bool| {
+            serde_json::json!({
+                "kind": "program_launch",
+                "executable": executable,
+                "installed_app": desktop_entry.is_some(),
+                "desktop_entry": desktop_entry,
+                "options": options,
+                "argument_count": usize::from(options),
+            })
+        };
+
+        for allowed in [
+            launch(&editor, None, false),
+            launch(&tool, None, true),
+            launch("/opt/browser/browser", Some("org.example.Browser"), false),
+        ] {
+            loaded
+                .authorize_protected_resource("process_launch", &allowed)
+                .unwrap_or_else(|error| panic!("{allowed}: {error}"));
+        }
+        for (denied, reason) in [
+            (launch(&viewer, None, false), "launch: true"),
+            (launch("/usr/bin/sh", None, false), "launch: true"),
+            (launch(&editor, None, true), "launch_options: true"),
+            (
+                launch("/opt/browser/browser", Some("org.example.Other"), false),
+                "launch: true",
+            ),
+            (
+                serde_json::json!({"kind": "process_instance", "executable": editor}),
+                "outside the capability manifest",
+            ),
+            (
+                serde_json::json!({"kind": "program_launch", "executable": editor}),
+                "options",
+            ),
+        ] {
+            let error = loaded
+                .authorize_protected_resource("process_launch", &denied)
+                .unwrap_err();
+            assert!(error.contains(reason), "{denied}: {error}");
+        }
     }
 
     #[cfg(feature = "yaml")]

@@ -290,12 +290,48 @@ fn authorize_policy_layers<'a>(
     Ok(())
 }
 
+// Test-only stand-in for a configured user policy. The real layers load
+// once per process from the environment, so registry tests that need a
+// policy install one for their own thread instead. `#[tokio::test]` runs on
+// a current-thread runtime, so the dispatch path sees it.
+#[cfg(test)]
+thread_local! {
+    static TEST_POLICY: std::cell::RefCell<Option<PolicyEngine>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) struct TestPolicyGuard(());
+
+#[cfg(test)]
+impl Drop for TestPolicyGuard {
+    fn drop(&mut self) {
+        TEST_POLICY.with(|policy| policy.borrow_mut().take());
+    }
+}
+
+#[cfg(all(test, feature = "yaml"))]
+pub(crate) fn install_test_yaml_policy(source: &str) -> TestPolicyGuard {
+    let engine = PolicyEngine::Yaml(YamlPolicy::from_str(source).expect("test policy parses"));
+    TEST_POLICY.with(|policy| *policy.borrow_mut() = Some(engine));
+    TestPolicyGuard(())
+}
+
 /// Canonical process-wide capability-policy decision for one tool call.
 ///
 /// Every daemon dispatch path must call this function immediately before
 /// registry lookup/invocation. A proxy may also call it as an early denial,
 /// but the daemon remains authoritative.
 pub fn authorize_tool_call(tool: &str, args: &Value) -> Result<(), AuthorizationError> {
+    #[cfg(test)]
+    if let Some(result) = TEST_POLICY.with(|policy| {
+        policy
+            .borrow()
+            .as_ref()
+            .map(|policy| authorize_policy_layers(tool, args, [("user", policy)]))
+    }) {
+        return result;
+    }
     let managed = configured_managed_policy()
         .map_err(|message| AuthorizationError::Loading(format!("managed policy: {message}")))?;
     let user = configured_policy()
@@ -308,6 +344,17 @@ pub fn authorize_tool_call(tool: &str, args: &Value) -> Result<(), Authorization
         layers.push(("user", policy));
     }
     authorize_policy_layers(tool, args, layers)
+}
+
+/// Whether any policy layer is configured, or failed to load (which
+/// [`authorize_tool_call`] then reports). Callers use it to skip work that
+/// only feeds a policy decision.
+pub fn policy_configured() -> bool {
+    #[cfg(test)]
+    if TEST_POLICY.with(|policy| policy.borrow().is_some()) {
+        return true;
+    }
+    !matches!(configured_managed_policy(), Ok(None)) || !matches!(configured_policy(), Ok(None))
 }
 
 /// Returns `true` when the tool should be advertised in `tools/list`.
@@ -549,6 +596,17 @@ struct RawConstraint {
     allowed: Option<Vec<Value>>,
 }
 
+/// launch_app arguments that pick the program it runs or the arguments it
+/// passes to it, on any platform.
+#[cfg(feature = "yaml")]
+const LAUNCH_APP_PROGRAM_ARGUMENTS: &[&str] = &[
+    "name",
+    "bundle_id",
+    "launch_path",
+    "additional_arguments",
+    "urls",
+];
+
 #[cfg(feature = "yaml")]
 #[derive(Debug, Clone)]
 struct YamlRule {
@@ -581,6 +639,26 @@ impl YamlRule {
         let object = args
             .as_object()
             .ok_or_else(|| "arguments must be a JSON object".to_owned())?;
+        // Rules are open for arguments they do not name, which is right for
+        // a coordinate or a text length but not for launch_app: on Linux
+        // `launch_path` replaces `name`, and `additional_arguments` and
+        // `urls` reach the program's argv. So a constrained launch_app rule
+        // admits a call only when it also constrains every one of these
+        // that the call supplies. A rule with no constraints stays an
+        // explicit allow, like `allow.tools`.
+        if self.tool == "launch_app" && !self.constraints.is_empty() {
+            for argument in LAUNCH_APP_PROGRAM_ARGUMENTS {
+                let supplied = object.get(*argument).is_some_and(|value| {
+                    !value.is_null() && value.as_array().is_none_or(|items| !items.is_empty())
+                });
+                if supplied && !self.constraints.contains_key(*argument) {
+                    return Err(format!(
+                        "argument '{argument}' is not constrained by this launch_app rule; \
+                         omit it, or ask the policy owner to add a constraint for it"
+                    ));
+                }
+            }
+        }
         for (argument, constraint) in &self.constraints {
             let value = object
                 .get(argument)
@@ -894,6 +972,95 @@ allow:
             policy.evaluate("launch_app", &serde_json::json!({"app": "Terminal"})),
             PolicyDecision::Deny(_)
         ));
+    }
+
+    // AUTH-1: a launch_app rule that constrains only `name` admitted any
+    // `launch_path`, `additional_arguments` or `urls`, and Linux launch_app
+    // runs `launch_path` in place of `name`.
+    #[cfg(feature = "yaml")]
+    #[test]
+    fn launch_app_rules_do_not_admit_unconstrained_launch_arguments() {
+        let policy = yaml_policy(
+            r#"
+allow:
+  rules:
+    - tool: launch_app
+      constraints:
+        name:
+          allowed: [Calculator, TextEdit, Safari]
+    - tool: click
+      constraints:
+        x: { min: 0, max: 1920 }
+"#,
+        );
+        for allowed in [
+            serde_json::json!({"name": "Calculator"}),
+            serde_json::json!({"name": "Calculator", "urls": [], "session": "s"}),
+            serde_json::json!({"name": "Calculator", "additional_arguments": null}),
+        ] {
+            assert_eq!(
+                policy.evaluate("launch_app", &allowed),
+                PolicyDecision::Allow,
+                "{allowed}"
+            );
+        }
+        for (denied, argument) in [
+            (
+                serde_json::json!({
+                    "name": "Calculator",
+                    "launch_path": "sh -c",
+                    "additional_arguments": ["id"],
+                }),
+                "launch_path",
+            ),
+            (
+                serde_json::json!({"name": "Calculator", "additional_arguments": ["-e", "sh"]}),
+                "additional_arguments",
+            ),
+            (
+                serde_json::json!({"name": "Calculator", "urls": ["-e"]}),
+                "urls",
+            ),
+            (
+                serde_json::json!({"name": "Calculator", "bundle_id": "org.example.Shell"}),
+                "bundle_id",
+            ),
+        ] {
+            assert!(
+                matches!(
+                    policy.evaluate("launch_app", &denied),
+                    PolicyDecision::Deny(reason) if reason.contains(argument)
+                ),
+                "{denied}"
+            );
+        }
+
+        // A rule that constrains every launch argument it is given still
+        // admits them, and other tools keep their open rule semantics.
+        let wide = yaml_policy(
+            r#"
+allow:
+  rules:
+    - tool: launch_app
+      constraints:
+        name: { allowed: [KWrite] }
+        urls: { allowed: [["/home/u/notes.txt"]] }
+"#,
+        );
+        assert_eq!(
+            wide.evaluate(
+                "launch_app",
+                &serde_json::json!({"name": "KWrite", "urls": ["/home/u/notes.txt"]})
+            ),
+            PolicyDecision::Allow
+        );
+        assert_eq!(
+            policy.evaluate(
+                "click",
+                &serde_json::json!({"x": 10, "y": 5000, "delivery_mode": "foreground"})
+            ),
+            PolicyDecision::Allow
+        );
     }
 
     #[cfg(feature = "yaml")]

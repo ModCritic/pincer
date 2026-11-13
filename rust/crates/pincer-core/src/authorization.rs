@@ -280,6 +280,7 @@ const DESKTOP_INPUT_OPERATIONS: &[&str] = &[
     "set_value",
     "bring_to_front",
     "set_window_frame",
+    "invoke_menu",
 ];
 const DESKTOP_INPUT_SCOPE_KEYS: &[&str] = &[
     "daemon_generation",
@@ -354,6 +355,24 @@ const PROCESS_CONTROL_SCOPE_KEYS: &[&str] = &[
     "public_session",
     "pid",
     "process_fingerprint",
+    "permission_mode",
+    "managed_policy_sha256",
+    "user_policy_sha256",
+];
+
+/// Linux only for now: the macOS and Windows launch_app tools cannot attest
+/// the exact program they start, so they select no launch adapter yet.
+#[cfg(target_os = "linux")]
+const PROCESS_LAUNCH_OPERATIONS: &[&str] = &["launch_app"];
+#[cfg(target_os = "linux")]
+const PROCESS_LAUNCH_SCOPE_KEYS: &[&str] = &[
+    "daemon_generation",
+    "public_session",
+    "executable",
+    "installed_app",
+    "desktop_entry",
+    "options",
+    "argument_count",
     "permission_mode",
     "managed_policy_sha256",
     "user_policy_sha256",
@@ -523,6 +542,30 @@ pub const ENFORCEMENT_ADAPTERS: &[EnforcementAdapterDescriptor] = &[
         refusal_code: Some("authorization_required"),
         authorization_source:
             "driver_ownership_in_standard; unattended_bounded_profile; trusted_unrestricted_mode; optional_capability_manifest_ceiling",
+        enforcement_by_mode: AdapterEnforcement::uniform(RiskEnforcement::Active),
+        profile_behavior: AdapterProfileBehavior::BoundedOrUnrestricted,
+    },
+    // launch_app can start any program with any arguments, so it is a
+    // bounded-or-unrestricted capability. Standard keeps one carve-out (see
+    // `consent::standard_allows_program_launch`): an installed desktop app
+    // whose arguments and urls carry no options. No grant is ever created.
+    #[cfg(target_os = "linux")]
+    EnforcementAdapterDescriptor {
+        id: "process_launch",
+        operations: PROCESS_LAUNCH_OPERATIONS,
+        state: RiskEnforcement::Active,
+        risk_class: RiskClass::R3,
+        resource_kind: "exact_program_launch",
+        scope_keys: PROCESS_LAUNCH_SCOPE_KEYS,
+        grant_type: None,
+        idle_ttl_seconds: None,
+        absolute_ttl_seconds: None,
+        authorization_requirement:
+            "installed_app_without_options_in_standard; unattended_in_bounded; optional_capability_manifest",
+        revocation_triggers: &[],
+        refusal_code: Some("program_launch_denied"),
+        authorization_source:
+            "installed_desktop_app_in_standard; unattended_bounded_profile; trusted_unrestricted_mode; optional_capability_manifest_ceiling",
         enforcement_by_mode: AdapterEnforcement::uniform(RiskEnforcement::Active),
         profile_behavior: AdapterProfileBehavior::BoundedOrUnrestricted,
     },
@@ -767,6 +810,11 @@ pub fn enforcement_adapters_for_call(
 
     if PROCESS_CONTROL_OPERATIONS.contains(&tool) {
         add("process_control");
+    }
+
+    #[cfg(target_os = "linux")]
+    if PROCESS_LAUNCH_OPERATIONS.contains(&tool) {
+        add("process_launch");
     }
 
     if tool == "check_permissions" && args.get("prompt").and_then(Value::as_bool).unwrap_or(false) {
@@ -1503,9 +1551,11 @@ mod tests {
 
     #[test]
     fn native_menu_invocation_matches_local_gui_action_risk() {
+        // invoke_menu drives a window's menus, so the desktop input adapter
+        // scopes it like other window input.
         let risk = advertised_risk_for("invoke_menu");
         assert_eq!(risk.class, RiskClass::R1);
-        assert_eq!(risk.enforcement, RiskEnforcement::MetadataOnly);
+        assert_eq!(risk.enforcement, RiskEnforcement::Active);
         assert!(!risk.operation_sensitive);
     }
 
@@ -1590,6 +1640,27 @@ mod tests {
         assert!(error.to_string().contains("authorization process"));
     }
 
+    /// Every active adapter in inventory order. `process_launch` exists only
+    /// where launch_app can attest the program it starts (Linux for now).
+    fn active_adapter_ids() -> Vec<&'static str> {
+        let mut ids = vec![
+            "browser_prepare.isolated",
+            "browser_prepare.existing_profile",
+            "private_observation",
+            "computer_history",
+            "desktop_input",
+            "file_transfer_and_output",
+            "browser_consequential_action",
+            "browser_bound_input",
+            "process_control",
+        ];
+        if cfg!(target_os = "linux") {
+            ids.push("process_launch");
+        }
+        ids.extend(["os_permission_prompt", "driver_configuration", "clipboard"]);
+        ids
+    }
+
     #[test]
     fn enforcement_inventory_is_unique_and_truthful() {
         let mut ids = std::collections::BTreeSet::new();
@@ -1613,20 +1684,7 @@ mod tests {
 
         assert_eq!(
             adapter_ids_with_state(RiskEnforcement::Active),
-            vec![
-                "browser_prepare.isolated",
-                "browser_prepare.existing_profile",
-                "private_observation",
-                "computer_history",
-                "desktop_input",
-                "file_transfer_and_output",
-                "browser_consequential_action",
-                "browser_bound_input",
-                "process_control",
-                "os_permission_prompt",
-                "driver_configuration",
-                "clipboard",
-            ]
+            active_adapter_ids()
         );
         assert_eq!(
             adapter_ids_with_state(RiskEnforcement::MetadataOnly),
@@ -1638,20 +1696,7 @@ mod tests {
         );
         assert_eq!(
             adapter_ids_with_state_for_mode(PermissionMode::Standard, RiskEnforcement::Active),
-            vec![
-                "browser_prepare.isolated",
-                "browser_prepare.existing_profile",
-                "private_observation",
-                "computer_history",
-                "desktop_input",
-                "file_transfer_and_output",
-                "browser_consequential_action",
-                "browser_bound_input",
-                "process_control",
-                "os_permission_prompt",
-                "driver_configuration",
-                "clipboard",
-            ]
+            active_adapter_ids()
         );
 
         let existing = ENFORCEMENT_ADAPTERS
@@ -1894,25 +1939,66 @@ mod tests {
         }
     }
 
+    // LXTOOLS-1 / AUTH-2: launch_app and invoke_menu selected no adapter, so
+    // neither standard mode nor a capability manifest scoped them.
+    #[test]
+    fn launch_app_and_invoke_menu_select_resource_adapters() {
+        let ids = |tool, args: Value| {
+            enforcement_adapters_for_call(tool, &args)
+                .into_iter()
+                .map(|adapter| adapter.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(
+                "invoke_menu",
+                serde_json::json!({"pid": 1, "window_id": 2, "path": ["File", "Quit"]})
+            ),
+            vec!["desktop_input"]
+        );
+        let launches = [
+            serde_json::json!({"name": "KWrite"}),
+            serde_json::json!({"launch_path": "sh -c", "additional_arguments": ["id"]}),
+            serde_json::json!({"urls": ["https://example.com"]}),
+        ];
+        for args in launches {
+            let expected: Vec<&str> = if cfg!(target_os = "linux") {
+                vec!["process_launch"]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(ids("launch_app", args.clone()), expected, "{args}");
+        }
+        if cfg!(target_os = "linux") {
+            let launch = ENFORCEMENT_ADAPTERS
+                .iter()
+                .find(|adapter| adapter.id == "process_launch")
+                .expect("Linux registers the process_launch adapter");
+            assert_eq!(
+                launch.profile_behavior.for_mode(PermissionMode::Standard),
+                ModeBehavior::Deny
+            );
+            assert_eq!(
+                launch.profile_behavior.for_mode(PermissionMode::Bounded),
+                ModeBehavior::AllowWithoutGrant
+            );
+            assert_eq!(
+                launch.profile_behavior.for_mode(PermissionMode::Unrestricted),
+                ModeBehavior::Allow
+            );
+            assert_eq!(
+                advertised_risk_for("launch_app").enforcement,
+                RiskEnforcement::Active
+            );
+        }
+    }
+
     #[test]
     fn status_derives_adapter_summaries_from_the_inventory() {
         let status = status_json();
         assert_eq!(
             status["active_risk_enforcement"],
-            serde_json::json!([
-                "browser_prepare.isolated",
-                "browser_prepare.existing_profile",
-                "private_observation",
-                "computer_history",
-                "desktop_input",
-                "file_transfer_and_output",
-                "browser_consequential_action",
-                "browser_bound_input",
-                "process_control",
-                "os_permission_prompt",
-                "driver_configuration",
-                "clipboard"
-            ])
+            serde_json::json!(active_adapter_ids())
         );
         assert_eq!(
             status["metadata_only_risk_enforcement"],
@@ -1924,20 +2010,7 @@ mod tests {
         );
         assert_eq!(
             status["effective_active_risk_enforcement"],
-            serde_json::json!([
-                "browser_prepare.isolated",
-                "browser_prepare.existing_profile",
-                "private_observation",
-                "computer_history",
-                "desktop_input",
-                "file_transfer_and_output",
-                "browser_consequential_action",
-                "browser_bound_input",
-                "process_control",
-                "os_permission_prompt",
-                "driver_configuration",
-                "clipboard"
-            ])
+            serde_json::json!(active_adapter_ids())
         );
         assert_eq!(
             status["effective_metadata_only_risk_enforcement"],

@@ -406,6 +406,16 @@ impl ProtectedResourceOwnershipStore {
     }
 }
 
+/// Whether standard mode admits an attested `process_launch` resource
+/// without a grant: an installed desktop app (`installed_app: true`) whose
+/// arguments and urls carry no option (`options: false`). Both fields must
+/// be attested; a missing field denies.
+pub fn standard_allows_program_launch(resource: &Value) -> bool {
+    resource.get("kind").and_then(Value::as_str) == Some("program_launch")
+        && resource.get("installed_app").and_then(Value::as_bool) == Some(true)
+        && resource.get("options").and_then(Value::as_bool) == Some(false)
+}
+
 impl ProtectedResourceGrants {
     pub fn new(broker: Arc<ApprovalBroker>) -> Self {
         Self {
@@ -451,6 +461,15 @@ impl ProtectedResourceGrants {
             // an attested runtime-launched process remains available, while a
             // foreign process is denied before approval. Manifest scope is an
             // additional ceiling and never replaces that ownership proof.
+            ModeBehavior::Allow
+        } else if adapter_id == "process_launch"
+            && context.mode() == PermissionMode::Standard
+            && standard_allows_program_launch(&resource)
+        {
+            // Standard's launch capability is the routine one: an installed
+            // desktop app with file or URL targets. Any other program, or
+            // any option, stays bounded-or-unrestricted. A manifest above
+            // still narrows the installed apps that may start.
             ModeBehavior::Allow
         } else {
             descriptor.profile_behavior.for_mode(context.mode())
@@ -902,6 +921,74 @@ mod tests {
                 Duration::from_secs(30),
                 Duration::from_secs(60),
             )
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(provider.requests.load(Ordering::SeqCst), 0);
+    }
+
+    // LXTOOLS-1: launch_app had no adapter, so standard mode started any
+    // program. Standard now admits only an installed desktop app whose
+    // arguments carry no options; everything else needs bounded or
+    // unrestricted mode, and no host approval can widen standard.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn standard_program_launch_admits_only_installed_apps_without_options() {
+        let provider = provider(ConsentAction::Accept);
+        let grants =
+            ProtectedResourceGrants::new(Arc::new(ApprovalBroker::new(Some(provider.clone()))));
+        let launch = |installed: Option<bool>, options: Option<bool>| {
+            let mut resource = serde_json::json!({
+                "kind": "program_launch",
+                "executable": "/usr/bin/kwrite",
+                "desktop_entry": "org.kde.kwrite",
+                "argument_count": 1,
+            });
+            if let Some(installed) = installed {
+                resource["installed_app"] = Value::Bool(installed);
+            }
+            if let Some(options) = options {
+                resource["options"] = Value::Bool(options);
+            }
+            resource
+        };
+        let authorize = |context: Arc<crate::session_authorization::EffectiveAuthorizationContext>,
+                         resource: Value| {
+            let grants = &grants;
+            async move {
+                grants
+                    .authorize(
+                        &context,
+                        "process_launch",
+                        RiskClass::R3,
+                        Some("public-a"),
+                        resource,
+                        "Start this exact program",
+                        Duration::from_secs(30),
+                        Duration::from_secs(60),
+                    )
+                    .await
+            }
+        };
+
+        let standard = authorization_context(PermissionMode::Standard);
+        assert!(authorize(standard.clone(), launch(Some(true), Some(false)))
+            .await
+            .unwrap()
+            .is_none());
+        for denied in [
+            launch(Some(false), Some(false)),
+            launch(Some(true), Some(true)),
+            launch(None, Some(false)),
+            launch(Some(true), None),
+        ] {
+            assert!(
+                authorize(standard.clone(), denied.clone()).await.is_err(),
+                "{denied}"
+            );
+        }
+        let unrestricted = authorization_context(PermissionMode::Unrestricted);
+        assert!(authorize(unrestricted, launch(Some(false), Some(true)))
             .await
             .unwrap()
             .is_none());
