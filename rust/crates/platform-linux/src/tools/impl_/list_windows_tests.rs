@@ -113,9 +113,9 @@ fn list_lines_leave_no_structured_copy() {
         json!({"pid": 166, "bundle_id": "org.kde.kwrite", "name": "KWrite", "running": true,
                "active": false, "kind": "desktop", "launch_path": "kwrite",
                "last_used": "2026-11-04T00:31:59Z", "windows": [windows[0].clone()]}),
-        json!({"pid": 0, "bundle_id": "scrcpy", "name": "scrcpy", "running": false,
-               "active": false, "kind": "desktop",
-               "launch_path": "/bin/sh -c \"\\\\$SHELL -i -c scrcpy\"",
+        json!({"pid": 0, "bundle_id": "org.gimp.GIMP", "name": "GNU Image Manipulation Program",
+               "running": false, "active": false, "kind": "desktop",
+               "launch_path": "flatpak run org.gimp.GIMP",
                "last_used": null, "windows": []}),
     ];
     let mut lines =
@@ -128,7 +128,10 @@ fn list_lines_leave_no_structured_copy() {
     }
     let text = lines.join("\n");
     assert!(
-        text.contains(" launch_path=\"/bin/sh -c \"\\\\$SHELL -i -c scrcpy\"\""),
+        text.contains(
+            "- \"GNU Image Manipulation Program\" pid=0 running=false \
+             bundle_id=org.gimp.GIMP launch_path=\"flatpak run org.gimp.GIMP\""
+        ),
         "{text}"
     );
     let processes = json!([{"pid": 1, "name": "python3"}, {"pid": 166, "name": "KWrite"}]);
@@ -139,6 +142,21 @@ fn list_lines_leave_no_structured_copy() {
     // An app whose running flag the line does not state keeps the list.
     let unstated = text.replace("pid=0 running=false", "pid=0");
     assert!(render(&unstated, &json!({ "apps": apps })).contains("\napps:\n"));
+}
+
+/// An `Exec=` line keeps its own quotes and backslashes, escaped inside the
+/// quoted value so they cannot end it. Until the text renderer also matches
+/// escaped values, such a record keeps its structured copy.
+#[test]
+fn an_exec_line_with_quotes_is_escaped_in_its_quoted_value() {
+    let scrcpy = json!({"pid": 0, "bundle_id": "scrcpy", "name": "scrcpy", "running": false,
+                        "launch_path": "/bin/sh -c \"\\\\$SHELL -i -c scrcpy\"",
+                        "last_used": null});
+    assert_eq!(
+        app_line(&scrcpy),
+        "- scrcpy pid=0 running=false bundle_id=scrcpy \
+         launch_path=\"/bin/sh -c \\\"\\\\\\\\$SHELL -i -c scrcpy\\\"\""
+    );
 }
 
 #[test]

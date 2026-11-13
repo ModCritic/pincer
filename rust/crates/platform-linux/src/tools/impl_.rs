@@ -17,6 +17,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use crate::atspi::Snapshots;
+use crate::input::{
+    quote_untrusted, quoted_title, untrusted_token, SHOWN_COMMAND_CHARS, SHOWN_NAME_CHARS,
+};
 use cursor_overlay::CursorRegistry;
 
 fn window_target_candidates_for_pid(
@@ -685,7 +688,9 @@ impl Tool for ListWindowsTool {
 /// `is_on_screen=false` for a window that is not on screen. `z=?` and
 /// `pid=?` stand for null. The text renderer drops the structured record
 /// only when its line says all of it, so a field added to the record
-/// belongs on this line too.
+/// belongs on this line too. The title and app name are app text: the title
+/// is always quoted, the app name only when it is not one plain word, both
+/// escaped and cut (see `quote_untrusted`); the record keeps them raw.
 fn window_record_line(record: &Value) -> String {
     let known = |value: &Value| {
         if value.is_null() {
@@ -696,10 +701,10 @@ fn window_record_line(record: &Value) -> String {
     };
     let bounds = &record["bounds"];
     let mut line = format!(
-        "window_id={} pid={} \"{}\" {}x{}+{}+{} z={}",
+        "window_id={} pid={} {} {}x{}+{}+{} z={}",
         record["window_id"],
         known(&record["pid"]),
-        record["title"].as_str().unwrap_or_default(),
+        quoted_title(record["title"].as_str().unwrap_or_default()),
         bounds["width"],
         bounds["height"],
         bounds["x"],
@@ -707,7 +712,7 @@ fn window_record_line(record: &Value) -> String {
         known(&record["z_index"]),
     );
     if let Some(app) = record["app_name"].as_str().filter(|app| !app.is_empty()) {
-        line.push_str(&format!(" app={app}"));
+        line.push_str(&format!(" app={}", untrusted_token(app, SHOWN_NAME_CHARS)));
     }
     if record["is_on_screen"] == false {
         line.push_str(" is_on_screen=false");
@@ -717,23 +722,27 @@ fn window_record_line(record: &Value) -> String {
 
 /// One list_apps record on one line, every field but the always-false
 /// `active` and the windows (listed under it): `- Name pid=N running=true
-/// bundle_id=… launch_path=… last_used=…`. A value with spaces is wrapped
-/// in quotes, not escaped, so it reads as the record holds it (an `Exec=`
-/// line such as `/bin/sh -c "\$SHELL -i -c scrcpy"` keeps its own quotes).
+/// bundle_id=… launch_path=… last_used=…`. The name and values come from
+/// `.desktop` files and process names, which anyone who can write one sets:
+/// each is shown bare when it is one plain word, else quoted with its own
+/// quotes and backslashes escaped and its length capped (`untrusted_token`),
+/// so `Name=Firefox pid=4242 running=true` stays one quoted name. An `Exec=`
+/// line such as `/bin/sh -c "\\$SHELL -i -c scrcpy"` reads
+/// `"/bin/sh -c \"\\\\$SHELL -i -c scrcpy\""`.
 fn app_line(app: &Value) -> String {
     let mut line = format!(
         "- {} pid={} running={}",
-        app["name"].as_str().unwrap_or("?"),
+        untrusted_token(app["name"].as_str().unwrap_or("?"), SHOWN_NAME_CHARS),
         app["pid"],
         app["running"].as_bool().unwrap_or(false),
     );
-    for key in ["bundle_id", "launch_path", "last_used"] {
+    for (key, max_chars) in [
+        ("bundle_id", SHOWN_NAME_CHARS),
+        ("launch_path", SHOWN_COMMAND_CHARS),
+        ("last_used", SHOWN_NAME_CHARS),
+    ] {
         if let Some(value) = app[key].as_str() {
-            if value.contains(char::is_whitespace) {
-                line.push_str(&format!(" {key}=\"{value}\""));
-            } else {
-                line.push_str(&format!(" {key}={value}"));
-            }
+            line.push_str(&format!(" {key}={}", untrusted_token(value, max_chars)));
         }
     }
     line
@@ -766,6 +775,9 @@ fn window_record_json(w: &crate::x11::WindowInfo) -> Value {
 
 #[cfg(test)]
 mod list_windows_tests;
+
+#[cfg(test)]
+mod untrusted_text_tests;
 
 // ── get_window_state ─────────────────────────────────────────────────────────
 
@@ -1155,7 +1167,10 @@ struct WindowOverlays {
 }
 
 impl WindowOverlays {
-    /// One sentence per overlay naming the call that acts on it.
+    /// One sentence per overlay naming the call that acts on it. A dialog's
+    /// title is the app's text inside Pincer's instruction, so it stays one
+    /// escaped, quoted value (`quoted_title`): a `"` or a line break in it
+    /// cannot end the quote and continue the sentence as Pincer.
     fn follow_up(&self, pid: u32) -> Option<String> {
         let mut parts = Vec::new();
         for dialog in &self.dialogs {
@@ -1178,10 +1193,10 @@ impl WindowOverlays {
                 None => (u64::from(pid), String::new()),
             };
             parts.push(format!(
-                "dialog \"{}\" (window_id {id}, transient of window {}{}{}) is open over this \
+                "dialog {} (window_id {id}, transient of window {}{}{}) is open over this \
                  window: call get_window_state(pid={read_pid}, window_id={id}) to index it and \
                  act there{keys}.",
-                dialog["title"].as_str().unwrap_or(""),
+                quoted_title(dialog["title"].as_str().unwrap_or("")),
                 dialog["transient_for"].as_u64().unwrap_or(0),
                 if dialog["modal"].as_bool() == Some(true) {
                     ", modal"
@@ -3942,9 +3957,18 @@ const READBACK_WHOLE_CHARS: usize = 80;
 /// Typed text longer than this is confirmed without quoting it back.
 const READBACK_QUOTED_TEXT_CHARS: usize = 60;
 
-/// One line of `seen` for a result: line breaks escaped like tree values.
+/// One line of `seen` for a result, shown inside double quotes: the app's
+/// text escaped by `untrusted_text::inline` (`\"`, `\\`, `\n`, `\u{2028}`),
+/// so it can neither end its quotes nor start a line.
 fn readback_one_line(seen: &str) -> String {
-    seen.replace('\r', "\\r").replace('\n', "\\n")
+    pincer_core::untrusted_text::inline(seen).into_owned()
+}
+
+/// A `set_value` or combo box read-back for the result text: the first
+/// [`READBACK_WHOLE_CHARS`] characters, escaped and quoted, with the full
+/// length named when it was cut. The structured result keeps it whole.
+fn readback_quoted(seen: &str) -> String {
+    quote_untrusted(seen, READBACK_WHOLE_CHARS)
 }
 
 /// What a confirmed read-back quotes: the whole value when it is short, else
@@ -4049,7 +4073,7 @@ fn type_text_readback_result(
         {
             let excerpt = readback_excerpt(&seen, text);
             let shown = match &excerpt {
-                Some(excerpt) => format!("it reads back '{excerpt}'"),
+                Some(excerpt) => format!("it reads back \"{excerpt}\""),
                 None => "it reads back the typed text in place".to_owned(),
             };
             let mut structured = json!({
@@ -4084,7 +4108,7 @@ fn type_text_readback_result(
             result
                 .content
                 .push(pincer_core::protocol::Content::text(format!(
-                    "The element reads back '{shown}', which does not contain the typed text \
+                    "The element reads back \"{shown}\", which does not contain the typed text \
                      at its caret or in its first 4,096 characters; confirm with \
                      get_window_state."
                 )));
@@ -4618,7 +4642,7 @@ fn attach_focus_guard_opts(
 /// (LibreOffice reports "D2"), so a one-row miss shows in the click result
 /// instead of after six typed values. Read from the focus-event log only,
 /// so it costs nothing when the press did not land on a grid.
-async fn attach_focused_cell(mut result: ToolResult, pid: u32) -> ToolResult {
+async fn attach_focused_cell(result: ToolResult, pid: u32) -> ToolResult {
     if result.is_error == Some(true) {
         return result;
     }
@@ -4632,10 +4656,21 @@ async fn attach_focused_cell(mut result: ToolResult, pid: u32) -> ToolResult {
     }) else {
         return result;
     };
+    with_focused_cell(result, &role, &name)
+}
+
+/// [`attach_focused_cell`]'s additions: `focus: cell D2` in the text, the
+/// raw name as `focused_cell`, and an evidence item. The cell's name and
+/// role come from the app (a web grid names its own cells), so the text
+/// shows the name as `untrusted_token` does (bare when one plain word,
+/// else escaped and quoted) and the evidence escapes the role
+/// (`table cell`) without quotes and quotes the name.
+fn with_focused_cell(mut result: ToolResult, role: &str, name: &str) -> ToolResult {
+    let shown = untrusted_token(name, SHOWN_NAME_CHARS);
     result
         .content
         .push(pincer_core::protocol::Content::text(format!(
-            "focus: cell {name}"
+            "focus: cell {shown}"
         )));
     let mut structured = result
         .structured_content
@@ -4646,7 +4681,11 @@ async fn attach_focused_cell(mut result: ToolResult, pid: u32) -> ToolResult {
         &mut structured,
         json!({
             "kind": "native_api_result",
-            "detail": format!("the accessible holding the focus after the press is {role} \"{name}\""),
+            "detail": format!(
+                "the accessible holding the focus after the press is {} {}",
+                pincer_core::untrusted_text::inline_clipped(role, SHOWN_NAME_CHARS),
+                quote_untrusted(name, SHOWN_NAME_CHARS)
+            ),
         }),
     );
     result.structured_content = Some(structured);
@@ -5125,8 +5164,9 @@ impl PointerRoute {
                 evidence.push(json!({
                     "kind": "window_change",
                     "detail": format!(
-                        "the point was under the application's own window {} \"{}\"; the press went to it",
-                        cover.window, cover.title
+                        "the point was under the application's own window {} {}; the press went to it",
+                        cover.window,
+                        quoted_title(&cover.title)
                     ),
                 }));
             }
@@ -5166,9 +5206,10 @@ impl PointerRoute {
         if let Self::Mpx(effect) = self {
             if let Some(cover) = &effect.retargeted_to {
                 text.push_str(&format!(
-                    " The point was under this application's own window {} \"{}\" \
+                    " The point was under this application's own window {} {} \
                      (retargeted_to), so the press went to that window.",
-                    cover.window, cover.title
+                    cover.window,
+                    quoted_title(&cover.title)
                 ));
             }
             if let Some(foreign) = &effect.foreign_window {
@@ -5415,7 +5456,9 @@ fn linux_input_error(error: anyhow::Error) -> ToolResult {
             if occluded.covering_title.is_empty() {
                 String::new()
             } else {
-                format!(" \"{}\"", occluded.covering_title)
+                // App text inside Pincer's advice: escaped, so it cannot
+                // close the quote or spell a retry instruction.
+                format!(" {}", quoted_title(&occluded.covering_title))
             },
             occluded
                 .covering_pid
@@ -5673,14 +5716,28 @@ async fn close_window_background(pid: u32, xid: u64, display: &str) -> ToolResul
         tokio::task::spawn_blocking(move || crate::x11::list_windows(Some(pid)))
             .await
             .unwrap_or_default();
-    let new_windows: Vec<&crate::x11::WindowInfo> = after
+    let opened = after
         .iter()
-        .filter(|w| w.is_on_screen && !before.iter().any(|old| old.xid == w.xid))
-        .collect();
+        .find(|w| w.is_on_screen && !before.iter().any(|old| old.xid == w.xid));
+    close_window_result(pid, xid, display, &title, closed, opened)
+}
+
+/// close_window_background's result once the request went out: `closed`
+/// when the window stopped being viewable, `opened` the first new window of
+/// the pid (a save or confirm dialog). The titles are app text, escaped and
+/// quoted (`quoted_title`); the structured `opened_window` keeps the raw one.
+fn close_window_result(
+    pid: u32,
+    xid: u64,
+    display: &str,
+    title: &str,
+    closed: bool,
+    opened: Option<&crate::x11::WindowInfo>,
+) -> ToolResult {
     let quoted = if title.is_empty() {
         String::new()
     } else {
-        format!(" \"{title}\"")
+        format!(" {}", quoted_title(title))
     };
     // The close request is an XSendEvent client message to the root (the
     // transport the action contract knows as x11_xsendevent).
@@ -5705,10 +5762,11 @@ async fn close_window_background(pid: u32, xid: u64, display: &str) -> ToolResul
              (_NET_CLOSE_WINDOW -> WM_DELETE_WINDOW; a virtual-keyboard Alt+F4 never reaches \
              the window manager): window {xid}{quoted} closed."
         );
-        if let Some(w) = new_windows.first() {
+        if let Some(w) = opened {
             text.push_str(&format!(
-                " The application then opened window {} \"{}\".",
-                w.xid, w.title
+                " The application then opened window {} {}.",
+                w.xid,
+                quoted_title(&w.title)
             ));
             structured["opened_window"] = json!({ "window_id": w.xid, "title": w.title });
         }
@@ -5721,16 +5779,21 @@ async fn close_window_background(pid: u32, xid: u64, display: &str) -> ToolResul
              (_NET_CLOSE_WINDOW -> WM_DELETE_WINDOW): window {xid}{quoted} is still mapped \
              after 2 s."
         );
-        if let Some(w) = new_windows.first() {
+        if let Some(w) = opened {
             text.push_str(&format!(
-                " The application opened window {} \"{}\" instead (a save / confirm \
+                " The application opened window {} {} instead (a save / confirm \
                  dialog?); act on it with get_window_state / click.",
-                w.xid, w.title
+                w.xid,
+                quoted_title(&w.title)
             ));
             structured["opened_window"] = json!({ "window_id": w.xid, "title": w.title });
             structured["evidence"] = json!([{
                 "kind": "window_change",
-                "detail": format!("the application opened window {} \"{}\" after the close request", w.xid, w.title),
+                "detail": format!(
+                    "the application opened window {} {} after the close request",
+                    w.xid,
+                    quoted_title(&w.title)
+                ),
             }]);
         } else {
             text.push_str(" Confirm with list_windows; kill_app force-closes the application.");
@@ -11332,16 +11395,41 @@ impl Tool for SetValueTool {
     }
 }
 
-/// `set_value` named an option the combo box or list does not have.
+/// `set_value` named an option the combo box or list does not have. The
+/// option labels are the app's text and can each be 4096 characters: the
+/// text and `detail` show each escaped, quoted and cut at
+/// `SHOWN_NAME_CHARS`; `options` keeps them whole.
 fn no_such_option_result(idx: usize, error: &anyhow::Error) -> ToolResult {
-    let detail = error.to_string();
-    let detail = detail
-        .strip_prefix(crate::atspi::native::NO_SUCH_OPTION)
-        .map(|rest| rest.trim_start_matches(':').trim())
-        .unwrap_or(&detail)
-        .to_owned();
+    let missing = error.downcast_ref::<crate::atspi::native::NoSuchOption>();
+    let detail = match missing {
+        Some(missing) => {
+            let (shown, more) = missing.listed();
+            format!(
+                "no option {}; options: [{}]{}",
+                quote_untrusted(&missing.value, SHOWN_NAME_CHARS),
+                shown
+                    .iter()
+                    .map(|option| quote_untrusted(option, SHOWN_NAME_CHARS))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                }
+            )
+        }
+        None => {
+            let detail = error.to_string();
+            detail
+                .strip_prefix(crate::atspi::native::NO_SUCH_OPTION)
+                .map(|rest| rest.trim_start_matches(':').trim())
+                .unwrap_or(&detail)
+                .to_owned()
+        }
+    };
     let mut structured = json!({ "code": "option_not_found", "detail": detail, "effect": "none" });
-    if let Some(missing) = error.downcast_ref::<crate::atspi::native::NoSuchOption>() {
+    if let Some(missing) = missing {
         let (shown, more) = missing.listed();
         structured["options"] = json!(shown);
         if more > 0 {
@@ -11789,16 +11877,25 @@ fn qt_combo_pick_result(
         "popup_window": popup,
         "popup_closed": popup_closed,
     });
+    // The option label and the read-back are the app's text: escaped and
+    // cut in the text, whole in `option` and `readback`.
     let how = if option == value {
         "its text matched exactly".to_owned()
     } else if value.trim() == value {
-        format!("'{value}' matched it ignoring case")
+        format!(
+            "{} matched it ignoring case",
+            quote_untrusted(value, SHOWN_NAME_CHARS)
+        )
     } else {
-        format!("'{value}' matched it ignoring case and surrounding space")
+        format!(
+            "{} matched it ignoring case and surrounding space",
+            quote_untrusted(value, SHOWN_NAME_CHARS)
+        )
     };
     let mut text = format!(
-        "Selected option '{option}' of combo box element [{idx}] ({how}; path={path}): pressed \
-         its row in popup window {popup}"
+        "Selected option {} of combo box element [{idx}] ({how}; path={path}): pressed \
+         its row in popup window {popup}",
+        quote_untrusted(option, SHOWN_NAME_CHARS)
     );
     text.push_str(if *popup_closed {
         ", which closed"
@@ -11807,15 +11904,17 @@ fn qt_combo_pick_result(
     });
     match readback.as_deref() {
         Some(seen) if verified => {
+            let seen = readback_quoted(seen);
             structured["evidence"] = json!([{
                 "kind": "value_readback",
-                "detail": format!("combo box element [{idx}] reads back '{seen}'"),
+                "detail": format!("combo box element [{idx}] reads back {seen}"),
             }]);
-            text.push_str(&format!("; the combo box reads back '{seen}'."));
+            text.push_str(&format!("; the combo box reads back {seen}."));
         }
         Some(seen) => text.push_str(&format!(
-            "; but the combo box reads back '{seen}', so the selection did not commit. Check \
-             it with get_window_state."
+            "; but the combo box reads back {}, so the selection did not commit. Check \
+             it with get_window_state.",
+            readback_quoted(seen)
         )),
         None => text.push_str(
             "; the combo box could not be read back, so this is not verified. Check it with \
@@ -11885,23 +11984,32 @@ fn set_value_result(
         "verified": verified,
         "effect": if verified { "confirmed" } else if readback.is_some() { "suspected_noop" } else { "unverifiable" },
     });
-    let mut text = format!("Set value of element [{idx}] to '{value}' (path={path})");
+    // The read-back is the app's text (a page script can rewrite a field):
+    // escaped and cut in the text, whole in `readback`.
+    let mut text = format!(
+        "Set value of element [{idx}] to {} (path={path})",
+        quote_untrusted(value, SHOWN_NAME_CHARS)
+    );
     match readback {
         Some(seen) if normalised_path => {
-            structured["readback"] = json!(seen);
             text.push_str(&format!(
-                "; the field reads back '{seen}': a file chooser navigated to the path's \
-                 directory and kept the file name (the write committed)."
+                "; the field reads back {}: a file chooser navigated to the path's \
+                 directory and kept the file name (the write committed).",
+                readback_quoted(&seen)
             ));
+            structured["readback"] = json!(seen);
         }
-        Some(seen) if verified => text.push_str(&format!("; read back '{seen}'.")),
+        Some(seen) if verified => {
+            text.push_str(&format!("; read back {}.", readback_quoted(&seen)))
+        }
         Some(seen) => {
+            text.push_str(&format!(
+                "; but the element reads back {} — the write may not have committed. \
+                 Confirm with get_window_state or a screenshot.",
+                readback_quoted(&seen)
+            ));
             structured["readback"] = json!(seen);
             structured["escalation"] = non_ax_escalation();
-            text.push_str(&format!(
-                "; but the element reads back '{seen}' — the write may not have committed. \
-                 Confirm with get_window_state or a screenshot."
-            ));
         }
         None => {
             structured["readback"] = Value::Null;
@@ -15886,7 +15994,8 @@ impl Tool for GetDesktopStateTool {
 /// process instead of guessing. Each line names its unit: the geometry in
 /// this screenshot's pixels when they differ from the desktop's, then in
 /// desktop pixels as the structured `windows` records hold it, and the
-/// z_index, so the line says the whole record.
+/// z_index, so the line says the whole record. Titles and app names are
+/// app text, escaped and quoted as in `window_record_line`.
 fn desktop_window_lines(windows: &[crate::x11::WindowInfo], frame_scale: f64) -> String {
     let px = |v: i32| (f64::from(v) / frame_scale).round() as i32;
     let sz = |v: u32| (f64::from(v) / frame_scale).round() as u32;
@@ -15900,7 +16009,7 @@ fn desktop_window_lines(windows: &[crate::x11::WindowInfo], frame_scale: f64) ->
         let title = if w.title.is_empty() {
             "(no title)".to_owned()
         } else {
-            format!("\"{}\"", w.title)
+            quoted_title(&w.title)
         };
         let desktop = format!("{}x{}+{}+{} desktop px", w.width, w.height, w.x, w.y);
         let geometry = if scaled {
@@ -15925,7 +16034,7 @@ fn desktop_window_lines(windows: &[crate::x11::WindowInfo], frame_scale: f64) ->
             if w.app_name.is_empty() {
                 String::new()
             } else {
-                format!(" app={}", w.app_name)
+                format!(" app={}", untrusted_token(&w.app_name, SHOWN_NAME_CHARS))
             },
             if w.is_on_screen {
                 ""
@@ -17273,23 +17382,7 @@ impl Tool for GetAccessibilityTreeTool {
         if !windows.is_empty() {
             lines.push(String::new());
             lines.push("Windows:".to_owned());
-            for w in &windows {
-                let title = if w.title.is_empty() {
-                    "(no title)".to_owned()
-                } else {
-                    format!("\"{}\"", w.title)
-                };
-                lines.push(format!(
-                    "- pid={} window_id={} {} {}x{}+{}+{}",
-                    w.pid.map(|p| p.to_string()).unwrap_or_else(|| "?".into()),
-                    w.xid,
-                    title,
-                    w.width,
-                    w.height,
-                    w.x,
-                    w.y
-                ));
-            }
+            lines.extend(windows.iter().map(tree_window_line));
             lines.push(
                 "→ Call get_window_state(pid, window_id) to inspect a window's UI.".to_owned(),
             );
@@ -17306,13 +17399,41 @@ impl Tool for GetAccessibilityTreeTool {
     }
 }
 
-/// `- name (pid N)`, then argv[0] when it differs from the name
-/// (`- at-spi-bus-laun (pid 15) /usr/lib/at-spi-bus-launcher`).
-fn process_line(p: &crate::proc_fs::ProcessInfo) -> String {
-    if p.cmdline.is_empty() || p.cmdline == p.name {
-        format!("- {} (pid {})", p.name, p.pid)
+/// One window of get_accessibility_tree: `- pid=N window_id=N "title"
+/// WxH+X+Y`, the title escaped and quoted as in `window_record_line`.
+fn tree_window_line(w: &crate::x11::WindowInfo) -> String {
+    let title = if w.title.is_empty() {
+        "(no title)".to_owned()
     } else {
-        format!("- {} (pid {}) {}", p.name, p.pid, p.cmdline)
+        quoted_title(&w.title)
+    };
+    format!(
+        "- pid={} window_id={} {} {}x{}+{}+{}",
+        w.pid.map(|p| p.to_string()).unwrap_or_else(|| "?".into()),
+        w.xid,
+        title,
+        w.width,
+        w.height,
+        w.x,
+        w.y
+    )
+}
+
+/// `- name (pid N)`, then argv[0] when it differs from the name
+/// (`- at-spi-bus-laun (pid 15) /usr/lib/at-spi-bus-launcher`). Any process
+/// sets its own name and argv[0] (argv[0] may hold newlines), so each is shown
+/// bare only when it is one plain word, else escaped, quoted and cut
+/// (`untrusted_token`).
+fn process_line(p: &crate::proc_fs::ProcessInfo) -> String {
+    let name = untrusted_token(&p.name, SHOWN_NAME_CHARS);
+    if p.cmdline.is_empty() || p.cmdline == p.name {
+        format!("- {name} (pid {})", p.pid)
+    } else {
+        format!(
+            "- {name} (pid {}) {}",
+            p.pid,
+            untrusted_token(&p.cmdline, SHOWN_COMMAND_CHARS)
+        )
     }
 }
 
@@ -18671,6 +18792,8 @@ impl StackingOutcome {
     }
 }
 
+/// `5 "Kate", 6`: window ids with their titles escaped and quoted
+/// (`quoted_title`).
 fn describe_windows(windows: &[(u64, String)]) -> String {
     windows
         .iter()
@@ -18678,7 +18801,7 @@ fn describe_windows(windows: &[(u64, String)]) -> String {
             if title.is_empty() {
                 id.to_string()
             } else {
-                format!("{id} \"{title}\"")
+                format!("{id} {}", quoted_title(title))
             }
         })
         .collect::<Vec<_>>()
