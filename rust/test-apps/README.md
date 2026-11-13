@@ -19,6 +19,7 @@ Common outputs:
 - `harness-swiftui/`
 - `harness-wkwebview/`
 - `harness-gtk3/`
+- `harness-gtk4/`
 - `harness-qt6/`
 
 Run the host build script for your platform:

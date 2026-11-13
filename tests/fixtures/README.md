@@ -15,9 +15,13 @@ tests/fixtures/
 ├── apps/
 │   ├── cross-platform/
 │   │   ├── electron/        # Chromium/Electron host, CDP port 9223
-│   │   └── tauri/           # native webview/Tauri host
+│   │   ├── tauri/           # native webview/Tauri host
+│   │   └── visual-only-canvas/  # custom-painted Tk canvas, no AX tree
 │   ├── linux/
-│   │   └── gtk3/            # PyGObject GTK3 app
+│   │   ├── gtk3/            # PyGObject GTK3 app
+│   │   ├── gtk4/            # PyGObject GTK4 app
+│   │   ├── qt6/             # Qt 6 Widgets app
+│   │   └── isolated-input/  # GTK3 raw-event input fixture
 │   ├── macos/
 │   │   ├── appkit/          # single-file Swift AppKit app
 │   │   ├── swiftui/         # single-file SwiftUI app
@@ -72,7 +76,9 @@ Rust tests under `rust/crates/pincer-e2e/tests/` consume the staged
 - `harness_<toolkit>_test.rs`: toolkit-specific app coverage.
 - `capture_contract_test.rs` and `desktop_scope_<os>_test.rs`: capture and
   desktop-scope contracts.
-- `protocol_*_test.rs` and schema tests: headless protocol coverage, default.
+
+Headless protocol and schema tests (`protocol_*_test.rs`) live in
+`rust/crates/pincer/tests/` and run by default.
 
 Rust integration tests under `rust/crates/pincer-e2e/tests/` drive
 the shared Electron/Tauri harnesses through the public MCP interface.
@@ -88,6 +94,7 @@ the shared Electron/Tauri harnesses through the public MCP interface.
 | WinUI3 | `apps/windows/winui3` | `harness-winui3` | UIA/XAML controls |
 | WebView2 | `apps/windows/webview2` | `harness-webview` | Chromium web UIA |
 | GTK3 | `apps/linux/gtk3` | `harness-gtk3` | AT-SPI/GTK controls |
+| GTK4 | `apps/linux/gtk4` | `harness-gtk4` | AT-SPI/GTK4 controls |
 | Qt6 | `apps/linux/qt6` | `harness-qt6` | AT-SPI/Qt Widgets controls and dialogs |
 | Electron | `apps/cross-platform/electron` | `harness-electron` | Chromium web AX/UIA/AT-SPI |
 | Tauri | `apps/cross-platform/tauri` | `harness-tauri` | native webview AX/UIA/AT-SPI |

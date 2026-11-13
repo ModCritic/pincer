@@ -104,9 +104,11 @@ calls keep their existing cursor behavior.
 `set_agent_cursor_motion` changes how the cursor moves and when it hides. It
 does not change artwork. `style` picks the trajectory: `signature_arc` (the
 default), `spring_settle`, `magnetic`, `comet_swoop`, `adaptive`, or `classic`
-(the previous Dubins glide). `timing` is `native` (the style's own), `fitts`
-(scales with distance and target size), or `fixed` (`glide_duration_ms`, 1430
-ms when 0). `effects` turns `trail`, `glow`, `magnet`, `ripple`, and `squish`
+(the previous Dubins glide). `timing` is `steady` (the default: the style's
+timing with a 600 ms minimum and a gentler ease), `relaxed` or `calm` (the same
+with a 450 or 750 ms minimum), `native` (the style's own), `fitts` (scales with
+distance and target size), `deliberate` (a slower `fitts`, 450 to 1300 ms), or
+`fixed` (`glide_duration_ms`, 1430 ms when 0). `effects` turns `trail`, `glow`, `magnet`, `ripple`, and `squish`
 on, off, or `default` (the style's own setting). Omit an effect to keep its current setting. From a shell, `pincer cursor
 motion --session <label> --style magnetic` sets the same fields. The removed `set_agent_cursor_style` operation and
 its `cursor_id`, shape, color, label, size, opacity, image-path, gradient, and
@@ -314,6 +316,6 @@ Regenerate the public documentation GIFs after changing the built-in cursor:
 ./scripts/cursor-gallery.sh export-docs
 ```
 
-Commit both GIFs in `docs/public/img/pincer/cursor-themes/` with the renderer
-change. The export requires Chrome, Node.js with WebSocket support, Python 3,
+The GIFs are written to `docs/public/img/pincer/cursor-themes/`; generated
+media is not committed in this repository. The export requires Chrome, Node.js with WebSocket support, Python 3,
 and ffmpeg.

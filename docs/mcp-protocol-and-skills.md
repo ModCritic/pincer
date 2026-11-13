@@ -79,8 +79,8 @@ Use `resources/read` to fetch a listed URI. For example, a modern request is:
 }
 ```
 
-The eight-file pack includes the main skill, README, platform guides, browser
-guide, recording guide, and embedding guide. It is embedded in the endpoint
+The ten-file pack includes the main skill, README, workflow and runtime
+guides, platform guides, browser guide, recording guide, and embedding guide. It is embedded in the endpoint
 binary, so serving it needs no separate skill installation. Only those exact
 resource URIs are readable. Directory listing, archives, arbitrary local
 files, and script execution are not supported by this endpoint.

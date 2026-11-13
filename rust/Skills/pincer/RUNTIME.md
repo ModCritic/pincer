@@ -69,14 +69,19 @@ from the selected profile, but it cannot grant a tool, resource, or approval
 bypass that another authorization layer denies. Approval is considered only
 after the tool and every adapter-attested resource are inside manifest scope.
 
-Use the canonical startup pair together:
+Use the canonical startup pair together on the daemon, then connect to it:
 
 ```bash
-pincer mcp \
+pincer serve \
   --permission-mode standard \
   --capability-manifest ./capabilities.yaml \
   --approve-capability-manifest
+pincer mcp --socket <path>
 ```
+
+`pincer mcp` rejects these flags. A direct `pincer mcp` runtime takes the
+same choice from `PINCER_PERMISSION_MODE`, `PINCER_CAPABILITY_MANIFEST_FILE`
+and `PINCER_CAPABILITY_MANIFEST_APPROVED`.
 
 Capability manifest v3 omits file-level `mode` and `ask.tools`. Its
 `allow.tools` list is nonempty. Lifetime fields are optional in `standard` and
@@ -98,7 +103,7 @@ Pixel `click` already animates the cursor. Do not precede it with `move_cursor` 
 
 The default theme provides session-colored pointer/glow, action marks, and activity animations. Named sessions have stable palette colors. Native hosts own delivery/target badges separately from theme artwork; cursor state is scoped to the private lifecycle.
 
-`set_agent_cursor_enabled` controls idle visibility. `set_agent_cursor_motion` takes `style` (`signature_arc` default, `spring_settle`, `magnetic`, `comet_swoop`, `adaptive`, `classic`), `timing` (`native`, `fitts`, `fixed`), `effects` (`trail`, `glow`, `magnet`, `ripple`, `squish` as `on`, `off`, or `default`; `default` restores the style default, and an omitted effect keeps its current setting), and the arc knobs `start_handle`, `end_handle`, `arc_size`, `arc_flow` (bezier styles) plus `spring` and `turn_radius` (`classic`) where advertised. Choose preinstalled artwork with `set_agent_cursor_theme`; `cursor_id` on input tools is not a theme selector. Never supply inline theme code or arbitrary source paths through agent tools. The trusted local `cursor-theme` workflow owns validation, compilation, preview, installation, and removal.
+`set_agent_cursor_enabled` controls idle visibility. `set_agent_cursor_motion` takes `style` (`signature_arc` default, `spring_settle`, `magnetic`, `comet_swoop`, `adaptive`, `classic`), `timing` (`steady` default, `relaxed`, `calm`, `native`, `fitts`, `deliberate`, `fixed`), `effects` (`trail`, `glow`, `magnet`, `ripple`, `squish` as `on`, `off`, or `default`; `default` restores the style default, and an omitted effect keeps its current setting), and the arc knobs `start_handle`, `end_handle`, `arc_size`, `arc_flow` (bezier styles) plus `spring` and `turn_radius` (`classic`) where advertised. Choose preinstalled artwork with `set_agent_cursor_theme`; `cursor_id` on input tools is not a theme selector. Never supply inline theme code or arbitrary source paths through agent tools. The trusted local `cursor-theme` workflow owns validation, compilation, preview, installation, and removal.
 
 Overlay operations need a suitable UI event loop. macOS direct SDK/MCP runtimes without a certified host main-thread adapter can return `facility_unavailable`; do not report that as a successful move. See [EMBEDDING.md](EMBEDDING.md).
 

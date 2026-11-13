@@ -13,13 +13,13 @@ surface. Complements the Rust integration tests under `rust/crates/pincer-e2e/te
 |-------------------|----------|----------------------------------------------------------------|
 | `macos.sh`        | macOS    | Spawns the AppKit harness, calls every tool once               |
 
-Each script checks in a baseline result file under `results/` for the
-current driver version. Diff against it to catch regressions in tool
-coverage:
+Save one run as a baseline and diff a later run against it to catch
+regressions in tool coverage:
 
 ```bash
+./macos.sh > /tmp/baseline.txt
 ./macos.sh > /tmp/run.txt
-diff results/macos.txt /tmp/run.txt
+diff /tmp/baseline.txt /tmp/run.txt
 ```
 
 Prereqs (macOS):

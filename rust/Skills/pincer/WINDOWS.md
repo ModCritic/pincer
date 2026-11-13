@@ -442,13 +442,14 @@ your prior tool calls earned.
    `SessionId == 0` is refused before runtime actions. The autostart Scheduled Task uses
    `LogonType=Interactive` so the daemon lands in the user's logon
    session. If you started the daemon via SSH-into-Windows, that
-   session is usually Session 0: kick the autostart task instead:
+   session is usually Session 0: kick the autostart task instead
+   (`pincer-local-serve` when `scripts/install-local.ps1` registered it):
    ```powershell
    schtasks /Run /TN pincer-serve
    ```
-3. **Run `pincer doctor`**: reports session ID, COM apartment
-   status, UIA desktop-enumeration reachability, install paths,
-   version. If anything reads `false` / `error`, fix that before
+3. **Run `pincer doctor`**: reports the version, install paths, the
+   interactive session, visible-window enumeration and UI Automation
+   reachability. If anything reads `false` / `error`, fix that before
    tool-calling.
 4. **Permissions**: Windows has no TCC equivalent. pincer
    needs:
@@ -702,8 +703,8 @@ typed browser tools yet.
 
 ## Common failure modes (Windows-specific)
 
-- **`Session 0` daemon**: `pincer doctor` reports
-  `SessionId: 0`. UIA enumeration returns empty, screenshot
+- **`Session 0` daemon**: `pincer doctor`'s interactive session
+  check reports Session 0. UIA enumeration returns empty, screenshot
   returns blank. Fix: stop the daemon, kick the autostart task with
   `schtasks /Run /TN pincer-serve`.
 - **Stale HWND** (`Invalid window handle 0x80070578`): the window
@@ -771,13 +772,12 @@ typed browser tools yet.
 
 `pincer doctor` reports:
 
-- Daemon version and install paths
-- Current session ID (must be ≥1)
-- COM apartment status (STA / MTA / uninitialized)
-- UIA reachability (can we create `CUIAutomation` and enumerate desktop children?)
-- AppX broker reachability (for packaged-app activation)
-- PATH state (is `pincer` actually on PATH?)
-- Autostart Scheduled Task status
+- Binary version and target, install dir and home dir
+- Interactive session (Session 0 or an attached desktop)
+- Visible top-level windows from `EnumWindows`
+- UIA reachability (can we create `CUIAutomation`?)
+
+`pincer autostart status` reports the autostart Scheduled Task.
 
 Run it whenever a tool call returns unexpectedly. Most failures
 trace back to one of these checks reading "false."

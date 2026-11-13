@@ -3,10 +3,9 @@
 # pincer local/debug installer (macOS + Linux). Builds from the
 # current source tree into a durable, separate local-product namespace.
 #
-# Private helper — invoked by install-local.sh (the multi-backend
-# dispatcher) when the user picks --backend=rust / --experimental-rust
-# or runs on a non-macOS host. Do not invoke directly; flag parity with
-# the dispatcher's argv shape is maintained from there.
+# Private helper, invoked by install-local.sh, which forwards every flag
+# here (its --backend flags are no-ops now that Rust is the only backend).
+# Do not invoke directly.
 #
 # Rust local installer (dev-only helper for the rust/ workspace):
 #   --release    build the release configuration (default: debug)

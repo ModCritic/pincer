@@ -342,8 +342,8 @@ common headless cases. Two things must still be true:
    **`toolkit-accessibility` must be on**: pincer advertises a screen
    reader at startup to flip it, but a session with no a11y bus at all
    (`/usr/libexec/at-spi-bus-launcher`) can't expose a tree. `pincer
-doctor` probes `org.a11y.Bus` for real (not just "is there a bus?")
-   and tells you which of the two is missing.
+doctor` probes `org.a11y.Bus` for real (not just "is there a bus?"),
+   and the `health_report` tool's hint says which of the two is missing.
 2. The daemon must run **as the desktop user** (so it can read that user's
    session-process environ and the `/run/user/<uid>/bus` socket). Running the
    daemon as root against a user session is the Linux analogue of the Windows
@@ -488,10 +488,10 @@ use the equivalent non-keypad key, instead of retrying the same call.
 
 If a tool call surprises you on Linux:
 
-1. `pincer doctor`: reports the display server (X11 / Wayland),
-   **whether `org.a11y.Bus` actually answers on the session bus** (not just
-   "is there a bus"), the discovered `DBUS_SESSION_BUS_ADDRESS`, and
-   `ffmpeg` availability (for recording).
+1. `pincer doctor`: reports the display server (X11 / Wayland), the X11
+   connection, and **whether `org.a11y.Bus` actually answers on the session
+   bus** (not just "is there a bus"). The `health_report` tool adds the
+   `DBUS_SESSION_BUS_ADDRESS` and `toolkit-accessibility` hints.
 2. Check `XDG_SESSION_TYPE`: X11 still has toolkit-specific delivery limits; `wayland`
    needs `PINCER_ENABLE_WAYLAND=1` for the native backend,
    else XWayland.
