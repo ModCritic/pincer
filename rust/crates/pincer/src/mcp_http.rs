@@ -17,9 +17,15 @@
 //! N clients run concurrently. (SSE streaming + transport-level session headers
 //! are a follow-up; tool calls are request/response, so `application/json`
 //! suffices.) Loopback-only — a local automation surface, not a public endpoint.
+//!
+//! Every local account can reach a loopback port, so nothing is read or
+//! allocated for a request body until its headers pass the Origin and bearer
+//! checks. Connections are capped, and a connection that has not yet sent an
+//! authorized request must send a complete request head within a time limit.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use pincer_core::protocol::{Request, Response};
 use pincer_core::server::{
@@ -27,9 +33,27 @@ use pincer_core::server::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 const MCP_HTTP_TOKEN_ENV: &str = "PINCER_MCP_HTTP_TOKEN";
+
+/// Connections served at once. Each one is a task and a descriptor, so the
+/// cap bounds what clients without the token can tie up.
+const MAX_CONNECTIONS: usize = 64;
+/// Time allowed for a whole request head (request line and headers). Until a
+/// connection has sent an authorized request, the clock starts at accept, so
+/// a client without the token cannot hold a slot for long. After that it
+/// starts at the first byte of each request, so an authenticated agent may
+/// leave its keep-alive connection idle between tool calls.
+const HEAD_TIMEOUT: Duration = Duration::from_secs(10);
+/// Time allowed for an authorized request body.
+const BODY_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a refused connection may take to accept the error response and
+/// close, so the client reads the error instead of a connection reset.
+const LINGER_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_HEAD: usize = 64 * 1024;
+const MAX_BODY: usize = 16 * 1024 * 1024;
 
 /// Resolve the configured HTTP MCP port: `PINCER_MCP_HTTP_PORT` (> 0), or
 /// `None` (disabled — the daemon spawns the listener only when this is set).
@@ -53,36 +77,90 @@ fn configured_port_from(value: Option<std::ffi::OsString>) -> anyhow::Result<Opt
     Ok(Some(port))
 }
 
-/// Spawn the HTTP MCP listener bound to `127.0.0.1:port` (loopback only).
-pub fn spawn(sdk: Arc<crate::sdk_adapter::SdkAdapter>, port: u16) -> anyhow::Result<()> {
+/// A running MCP HTTP listener. Dropping it stops the listener and closes its
+/// connections.
+#[must_use = "dropping the Server stops the MCP HTTP listener"]
+pub struct Server(tokio::task::JoinHandle<()>);
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Bind the HTTP MCP listener to `127.0.0.1:port` (loopback only) and serve it
+/// on a task. The port is bound before this returns, and a bind failure is an
+/// error: if another process holds the port, it would otherwise receive every
+/// client's bearer token and tool traffic.
+pub fn spawn(sdk: Arc<crate::sdk_adapter::SdkAdapter>, port: u16) -> anyhow::Result<Server> {
     let token = Arc::<str>::from(configured_auth_token().map_err(anyhow::Error::msg)?);
-    tokio::spawn(async move {
-        let addr: SocketAddr = ([127, 0, 0, 1], port).into();
-        match TcpListener::bind(addr).await {
-            Ok(listener) => {
-                info!("MCP HTTP transport listening on http://{addr}/mcp (one connection per agent → parallel)");
-                loop {
-                    match listener.accept().await {
-                        Ok((stream, peer)) => {
-                            let sdk = sdk.clone();
-                            let token = token.clone();
-                            tokio::spawn(async move {
-                                if let Err(e) = serve_conn(stream, sdk, token).await {
-                                    debug!(%peer, "MCP HTTP connection closed: {e}");
-                                }
-                            });
+    let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+    let listener = std::net::TcpListener::bind(addr)
+        .and_then(|listener| {
+            listener.set_nonblocking(true)?;
+            TcpListener::from_std(listener)
+        })
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "MCP HTTP transport cannot listen on http://{addr}/mcp: {error}. Pincer does \
+                 not start without it, so that another process holding port {port} never \
+                 receives the bearer token. Stop that process or set PINCER_MCP_HTTP_PORT \
+                 to a free port."
+            )
+        })?;
+    info!("MCP HTTP transport listening on http://{addr}/mcp (one connection per agent → parallel)");
+    Ok(Server(tokio::spawn(serve_listener(listener, sdk, token))))
+}
+
+async fn serve_listener(
+    listener: TcpListener,
+    sdk: Arc<crate::sdk_adapter::SdkAdapter>,
+    token: Arc<str>,
+) {
+    let permits = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
+    // Owned here so that stopping the listener also closes its connections.
+    let mut connections = tokio::task::JoinSet::new();
+    loop {
+        tokio::select! {
+            accepted = listener.accept() => match accepted {
+                Ok((stream, peer)) => {
+                    let Ok(permit) = permits.clone().try_acquire_owned() else {
+                        debug!(%peer, "MCP HTTP connection refused: {MAX_CONNECTIONS} connections already open");
+                        refuse_over_capacity(stream);
+                        continue;
+                    };
+                    let sdk = sdk.clone();
+                    let token = token.clone();
+                    connections.spawn(async move {
+                        let _permit = permit;
+                        if let Err(e) = serve_conn(stream, sdk, token).await {
+                            debug!(%peer, "MCP HTTP connection closed: {e}");
                         }
-                        Err(e) => {
-                            warn!("MCP HTTP accept error: {e}");
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        }
-                    }
+                    });
                 }
-            }
-            Err(e) => warn!("MCP HTTP transport disabled — bind {addr} failed: {e}"),
+                Err(e) => {
+                    warn!("MCP HTTP accept error: {e}");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            },
+            _ = connections.join_next(), if !connections.is_empty() => {}
         }
-    });
-    Ok(())
+    }
+}
+
+/// Answer a connection over [`MAX_CONNECTIONS`] with 503 and close it at once,
+/// without a task, so a flood of connections cannot pile up.
+fn refuse_over_capacity(stream: TcpStream) {
+    if let Ok(mut stream) = stream.into_std() {
+        use std::io::Write as _;
+        // A new socket has an empty send buffer, so this short write completes
+        // at once even though the socket is nonblocking.
+        let _ = stream.write_all(&http_response(
+            503,
+            br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"Too many MCP HTTP connections are open; close idle connections and retry"}}"#,
+            false,
+        ));
+    }
 }
 
 /// Handle one TCP connection: a keep-alive loop of HTTP requests. Requests on a
@@ -107,29 +185,80 @@ async fn serve_conn(
         sdk: sdk.clone(),
         transport_session: transport_session.clone(),
     };
+    let mut authenticated = false;
     loop {
-        let Some(req) = read_http_request(&mut stream, &token).await? else {
-            return Ok(()); // clean EOF
+        let head = match read_request_head(&mut stream, authenticated).await? {
+            HeadRead::Closed => return Ok(()), // clean EOF
+            HeadRead::TimedOut => {
+                refuse(
+                    &mut stream,
+                    408,
+                    br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"The request headers did not arrive in time"}}"#,
+                )
+                .await;
+                return Ok(());
+            }
+            HeadRead::Head(head) => parse_request_head(&head, &token),
         };
-        let keep_alive = req.keep_alive;
-        if req.has_origin {
-            write_http(
+        // Decide Origin and Authorization from the headers alone, before any
+        // body byte is read or allocated. A refused connection closes, since
+        // its unread body would otherwise be parsed as the next request.
+        if head.has_origin {
+            refuse(
                 &mut stream,
                 403,
                 br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Browser-origin requests are forbidden"}}"#,
-                keep_alive,
             )
-            .await?;
-        } else if !req.authorized {
-            write_http(
+            .await;
+            return Ok(());
+        }
+        if !head.authorized {
+            refuse(
                 &mut stream,
                 401,
                 br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32001,"message":"Authentication required"}}"#,
-                false,
             )
-            .await?;
+            .await;
             return Ok(());
-        } else if !req.method.eq_ignore_ascii_case("POST") {
+        }
+        authenticated = true;
+        let Some(content_length) = head.content_length else {
+            refuse(
+                &mut stream,
+                400,
+                br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Send one valid Content-Length header"}}"#,
+            )
+            .await;
+            return Ok(());
+        };
+        if content_length > MAX_BODY {
+            refuse(
+                &mut stream,
+                413,
+                br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Request body exceeds the 16 MiB limit"}}"#,
+            )
+            .await;
+            return Ok(());
+        }
+        let mut body = vec![0u8; content_length];
+        if content_length > 0 {
+            match tokio::time::timeout(BODY_TIMEOUT, stream.read_exact(&mut body)).await {
+                Ok(read) => {
+                    read?;
+                }
+                Err(_) => {
+                    refuse(
+                        &mut stream,
+                        408,
+                        br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"The request body did not arrive in time"}}"#,
+                    )
+                    .await;
+                    return Ok(());
+                }
+            }
+        }
+        let keep_alive = head.keep_alive;
+        if !head.method.eq_ignore_ascii_case("POST") {
             write_http(
                 &mut stream,
                 405,
@@ -139,7 +268,7 @@ async fn serve_conn(
             .await?;
         } else {
             if let Some(error) =
-                unsupported_protocol_error(&req.body, req.protocol_version.as_deref())
+                unsupported_protocol_error(&body, head.protocol_version.as_deref())
             {
                 write_http(&mut stream, 400, error.as_bytes(), keep_alive).await?;
                 if !keep_alive {
@@ -147,7 +276,7 @@ async fn serve_conn(
                 }
                 continue;
             }
-            match dispatch(&req.body, &sdk, &transport_session).await {
+            match dispatch(&body, &sdk, &transport_session).await {
                 Some(resp_json) => {
                     write_http(&mut stream, 200, resp_json.as_bytes(), keep_alive).await?
                 }
@@ -160,6 +289,25 @@ async fn serve_conn(
         // from distinct connections regardless of keep-alive.
         if !keep_alive {
             return Ok(());
+        }
+    }
+}
+
+/// Send an error response, then close without a reset: stop writing and
+/// discard what the client already sent, for at most [`LINGER_TIMEOUT`], so
+/// the client can read the response. Nothing read here is kept.
+async fn refuse(stream: &mut TcpStream, status: u16, body: &[u8]) {
+    let deadline = Instant::now() + LINGER_TIMEOUT;
+    let written =
+        tokio::time::timeout_at(deadline, write_http(stream, status, body, false)).await;
+    if !matches!(written, Ok(Ok(()))) {
+        return;
+    }
+    let _ = stream.shutdown().await;
+    let mut discard = [0u8; 8192];
+    while let Ok(Ok(read)) = tokio::time::timeout_at(deadline, stream.read(&mut discard)).await {
+        if read == 0 {
+            break;
         }
     }
 }
@@ -268,12 +416,12 @@ fn apply_session_identity(req: &mut Request, transport_session: &str) {
     }
 }
 
-/// One parsed HTTP/1.1 request.
-struct HttpRequest {
+/// The request line and headers of one HTTP/1.1 request.
+struct RequestHead {
     method: String,
-    #[allow(dead_code)]
-    path: String,
-    body: Vec<u8>,
+    /// `None` when Content-Length is malformed or repeated with different
+    /// values; `Some(0)` when it is absent.
+    content_length: Option<usize>,
     /// Browser requests carry Origin; native MCP clients normally do not.
     has_origin: bool,
     /// Whether to keep the connection open after responding (HTTP/1.1 default;
@@ -283,35 +431,59 @@ struct HttpRequest {
     protocol_version: Option<String>,
 }
 
-/// Read one HTTP/1.1 request, or `None` on clean EOF. Minimal: request line +
-/// headers until CRLFCRLF, then `Content-Length` bytes.
-async fn read_http_request(
+enum HeadRead {
+    Head(Vec<u8>),
+    /// The peer closed the connection before a complete head.
+    Closed,
+    /// The head did not arrive within [`HEAD_TIMEOUT`].
+    TimedOut,
+}
+
+/// Read one request head, up to and including the blank line. Until the
+/// connection is `authenticated`, the whole head must arrive within
+/// [`HEAD_TIMEOUT`] of this call; afterwards the wait for the first byte is
+/// unbounded and the limit starts there.
+async fn read_request_head(
     stream: &mut TcpStream,
-    token: &str,
-) -> anyhow::Result<Option<HttpRequest>> {
+    authenticated: bool,
+) -> anyhow::Result<HeadRead> {
     let mut head = Vec::with_capacity(1024);
     let mut byte = [0u8; 1];
+    let mut deadline = (!authenticated).then(|| Instant::now() + HEAD_TIMEOUT);
     loop {
-        let n = stream.read(&mut byte).await?;
-        if n == 0 {
-            return Ok(None); // EOF — peer closed
+        let read = match deadline {
+            Some(deadline) => {
+                match tokio::time::timeout_at(deadline, stream.read(&mut byte)).await {
+                    Ok(read) => read?,
+                    Err(_) => return Ok(HeadRead::TimedOut),
+                }
+            }
+            None => stream.read(&mut byte).await?,
+        };
+        if read == 0 {
+            return Ok(HeadRead::Closed);
         }
+        deadline.get_or_insert_with(|| Instant::now() + HEAD_TIMEOUT);
         head.push(byte[0]);
         if head.ends_with(b"\r\n\r\n") {
-            break;
+            return Ok(HeadRead::Head(head));
         }
-        if head.len() > 64 * 1024 {
+        if head.len() > MAX_HEAD {
             anyhow::bail!("HTTP headers too large");
         }
     }
-    let head_str = String::from_utf8_lossy(&head);
+}
+
+fn parse_request_head(head: &[u8], token: &str) -> RequestHead {
+    let head_str = String::from_utf8_lossy(head);
     let mut lines = head_str.split("\r\n");
     let request_line = lines.next().unwrap_or("");
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or("").to_owned();
-    let path = parts.next().unwrap_or("/").to_owned();
+    let _path = parts.next().unwrap_or("/");
     let version = parts.next().unwrap_or("HTTP/1.1");
-    let mut content_length = 0usize;
+    let mut content_length = Some(0usize);
+    let mut seen_content_length = false;
     let mut has_origin = false;
     let mut keep_alive = version.eq_ignore_ascii_case("HTTP/1.1"); // 1.1 defaults to keep-alive
     let mut authorized = false;
@@ -322,7 +494,13 @@ async fn read_http_request(
             if k.eq_ignore_ascii_case("origin") {
                 has_origin = true;
             } else if k.eq_ignore_ascii_case("content-length") {
-                content_length = v.parse().unwrap_or(0);
+                let parsed = v.parse::<usize>().ok();
+                content_length = if seen_content_length && parsed != content_length {
+                    None
+                } else {
+                    parsed
+                };
+                seen_content_length = true;
             } else if k.eq_ignore_ascii_case("connection") {
                 if v.eq_ignore_ascii_case("close") {
                     keep_alive = false;
@@ -341,26 +519,41 @@ async fn read_http_request(
             }
         }
     }
-    if content_length > 16 * 1024 * 1024 {
-        anyhow::bail!("HTTP body too large");
-    }
-    let mut body = vec![0u8; content_length];
-    if content_length > 0 {
-        stream.read_exact(&mut body).await?;
-    }
-    Ok(Some(HttpRequest {
+    RequestHead {
         method,
-        path,
-        body,
+        content_length,
         has_origin,
         keep_alive,
         authorized,
         protocol_version,
-    }))
+    }
+}
+
+/// The bearer token, read from the environment once. Reading it removes it
+/// from the process environment, so apps the daemon launches never inherit it.
+static AUTH_TOKEN: OnceLock<Option<std::ffi::OsString>> = OnceLock::new();
+
+/// Move `PINCER_MCP_HTTP_TOKEN` out of the process environment into this
+/// module. The daemon calls this at startup, before it starts other threads;
+/// [`spawn`] reads the token through the same path, so a later call is safe.
+pub fn capture_auth_token() {
+    let _ = captured_auth_token();
+}
+
+fn captured_auth_token() -> Option<std::ffi::OsString> {
+    AUTH_TOKEN
+        .get_or_init(|| {
+            let token = std::env::var_os(MCP_HTTP_TOKEN_ENV);
+            if token.is_some() {
+                std::env::remove_var(MCP_HTTP_TOKEN_ENV);
+            }
+            token
+        })
+        .clone()
 }
 
 fn configured_auth_token() -> Result<String, String> {
-    configured_auth_token_from(std::env::var_os(MCP_HTTP_TOKEN_ENV))
+    configured_auth_token_from(captured_auth_token())
 }
 
 fn configured_auth_token_from(value: Option<std::ffi::OsString>) -> Result<String, String> {
@@ -399,30 +592,38 @@ fn constant_time_equal(left: &str, right: &str) -> bool {
     difference == 0
 }
 
+fn http_response(status: u16, body: &[u8], keep_alive: bool) -> Vec<u8> {
+    let reason = match status {
+        200 => "OK",
+        202 => "Accepted",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        405 => "Method Not Allowed",
+        408 => "Request Timeout",
+        413 => "Payload Too Large",
+        503 => "Service Unavailable",
+        _ => "OK",
+    };
+    let conn = if keep_alive { "keep-alive" } else { "close" };
+    let mut response = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: {conn}\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    response.extend_from_slice(body);
+    response
+}
+
 async fn write_http(
     stream: &mut TcpStream,
     status: u16,
     body: &[u8],
     keep_alive: bool,
 ) -> anyhow::Result<()> {
-    let reason = match status {
-        200 => "OK",
-        202 => "Accepted",
-        400 => "Bad Request",
-        403 => "Forbidden",
-        401 => "Unauthorized",
-        405 => "Method Not Allowed",
-        _ => "OK",
-    };
-    let conn = if keep_alive { "keep-alive" } else { "close" };
-    let head = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: {conn}\r\n\r\n",
-        body.len()
-    );
-    stream.write_all(head.as_bytes()).await?;
-    if !body.is_empty() {
-        stream.write_all(body).await?;
-    }
+    stream
+        .write_all(&http_response(status, body, keep_alive))
+        .await?;
     stream.flush().await?;
     Ok(())
 }
@@ -717,5 +918,231 @@ mod tests {
         assert!(response.contains("Authentication required"));
         server.await.unwrap();
         sdk.shutdown().await.expect("SDK shutdown");
+    }
+
+    const TEST_TOKEN: &str = "0123456789abcdef0123456789abcdef";
+
+    /// Serve exactly one connection with `serve_conn` on a loopback port.
+    async fn one_connection_server(
+        sdk: Arc<crate::sdk_adapter::SdkAdapter>,
+    ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let _ = serve_conn(stream, sdk, Arc::<str>::from(TEST_TOKEN)).await;
+        });
+        (addr, server)
+    }
+
+    /// Send `head` and nothing else, then read until the server closes.
+    /// `None` means the server neither answered nor closed within `limit`.
+    async fn send_head_and_wait(
+        addr: SocketAddr,
+        head: &[u8],
+        limit: std::time::Duration,
+    ) -> Option<String> {
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        client.write_all(head).await.unwrap();
+        let mut response = Vec::new();
+        match tokio::time::timeout(limit, client.read_to_end(&mut response)).await {
+            Ok(_) => Some(String::from_utf8_lossy(&response).into_owned()),
+            Err(_) => None,
+        }
+    }
+
+    // DAEMON-2: a client without the token must be refused as soon as its
+    // headers arrive. Before the fix the server waited for (and buffered) the
+    // whole declared body first, so these requests got no answer at all.
+    #[tokio::test]
+    async fn unauthenticated_requests_are_refused_before_the_body_is_read() {
+        let _runtime_guard = crate::test_runtime_lock().lock().await;
+        let sdk = crate::sdk_adapter::SdkAdapter::load(crate::build_driver_without_cursor())
+            .await
+            .expect("SDK adapter");
+        let limit = std::time::Duration::from_secs(3);
+        for (head, status) in [
+            (
+                "POST /mcp HTTP/1.1\r\nAuthorization: Bearer wrong\r\nContent-Length: 16777216\r\n\r\n",
+                "HTTP/1.1 401 Unauthorized\r\n",
+            ),
+            (
+                "POST /mcp HTTP/1.1\r\nContent-Length: 16777216\r\n\r\n",
+                "HTTP/1.1 401 Unauthorized\r\n",
+            ),
+            (
+                "POST /mcp HTTP/1.1\r\nOrigin: https://example.com\r\nContent-Length: 16777216\r\n\r\n",
+                "HTTP/1.1 403 Forbidden\r\n",
+            ),
+            (
+                "POST /mcp HTTP/1.1\r\nAuthorization: Bearer wrong\r\nContent-Length: 1073741824\r\n\r\n",
+                "HTTP/1.1 401 Unauthorized\r\n",
+            ),
+        ] {
+            let (addr, server) = one_connection_server(sdk.clone()).await;
+            let response = send_head_and_wait(addr, head.as_bytes(), limit).await;
+            server.abort();
+            let response = response.unwrap_or_else(|| {
+                panic!("no answer within {limit:?} to an unauthenticated request: {head:?}")
+            });
+            assert!(response.starts_with(status), "{head:?} got {response:?}");
+        }
+        sdk.shutdown().await.expect("SDK shutdown");
+    }
+
+    // DAEMON-2: a connection that never completes its request head must not
+    // hold a daemon socket forever.
+    #[tokio::test]
+    async fn stalled_request_heads_are_closed() {
+        let _runtime_guard = crate::test_runtime_lock().lock().await;
+        let sdk = crate::sdk_adapter::SdkAdapter::load(crate::build_driver_without_cursor())
+            .await
+            .expect("SDK adapter");
+        let limit = std::time::Duration::from_secs(20);
+        let (silent_addr, silent_server) = one_connection_server(sdk.clone()).await;
+        let (partial_addr, partial_server) = one_connection_server(sdk.clone()).await;
+        let (silent, partial) = tokio::join!(
+            send_head_and_wait(silent_addr, b"", limit),
+            send_head_and_wait(
+                partial_addr,
+                b"POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n",
+                limit
+            ),
+        );
+        silent_server.abort();
+        partial_server.abort();
+        assert!(
+            silent.is_some(),
+            "a connection that sent nothing stayed open for {limit:?}"
+        );
+        assert!(
+            partial.is_some(),
+            "a connection with an unfinished head stayed open for {limit:?}"
+        );
+        sdk.shutdown().await.expect("SDK shutdown");
+    }
+
+    /// Load the SDK and run `body` inside a fresh runtime (child tests only).
+    fn with_child_sdk<F, Fut>(body: F)
+    where
+        F: FnOnce(Arc<crate::sdk_adapter::SdkAdapter>) -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let sdk = crate::sdk_adapter::SdkAdapter::load(crate::build_driver_without_cursor())
+                .await
+                .expect("SDK adapter");
+            body(sdk.clone()).await;
+            sdk.shutdown().await.expect("SDK shutdown");
+        });
+    }
+
+    fn token_env() -> [(&'static str, &'static std::ffi::OsStr); 1] {
+        [(MCP_HTTP_TOKEN_ENV, std::ffi::OsStr::new(TEST_TOKEN))]
+    }
+
+    // DAEMON-3: if the port is taken, whoever holds it would receive every
+    // client's bearer token. Startup must fail instead of only warning.
+    #[test]
+    fn mcp_http_bind_failure_fails_startup() {
+        if !crate::is_test_child() {
+            crate::run_test_child(
+                "mcp_http::tests::mcp_http_bind_failure_fails_startup",
+                &token_env(),
+                &[],
+                std::time::Duration::from_secs(60),
+            );
+            return;
+        }
+        with_child_sdk(|sdk| async move {
+            let squatter = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let port = squatter.local_addr().unwrap().port();
+            let result = spawn(sdk, port);
+            assert!(
+                result.is_err(),
+                "MCP HTTP started although 127.0.0.1:{port} belongs to another listener"
+            );
+            let message = format!("{:#}", result.err().unwrap());
+            assert!(message.contains(&port.to_string()), "{message}");
+            drop(squatter);
+        });
+    }
+
+    // DAEMON-2: concurrent connections are capped, and a connection over the
+    // cap is answered and closed at once instead of holding a task.
+    #[test]
+    fn mcp_http_connections_over_the_cap_are_refused() {
+        if !crate::is_test_child() {
+            crate::run_test_child(
+                "mcp_http::tests::mcp_http_connections_over_the_cap_are_refused",
+                &token_env(),
+                &[],
+                std::time::Duration::from_secs(60),
+            );
+            return;
+        }
+        with_child_sdk(|sdk| async move {
+            let port = {
+                let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+                probe.local_addr().unwrap().port()
+            };
+            let _server = spawn(sdk, port).expect("MCP HTTP listener");
+            let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+            let mut idle = Vec::new();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while idle.is_empty() {
+                match TcpStream::connect(addr).await {
+                    Ok(stream) => idle.push(stream),
+                    Err(error) if std::time::Instant::now() < deadline => {
+                        let _ = error;
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                    Err(error) => panic!("MCP HTTP listener never came up: {error}"),
+                }
+            }
+            while idle.len() < 64 {
+                idle.push(TcpStream::connect(addr).await.unwrap());
+            }
+            let mut extra = TcpStream::connect(addr).await.unwrap();
+            let mut response = Vec::new();
+            let read = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                extra.read_to_end(&mut response),
+            )
+            .await;
+            let response = String::from_utf8_lossy(&response);
+            assert!(
+                read.is_ok() && response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"),
+                "connection 65 was not refused: {response:?}"
+            );
+            drop(idle);
+        });
+    }
+
+    // DAEMON-4: the daemon must not keep the token in its environment, where
+    // every app it launches would inherit it.
+    #[test]
+    fn mcp_http_token_leaves_the_environment_once_read() {
+        if !crate::is_test_child() {
+            crate::run_test_child(
+                "mcp_http::tests::mcp_http_token_leaves_the_environment_once_read",
+                &token_env(),
+                &[],
+                std::time::Duration::from_secs(60),
+            );
+            return;
+        }
+        assert_eq!(configured_auth_token().unwrap(), TEST_TOKEN);
+        assert!(
+            std::env::var_os(MCP_HTTP_TOKEN_ENV).is_none(),
+            "{MCP_HTTP_TOKEN_ENV} is still in the daemon environment"
+        );
+        // A second read (for example a second listener) still sees the token.
+        assert_eq!(configured_auth_token().unwrap(), TEST_TOKEN);
     }
 }

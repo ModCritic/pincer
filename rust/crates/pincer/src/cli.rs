@@ -1506,7 +1506,12 @@ where
     // The UIAccess helper is a daemon-internal privilege boundary. Public MCP
     // clients always enter through the canonical service authorization path;
     // they must never select the helper merely because its pipe exists.
-    let socket_path = socket.unwrap_or_else(crate::serve::default_socket_path);
+    let socket_path = match socket {
+        Some(socket) => socket,
+        None => pincer_core::daemon::try_socket_path_for_namespace(
+            crate::bundle::state_namespace(),
+        )?,
+    };
 
     let already_running = crate::serve::is_daemon_listening(&socket_path);
     if already_running && !grants.is_empty() {
@@ -2149,7 +2154,7 @@ pub fn run_call(
     // When `socket_override` is Some (i.e. caller passed `--socket <path>`),
     // route directly to that path and skip the platform default. Used by
     // integration tests to drive a tempfile-socketed daemon.
-    let socket_path = socket_override.unwrap_or_else(crate::serve::default_socket_path);
+    let socket_path = socket_override.unwrap_or_else(crate::serve::default_socket_path_or_exit);
     if !crate::serve::is_daemon_listening(&socket_path) {
         eprintln!(
             "Pincer daemon is not running on {socket_path}.\n\
@@ -2338,7 +2343,7 @@ pub fn run_history_cmd(
     }
     let socket_path = socket
         .map(str::to_owned)
-        .unwrap_or_else(crate::serve::default_socket_path);
+        .unwrap_or_else(crate::serve::default_socket_path_or_exit);
 
     if subcommand == "enable" {
         let admitted = history_daemon_status(&socket_path)
@@ -2633,7 +2638,7 @@ pub fn run_recording_cmd(subcommand: &str, args: &[String], socket: Option<&str>
 
     let socket_path = socket
         .map(str::to_owned)
-        .unwrap_or_else(crate::serve::default_socket_path);
+        .unwrap_or_else(crate::serve::default_socket_path_or_exit);
 
     if !crate::serve::is_daemon_listening(&socket_path) {
         eprintln!(
@@ -2648,10 +2653,17 @@ pub fn run_recording_cmd(subcommand: &str, args: &[String], socket: Option<&str>
         "start" => {
             let output_dir = match args.first() {
                 Some(d) => {
-                    // Expand ~ manually.
+                    // Expand ~ manually. Without HOME, refuse rather than
+                    // write the recording under a shared /tmp path.
                     if d.starts_with('~') {
-                        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-                        d.replacen('~', &home, 1)
+                        let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty())
+                        else {
+                            eprintln!(
+                                "Cannot expand {d}: HOME is not set. Pass an absolute output directory."
+                            );
+                            process::exit(64);
+                        };
+                        d.replacen('~', &home.to_string_lossy(), 1)
                     } else {
                         d.clone()
                     }
@@ -4431,7 +4443,7 @@ pub fn run_config_cmd(
 ) {
     let socket_path = socket
         .map(str::to_owned)
-        .unwrap_or_else(crate::serve::default_socket_path);
+        .unwrap_or_else(crate::serve::default_socket_path_or_exit);
 
     if !crate::serve::is_daemon_listening(&socket_path) {
         eprintln!(

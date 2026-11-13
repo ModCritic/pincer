@@ -336,9 +336,22 @@ fn history_relaunch_state_response(
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
-/// Returns the platform default socket/pipe path.
+/// Returns the platform default socket/pipe path. On Unix without HOME or a
+/// private XDG_RUNTIME_DIR this is an unusable placeholder (see
+/// [`pincer_core::daemon::socket_path_for_namespace`]); commands that need a
+/// real default use [`default_socket_path_or_exit`].
 pub fn default_socket_path() -> String {
     socket_path_for_namespace(crate::bundle::state_namespace())
+}
+
+/// The default socket path, or exit with the reason and the fix when there is
+/// no private directory for it.
+pub fn default_socket_path_or_exit() -> String {
+    pincer_core::daemon::try_socket_path_for_namespace(crate::bundle::state_namespace())
+        .unwrap_or_else(|error| {
+            eprintln!("pincer: {error}");
+            std::process::exit(1);
+        })
 }
 
 /// On Windows, returns the reserved named-pipe path of the uiAccess-elevated
@@ -356,27 +369,45 @@ pub fn default_uia_pipe_path() -> String {
     }
 }
 
-/// Returns the platform default PID file path.
+/// Returns the platform default PID file path. On Unix without HOME or a
+/// private XDG_RUNTIME_DIR this is an unusable placeholder; see
+/// [`try_default_pid_file_path`].
 pub fn default_pid_file_path() -> String {
-    let namespace = crate::bundle::state_namespace();
-    #[cfg(target_os = "macos")]
+    #[cfg(unix)]
     {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        format!("{home}/Library/Caches/{namespace}/{namespace}.pid")
+        let namespace = crate::bundle::state_namespace();
+        try_default_pid_file_path().unwrap_or_else(|_| {
+            pincer_core::daemon::unavailable_daemon_path(namespace, "pid")
+        })
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(not(unix))]
     {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        format!("{home}/.cache/{namespace}/{namespace}.pid")
+        try_default_pid_file_path().expect("the PID path has a fallback off Unix")
+    }
+}
+
+/// The default PID file path: next to the default socket, in
+/// [`pincer_core::daemon::daemon_state_dir_for_namespace`] on Unix. An error
+/// says how to fix a missing private directory.
+pub fn try_default_pid_file_path() -> anyhow::Result<String> {
+    let namespace = crate::bundle::state_namespace();
+    #[cfg(unix)]
+    {
+        let directory = pincer_core::daemon::daemon_state_dir_for_namespace(namespace)?;
+        Ok(directory
+            .join(format!("{namespace}.pid"))
+            .to_string_lossy()
+            .into_owned())
     }
     #[cfg(target_os = "windows")]
     {
         let local = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| "C:/Temp".into());
-        format!("{local}/{namespace}/{namespace}.pid")
+        Ok(format!("{local}/{namespace}/{namespace}.pid"))
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(unix, target_os = "windows")))]
     {
-        "/tmp/pincer.pid".to_owned()
+        let _ = namespace;
+        Ok("/tmp/pincer.pid".to_owned())
     }
 }
 
@@ -590,6 +621,157 @@ fn prepare_embedded_socket_path(socket_path: &str, embedded: bool) -> anyhow::Re
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
+}
+
+/// Create the daemon socket's directory if it is missing (mode 0700, not the
+/// process umask), then refuse a directory where another account could
+/// replace the socket, or swap it for a symlink before the chmod after bind:
+/// one owned by someone else, or one any account can write to. A sticky
+/// directory such as /tmp stays allowed for explicit `--socket` paths, since
+/// other accounts cannot remove or rename this account's entries there.
+#[cfg(unix)]
+fn prepare_daemon_directory(directory: &std::path::Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _};
+    let directory = if directory.as_os_str().is_empty() {
+        std::path::Path::new(".")
+    } else {
+        directory
+    };
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(directory)
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "create daemon socket directory {}: {error}",
+                directory.display()
+            )
+        })?;
+    let metadata = std::fs::metadata(directory)
+        .map_err(|error| anyhow::anyhow!("read {}: {error}", directory.display()))?;
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    let euid = unsafe { libc::geteuid() };
+    check_daemon_directory(directory, metadata.uid(), metadata.mode(), euid)
+}
+
+#[cfg(unix)]
+fn check_daemon_directory(
+    directory: &std::path::Path,
+    owner: u32,
+    mode: u32,
+    euid: u32,
+) -> anyhow::Result<()> {
+    const STICKY: u32 = 0o1000;
+    let shown = directory.display();
+    if mode & STICKY != 0 {
+        return Ok(());
+    }
+    if owner != euid {
+        anyhow::bail!(
+            "refusing daemon socket directory {shown}: it is owned by uid {owner}, not by you \
+             (uid {euid}), so that account could replace the socket. Pass --socket <path> in a \
+             directory you own, such as $XDG_RUNTIME_DIR."
+        );
+    }
+    if mode & 0o002 != 0 {
+        anyhow::bail!(
+            "refusing daemon socket directory {shown}: any account can write to it (mode {:o}). \
+             Run `chmod 700 {shown}` or pass --socket <path> in a private directory.",
+            mode & 0o7777
+        );
+    }
+    Ok(())
+}
+
+/// Write this process's PID without following a symlink at `pid_path`: a
+/// planted link would make the daemon overwrite the file it points to. The
+/// PID file is only advisory, so a failure is reported and startup goes on.
+/// Returns whether the file was written (and so may be removed at shutdown).
+#[cfg(unix)]
+fn write_pid_file(pid_path: &str) -> bool {
+    use std::io::Write as _;
+    use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+    if let Some(directory) = std::path::Path::new(pid_path)
+        .parent()
+        .filter(|directory| !directory.as_os_str().is_empty())
+    {
+        let _ = std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(directory);
+    }
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(pid_path)
+        .and_then(|mut file| file.write_all(std::process::id().to_string().as_bytes()));
+    match written {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(
+                "PID file {pid_path} not written ({error}); `pincer status` will not show the \
+                 daemon PID. Remove the path if it is a symlink, or pass --pid-file <path>."
+            );
+            false
+        }
+    }
+}
+
+/// Largest daemon request line, newline excluded. It matches the MCP HTTP body
+/// limit, since the same tool calls arrive through both transports.
+#[cfg(unix)]
+const MAX_REQUEST_LINE: usize = 16 * 1024 * 1024;
+
+/// Pause after a failed accept before trying again.
+#[cfg(unix)]
+const ACCEPT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Read the next newline-delimited request into `line`, without its line
+/// ending. Returns false at end of stream, on a read error, or after
+/// answering a line longer than [`MAX_REQUEST_LINE`] with an error; the
+/// caller then closes the connection, because the rest of an oversized line
+/// cannot be skipped reliably.
+#[cfg(unix)]
+async fn read_request_line<R, W>(reader: &mut R, writer: &mut W, line: &mut Vec<u8>) -> bool
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _};
+    line.clear();
+    // Do not keep a huge buffer alive for the rest of a long connection.
+    if line.capacity() > 1024 * 1024 {
+        *line = Vec::new();
+    }
+    let limit = MAX_REQUEST_LINE as u64 + 1;
+    match (&mut *reader).take(limit).read_until(b'\n', line).await {
+        Ok(0) | Err(_) => return false,
+        Ok(_) => {}
+    }
+    if line.last() == Some(&b'\n') {
+        line.pop();
+        if line.last() == Some(&b'\r') {
+            line.pop();
+        }
+        return true;
+    }
+    if line.len() <= MAX_REQUEST_LINE {
+        return true; // the final line, without a newline, at end of stream
+    }
+    let response = DaemonResponse::err(
+        format!(
+            "request line exceeds the {} MiB daemon limit; send smaller arguments",
+            MAX_REQUEST_LINE / (1024 * 1024)
+        ),
+        65,
+    );
+    let _ = writer
+        .write_all((serde_json::to_string(&response).unwrap() + "\n").as_bytes())
+        .await;
+    false
 }
 
 static PERMISSION_GATE_PENDING: std::sync::atomic::AtomicBool =
@@ -914,7 +1096,7 @@ pub async fn run_serve(
     socket_path: &str,
     pid_file_path: Option<&str>,
 ) -> anyhow::Result<()> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::io::{AsyncWriteExt, BufReader};
     use tokio::net::UnixListener;
 
     pincer_core::authorization::validate_startup_authorization()?;
@@ -922,9 +1104,10 @@ pub async fn run_serve(
     #[cfg(target_os = "linux")]
     platform_linux::recover_orphaned_mpx_devices();
 
-    // Create parent directory.
+    // Create the socket directory private, and refuse one that another
+    // account could use to replace the socket.
     if let Some(dir) = std::path::Path::new(socket_path).parent() {
-        std::fs::create_dir_all(dir)?;
+        prepare_daemon_directory(dir)?;
     }
 
     let embedded = pincer_core::embedded_mode();
@@ -932,20 +1115,34 @@ pub async fn run_serve(
     // arbitrary pre-existing path between the host's safety check and bind.
     prepare_embedded_socket_path(socket_path, embedded)?;
 
-    let listener =
-        UnixListener::bind(socket_path).map_err(|e| anyhow::anyhow!("bind {socket_path}: {e}"))?;
+    // Bind the optional HTTP transports before the daemon socket, so a port
+    // that cannot be bound fails startup with no socket or PID file left
+    // behind. Whoever held the port would otherwise receive the MCP HTTP
+    // bearer token. Idle-session and recording maintenance is owned by the
+    // SDK runtime so direct embedded applications and daemon-backed clients
+    // behave alike.
+    let mcp_http = match crate::mcp_http::configured_port()? {
+        Some(port) => Some(crate::mcp_http::spawn(sdk.clone(), port)?),
+        None => None,
+    };
+    let envelope_http = match crate::driver_service_http::configured_port()? {
+        Some(port) => Some(crate::driver_service_http::start(sdk.clone(), port).await?),
+        None => None,
+    };
+
+    let listener = UnixListener::bind(socket_path).map_err(|e| {
+        anyhow::anyhow!(
+            "bind {socket_path}: {e}. If another account owns that path, choose a socket in a \
+             directory only you can write."
+        )
+    })?;
     secure_local_socket(socket_path)?;
     let bound_socket = socket_identity(socket_path)?;
 
     eprintln!("Pincer daemon listening on {socket_path}");
 
-    // Write PID file.
-    if let Some(pid_path) = pid_file_path {
-        if let Some(dir) = std::path::Path::new(pid_path).parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let _ = std::fs::write(pid_path, std::process::id().to_string());
-    }
+    // Write the PID file; remove it at shutdown only if this daemon wrote it.
+    let written_pid_file = pid_file_path.filter(|pid_path| write_pid_file(pid_path));
 
     // Shutdown channel.
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -962,21 +1159,21 @@ pub async fn run_serve(
     };
     tokio::pin!(parent_liveness);
 
-    // Idle-session and recording maintenance is owned by the SDK runtime so
-    // direct embedded applications and daemon-backed clients behave alike.
-    if let Some(port) = crate::mcp_http::configured_port()? {
-        crate::mcp_http::spawn(sdk.clone(), port)?;
-    }
-
-    let _envelope_http = match crate::driver_service_http::configured_port()? {
-        Some(port) => Some(crate::driver_service_http::start(sdk.clone(), port).await?),
-        None => None,
-    };
-
     loop {
         tokio::select! {
             result = listener.accept() => {
-                let (stream, _) = result?;
+                let stream = match result {
+                    Ok((stream, _)) => stream,
+                    Err(error) => {
+                        // Running out of descriptors (EMFILE or ENFILE) or
+                        // memory, or a client that gave up before accept, does
+                        // not break the listener. Back off and keep serving
+                        // instead of ending the daemon for every client.
+                        tracing::warn!("daemon socket accept failed, retrying: {error}");
+                        tokio::time::sleep(ACCEPT_RETRY_DELAY).await;
+                        continue;
+                    }
+                };
                 reap_finished_connections(&mut connection_tasks);
                 if let Err(error) = authenticate_unix_peer(&stream) {
                     tracing::warn!("service connection rejected before request parsing: {error}");
@@ -991,7 +1188,8 @@ pub async fn run_serve(
 
                 connection_tasks.spawn(async move {
                     let (reader, mut writer) = stream.into_split();
-                    let mut lines = BufReader::new(reader).lines();
+                    let mut reader = BufReader::new(reader);
+                    let mut line = Vec::new();
 
                     // Set ONLY by a `session_begin` on this connection — i.e.
                     // the proxy's persistent control connection. Per-call
@@ -1002,8 +1200,8 @@ pub async fn run_serve(
                     let mut control_session_id: Option<String> = None;
                     let mut trusted_session: Option<TrustedConnectionSession> = None;
 
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        let req: DaemonRequest = match serde_json::from_str(&line) {
+                    while read_request_line(&mut reader, &mut writer, &mut line).await {
+                        let req: DaemonRequest = match serde_json::from_slice(&line) {
                             Ok(r) => r,
                             Err(e) => {
                                 let resp = DaemonResponse::err(
@@ -1025,7 +1223,7 @@ pub async fn run_serve(
                             "mcp_envelope_stream" if control_session_id.is_none() && trusted_session.is_none() => {
                                 // Existing local-peer authentication already passed.
                                 // Registry and session lifetime belong to this stream.
-                                let _ = crate::mcp_envelope::accept(reg.clone(), lines.into_inner(), writer).await;
+                                let _ = crate::mcp_envelope::accept(reg.clone(), reader, writer).await;
                                 return;
                             }
                             "metadata" => {
@@ -1370,12 +1568,14 @@ pub async fn run_serve(
 
     // Accepted connections may still own SDK/session state after the listener
     // stops. Abort and join them before tearing down the SDK runtime.
+    drop(mcp_http);
+    drop(envelope_http);
     connection_tasks.shutdown().await;
     release_active_proxy_sessions();
 
     // Do not unlink a replacement socket created after this listener was bound.
     remove_owned_socket(socket_path, bound_socket);
-    if let Some(pid_path) = pid_file_path {
+    if let Some(pid_path) = written_pid_file {
         let _ = std::fs::remove_file(pid_path);
     }
     sdk.shutdown()
@@ -1686,9 +1886,11 @@ pub async fn run_serve(
     tokio::pin!(parent_liveness);
 
     // Idle-session and recording maintenance is owned by the SDK runtime.
-    if let Some(port) = crate::mcp_http::configured_port()? {
-        crate::mcp_http::spawn(sdk.clone(), port)?;
-    }
+    // Keep the listener handle: dropping it stops MCP HTTP.
+    let _mcp_http = match crate::mcp_http::configured_port()? {
+        Some(port) => Some(crate::mcp_http::spawn(sdk.clone(), port)?),
+        None => None,
+    };
 
     let _envelope_http = match crate::driver_service_http::configured_port()? {
         Some(port) => Some(crate::driver_service_http::start(sdk.clone(), port).await?),
@@ -3052,5 +3254,300 @@ mod session_boundary_tests {
         inject_browser_approvals("browser_download", &mut proxy_download, Some(session));
         active_proxy_sessions().lock().unwrap().remove(session);
         assert_eq!(proxy_download[MCP_HOST_DOWNLOAD_APPROVAL_ARG], true);
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod daemon_security_tests {
+    use super::{run_serve, send_request, DaemonRequest, DaemonResponse};
+    use std::io::{BufRead as _, Write as _};
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    fn request(method: &str) -> DaemonRequest {
+        DaemonRequest {
+            method: method.into(),
+            name: None,
+            args: None,
+            session_id: None,
+            observation_origin: None,
+            client_kind: None,
+        }
+    }
+
+    async fn load_sdk() -> Arc<crate::sdk_adapter::SdkAdapter> {
+        crate::sdk_adapter::SdkAdapter::load(crate::build_driver_without_cursor())
+            .await
+            .expect("SDK adapter")
+    }
+
+    async fn wait_for_daemon(socket: &str) {
+        for _ in 0..250 {
+            let probe = socket.to_owned();
+            let listening =
+                tokio::task::spawn_blocking(move || super::is_daemon_listening(&probe))
+                    .await
+                    .unwrap();
+            if listening {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("daemon never listened on {socket}");
+    }
+
+    async fn stop_daemon(socket: &str, server: tokio::task::JoinHandle<anyhow::Result<()>>) {
+        let socket = socket.to_owned();
+        let _ = tokio::task::spawn_blocking(move || send_request(&socket, &request("shutdown")))
+            .await
+            .unwrap();
+        let _ = tokio::time::timeout(Duration::from_secs(30), server).await;
+    }
+
+    fn spawn_daemon(
+        sdk: Arc<crate::sdk_adapter::SdkAdapter>,
+        socket: &str,
+        pid_file: Option<&str>,
+    ) -> tokio::task::JoinHandle<anyhow::Result<()>> {
+        let socket = socket.to_owned();
+        let pid_file = pid_file.map(str::to_owned);
+        tokio::spawn(async move { run_serve(sdk, &socket, pid_file.as_deref()).await })
+    }
+
+    // DAEMON-7: one request line may not grow without limit. A line longer
+    // than the cap gets an error response and the connection closes.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn oversized_request_line_is_refused() {
+        let _runtime_guard = crate::test_runtime_lock().lock().await;
+        let sdk = load_sdk().await;
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("d.sock").to_str().unwrap().to_owned();
+        let server = spawn_daemon(sdk, &socket, None);
+        wait_for_daemon(&socket).await;
+
+        let client_socket = socket.clone();
+        let answer = tokio::task::spawn_blocking(move || {
+            let mut stream = std::os::unix::net::UnixStream::connect(&client_socket).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            stream
+                .write_all(&vec![b'a'; 16 * 1024 * 1024 + 1])
+                .unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(stream)
+                .read_line(&mut line)
+                .map(|_| line)
+        })
+        .await
+        .unwrap();
+        stop_daemon(&socket, server).await;
+
+        let line = answer.expect("no answer to an oversized request line within 10 seconds");
+        let response: DaemonResponse = serde_json::from_str(&line).unwrap();
+        assert!(!response.ok);
+        assert!(
+            response.error.as_deref().unwrap_or_default().contains("limit"),
+            "{line}"
+        );
+    }
+
+    // DAEMON-5: the daemon creates its socket directory private (0700)
+    // instead of with the process umask.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn daemon_creates_its_socket_directory_private() {
+        let _runtime_guard = crate::test_runtime_lock().lock().await;
+        let sdk = load_sdk().await;
+        let directory = tempfile::tempdir().unwrap();
+        let state = directory.path().join("state");
+        let nested = state.join("pincer");
+        let socket = nested.join("d.sock").to_str().unwrap().to_owned();
+        let server = spawn_daemon(sdk, &socket, None);
+        wait_for_daemon(&socket).await;
+        let modes = [&state, &nested]
+            .map(|path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777);
+        stop_daemon(&socket, server).await;
+        assert_eq!(modes, [0o700, 0o700]);
+    }
+
+    // DAEMON-5: a socket directory any account can write to lets another
+    // user replace the socket or redirect the chmod after bind. Refuse it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn daemon_refuses_a_world_writable_socket_directory() {
+        let _runtime_guard = crate::test_runtime_lock().lock().await;
+        let sdk = load_sdk().await;
+        let directory = tempfile::tempdir().unwrap();
+        let shared = directory.path().join("shared");
+        std::fs::create_dir(&shared).unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let socket = shared.join("d.sock").to_str().unwrap().to_owned();
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_serve(sdk.clone(), &socket, None),
+        )
+        .await;
+        sdk.shutdown().await.expect("SDK shutdown");
+        let error = match result {
+            Ok(Err(error)) => format!("{error:#}"),
+            Ok(Ok(())) => panic!("daemon served from a world-writable directory"),
+            Err(_) => panic!("daemon started in world-writable {}", shared.display()),
+        };
+        assert!(error.contains(shared.to_str().unwrap()), "{error}");
+    }
+
+    // DAEMON-5: writing the PID file must not follow a planted symlink and
+    // overwrite the file it points to.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn pid_file_symlink_is_not_followed() {
+        let _runtime_guard = crate::test_runtime_lock().lock().await;
+        let sdk = load_sdk().await;
+        let directory = tempfile::tempdir().unwrap();
+        let victim = directory.path().join("victim.txt");
+        std::fs::write(&victim, "precious").unwrap();
+        let pid_file = directory.path().join("d.pid");
+        std::os::unix::fs::symlink(&victim, &pid_file).unwrap();
+        let socket = directory.path().join("d.sock").to_str().unwrap().to_owned();
+        let server = spawn_daemon(sdk, &socket, Some(pid_file.to_str().unwrap()));
+        wait_for_daemon(&socket).await;
+        let victim_after_start = std::fs::read_to_string(&victim).unwrap();
+        stop_daemon(&socket, server).await;
+        assert_eq!(victim_after_start, "precious");
+    }
+
+    // DAEMON-5 and CLI-11: with HOME unset, the default socket and PID file
+    // must not fall back to a shared /tmp path. A private XDG_RUNTIME_DIR is
+    // used instead; without one there is no usable default.
+    #[test]
+    fn default_daemon_paths_without_home_avoid_shared_directories() {
+        const CASE_ENV: &str = "PINCER_TEST_PATH_CASE";
+        if !crate::is_test_child() {
+            let directory = tempfile::tempdir().unwrap();
+            let private = directory.path().join("private");
+            std::fs::create_dir(&private).unwrap();
+            std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let shared = directory.path().join("shared");
+            std::fs::create_dir(&shared).unwrap();
+            std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+            let name = "serve::daemon_security_tests::default_daemon_paths_without_home_avoid_shared_directories";
+            let timeout = Duration::from_secs(30);
+            crate::run_test_child(
+                name,
+                &[
+                    ("XDG_RUNTIME_DIR", private.as_os_str()),
+                    (CASE_ENV, std::ffi::OsStr::new("private")),
+                ],
+                &["HOME"],
+                timeout,
+            );
+            crate::run_test_child(
+                name,
+                &[
+                    ("XDG_RUNTIME_DIR", shared.as_os_str()),
+                    (CASE_ENV, std::ffi::OsStr::new("shared")),
+                ],
+                &["HOME"],
+                timeout,
+            );
+            crate::run_test_child(
+                name,
+                &[(CASE_ENV, std::ffi::OsStr::new("none"))],
+                &["HOME", "XDG_RUNTIME_DIR"],
+                timeout,
+            );
+            return;
+        }
+        let namespace = crate::bundle::state_namespace();
+        let socket = super::default_socket_path();
+        let pid_file = super::default_pid_file_path();
+        let case = std::env::var(CASE_ENV).unwrap();
+        if case == "private" {
+            let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap();
+            assert_eq!(socket, format!("{runtime}/{namespace}/{namespace}.sock"));
+            assert_eq!(pid_file, format!("{runtime}/{namespace}/{namespace}.pid"));
+        } else {
+            let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
+            for path in [&socket, &pid_file] {
+                assert!(!path.starts_with("/tmp/"), "{case}: shared default {path}");
+                assert!(
+                    runtime.is_empty() || !path.starts_with(&runtime),
+                    "{case}: default {path} inside a world-writable XDG_RUNTIME_DIR"
+                );
+            }
+        }
+    }
+
+    // DAEMON-2: running out of descriptors makes accept fail. That must not
+    // end the daemon; it keeps serving once descriptors are free again.
+    #[test]
+    fn accept_errors_do_not_stop_the_daemon() {
+        if !crate::is_test_child() {
+            crate::run_test_child(
+                "serve::daemon_security_tests::accept_errors_do_not_stop_the_daemon",
+                &[],
+                &[],
+                Duration::from_secs(90),
+            );
+            return;
+        }
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let sdk = load_sdk().await;
+            let directory = tempfile::tempdir().unwrap();
+            let socket = directory.path().join("d.sock").to_str().unwrap().to_owned();
+            let server = spawn_daemon(sdk, &socket, None);
+            wait_for_daemon(&socket).await;
+
+            let mut original = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            assert_eq!(
+                unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut original) },
+                0
+            );
+            let open_now = std::fs::read_dir("/proc/self/fd").unwrap().count() as u64;
+            let lowered = libc::rlimit {
+                rlim_cur: open_now + 16,
+                rlim_max: original.rlim_max,
+            };
+            assert_eq!(
+                unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &lowered) },
+                0
+            );
+            // Fill the descriptor table, free one slot for a client, connect,
+            // and fill again so the daemon's accept has no descriptor left.
+            let mut fillers = Vec::new();
+            while let Ok(file) = std::fs::File::open("/dev/null") {
+                fillers.push(file);
+            }
+            fillers.pop();
+            let client = std::os::unix::net::UnixStream::connect(&socket);
+            while let Ok(file) = std::fs::File::open("/dev/null") {
+                fillers.push(file);
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let stopped = server.is_finished();
+            drop(fillers);
+            assert_eq!(
+                unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &original) },
+                0
+            );
+            assert!(client.is_ok(), "test client could not connect");
+            assert!(!stopped, "an accept error (EMFILE) stopped the daemon");
+
+            let probe = socket.clone();
+            let listed = tokio::task::spawn_blocking(move || send_request(&probe, &request("list")))
+                .await
+                .unwrap()
+                .expect("daemon answers after descriptors are free");
+            assert!(listed.ok);
+            drop(client);
+            stop_daemon(&socket, server).await;
+        });
     }
 }

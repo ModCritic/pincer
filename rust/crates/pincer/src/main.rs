@@ -297,6 +297,91 @@ fn test_runtime_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
+/// The PID file for `pincer serve` without `--pid-file`. When there is no
+/// private default directory the daemon runs without a PID file rather than
+/// write one into a shared directory.
+fn default_serve_pid_file() -> Option<String> {
+    serve::try_default_pid_file_path()
+        .map_err(|error| eprintln!("pincer: running without a PID file: {error}"))
+        .ok()
+}
+
+/// Environment variable that tells a test it is running as the child copy
+/// started by [`run_test_child`].
+#[cfg(test)]
+const TEST_CHILD_ENV: &str = "PINCER_TEST_CHILD";
+
+/// True inside the child copy of a test started by [`run_test_child`].
+#[cfg(test)]
+fn is_test_child() -> bool {
+    std::env::var_os(TEST_CHILD_ENV).is_some()
+}
+
+/// Run the single test `name` again in a fresh copy of this test binary, with
+/// `set` added to and `remove` taken out of its environment. Tests that need
+/// process-wide state (environment variables, descriptor limits) run their
+/// body in the child so the parallel test threads here never see it. Panics
+/// with the child's output when it fails or outlives `timeout`.
+#[cfg(test)]
+fn run_test_child(
+    name: &str,
+    set: &[(&str, &std::ffi::OsStr)],
+    remove: &[&str],
+    timeout: std::time::Duration,
+) {
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", name, "--nocapture", "--test-threads=1"])
+        .env(TEST_CHILD_ENV, "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    for (key, value) in set {
+        command.env(key, value);
+    }
+    for key in remove {
+        command.env_remove(key);
+    }
+    let mut child = command.spawn().unwrap();
+    // Drain both pipes on threads so a chatty child never blocks on a full
+    // pipe while this loop waits for it to exit.
+    let mut stdout_pipe = child.stdout.take().unwrap();
+    let mut stderr_pipe = child.stderr.take().unwrap();
+    let stdout_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = std::io::Read::read_to_string(&mut stdout_pipe, &mut text);
+        text
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = std::io::Read::read_to_string(&mut stderr_pipe, &mut text);
+        text
+    });
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    let stdout = stdout_reader.join().unwrap();
+    let stderr = stderr_reader.join().unwrap();
+    let Some(status) = status else {
+        panic!(
+            "test child {name} did not finish within {timeout:?}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    };
+    assert!(
+        status.success() && stdout.contains("1 passed"),
+        "test child {name} failed ({status})\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+}
+
 fn run_mcp_direct(compatibility_mode: bool) -> anyhow::Result<()> {
     // Validate immutable process policy before platform initialization. The
     // adapter repeats this check before reading stdin as defense in depth.
@@ -495,6 +580,10 @@ fn main() {
             grants,
             experimental_history,
         } => {
+            // Take the MCP HTTP token out of the environment before any
+            // runtime thread exists, so apps the daemon launches never
+            // inherit it (DAEMON-4).
+            mcp_http::capture_auth_token();
             if let Err(error) = configure_startup_permission_mode(
                 permission_mode.as_deref(),
                 dangerously_bypass_approvals,
@@ -557,8 +646,8 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            let sp = socket.unwrap_or_else(serve::default_socket_path);
-            let pid_path = pid_file.unwrap_or_else(serve::default_pid_file_path);
+            let sp = socket.unwrap_or_else(serve::default_socket_path_or_exit);
+            let pid_path = pid_file.or_else(default_serve_pid_file);
 
             // Bind the Unix socket FIRST, on a background thread, BEFORE
             // running the (blocking) permissions gate (#1761).
@@ -582,7 +671,7 @@ fn main() {
             let serve_handle = std::thread::Builder::new()
                 .name("pincer-serve".into())
                 .spawn(move || {
-                    serve::run_serve_cmd(driver, &sp, Some(&pid_path));
+                    serve::run_serve_cmd(driver, &sp, pid_path.as_deref());
                     std::process::exit(0);
                 })
                 .expect("spawn serve thread");
@@ -628,7 +717,7 @@ fn main() {
             socket,
             expected_pid,
         } => {
-            let sp = socket.unwrap_or_else(serve::default_socket_path);
+            let sp = socket.unwrap_or_else(serve::default_socket_path_or_exit);
             match expected_pid {
                 Some(pid) => stop::run_pid_bound_stop_cmd(&sp, pid),
                 None => serve::run_stop_cmd(&sp),
@@ -639,16 +728,16 @@ fn main() {
             session,
             all,
         } => {
-            let sp = socket.unwrap_or_else(serve::default_socket_path);
+            let sp = socket.unwrap_or_else(serve::default_socket_path_or_exit);
             serve::run_revoke_cmd(&sp, session.as_deref(), all);
         }
         cli::Command::Status { socket, pid_file } => {
-            let sp = socket.unwrap_or_else(serve::default_socket_path);
+            let sp = socket.unwrap_or_else(serve::default_socket_path_or_exit);
             let pid_path = pid_file.unwrap_or_else(serve::default_pid_file_path);
             serve::run_status_cmd(&sp, &pid_path);
         }
         cli::Command::Sessions { json, socket } => {
-            let sp = socket.unwrap_or_else(serve::default_socket_path);
+            let sp = socket.unwrap_or_else(serve::default_socket_path_or_exit);
             serve::run_sessions_list_cmd(&sp, json);
         }
         cli::Command::Recording {
@@ -805,6 +894,10 @@ fn main() -> anyhow::Result<()> {
             grants,
             experimental_history,
         } => {
+            // Take the MCP HTTP token out of the environment before any
+            // runtime thread exists, so apps the daemon launches never
+            // inherit it (DAEMON-4).
+            mcp_http::capture_auth_token();
             configure_startup_permission_mode(
                 permission_mode.as_deref(),
                 dangerously_bypass_approvals,
@@ -836,11 +929,11 @@ fn main() -> anyhow::Result<()> {
             let driver =
                 build_driver(cursor_cfg, claude_code_compat, pincer_core::embedded_mode())?;
             maybe_init_pip();
-            let sp = socket.unwrap_or_else(serve::default_socket_path);
-            let pid_path = pid_file.unwrap_or_else(serve::default_pid_file_path);
+            let sp = socket.unwrap_or_else(serve::default_socket_path_or_exit);
+            let pid_path = pid_file.or_else(default_serve_pid_file);
             // run_serve_cmd builds its own runtime; must run on a fresh thread.
             std::thread::spawn(move || {
-                serve::run_serve_cmd(driver, &sp, Some(&pid_path));
+                serve::run_serve_cmd(driver, &sp, pid_path.as_deref());
             })
             .join()
             .ok();
@@ -850,7 +943,7 @@ fn main() -> anyhow::Result<()> {
             socket,
             expected_pid,
         } => {
-            let sp = socket.unwrap_or_else(serve::default_socket_path);
+            let sp = socket.unwrap_or_else(serve::default_socket_path_or_exit);
             match expected_pid {
                 Some(pid) => stop::run_pid_bound_stop_cmd(&sp, pid),
                 None => serve::run_stop_cmd(&sp),
@@ -862,18 +955,18 @@ fn main() -> anyhow::Result<()> {
             session,
             all,
         } => {
-            let sp = socket.unwrap_or_else(serve::default_socket_path);
+            let sp = socket.unwrap_or_else(serve::default_socket_path_or_exit);
             serve::run_revoke_cmd(&sp, session.as_deref(), all);
             Ok(())
         }
         cli::Command::Status { socket, pid_file } => {
-            let sp = socket.unwrap_or_else(serve::default_socket_path);
+            let sp = socket.unwrap_or_else(serve::default_socket_path_or_exit);
             let pid_path = pid_file.unwrap_or_else(serve::default_pid_file_path);
             serve::run_status_cmd(&sp, &pid_path);
             Ok(())
         }
         cli::Command::Sessions { json, socket } => {
-            let sp = socket.unwrap_or_else(serve::default_socket_path);
+            let sp = socket.unwrap_or_else(serve::default_socket_path_or_exit);
             serve::run_sessions_list_cmd(&sp, json);
             Ok(())
         }

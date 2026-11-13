@@ -141,25 +141,206 @@ pub fn request_daemon_metadata(socket_path: &str) -> anyhow::Result<DaemonMetada
 /// Return the platform socket or pipe path for an installed-product namespace.
 /// The executable chooses its release/local namespace; imported SDKs use the
 /// release namespace unless the caller supplies an explicit path.
+///
+/// On Unix the socket lives in [`daemon_state_dir_for_namespace`]. When that
+/// has no private directory to offer, this returns a placeholder under
+/// `/nonexistent` whose name says what is missing, so connecting or binding
+/// fails instead of using a shared directory such as `/tmp`. Prefer
+/// [`try_socket_path_for_namespace`], which returns the reason as an error.
 pub fn socket_path_for_namespace(namespace: &str) -> String {
-    #[cfg(target_os = "macos")]
+    #[cfg(unix)]
     {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        format!("{home}/Library/Caches/{namespace}/{namespace}.sock")
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        format!("{home}/.cache/{namespace}/{namespace}.sock")
+        try_socket_path_for_namespace(namespace)
+            .unwrap_or_else(|_| unavailable_daemon_path(namespace, "sock"))
     }
     #[cfg(target_os = "windows")]
     {
         format!(r"\\.\pipe\{namespace}")
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(unix, target_os = "windows")))]
     {
         format!("/tmp/{namespace}.sock")
     }
+}
+
+/// The default socket path for `namespace`, or an error that says how to get
+/// one when no private directory is available.
+#[cfg(unix)]
+pub fn try_socket_path_for_namespace(namespace: &str) -> anyhow::Result<String> {
+    let directory = daemon_state_dir_for_namespace(namespace)?;
+    Ok(directory
+        .join(format!("{namespace}.sock"))
+        .to_string_lossy()
+        .into_owned())
+}
+
+/// The default socket path for `namespace` (named pipes need no directory).
+#[cfg(not(unix))]
+pub fn try_socket_path_for_namespace(namespace: &str) -> anyhow::Result<String> {
+    Ok(socket_path_for_namespace(namespace))
+}
+
+/// Placeholder daemon file path used when no private directory exists. Only
+/// root can create `/nonexistent`, so nothing can be listening there.
+#[cfg(unix)]
+pub fn unavailable_daemon_path(namespace: &str, extension: &str) -> String {
+    format!(
+        "/nonexistent/{namespace}-needs-HOME-or-a-private-XDG_RUNTIME_DIR/{namespace}.{extension}"
+    )
+}
+
+/// Directory for a namespace's daemon socket and PID file:
+/// `$HOME/.cache/<namespace>` (`$HOME/Library/Caches/<namespace>` on macOS).
+/// Without HOME it is `$XDG_RUNTIME_DIR/<namespace>`, and only when
+/// [`private_runtime_dir`] accepts XDG_RUNTIME_DIR. Anything else is an error:
+/// the old fallback, `/tmp/.cache/<namespace>`, could be created first by
+/// another account, which could then intercept the socket.
+#[cfg(unix)]
+pub fn daemon_state_dir_for_namespace(namespace: &str) -> anyhow::Result<std::path::PathBuf> {
+    if let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty()) {
+        let home = std::path::PathBuf::from(home);
+        let cache = if cfg!(target_os = "macos") {
+            home.join("Library").join("Caches")
+        } else {
+            home.join(".cache")
+        };
+        return Ok(cache.join(namespace));
+    }
+    Ok(private_runtime_dir()?.join(namespace))
+}
+
+/// `$XDG_RUNTIME_DIR`, when it is an absolute path to a real directory owned
+/// by this user with no group or other permissions (mode 0700), as the XDG
+/// Base Directory specification requires. Anything else is an error that says
+/// how to fix it.
+#[cfg(unix)]
+pub fn private_runtime_dir() -> anyhow::Result<std::path::PathBuf> {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    let euid = unsafe { libc::geteuid() };
+    private_runtime_dir_from(std::env::var_os("XDG_RUNTIME_DIR"), euid)
+}
+
+#[cfg(unix)]
+fn private_runtime_dir_from(
+    value: Option<std::ffi::OsString>,
+    euid: u32,
+) -> anyhow::Result<std::path::PathBuf> {
+    use std::os::unix::fs::MetadataExt as _;
+    const FIX: &str = "set HOME, set XDG_RUNTIME_DIR to a directory you own with mode 0700, \
+                       or pass --socket <path> in a directory only you can write";
+    let Some(value) = value.filter(|value| !value.is_empty()) else {
+        anyhow::bail!(
+            "HOME and XDG_RUNTIME_DIR are not set, so there is no private directory for the \
+             Pincer daemon socket and PID file; {FIX}"
+        );
+    };
+    let directory = std::path::PathBuf::from(value);
+    let shown = directory.display();
+    if !directory.is_absolute() {
+        anyhow::bail!("HOME is not set and XDG_RUNTIME_DIR={shown} is not an absolute path; {FIX}");
+    }
+    let metadata = std::fs::symlink_metadata(&directory).map_err(|error| {
+        anyhow::anyhow!("HOME is not set and XDG_RUNTIME_DIR={shown} cannot be read ({error}); {FIX}")
+    })?;
+    if !metadata.is_dir() {
+        anyhow::bail!("HOME is not set and XDG_RUNTIME_DIR={shown} is not a directory; {FIX}");
+    }
+    if metadata.uid() != euid {
+        anyhow::bail!(
+            "HOME is not set and XDG_RUNTIME_DIR={shown} is owned by uid {}, not by you \
+             (uid {euid}); {FIX}",
+            metadata.uid()
+        );
+    }
+    if metadata.mode() & 0o077 != 0 {
+        anyhow::bail!(
+            "HOME is not set and XDG_RUNTIME_DIR={shown} has mode {:o}, so other accounts can \
+             use it; {FIX}",
+            metadata.mode() & 0o7777
+        );
+    }
+    Ok(directory)
+}
+
+/// Refuse a daemon socket served by another account. The daemon checks its
+/// clients' uid; this is the same check from the client side. Without it, an
+/// account that creates the socket path first (for example in `/tmp`) would
+/// receive every request, typed text included, and could answer with forged
+/// results.
+#[cfg(unix)]
+pub fn check_daemon_peer_uid(
+    socket_path: &str,
+    expected_uid: u32,
+    peer_uid: u32,
+) -> anyhow::Result<()> {
+    if peer_uid != expected_uid {
+        anyhow::bail!(
+            "refusing daemon socket {socket_path}: it is served by uid {peer_uid}, not by uid \
+             {expected_uid} (this user), so another account may be listening there to read your \
+             requests. Remove that socket if you can, or use a socket in a directory only you \
+             can write, such as the default path or $XDG_RUNTIME_DIR."
+        );
+    }
+    Ok(())
+}
+
+/// [`check_daemon_peer_uid`] against this process's effective uid.
+#[cfg(unix)]
+pub fn verify_daemon_peer_uid(socket_path: &str, peer_uid: u32) -> anyhow::Result<()> {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    check_daemon_peer_uid(socket_path, unsafe { libc::geteuid() }, peer_uid)
+}
+
+/// Read the uid of the process listening on the other end of a connected
+/// daemon socket and refuse it unless it is this account.
+#[cfg(unix)]
+pub fn verify_daemon_peer(
+    stream: &std::os::unix::net::UnixStream,
+    socket_path: &str,
+) -> anyhow::Result<()> {
+    let peer_uid = unix_peer_uid(stream).map_err(|error| {
+        anyhow::anyhow!("read the owner of daemon socket {socket_path}: {error}")
+    })?;
+    verify_daemon_peer_uid(socket_path, peer_uid)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn unix_peer_uid(stream: &std::os::unix::net::UnixStream) -> std::io::Result<u32> {
+    use std::os::unix::io::AsRawFd as _;
+    let mut credentials = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: the pointer and length describe a writable ucred, which is what
+    // SO_PEERCRED fills in for a connected Unix stream socket.
+    let result = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut credentials as *mut libc::ucred).cast(),
+            &mut length,
+        )
+    };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(credentials.uid)
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+fn unix_peer_uid(stream: &std::os::unix::net::UnixStream) -> std::io::Result<u32> {
+    use std::os::unix::io::AsRawFd as _;
+    let mut uid: libc::uid_t = 0;
+    let mut gid: libc::gid_t = 0;
+    // SAFETY: both pointers refer to writable locals.
+    let result = unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(uid)
 }
 
 /// Probe whether a daemon is listening on `socket_path`.
@@ -201,7 +382,8 @@ pub fn is_daemon_listening(socket_path: &str) -> bool {
 
 /// Send one newline-delimited request and read one response.
 ///
-/// Unix reads and writes retry transient timeouts until a 120-second overall
+/// On Unix the request is sent only after [`verify_daemon_peer`] confirms that
+/// this account runs the listening daemon. Unix reads and writes retry transient timeouts until a 120-second overall
 /// deadline so slow accessibility walks and large screenshots are supported.
 #[cfg(unix)]
 pub fn send_request(socket_path: &str, request: &DaemonRequest) -> anyhow::Result<DaemonResponse> {
@@ -211,6 +393,8 @@ pub fn send_request(socket_path: &str, request: &DaemonRequest) -> anyhow::Resul
 
     let mut stream = UnixStream::connect(socket_path)
         .map_err(|error| anyhow::anyhow!("connect to {socket_path}: {error}"))?;
+    // Send nothing to a socket another account is serving.
+    verify_daemon_peer(&stream, socket_path)?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
 
@@ -351,6 +535,136 @@ mod tests {
             serde_json::to_value(ToolObservationOrigin::McpProxy).unwrap(),
             "mcp_proxy"
         );
+    }
+
+    /// A fresh directory under the system temp dir with `mode`, removed on drop.
+    #[cfg(unix)]
+    struct ScratchDir(std::path::PathBuf);
+
+    #[cfg(unix)]
+    impl ScratchDir {
+        fn new(label: &str, mode: u32) -> Self {
+            use std::os::unix::fs::PermissionsExt as _;
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "pincer-core-daemon-test-{label}-{}-{nanos}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&path).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            Self(path)
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Run test `name` again in a child copy of this binary with the given
+    /// environment changes; HOME and XDG_RUNTIME_DIR are process-wide.
+    #[cfg(unix)]
+    fn run_path_child(name: &str, set: &[(&str, &std::ffi::OsStr)], remove: &[&str]) {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", name, "--nocapture", "--test-threads=1"])
+            .env("PINCER_CORE_TEST_CHILD", "1");
+        for (key, value) in set {
+            command.env(key, value);
+        }
+        for key in remove {
+            command.env_remove(key);
+        }
+        let output = command.output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "child {name} failed\nstdout:\n{stdout}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // DAEMON-5 and CLI-3: with HOME unset the default socket used to fall
+    // back to /tmp/.cache/<namespace>, a directory any account can create
+    // first. A private XDG_RUNTIME_DIR is used instead.
+    #[cfg(unix)]
+    #[test]
+    fn home_unset_uses_a_private_xdg_runtime_dir() {
+        if std::env::var_os("PINCER_CORE_TEST_CHILD").is_none() {
+            let runtime = ScratchDir::new("xdg-private", 0o700);
+            run_path_child(
+                "daemon::tests::home_unset_uses_a_private_xdg_runtime_dir",
+                &[("XDG_RUNTIME_DIR", runtime.0.as_os_str())],
+                &["HOME"],
+            );
+            return;
+        }
+        let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap();
+        assert_eq!(
+            socket_path_for_namespace("pincer-test"),
+            format!("{runtime}/pincer-test/pincer-test.sock")
+        );
+    }
+
+    // DAEMON-5 and CLI-11: without HOME and without a private runtime
+    // directory there is no safe default, so no shared path may be returned.
+    #[cfg(unix)]
+    #[test]
+    fn home_unset_without_a_private_runtime_dir_has_no_shared_default() {
+        if std::env::var_os("PINCER_CORE_TEST_CHILD").is_none() {
+            let shared = ScratchDir::new("xdg-shared", 0o777);
+            let name =
+                "daemon::tests::home_unset_without_a_private_runtime_dir_has_no_shared_default";
+            run_path_child(name, &[("XDG_RUNTIME_DIR", shared.0.as_os_str())], &["HOME"]);
+            run_path_child(name, &[], &["HOME", "XDG_RUNTIME_DIR"]);
+            return;
+        }
+        let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
+        let path = socket_path_for_namespace("pincer-test");
+        assert!(!path.starts_with("/tmp/"), "shared default {path}");
+        assert!(
+            runtime.is_empty() || !path.starts_with(&runtime),
+            "default {path} inside a world-writable XDG_RUNTIME_DIR"
+        );
+        let error = super::try_socket_path_for_namespace("pincer-test")
+            .expect_err("no private directory, so no default socket")
+            .to_string();
+        assert!(error.contains("HOME"), "{error}");
+        assert!(error.contains("XDG_RUNTIME_DIR"), "{error}");
+        assert!(error.contains("--socket"), "{error}");
+    }
+
+    // CLI-3: a client must refuse a daemon socket served by another account
+    // before it sends anything, since that account would see every request.
+    #[cfg(unix)]
+    #[test]
+    fn daemon_client_refuses_a_socket_served_by_another_uid() {
+        super::check_daemon_peer_uid("/run/user/1000/pincer/pincer.sock", 1000, 1000)
+            .expect("same uid is accepted");
+        let error =
+            super::check_daemon_peer_uid("/tmp/pincer.sock", 1000, 1001).expect_err("foreign uid");
+        let message = error.to_string();
+        assert!(message.contains("/tmp/pincer.sock"), "{message}");
+        assert!(message.contains("1001"), "{message}");
+        assert!(message.contains("1000"), "{message}");
+    }
+
+    // CLI-3: the client reads the listening process's uid from the connected
+    // socket and accepts a daemon run by the same account.
+    #[cfg(unix)]
+    #[test]
+    fn daemon_client_accepts_a_socket_served_by_its_own_uid() {
+        let directory = ScratchDir::new("peer", 0o700);
+        let socket = directory.0.join("d.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let stream = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+        super::verify_daemon_peer(&stream, socket.to_str().unwrap())
+            .expect("a socket served by this account is accepted");
     }
 
     #[test]

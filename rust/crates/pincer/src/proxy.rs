@@ -212,6 +212,12 @@ fn daemon_start_hint() -> String {
 pub async fn run_proxy(socket_path: String) -> anyhow::Result<()> {
     validate_configured_policy()?;
     if !is_daemon_listening(&socket_path) {
+        // A socket served by another account is refused before any request;
+        // say so instead of only "not reachable".
+        #[cfg(unix)]
+        if let Ok(stream) = std::os::unix::net::UnixStream::connect(&socket_path) {
+            pincer_core::daemon::verify_daemon_peer(&stream, &socket_path)?;
+        }
         anyhow::bail!(
             "pincer daemon not reachable on {socket_path}. Start it with `{}` and retry.",
             daemon_start_hint()
@@ -504,6 +510,17 @@ async fn run_control_connection(
                 }
             }
         };
+        // Send nothing to a socket another account is serving (CLI-3).
+        if let Err(error) = stream
+            .peer_cred()
+            .map_err(anyhow::Error::from)
+            .and_then(|credentials| {
+                pincer_core::daemon::verify_daemon_peer_uid(&socket_path, credentials.uid())
+            })
+        {
+            warn!("control connection: {error}");
+            return;
+        }
         if let Err(e) = stream.write_all(line.as_bytes()).await {
             debug!("control connection: write session_begin failed: {e}");
             return;
