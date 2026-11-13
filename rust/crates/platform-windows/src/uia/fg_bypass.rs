@@ -11,7 +11,7 @@
 //! still execute — UIA pattern delivery uses the kernel accessibility channel,
 //! not the input queue gated by `EnableWindow`.
 //!
-//! Empirical evidence (`flash-repro/14-multi-uwp-v3.ps1`, 2026-05-24):
+//! Empirical evidence (upstream's `flash-repro/14-multi-uwp-v3.ps1`, 2026-05-24):
 //!   - Baseline UIA Invoke against UWP Calculator num5 button: user's
 //!     foreground window dropped below the target in 91% of poller samples.
 //!   - With this bypass: 0/507 z-drops across Calculator, Clock, Settings.
@@ -25,7 +25,7 @@
 //! the Invoke still lands over the a11y channel.
 //!
 //! Non-UWP / non-Chromium classic Win32 apps don't exhibit the bug
-//! (`flash-repro/15-non-uwp.ps1`, Notepad: 0/45 baseline z-drops). The bypass
+//! (upstream's `flash-repro/15-non-uwp.ps1`, Notepad: 0/45 baseline z-drops). The bypass
 //! is therefore gated on `is_xaml_host_hwnd || is_chromium_target_window` and is
 //! a no-op for other hosts.
 
@@ -89,9 +89,9 @@ impl Drop for DisabledHwndGuard {
 /// `SetForegroundWindow`, which is NOT gated by EnableWindow. The bypass
 /// has no effect there, and the daemon WILL transiently steal foreground
 /// from the user. Restoring foreground from a non-UIAccess process is
-/// blocked by the foreground-lock, so the only mitigation is to spawn
-/// pincer-uia.exe (UIAccess-manifested worker) and route UIA
-/// activations through it. See PR #1699 bg-modality tests for the
+/// blocked by the foreground-lock, so the only mitigation is to run the
+/// daemon at UIAccess or High integrity (no client route reaches the
+/// UIAccess `pincer-uia.exe` worker today). See PR #1699 bg-modality tests for the
 /// regression guards.
 pub fn run_with_uwp_bypass<T>(host_hwnd: isize, action: impl FnOnce() -> T) -> T {
     let _guard = make_guard(host_hwnd);

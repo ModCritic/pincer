@@ -1248,7 +1248,7 @@ impl Tool for GetWindowStateTool {
                 "include_screenshot":{"type":"boolean","description":"Default true — returns a grounding screenshot alongside the tree. Set false to skip the grab and return tree only (the cheap path for re-indexing before an element ax action)."},
                 "screenshot_out_file":{"type":"string","description":"When set, write the PNG to this file path instead of embedding base64 in the response. The structured output will contain `screenshot_file_path` instead."},
                 "query":{"type":"string","description":"Optional case-insensitive substring. Projects both tree_markdown and structured elements to matches plus ancestors while preserving original indices. Compare total_element_count with returned_element_count."},
-                "max_elements":{"type":"integer","minimum":1,"description":"Cap on the total number of UIA nodes walked. Truncates depth-first; markdown and structured elements truncate together. Default 250 (5 000 with full_output:true); the response states when the tree was cut. Raise it to read further into a large window."},
+                "max_elements":{"type":"integer","minimum":1,"description":"Cap on the total number of UIA nodes walked. Truncates depth-first; markdown and structured elements truncate together. Default 250 (5 000 with full_output:true; with query set, at least 5 000); the response states when the tree was cut. Raise it to read further into a large window."},
                 "max_depth":{"type":"integer","minimum":1,"description":"Cap on the UIA-tree walk depth. Nodes whose rendered indent would exceed this are omitted. Omit for the default (25). Lower for deep menu / Electron trees."},
                 "timeout_ms": pincer_core::tool_schema::timeout_ms_schema(),
                 "max_image_dimension":{"type":"integer","minimum":0,"description":"Per-call long-edge limit for the returned screenshot, in pixels (aspect ratio preserved). Explicit values override configured behavior; 0 returns native resolution. Omit to preserve the configured default."}
@@ -2234,7 +2234,7 @@ impl Tool for LaunchAppTool {
                 "additional_arguments":{"type":"array","items":{"type":"string"},"description":"Extra command-line arguments passed to the launched process (or activation arguments for packaged apps)."},
                 "webkit_inspector_port":{"type":"integer","description":"Accepted for cross-platform parity; no-op on Windows."},
                 "creates_new_application_instance":{"type":"boolean","description":"Accepted for parity; no-op on Windows (ShellExecuteEx always creates a new process)."},
-                "start_minimized":{"type":"boolean","description":"When true, launch the app's window minimized to the taskbar instead of restored-but-not-activated. Use this when the agent wants to drive the app entirely in the background — the user's previously-frontmost window (e.g. terminal) stays visually on top. Desktop launches hold the foreground lock through startup and use SW_SHOWMINNOACTIVE; packaged-app activation remains broker-controlled and receives a best-effort SW_SHOWMINNOACTIVE post-pass. UIA / background dispatch still work on a minimized window; only `screenshot` and `delivery_mode:\"foreground\"` need it restored."}
+                "start_minimized":{"type":"boolean","description":"When true, launch the app's window minimized to the taskbar instead of restored-but-not-activated. Use this when the agent wants to drive the app entirely in the background; the user's previously-frontmost window (e.g. terminal) stays visually on top. Desktop launches hold the foreground lock through startup and use SW_SHOWMINNOACTIVE; packaged-app activation remains broker-controlled and receives a best-effort SW_SHOWMINNOACTIVE post-pass. UIA / background dispatch still work on a minimized window; only the get_window_state screenshot and `delivery_mode:\"foreground\"` need it restored."}
             },"additionalProperties":false}),
             read_only: false, destructive: false, idempotent: true, open_world: true,
         })
@@ -3314,7 +3314,7 @@ impl Tool for ClickTool {
                 impossible; a guessed foreground click needlessly steals the user's focus.** \
                 `count: 2` posts two down/up pairs for a double-click. Pixel clicks need \
                 a visible on-screen window to anchor the coordinate conversion (errors \
-                with `pid X has no on-screen window` otherwise).\n\n\
+                with `No windows found for pid N. Provide window_id.` otherwise).\n\n\
                 Exactly one of `element_token` or (`x` AND `y`) must be provided. \
                 `pid` is required for window scope and omitted for desktop scope. After a `zoom` call, \
                 pass `from_zoom=true` to auto-translate zoom-image coords back to \
@@ -4557,22 +4557,21 @@ impl Tool for TypeTextTool {
             // Windows transport note.  Swift tries AXSetAttribute(kAXSelectedText)
             // first, falls back to character-by-character CGEvent synthesis.
             // Windows uses character-by-character PostMessage(WM_CHAR) to the
-            // window's focused child — there's no UIA equivalent of
-            // AXSelectedText wired up yet, so it's always the synthesis path.
+            // window's focused child, unless an element_token routes the text
+            // through UIA ValuePattern.SetValue first.
             description: "Insert text into the target pid via character-by-character \
                 PostMessage(WM_CHAR) to the focused window. No focus steal.\n\n\
                 Special keys (Return, Escape, arrows, Tab) go through `press_key` / \
                 `hotkey` — they are not text.\n\n\
-                **Routing on Windows.** When the target's owning EXE or top-level window \
-                class identifies it as a XAML / WinUI3 / UWP host (modern Notepad, \
-                Calculator, Photos, Settings, etc.), the tool requires `element_token` \
-                and routes through UI Automation's `ValuePattern.SetValue` \
-                — same backend as the `set_value` tool. PostMessage WM_CHAR doesn't \
-                reach those hosts (their CoreInput dispatcher only consumes events from \
-                the system input queue), so the fallback path silently dropped chars. \
-                If you call `type_text(pid, text)` on a XAML host without `element_token`, \
-                the tool returns an actionable error pointing you at `get_window_state` \
-                first. Native ConsoleHost on Windows ARM64 is hard-refused because it can \
+                **Routing on Windows.** With `element_token` the tool tries UI \
+                Automation's `ValuePattern.SetValue` first on any host (the same backend \
+                as `set_value`) and falls back to WM_CHAR when the element has no \
+                ValuePattern. Without `element_token` it posts WM_CHAR to the window's \
+                focused child. XAML / WinUI3 / UWP hosts (modern Notepad, Calculator, \
+                Photos, Settings) do not receive posted WM_CHAR, so pass an \
+                `element_token` from `get_window_state` there. In the background it \
+                returns `background_unavailable` for targets known to drop posted text \
+                (Chromium, WPF without a token). Native ConsoleHost on Windows ARM64 is hard-refused because it can \
                 accept synthesized Unicode events without delivering them; use a process \
                 or PTY setup channel instead. Legacy Win32 apps still use the PostMessage \
                 path, preserving the no-focus-steal property.\n\n\
@@ -4874,12 +4873,11 @@ impl Tool for TypeTextTool {
         }
 
         // CUA-543 routing: PostMessage WM_CHAR doesn't reach modern
-        // XAML / WinUI3 hosts. When the target is one of those AND the
-        // caller has supplied an element_index, route through UIA
-        // `ValuePattern.SetValue` — same code path the `set_value` tool
-        // uses, which we've verified works on modern Notepad / WinUI3.
-        // Legacy Win32 stays on the PostMessage path so the no-focus-
-        // steal property is preserved.
+        // XAML / WinUI3 hosts, so an element_token routes through UIA
+        // `ValuePattern.SetValue` on any host (the same code path the
+        // `set_value` tool uses, verified on modern Notepad / WinUI3).
+        // Without one the text goes through PostMessage, which keeps the
+        // no-focus-steal property.
         // ── Automatic routing — the caller need not know the framework. ──
         // 1. With an element_index, try UIA ValuePattern.SetValue first: it works
         //    for WPF / WinForms / UWP / XAML and many web inputs, sets the value
@@ -5629,8 +5627,8 @@ impl Tool for HotkeyTool {
                 never see the combo as a real accelerator on the PostMessage-only path. \
                 Trade-off: brief foreground swap (mitigated by restoring the previous foreground \
                 after the keystrokes flush). Requires the daemon to have UIAccess integrity so \
-                `SetForegroundWindow` is permitted — the MCP proxy auto-prefers the \
-                `pincer-uia.exe` worker pipe when both daemons are running.\n\n\
+                `SetForegroundWindow` is permitted (run the daemon at UIAccess or High \
+                integrity; no client route reaches the `pincer-uia.exe` worker).\n\n\
                 - **Legacy Win32 targets without modifiers** (plain `enter`, `tab`, `f5`, etc.) \
                 route through `PostMessage(WM_KEYDOWN/UP)` — no focus steal, no need to update \
                 modifier state.\n\n\
@@ -6304,8 +6302,8 @@ impl Tool for ScrollTool {
                 approaches reach backgrounded windows.\n\n\
                 Mapping: `by: \"page\"` → SB_PAGEDOWN/UP/LEFT/RIGHT × amount; \
                 `by: \"line\"` → SB_LINEDOWN/UP/LEFT/RIGHT × amount.\n\n\
-                Note: `element_token` is accepted for cross-platform parity but currently \
-                no-op on Windows (UIA SetFocus not wired up yet — same caveat as `press_key`).".into(),
+                `element_token` scrolls that UIA element through its ScrollPattern instead; \
+                with `delivery_mode:\"foreground\"` a SendInput wheel is sent.".into(),
             input_schema: json!({
                 "type":"object","required":["direction"],"properties":{
                     "session": pincer_core::tool_schema::session_schema(),
@@ -8221,7 +8219,7 @@ impl Tool for MoveCursorTool {
         MCURSOR_DEF.get_or_init(|| ToolDef {
             name: "move_cursor".into(),
             description:
-                "Move the agent cursor overlay to (x, y). Does NOT move the real mouse cursor."
+                "Move the agent cursor overlay to (x, y). With scope \"desktop\" it moves the real OS pointer instead."
                     .into(),
             input_schema: json!({"type":"object","required":["x","y"],"properties":{
                 "session": pincer_core::tool_schema::session_schema(),
@@ -8698,15 +8696,16 @@ impl Tool for GetConfigTool {
         GCFG_DEF.get_or_init(|| ToolDef {
             name: "get_config".into(),
             // Description ported from Swift `GetConfigTool.swift` with the
-            // Windows config path. Swift's `agent_cursor.*` subtree is not
-            // mirrored on Windows yet (separate cursor-overlay config path).
+            // Windows config path.
             description: "Report the current persistent driver config.\n\n\
                 Pure read-only. Returns defaults when the underlying state is unset — \
                 same fallback the daemon uses at startup. Sibling to `set_config`.\n\n\
                 Current schema (Windows):\n\n  \
                 {\n    \"schema_version\": 1,\n    \"version\": \"<crate version>\",\n    \
                 \"source_sha\": \"<maintainer build commit or null>\",\n    \"platform\": \"windows\",\n    \
-                \"max_image_dimension\": 0\n  }".into(),
+                \"max_image_dimension\": 0,\n    \"agent_cursor\": {\"enabled\": true},\n    \
+                \"cursor\": {\"motion\": {...}, \"badges\": \"minimal\"},\n    \
+                \"experimental_pip\": false,\n    \"experimental_pip_geometry\": null\n  }".into(),
             input_schema: json!({"type":"object","properties":{},"additionalProperties":false}),
             read_only: true, destructive: false, idempotent: true, open_world: false,
         })
@@ -8769,7 +8768,7 @@ impl Tool for SetConfigTool {
                 - `experimental_pip_geometry` (string `WxH` or `WxH+X+Y`; persisted; applies on next daemon restart)\n\n\
                 - `cursor.motion.style`, `cursor.motion.timing`, `cursor.motion.effects.<name>` (`on`, `off`, or `default`) — saved default cursor motion for sessions started afterwards. `cursor.motion: \"default\"` clears every saved cursor motion default.\n\
                 - `cursor.badges` (`minimal` default, `verbose`, or `off`) — agent cursor badge; applies to every cursor at once.\n\n\
-                Returns the full updated config in the same shape as `get_config`.".into(),
+                Returns the updated config: `get_config`'s keys without the `cursor` block.".into(),
             input_schema: with_cursor_motion_config_properties(json!({"type":"object","properties":{
                 "max_image_dimension":{"type":"integer","description":"Max dimension for screenshot resizing (0 = no limit)."},
                 "experimental_pip":{"type":"boolean","description":"Enables PiP preview (applies next restart)."},
@@ -9578,9 +9577,7 @@ impl Tool for BringToFrontTool {
                 action-scoped activation prevents the remote surface from accepting input. \n\n\
                 Implementation uses the `AttachThreadInput` trick to bypass Windows' \
                 foreground-lock when the daemon is not at UIAccess integrity. Returns \
-                structured `{previous_fg_hwnd, now_fg_hwnd}` so callers can later restore. \
-                Windows only; macOS / Linux return an error pointing at platform-native \
-                alternatives.".into(),
+                structured `{previous_fg_hwnd, now_fg_hwnd}` so callers can later restore.".into(),
             input_schema: json!({"type":"object","required":["pid"],"properties":{
                 "pid":{"type":"integer","description":"Target process ID."},
                 "window_id":{"type":"integer","description":"Optional HWND. Defaults to pid's first visible top-level window."}
@@ -9620,9 +9617,9 @@ impl Tool for BringToFrontTool {
         };
 
         // Run the foreground swap on a blocking thread. The AttachThreadInput
-        // trick mirrors `send_key_synthesized` (input/keyboard.rs:313-345)
-        // and is validated by `flash-repro/16-edge-launch-fg.ps1` for the
-        // Edge launch focus-steal recovery case.
+        // trick is `force_foreground_attached` in input/inject.rs, validated
+        // by upstream's `flash-repro/16-edge-launch-fg.ps1` for the Edge
+        // launch focus-steal recovery case.
         let outcome =
             tokio::task::spawn_blocking(move || -> Result<(u64, u64, bool, bool), String> {
                 use windows::Win32::Foundation::HWND;
@@ -10343,11 +10340,8 @@ pub fn build_registry_with_provider(
     //   3. Claude Code's vision pipeline can be retargeted at
     //      `get_window_state` via its tool-anchor config — no need for
     //      a dedicated "screenshot" name.
-    // The `ScreenshotTool` and `ScreenshotCompatTool` structs are kept in
-    // this file for now as private impl helpers — the `capture::*`
-    // functions they wrap are still the actual screenshot machinery.
-    // Delete the structs in a follow-up after confirming no callers
-    // depend on them via `Tool` trait reflection.
+    // The `capture::*` functions those tools wrapped are still the
+    // screenshot machinery behind get_window_state.
     let _ = compat; // formerly drove the ScreenshotCompatTool branch
     r.register(Box::new(GetScreenSizeTool));
     r.register(Box::new(GetDesktopStateTool {

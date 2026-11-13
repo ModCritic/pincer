@@ -11,20 +11,14 @@
 //! Notepad) render directly to the GPU compositor and have no GDI back
 //! buffer for `PrintWindow` to copy from. Result is an all-black image.
 //!
-//! When the PrintWindow result comes back mostly-black (sentinel for
-//! that case), we fall back to a **screen-region BitBlt**: read the
-//! window's on-screen bounds via `GetWindowRect`, BitBlt the matching
-//! pixels off the desktop DC. This is the same approach the Windows
-//! Snipping Tool's "Window" mode uses. Trade-off: only works when the
-//! window is actually on-screen and not occluded by another window.
-//! For our daemon-driven agent flow that's the common case anyway —
-//! the daemon lives in the user's interactive session and the target
-//! is typically a visible window the agent just launched.
-//!
-//! The full proper fix (Windows.Graphics.Capture, which works for
-//! occluded / off-screen UWP windows too) is tracked separately on
-//! CUA-542; the screen-region fallback covers the same common
-//! ground at a fraction of the implementation cost.
+//! When the PrintWindow result comes back mostly black (sentinel for
+//! that case), the capture tries **Windows.Graphics.Capture** (`crate::wgc`),
+//! which also reads occluded and off-screen DirectComposition windows. XAML
+//! hosts go to WGC first, before PrintWindow. When WGC fails, the last
+//! fallback is a **screen-region BitBlt**: read the window's on-screen bounds
+//! via `GetWindowRect` and BitBlt the matching pixels off the desktop DC (the
+//! Snipping Tool's "Window" mode does the same). That fallback only works
+//! when the window is on-screen and not occluded by another window.
 
 use anyhow::{bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -436,7 +430,8 @@ unsafe fn screenshot_window_bytes_with_occlusion_unsafe(
     // apart from a real "blank screen" capture — wasting model turns
     // retrying against a window that's literally minimized to the taskbar.
     //
-    // The WGC sibling path at `wgc.rs:58` already short-circuits this case;
+    // The WGC sibling path (`wgc_capture_impl` in wgc.rs) already
+    // short-circuits this case;
     // the GDI/PrintWindow fallback below + the screen-region BitBlt fallback
     // both happily produced the degenerate PNG. Guarding here covers both
     // and matches the WGC error shape so callers can `list_windows` and
@@ -706,7 +701,7 @@ unsafe fn screenshot_window_bytes_with_occlusion_unsafe(
 // (`png_bytes_to_jpeg`, `resize_png_if_needed`, `crosshair_png_bytes`,
 // `png_dimensions_pub`). They're now thin re-exports of the shared
 // `pincer_core::image_utils::*` so all three platform crates call the
-// same code. See `PINCER_DEDUP_AUDIT.md` for the full audit.
+// same code.
 
 /// Capture the primary display (full screen), returning raw PNG bytes.
 pub fn screenshot_display_bytes() -> Result<Vec<u8>> {
@@ -830,8 +825,8 @@ pub fn crosshair_png_bytes(png_bytes: &[u8], cx: f64, cy: f64) -> Result<Vec<u8>
 
 /// Parse width and height from a PNG IHDR chunk.
 ///
-/// Suffixed `_pub` because an older private `png_dimensions` predated
-/// the `_pub` export; the public alias is what callers use today.
+/// A thin alias of `pincer_core::image_utils::png_dimensions`, kept under
+/// this name for existing callers.
 pub fn png_dimensions_pub(data: &[u8]) -> Result<(u32, u32)> {
     pincer_core::image_utils::png_dimensions(data)
 }

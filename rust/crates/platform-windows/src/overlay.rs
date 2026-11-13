@@ -4,7 +4,8 @@
 //!
 //! - Extended style: `WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`
 //! - Spans the virtual screen (all monitors).
-//! - Render loop: dedicated STA thread, ~125 Hz (8ms timer via `SetTimer`).
+//! - Render loop: dedicated STA thread, ~125 Hz (8 ms `SetTimer`) while a
+//!   cursor animates, 80 ms while sampling hover, a 250 ms heartbeat when idle.
 //! - Pixel pipeline: `tiny-skia` → BGRA DIB → `UpdateLayeredWindow` per-pixel alpha.
 //! - Z-ordering: every 80ms call `SetWindowPos` to stay just above the pinned target.
 //! - Idle-hide: fade out over 180ms once `idle_hide_ms` has elapsed with no activity.

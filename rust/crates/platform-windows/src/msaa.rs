@@ -14,7 +14,7 @@
 //! click that opens the dropdown half (e.g. LO Writer "Font Color" → color
 //! picker) instead of just re-firing the press half.
 //!
-//! Discovery context: `flash-repro/ia2_pixel_click.ps1` proved the path —
+//! Discovery context: upstream's `flash-repro/ia2_pixel_click.ps1` proved the path:
 //! `accLocation("Font Color")` → click `(rect.right - 4, center_y)` →
 //! `SALTMPSUBFRAME 'Font Color'` popup appears.
 

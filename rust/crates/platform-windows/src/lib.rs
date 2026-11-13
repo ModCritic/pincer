@@ -132,10 +132,8 @@ pub fn register_tools() -> ToolRegistry {
     tools::build_registry(false)
 }
 
-/// `compat=true` enables Claude Code computer-use compatibility mode:
-/// the regular `screenshot` tool is replaced by a window-scoped variant
-/// (pid + window_id required, JPEG @ 85%, text note pointing at pixel
-/// tools). See `tools::impl_::ScreenshotCompatTool`.
+/// `compat` is accepted for API compatibility and ignored: the `screenshot`
+/// tool it used to swap for a window-scoped variant was removed.
 pub fn register_tools_with_cursor(cfg: cursor_overlay::CursorConfig, compat: bool) -> ToolRegistry {
     register_tools_with_cursor_and_provider(None, cfg, compat)
 }

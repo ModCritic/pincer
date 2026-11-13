@@ -3,7 +3,7 @@
 //! Measures the foreground "flash": when actuating input into a *background*
 //! window, does the target window rise above the user's foreground window?
 //!
-//! The harness mirrors the `flash-repro` methodology referenced in
+//! The harness mirrors upstream's `flash-repro` methodology referenced in
 //! `uia/fg_bypass.rs`: capture the user's foreground window as `baseline`, then
 //! poll the z-order at high frequency while an actuation runs on another thread.
 //! A "z-drop" is any sample where `target` sits above `baseline` (or `baseline`
@@ -15,7 +15,7 @@
 //!   - inject : Track A — pointer/touch injection (InitializeTouchInjection +
 //!     InjectTouchInput), which RE showed has no foreground precondition
 //!     (NtUserInjectMouseInput gates only on per-process injection-enable, not
-//!     GetForegroundWindow — see docs/windows-background-input-re-plan.rs §4.4).
+//!     GetForegroundWindow; see upstream's docs/windows-background-input-re-plan.md §4.4).
 //!
 //! Usage (run from an interactive desktop session, with a Chrome/WPF/etc window
 //! open in the BACKGROUND and a different window focused in front):

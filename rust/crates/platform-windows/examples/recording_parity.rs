@@ -1,7 +1,7 @@
 //! Smoke check for the recording tools via the Windows named-pipe daemon.
 //!
 //! Renamed from the old "Swift-parity" check — the API split into
-//! `start_recording` + `stop_recording` (see JOURNAL_VIDEO.md) means
+//! `start_recording` + `stop_recording` means
 //! the older Swift CLI surface is no longer the reference. This file
 //! verifies the new contract end-to-end against a running daemon.
 

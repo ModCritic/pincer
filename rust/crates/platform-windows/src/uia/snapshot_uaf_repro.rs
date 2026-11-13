@@ -1,9 +1,9 @@
 //! Regression guard for the UIA element-cache use-after-free fixed in
-//! d95b89a1 (retain-under-lock / `RetainedElement`).
+//! upstream's d95b89a1 (retain-under-lock / `RetainedElement`).
 //!
 //! THE RACE (what these tests model):
 //!   Two concurrent sessions drive the same (pid, hwnd).
-//!   - Session A: `get_window_state` → `Snapshots::update` → `core.insert`
+//!   - Session A: `get_window_state` → `Snapshots::publish_for_session`
 //!     replaces the snapshot → old `UiaSnapshot::drop` → COM `Release` on
 //!     every cached `IUIAutomationElement`.
 //!   - Session B: `click` / `type_text` / `set_value` looked the element up out
@@ -17,7 +17,7 @@
 //!   The cache only ever calls IUnknown vtable slots on the cached pointers
 //!   (`AddRef` via `clone()`, `Release` via `drop`). So we feed it a real,
 //!   independently-refcounted COM-ABI object of our own (`FakeObj`) with a
-//!   hand-rolled IUnknown vtable. The cache's real `with_snapshot` mutex, real
+//!   hand-rolled IUnknown vtable. The store's real `inner` mutex, real
 //!   `UiaSnapshot::drop`, and the real retain-under-lock resolution all run
 //!   unchanged against it. An AddRef/Release seen while the refcount is
 //!   already <= 0 bumps a shared `uaf_hits` counter (a use-after-free that a

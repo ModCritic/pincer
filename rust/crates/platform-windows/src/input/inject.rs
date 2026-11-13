@@ -12,8 +12,8 @@
 //!
 //! Touch injection routes by coordinate through the system input queue (so
 //! Chromium et al. accept it; the OS promotes it to `WM_*BUTTON` for legacy
-//! Win32 windows that don't consume `WM_POINTER`), and — per the RE in
-//! `docs/windows-background-input-re-plan.md` §4.4 — the kernel injection path
+//! Win32 windows that don't consume `WM_POINTER`), and (per the RE in
+//! upstream's `docs/windows-background-input-re-plan.md` §4.4) the kernel injection path
 //! (`NtUserInjectMouseInput`/`NtUserInjectTouchInput`) gates only on a
 //! per-process injection-enable, NOT on the target being foreground. The one
 //! residual is that a tap on an *inactive* top-level window can still trigger
@@ -447,7 +447,7 @@ pub fn point_on_virtual_desktop(x: i32, y: i32) -> bool {
 
 /// True when `hwnd` is minimized (iconic).
 ///
-/// Authoritative counterpart to [`is_iconic_sentinel_point`]: the capture path
+/// Authoritative counterpart to [`point_on_virtual_desktop`]: the capture path
 /// already refuses iconic windows outright (see `capture.rs`), and the input
 /// path needs the same signal so an element action can fail loudly instead of
 /// posting into the off-screen iconic region.

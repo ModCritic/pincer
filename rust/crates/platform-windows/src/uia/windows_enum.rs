@@ -15,7 +15,7 @@
 // We pattern-match against `UIA_*ControlTypeId` constants from the `windows`
 // crate, which use mixed case we can't rename. The lint's suggested rewrite
 // (UIA_BUTTON_CONTROL_TYPE_ID) would silently shadow the external constant
-// with a fresh local binding and break the match. Mirrors overlay.rs:12.
+// with a fresh local binding and break the match. Same allow as overlay.rs.
 #![allow(non_upper_case_globals)]
 
 use std::sync::atomic::{AtomicBool, Ordering};
