@@ -376,6 +376,7 @@ pub fn set_window_frame(
         None => anyhow::bail!("window_id {xid} has no verifiable owner pid ({UNATTRIBUTED_OWNER})"),
     }
 
+    leave_maximized(&conn, root, xid)?;
     let atom = get_atom(&conn, "_NET_MOVERESIZE_WINDOW")?;
     let fields = moveresize_window_flags();
     let source_indication = 1_u32 << 12; // normal application (EWMH §4.1.5)
@@ -420,6 +421,53 @@ pub fn set_window_frame(
         .as_ref()
         .is_some_and(|window| (window.x, window.y, window.width, window.height) == requested);
     Ok((observed, confirmed, mutation_error))
+}
+
+/// The window manager keeps a maximized or full-screen window's geometry and
+/// ignores _NET_MOVERESIZE_WINDOW for it: under KWin, Inkscape opened
+/// maximized stayed 2560x1412 after a request for 1280x1376+0+0. Ask the
+/// window manager to drop those states first (EWMH _NET_WM_STATE, remove), as
+/// dragging a window out of maximized does, and wait up to 400 ms for it.
+fn leave_maximized(conn: &RustConnection, root: Window, xid: u32) -> Result<()> {
+    let wm_state = get_atom(conn, "_NET_WM_STATE")?;
+    let max_v = get_atom(conn, "_NET_WM_STATE_MAXIMIZED_VERT")?;
+    let max_h = get_atom(conn, "_NET_WM_STATE_MAXIMIZED_HORZ")?;
+    let full = get_atom(conn, "_NET_WM_STATE_FULLSCREEN")?;
+    let states = || -> Vec<u32> {
+        conn.get_property(false, xid, wm_state, AtomEnum::ATOM, 0, 64)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .and_then(|reply| reply.value32().map(|atoms| atoms.collect()))
+            .unwrap_or_default()
+    };
+    let held = |current: &[u32]| [max_v, max_h, full].iter().any(|atom| current.contains(atom));
+    if !held(&states()) {
+        return Ok(());
+    }
+    const REMOVE: u32 = 0;
+    const NORMAL_APPLICATION: u32 = 1;
+    for (first, second) in [(max_v, max_h), (full, 0)] {
+        let event = ClientMessageEvent::new(
+            32,
+            xid,
+            wm_state,
+            ClientMessageData::from([REMOVE, first, second, NORMAL_APPLICATION, 0]),
+        );
+        conn.send_event(
+            false,
+            root,
+            EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+            event,
+        )?;
+    }
+    conn.flush()?;
+    for _ in 0..10 {
+        if !held(&states()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(40));
+    }
+    Ok(())
 }
 
 /// EWMH §4.2 requires an explicit StaticGravity when a pager-style client
