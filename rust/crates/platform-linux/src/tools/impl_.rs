@@ -1463,7 +1463,8 @@ impl Tool for GetWindowStateTool {
         GWS_DEF.get_or_init(|| ToolDef {
             name: "get_window_state".into(),
             description: "Read a window: its AT-SPI element tree as compact Markdown, plus a \
-                screenshot. Each actionable row is tagged `[N]`; its element_token is \
+                screenshot. Each addressable row is tagged `[N]` (a text row with `actions=[]` still \
+                takes type_text and set_value); its element_token is \
                 `<snapshot_id>:N`, with snapshot_id in the response header and returned in the \
                 result. A row ends with the states that change when it is used, such as \
                 `(checked)`, `(unchecked)`, `(pressed)`, `(expanded)` or `(selected)`. Re-read \
@@ -2633,7 +2634,7 @@ impl Tool for LaunchAppTool {
             description: "Start a Linux app and return its pid and windows, titles read once \
                 they stop changing (up to 1 s). The window manager may activate and raise the \
                 new window (KWin does for Qt and KDE apps such as KWrite and Dolphin; GTK apps \
-                stay behind); `active` says whether it did. Name the app with launch_path or \
+                stay behind an already active window); `active` says whether it did. Name the app with launch_path or \
                 name. To open files or URLs in that app, pass them in `urls` (or \
                 `additional_arguments`): they are appended to its command line, for example \
                 {name:\"KWrite\", urls:[\"/path/notes.txt\"]}. `urls` without launch_path or \
@@ -4522,7 +4523,7 @@ fn background_key_route(
     }
     if let Some(index) = element_index {
         if !crate::atspi::focus_element(pid, xid, index)? {
-            anyhow::bail!("AT-SPI Component.GrabFocus returned false for element {index}");
+            anyhow::bail!("AT-SPI Component.GrabFocus returned false for element {index}; {GRAB_FOCUS_RETRY}");
         }
     }
     match px_target {
@@ -4542,6 +4543,13 @@ fn background_key_route(
 
 const GRAB_FOCUS_FAILURE_PREFIX: &str = "grab_focus_failed";
 
+/// Recovery advice for a refused GrabFocus. KWrite's editor answers false even
+/// while it holds the focus (round 4 of the first-call test), and a key or
+/// text sent to the window still reaches its focused widget.
+const GRAB_FOCUS_RETRY: &str = "the app would not move its focus to that element; to send \
+    the input to the window's focused widget instead, call again with pid and window_id in \
+    place of element_token";
+
 /// AT-SPI `Component.GrabFocus` on the addressed element, for the background
 /// keyboard routes. Failures carry a prefix so the caller never mistakes them
 /// for a delivery failure worth a synthetic-event fallback.
@@ -4556,7 +4564,7 @@ fn grab_focus_for_background(
     match crate::atspi::focus_element(pid, xid, index) {
         Ok(true) => Ok(()),
         Ok(false) => anyhow::bail!(
-            "{GRAB_FOCUS_FAILURE_PREFIX}: AT-SPI Component.GrabFocus returned false for element {index}"
+            "{GRAB_FOCUS_FAILURE_PREFIX}: AT-SPI Component.GrabFocus returned false for element {index}; {GRAB_FOCUS_RETRY}"
         ),
         Err(error) => Err(error.context(format!(
             "{GRAB_FOCUS_FAILURE_PREFIX}: AT-SPI Component.GrabFocus for element {index}"
@@ -7897,8 +7905,9 @@ impl ClickTool {
                             .map(|outcome| outcome.apply(&mut structured))
                             .unwrap_or_default();
                         let result = ToolResult::text(format!(
-                            "Clicked element [{idx}] (pid {pid}) with a real pointer click \
+                            "Clicked element {} (pid {pid}) with a real pointer click \
                              (delivery_mode=foreground{}, focus_after={}){}{}{popup_note}",
+                            observed.described(idx),
                             report
                                 .popup_target
                                 .map(|popup| format!(
@@ -8002,10 +8011,11 @@ impl ClickTool {
                             );
                         }
                         ToolResult::text(format!(
-                            "Clicked element [{idx}] (pid {pid}) through its AT-SPI action \
+                            "Clicked element {} (pid {pid}) through its AT-SPI action \
                              \"{action}\" with the window activated (delivery_mode=foreground, \
                              path=ax_fg, focus_after={}): the element had no usable \
                              on-screen bounds ({reason}), so no pointer was moved.{}",
+                            observed.described(idx),
                             report.focus_after.as_str(),
                             match &report.window_change {
                                 Some(change) => format!(" {change}."),
@@ -8142,7 +8152,7 @@ impl Tool for ClickTool {
         CLICK_DEF.get_or_init(|| ToolDef {
             name: "click".into(),
             description: "Click in a window. Prefer `element_token`: it works on hidden or \
-                background windows and names the element's role and label. A token click \
+                background windows, and the result names the element's role and label. A token click \
                 fires the element's accessible action, so a row with `actions=[]` (a text \
                 area, for example) cannot be clicked by token in background; use \
                 delivery_mode foreground. Use x,y only for \
@@ -8553,7 +8563,7 @@ impl Tool for ClickTool {
                              AT-SPI timeout; its effect is unknown"
                         );
                     }
-                    let mut text = format!("Clicked element [{idx}] (pid {pid}).");
+                    let mut text = format!("Clicked element {} (pid {pid}).", observed.described(idx));
                     if let Some(window) = token_popup {
                         let closed = tokio::task::spawn_blocking(move || {
                             crate::input::foreground::wait_for_popup_close(window)
@@ -8735,7 +8745,8 @@ impl Tool for ClickTool {
                 Ok(Ok(route)) => {
                     attach_focused_cell(
                         ToolResult::text(format!(
-                            "Clicked element [{idx}] (pid {pid}) with a real pointer click {}",
+                            "Clicked element {} (pid {pid}) with a real pointer click {}",
+                            observed.described(idx),
                             route.text_suffix(mode_label)
                         ))
                         .with_structured(route.structured(mode_label)),
@@ -9241,7 +9252,7 @@ async fn focus_nested_inject_target(
         {
             Ok(Ok(true)) => Ok(()),
             Ok(Ok(false)) => Err(ToolResult::error(format!(
-                "AT-SPI Component.GrabFocus returned false for element {index}"
+                "AT-SPI Component.GrabFocus returned false for element {index}; {GRAB_FOCUS_RETRY}"
             ))),
             Ok(Err(error)) => Err(ToolResult::error(error.to_string())),
             Err(error) => Err(ToolResult::error(format!("Task error: {error}"))),
@@ -9677,7 +9688,7 @@ impl Tool for TypeTextTool {
                     crate::wayland::with_target_foreground(pid, xid, || {
                         if !crate::atspi::focus_element(pid, xid, idx)? {
                             anyhow::bail!(
-                                "AT-SPI Component.GrabFocus returned false for element {idx}"
+                                "AT-SPI Component.GrabFocus returned false for element {idx}; {GRAB_FOCUS_RETRY}"
                             );
                         }
                         crate::wayland::type_text_focused(&text_w)
@@ -9748,7 +9759,7 @@ impl Tool for TypeTextTool {
                     if let Some(idx) = idx {
                         if !crate::atspi::focus_element(pid, xid, idx)? {
                             anyhow::bail!(
-                                "AT-SPI Component.GrabFocus returned false for element {idx}"
+                                "AT-SPI Component.GrabFocus returned false for element {idx}; {GRAB_FOCUS_RETRY}"
                             );
                         }
                     }
@@ -9845,7 +9856,7 @@ impl Tool for TypeTextTool {
                             if let Some(idx) = idx {
                                 if !crate::atspi::focus_element(pid, xid, idx)? {
                                     anyhow::bail!(
-                                        "AT-SPI Component.GrabFocus returned false for element {idx}"
+                                        "AT-SPI Component.GrabFocus returned false for element {idx}; {GRAB_FOCUS_RETRY}"
                                     );
                                 }
                             }
@@ -10544,7 +10555,7 @@ impl Tool for PressKeyTool {
                     if let Some(idx) = idx {
                         if !crate::atspi::focus_element(pid, xid, idx)? {
                             anyhow::bail!(
-                                "AT-SPI Component.GrabFocus returned false for element {idx}"
+                                "AT-SPI Component.GrabFocus returned false for element {idx}; {GRAB_FOCUS_RETRY}"
                             );
                         }
                     }
@@ -10565,6 +10576,14 @@ impl Tool for PressKeyTool {
         }
 
         let key_for_task = key.clone();
+        // The result names the whole combination ("ctrl+end"), not the bare
+        // key, so a modified press doesn't read as a plain one.
+        let pressed = mods
+            .iter()
+            .map(String::as_str)
+            .chain([key.as_str()])
+            .collect::<Vec<_>>()
+            .join("+");
         let cursor_id = resolve_cursor_key(&args);
         // Foreground delivery is one atomic activate-and-XTest transaction.
         // A preceding PX click establishes internal widget focus, but that
@@ -10596,7 +10615,7 @@ impl Tool for PressKeyTool {
                         if let Some(element_index) = resolved_element_index {
                             if !crate::atspi::focus_element(pid, xid, element_index)? {
                                 anyhow::bail!(
-                                    "AT-SPI Component.GrabFocus returned false for element {element_index}"
+                                    "AT-SPI Component.GrabFocus returned false for element {element_index}; {GRAB_FOCUS_RETRY}"
                                 );
                             }
                         }
@@ -10622,7 +10641,7 @@ impl Tool for PressKeyTool {
             "background"
         };
         match result {
-            Ok(Ok(route)) => key_route_result(&format!("Pressed key '{key}'"), route, mode_label),
+            Ok(Ok(route)) => key_route_result(&format!("Pressed key '{pressed}'"), route, mode_label),
             Ok(Err(e)) => input_error_result(e),
             Err(e) => ToolResult::error(format!("Task error: {e}")),
         }
@@ -11009,7 +11028,7 @@ impl Tool for HotkeyTool {
                 Ok(Ok(true)) => {}
                 Ok(Ok(false)) => {
                     return ToolResult::error(format!(
-                        "AT-SPI Component.GrabFocus returned false for element {element_index}"
+                        "AT-SPI Component.GrabFocus returned false for element {element_index}; {GRAB_FOCUS_RETRY}"
                     ))
                 }
                 Ok(Err(error)) => return ToolResult::error(error.to_string()),
@@ -12044,13 +12063,14 @@ impl Tool for ScrollTool {
     fn def(&self) -> &ToolDef {
         SCROLL_DEF.get_or_init(|| ToolDef {
             name: "scroll".into(),
-            description: "Scroll a window without stealing focus: real wheel steps from the \
-                session's virtual pointer over the element_token or x,y point, else the window's \
-                center. direction required; amount (default 3) counts wheel steps, or with \
+            description: "Scroll a window without stealing focus: wheel steps over the \
+                element_token or x,y point, else the window's center, sent by the session's \
+                virtual pointer where uinput is available, else as synthetic X events (path \
+                x11_xsendevent). direction required; amount (default 3) counts wheel steps, or with \
                 by:\"page\" pages of 3 wheel steps each, not screenfuls; the app decides how far a \
                 step moves. On X11 the result compares the window's scroll bars from \
                 the last get_window_state: an error with code no_change when nothing moved (Qt \
-                ignores background wheel events; use set_value on the scroll bar row instead), \
+                ignores synthetic wheel events; use set_value on the scroll bar row instead), \
                 unverifiable when no scroll bar is known. Where no focus-free pointer route \
                 exists (a GTK3 canvas, for example) background delivery is refused with \
                 background_unavailable: retry with delivery_mode foreground. Window x,y need a \
@@ -12758,8 +12778,8 @@ fn scroll_outcome_result(
             ToolResult::error(format!(
                 "Nothing scrolled: sent {what} {direction} ({route}), but the window's scroll \
                  bar stayed at {value}; {why}. In background, set the scroll position with \
-                 set_value on the `scroll bar` row's element_token, or press_key page_down / \
-                 page_up on the window; otherwise retry with delivery_mode:\"foreground\".\
+                 set_value on the `scroll bar` row's element_token, or press_key pagedown / \
+                 pageup on the window; otherwise retry with delivery_mode:\"foreground\".\
                  {page_note}"
             ))
             .with_structured(json!({
@@ -12774,8 +12794,7 @@ fn scroll_outcome_result(
         ScrollMovement::Unknown => {
             let mut text = format!(
                 "Sent {what} {direction} ({route}); not verified: no scroll bar of this \
-                 window is known (get_window_state indexes them), so check a screenshot.\
-                 {page_note}"
+                 window is known, so {POINTER_CHECK}.{page_note}"
             );
             if synthetic_wheel_ignored {
                 text.push_str(
@@ -12816,7 +12835,7 @@ impl Tool for DoubleClickTool {
                 when it can, else synthetic XSendEvent (path x11_xsendevent), which some \
                 toolkits read as a single click: check `path` and verify the result. Where no \
                 focus-free pointer route exists (a GTK3 canvas, for example) background delivery \
-                is refused with background_unavailable: retry with delivery_mode foreground. A \
+                is refused with background_unavailable: retry with delivery_mode foreground. In background, a \
                 point covered by another application's window is refused \
                 (target_occluded), one covered by this app's own dialog is retargeted to it \
                 (retargeted_to). No focus steal. Pass pid + window_id + x,y, or an element_token \
@@ -13166,8 +13185,8 @@ impl Tool for RightClickTool {
                 maps zoom-image coordinates \
                 back. Background delivery does not steal focus; where no focus-free pointer \
                 route exists (a GTK3 canvas, for example) it is refused with \
-                background_unavailable: retry with delivery_mode foreground. A point covered by \
-                another app's \
+                background_unavailable: retry with delivery_mode foreground. In background, a point \
+                covered by another app's \
                 window is refused (target_occluded), one covered by this app's own dialog goes to \
                 the dialog (retargeted_to), and one outside the window is refused \
                 (point_outside_window); results report window_point and screen_point. When Pincer \
@@ -13460,7 +13479,7 @@ impl Tool for DragTool {
             description: "Press, move and release from (from_x, from_y) to (to_x, to_y) in \
                           window screenshot pixels, without stealing focus. Window points need a \
                           get_window_state screenshot of the window earlier in the session \
-                          (screenshot_context_missing otherwise). A point covered by \
+                          (screenshot_context_missing otherwise). In background, a point covered by \
                           another app's window is refused (target_occluded); one covered by this \
                           app's own dialog goes to the dialog. Background drags need a pointer \
                           backend some apps lack even where clicks work, so a drag can return \
@@ -13968,7 +13987,7 @@ impl Tool for DragTool {
                 Ok(Ok(())) => ToolResult::text(format!(
                     "Dragged ({button_str}) to pid {pid} from ({from_x:.0}, {from_y:.0}) \
                      to ({to_x:.0}, {to_y:.0}) in {duration_ms}ms / {steps} steps \
-                     (delivery_mode=foreground)."
+                     (delivery_mode=foreground, path=x11_xtest_fg); not verified: {POINTER_CHECK}."
                 ))
                 .with_structured(json!({
                     "path": "x11_xtest_fg",
@@ -14233,9 +14252,11 @@ impl Tool for MouseButtonDownTool {
                 sends synthetic events, which GTK, Qt, LibreOffice, Chromium and WebKitGTK \
                 windows ignore, so for those it is refused with background_unavailable; pass \
                 delivery_mode foreground, which activates the window and holds a real button \
-                on the system pointer until mouse_button_up. A point covered by another app's \
-                window is refused (target_occluded), as is one outside the window \
-                (point_outside_window). Returns the held-button state."
+                on the system pointer until mouse_button_up. In background, a point covered by \
+                another app's window is refused (target_occluded); foreground raises the window \
+                first, so there only a window kept above it refuses. A point outside the window \
+                is refused (point_outside_window). Returns a line naming the held button and \
+                point."
                 .into(),
             input_schema: json!({"type":"object","required":["pid","window_id","x","y"],"properties":{
                 "session": pincer_core::tool_schema::session_schema_with(
@@ -15489,7 +15510,9 @@ impl Tool for GetDesktopStateTool {
                 Use the returned PNG directly as the coordinate source for actions whose target is \
                 {kind:\"desktop\",display_id:\"primary\"}. No AT-SPI walk. Also lists the \
                 visible windows with pid, window_id, z_index and geometry, labeled \
-                `screenshot px` (this image) and `desktop px` (list_windows and set_window_frame).".into(),
+                `screenshot px` (this image) and `desktop px` (list_windows and set_window_frame). The \
+                agent cursor is hidden for the capture; `agent_overlay_capture` says how, and \
+                `excluded` means it is not in the image.".into(),
             input_schema: json!({"type":"object","properties":{
                 "session": pincer_core::tool_schema::session_schema(),
                 "screenshot_out_file":{"type":"string","description":"Write PNG here instead of base64."},
@@ -15937,12 +15960,41 @@ impl Tool for MoveCursorTool {
                     .await
             };
             return match result {
-                Ok(Ok(())) => ToolResult::text(format!(
-                    "Moved the real desktop pointer to ({xi}, {yi})."
-                ))
-                .with_structured(
-                    json!({"scope":"desktop","path":path,"x":xi,"y":yi,"effect":"unverifiable"}),
-                ),
+                Ok(Ok(())) => {
+                    // On X11 the server reports the pointer XTest just moved;
+                    // Wayland gives clients no such query.
+                    let read_back = if crate::wayland::is_wayland() {
+                        None
+                    } else {
+                        tokio::task::spawn_blocking(current_pointer_position)
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|(rx, ry)| (rx.round() as i32, ry.round() as i32))
+                    };
+                    let mut structured = json!({
+                        "scope":"desktop","path":path,"x":xi,"y":yi,"effect":"unverifiable"
+                    });
+                    let text = match read_back {
+                        Some((rx, ry)) if (rx, ry) == (xi, yi) => {
+                            structured["effect"] = json!("confirmed");
+                            structured["evidence"] = json!([{
+                                "kind": "value_readback",
+                                "detail": format!("the X server reports the pointer at ({rx}, {ry})"),
+                            }]);
+                            format!("Moved the real desktop pointer to ({xi}, {yi}); it reads back there.")
+                        }
+                        Some((rx, ry)) => {
+                            structured["read_back"] = json!({"x": rx, "y": ry});
+                            format!(
+                                "Sent the real desktop pointer to ({xi}, {yi}), but it reads back \
+                                 at ({rx}, {ry}); a point off the screen stops at its edge."
+                            )
+                        }
+                        None => format!("Moved the real desktop pointer to ({xi}, {yi})."),
+                    };
+                    ToolResult::text(text).with_structured(structured)
+                }
                 Ok(Err(error)) => ToolResult::error(error.to_string()),
                 Err(error) => ToolResult::error(format!("Task error: {error}")),
             };
@@ -16345,8 +16397,18 @@ impl Tool for MoveAlongPathTool {
             None => "",
         };
         let windowed = target.is_some();
+        // One line with every stat, floats to one decimal as JSON writes
+        // them, so the text result does not repeat `stats` as JSON.
         ToolResult::text(format!(
-            "Moved the real pointer along the path{held} in {duration_ms} ms{click}.\n{stats}"
+            "Moved the real pointer along the path{held} in {duration_ms} ms{click}: \
+             {:.1} px from ({:.1}, {:.1}) to ({:.1}, {:.1}), {} segment(s), {} samples.",
+            round_tenth(sampled.length_px),
+            round_tenth(first.0),
+            round_tenth(first.1),
+            round_tenth(last.0),
+            round_tenth(last.1),
+            sampled.segment_count,
+            sampled.points.len(),
         ))
         .with_structured(json!({
             "scope": if windowed { "window" } else { "desktop" },
@@ -17136,7 +17198,7 @@ impl Tool for ZoomTool {
             description: "Capture a cropped JPEG of a window region from (x1,y1) to (x2,y2), in \
                 pixels of this window's most recent get_window_state screenshot, padded by 20% \
                 of the region's width and height on each side (clamped to the window). Output \
-                is at most 500 px wide. \
+                is at most 500 px wide and never enlarged past the screenshot's own pixels. \
                 Corners, not a size: x1,y1 is the top-left and x2,y2 the bottom-right (x,y,width,height is also accepted and converted). The result echoes the padded region the image actually shows, in the same screenshot pixels.\n\n\
                 After a zoom, pass from_zoom=true to click, double_click, right_click, drag or \
                 a mouse_button / mouse_drag call to auto-translate coordinates back to \

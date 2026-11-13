@@ -135,7 +135,10 @@ pub fn render_tool_result(result: &mut Value) {
 /// a key is left out only when the text already says its whole value (see
 /// [`skip_field`]), and a key that stays is printed whole. Nothing inside an
 /// object or an array is dropped for being in the text, so a list or object
-/// in the tail is never a partial copy that reads as complete.
+/// in the tail is never a partial copy that reads as complete. The one
+/// exception is a tool result nested in this one (run_steps' `observation`),
+/// whose text is part of this text: its fields, and its `state`'s, are
+/// deduplicated by the same rules (see [`nested_result_rest`]).
 pub fn render_text(text: &str, structured: &Value, is_error: bool) -> String {
     render_text_with(text, structured, is_error, TOKEN_SCANS_BEFORE_INDEX)
 }
@@ -345,6 +348,20 @@ impl<'a> Shown<'a> {
         })
     }
 
+    /// Lines that start, after their indent, with `n.`: an item of a
+    /// numbered list (run_steps' `1. click ok: ...`, run_script's calls).
+    fn numbered_lines(&self, n: u64) -> Vec<usize> {
+        self.memoized(format!("\u{0}#{n}"), || {
+            let prefix = format!("{n}.");
+            self.raw
+                .split('\n')
+                .enumerate()
+                .filter(|(_, line)| line.trim_start().starts_with(&prefix))
+                .map(|(line, _)| line)
+                .collect()
+        })
+    }
+
     /// Offsets in `raw` where `token` may start, ascending, a superset of
     /// its matches. `None` (scan instead) for a token under three bytes and
     /// until the scans before indexing are used up.
@@ -540,11 +557,13 @@ fn push_fields(
     except: &[&str],
 ) {
     for (key, value) in fields {
-        if except.contains(&key.as_str())
-            || skip_field(key, value, fields, shown)
-            || restated_assignment(key, value, shown.raw)
-            || restated_scalar(key, value, shown)
-        {
+        if except.contains(&key.as_str()) || field_said(key, value, fields, shown) {
+            continue;
+        }
+        if let Some(rest) = nested_result_rest(value, shown) {
+            if !rest.is_empty() {
+                lines.push(format!("{key}: {}", render_value(&Value::Object(rest), false, shown)));
+            }
             continue;
         }
         match value {
@@ -564,6 +583,47 @@ fn push_fields(
             }
         }
     }
+}
+
+/// A field the text already says, or one with nothing to say: the rules
+/// [`push_fields`] applies to each key.
+fn field_said(key: &str, value: &Value, siblings: &Map<String, Value>, shown: &Shown) -> bool {
+    skip_field(key, value, siblings, shown)
+        || restated_assignment(key, value, shown.raw)
+        || restated_scalar(key, value, shown)
+}
+
+/// A tool result nested in this one, as run_steps' `observation` holds the
+/// observing read (`tool`, its `summary` and its own `state`), less every
+/// field the text already says, and its `state` less the same: the rules of
+/// a top-level field, since the nested result's text is printed above it.
+/// Without this the observation repeated the diff advice, the invalidated
+/// ids and the snapshot id after the text (round 5 of the first-call test).
+/// `None` for any other value.
+fn nested_result_rest(value: &Value, shown: &Shown) -> Option<Map<String, Value>> {
+    let fields = value.as_object()?;
+    if !fields.get("tool").is_some_and(Value::is_string)
+        || !fields.get("state").is_some_and(Value::is_object)
+    {
+        return None;
+    }
+    let rest_of = |fields: &Map<String, Value>| -> Map<String, Value> {
+        fields
+            .iter()
+            .filter(|(key, value)| !field_said(key, value, fields, shown))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect()
+    };
+    let mut rest = rest_of(fields);
+    if let Some(Value::Object(state)) = rest.get("state") {
+        let state = rest_of(state);
+        if state.is_empty() {
+            rest.remove("state");
+        } else {
+            rest.insert("state".to_owned(), Value::Object(state));
+        }
+    }
+    Some(rest)
 }
 
 /// A `*_json` string that holds a JSON object or array (verify_state's
@@ -598,12 +658,27 @@ fn skip_field(key: &str, value: &Value, siblings: &Map<String, Value>, shown: &S
     match value {
         Value::Null => true,
         Value::String(text) => text.is_empty() || (!protected(key, value) && shown.restates(text)),
-        Value::Array(items) => items.is_empty() || value_shown(key, value, shown),
-        Value::Object(fields) => fields.is_empty() || value_shown(key, value, shown),
+        Value::Array(items) => {
+            items.is_empty() || json_in_text(key, value, shown) || value_shown(key, value, shown)
+        }
+        Value::Object(fields) => {
+            fields.is_empty() || json_in_text(key, value, shown) || value_shown(key, value, shown)
+        }
         Value::Bool(true) => key.ends_with("_complete") || key.ends_with("_valid"),
-        Value::Bool(false) => key == "truncated",
+        Value::Bool(false) => key == "truncated" || key.ends_with("_truncated"),
         Value::Number(_) => duplicate_geometry(key, value, siblings),
     }
+}
+
+/// The text holds the value's exact compact JSON, as run_script's `return
+/// value: {"n":2}` holds `value` (whose only leaf is too short for
+/// [`record_shown`]). Never true for a value holding something
+/// [`protected`].
+fn json_in_text(key: &str, value: &Value, shown: &Shown) -> bool {
+    let mut leaves = Vec::new();
+    collect_leaves(key, value, &mut leaves)
+        && serde_json::to_string(value)
+            .is_ok_and(|json| json.len() >= 6 && shown.raw.contains(&json))
 }
 
 /// Flat window geometry next to a `bounds` object that holds it (the
@@ -650,7 +725,9 @@ fn value_shown(key: &str, value: &Value, shown: &Shown) -> bool {
 ///   `key=value` or `key: value`, appears on a line that shows one of the
 ///   record's longer values, since a short value elsewhere in the text
 ///   ("4 ms") says nothing about this record;
-/// - a flag in [`USUAL_FLAGS`], a null and an empty string need nothing.
+/// - a flag in [`USUAL_FLAGS`], a null and an empty string need nothing;
+/// - in a numbered list, a record's 0-based `index` is said by its line's
+///   `index + 1.`, and `ok: true` by the word `ok` on that line.
 ///
 /// This rests on producers keeping each record's short values on the same
 /// line as its ids (list_windows' `z=0` after the window_id), which every
@@ -698,7 +775,19 @@ fn record_shown(key: &str, record: &Value, shown: &Shown) -> bool {
     lines.dedup();
     short.into_iter().all(|(key, leaf)| {
         let leaf_lines = match leaf {
+            Value::Bool(true) if key == "ok" => {
+                let mut lines = shown.flag_lines(key, true);
+                lines.extend(shown.token_lines("ok"));
+                lines
+            }
             Value::Bool(flag) => shown.flag_lines(key, *flag),
+            Value::Number(number) if key == "index" => {
+                let mut lines = shown.token_lines(&number.to_string());
+                if let Some(index) = number.as_u64() {
+                    lines.extend(shown.numbered_lines(index + 1));
+                }
+                lines
+            }
             Value::Number(number) => shown.token_lines(&number.to_string()),
             Value::String(text) => shown.token_lines(text),
             _ => Vec::new(),
@@ -1300,6 +1389,96 @@ mod tests {
                  elements_complete: true, tree_markdown: (same as the text above)}}}}",
                 text.trim_end()
             )
+        );
+    }
+
+    /// run_steps' own result (round 5 of the first-call test, Test Pad): the
+    /// step lines say each `steps` record, and the observation's text says
+    /// most of its read, so only the fields no line says follow.
+    #[test]
+    fn run_steps_says_its_steps_and_observation_once() {
+        let text = "run_steps: 2/2 steps ok\n\
+                    1. click ok: Clicked element [5] push button \"Count\" (pid 253).\n\
+                    2. click ok: Clicked element [5] push button \"Count\" (pid 253).\n\
+                    observation: changed since s00000001: 1 added, 1 changed, 0 removed (below)\n\
+                    window_id=18874371 pid=253 elements=6 walk_ms=26 snapshot_id=s00000002\n\
+                    \n\
+                    since s00000001: 1 added (1 of them a row with no [N]), 1 changed (1 of them \
+                    a row with no [N]), 0 removed. Use element_tokens s00000002:N for every row \
+                    except - rows; - ids are from s00000001.\n\
+                    + label = \"Count: 2   Strokes: 0   Scrolls: 0\"\n\
+                    ~ label = \"Last: Count pressed\"\n\
+                    Invalidated snapshots s00000001: their element_tokens are stale.";
+        let diff = text.split_once("\n\n").unwrap().1;
+        let step = |index: u64| {
+            json!({"index": index, "message": "Clicked element [5] push button \"Count\" (pid 253).",
+                   "ok": true, "target": {"window": {"pid": 253, "window_id": 18874371}},
+                   "tool": "click"})
+        };
+        let structured = json!({
+            "executed": 2,
+            "observation": {
+                "ok": true,
+                "state": {
+                    "app_name": "Pincer-test-pad", "bounds_complete": true,
+                    "diff_counts": {"added": 1, "changed": 1, "removed": 0},
+                    "elements_complete": true, "invalidated_snapshot_ids": ["s00000001"],
+                    "pid": 253, "since": "s00000001", "snapshot_id": "s00000002",
+                    "tree_diff": diff, "truncated": false, "window_id": 18874371,
+                    "window_title": "Pincer Test Pad",
+                },
+                "summary": "changed since s00000001: 1 added, 1 changed, 0 removed",
+                "tool": "get_window_state",
+            },
+            "ok": true,
+            "steps": [step(0), step(1)],
+            "total": 2,
+        });
+        assert_eq!(
+            render_text(text, &structured, false),
+            format!(
+                "{text}\nexecuted: 2\nobservation: {{ok: true, state: {{app_name: Pincer-test-pad, \
+                 diff_counts: {{added: 1, changed: 1, removed: 0}}, window_title: Pincer Test Pad}}, \
+                 tool: get_window_state}}\nok: true\ntotal: 2"
+            )
+        );
+    }
+
+    /// A step that failed keeps its record: `ok: false` is not the word ok.
+    #[test]
+    fn a_failed_step_keeps_its_record() {
+        let text = "run_steps: step 1 of 1 (steps[0]) failed; 0 step(s) ran before it, 0 not run\n\
+                    1. click ERROR: element_token s00000009:4 is stale";
+        let structured = json!({"steps": [{"index": 0, "message": "element_token s00000009:4 is stale",
+                                           "ok": false, "tool": "click"}]});
+        assert_eq!(
+            render_text(text, &structured, false),
+            format!(
+                "{text}\nsteps:\n- {{index: 0, message: element_token s00000009:4 is stale, \
+                 ok: false, tool: click}}"
+            )
+        );
+    }
+
+    /// run_script prints its call log and its return value as JSON; neither
+    /// follows again, nor a console that was not cut.
+    #[test]
+    fn run_script_says_its_calls_and_value_once() {
+        let text = "run_script: ok in 8 ms, 2 driver call(s)\n\
+                    return value: {\"n\":2}\n\
+                    calls:\n  1. line 1 list_windows ok (1 ms): Found 1 window(s):\n  \
+                    2. line 1 list_windows ok (0 ms): Found 1 window(s):";
+        let call = |call: u64, ms: u64| {
+            json!({"call": call, "detail": "Found 1 window(s):", "line": 1, "ms": ms,
+                   "ok": true, "op": "list_windows"})
+        };
+        let structured = json!({
+            "calls": [call(1, 1), call(2, 0)], "console_truncated": false,
+            "driver_calls": 2, "ok": true, "value": {"n": 2},
+        });
+        assert_eq!(
+            render_text(text, &structured, false),
+            format!("{text}\ndriver_calls: 2\nok: true")
         );
     }
 

@@ -187,7 +187,9 @@ impl Tool for RunStepsTool {
                 Checks: `wait_for` runs before a step's action, `expect` after it; both poll \
                 until they hold or time out. Each check names its own element with role, name \
                 or text, since it does not reuse the step's target; value, value_contains, \
-                enabled and selected then test that element. `text` matches any tree row, \
+                enabled and selected then test that element (`selected` is a check box's \
+                checked state, and the selected or checked state of a radio button, list item, \
+                menu item or tab). `text` matches any tree row, \
                 static text included; \
                 `gone:true` waits for it to disappear. A failed step is reported with its phase \
                 (wait_for, find, action, expect) and what was found. A step refused because its \
@@ -213,7 +215,7 @@ impl Tool for RunStepsTool {
                                 "tool": { "type": "string", "enum": BATCHABLE_TOOLS, "description": "Action tool to run." },
                                 "args": { "type": "object", "description": "That tool's arguments, optionally with role/name/nth/app/window in place of pid/window_id/element_token." },
                                 "wait_for": { "type": "object", "description": "Check that must hold before the action: {role?, name?, text?, gone?, app?, window?, timeout_ms?}, with at least one of role, name or text to pick the element. Default timeout 5000 ms." },
-                                "expect": { "type": "array", "maxItems": 4, "items": {"type": "object"}, "description": "Up to 4 checks that must hold after the action: {role?, name?, text?, gone?, value?, value_contains?, enabled?, selected?, app?, window?, timeout_ms?}. Each needs at least one of role, name or text to pick its element; the step's target is not reused. Default timeout 2000 ms." },
+                                "expect": { "type": "array", "maxItems": 4, "items": {"type": "object"}, "description": "Up to 4 checks that must hold after the action: {role?, name?, text?, gone?, value?, value_contains?, enabled?, selected? (checked, for a check box), app?, window?, timeout_ms?}. Each needs at least one of role, name or text to pick its element; the step's target is not reused. Default timeout 2000 ms." },
                                 "timeout_ms": { "type": "integer", "minimum": 0, "maximum": 10000, "description": "How long a named target may take to appear. Default 3000." }
                             },
                             "additionalProperties": true
@@ -713,9 +715,9 @@ impl Plan {
         let header = match failed_step {
             None => format!("run_steps: {total}/{total} steps ok"),
             Some(index) => format!(
-                "run_steps: step {} of {total} failed; {} step(s) ran before it, {} not run",
+                "run_steps: step {} of {total} (steps[{index}]) failed; {index} step(s) ran \
+                 before it, {} not run",
                 index + 1,
-                index,
                 total - executed
             ),
         };
@@ -2091,11 +2093,24 @@ fn bounded_message(result: &ToolResult) -> String {
         })
         .unwrap_or("");
     let first_line = text.lines().next().unwrap_or("");
-    let mut message: String = first_line.chars().take(MESSAGE_LIMIT).collect();
-    if first_line.chars().count() > MESSAGE_LIMIT {
-        message.push_str("...");
+    clip_message(first_line, MESSAGE_LIMIT)
+}
+
+/// `text` cut to `limit` characters at the last sentence end in its second
+/// half, else at the last space, so a refusal never stops mid-word ("and
+/// deli..." in round 3 of the first-call test).
+fn clip_message(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_owned();
     }
-    message
+    let head: String = text.chars().take(limit).collect();
+    let cut = head
+        .rfind(". ")
+        .map(|at| at + 1)
+        .filter(|&at| at >= head.len() / 2)
+        .or_else(|| head.rfind(' '))
+        .unwrap_or(head.len());
+    format!("{} ...", head[..cut].trim_end())
 }
 
 #[cfg(test)]
@@ -2103,3 +2118,17 @@ mod tests;
 
 #[cfg(test)]
 mod flow_tests;
+
+#[cfg(test)]
+mod clip_message_tests {
+    use super::clip_message;
+
+    #[test]
+    fn a_long_message_is_cut_at_a_sentence_or_word_never_mid_word() {
+        let sentence = format!("{}. And delivery goes on here", "a".repeat(30));
+        assert_eq!(clip_message(&sentence, 40), format!("{}. ...", "a".repeat(30)));
+        let words = "one two three four five six seven";
+        assert_eq!(clip_message(words, 12), "one two ...");
+        assert_eq!(clip_message("short", 40), "short");
+    }
+}

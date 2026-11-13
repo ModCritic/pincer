@@ -214,7 +214,7 @@ async fn stops_at_the_first_failure_and_still_observes() {
         0,
         "steps after the failure must not run"
     );
-    assert!(text(&result).contains("step 2 of 3 failed"));
+    assert!(text(&result).contains("step 2 of 3 (steps[1]) failed"));
     assert_eq!(harness.hits("get_window_state"), 1);
     assert_eq!(structured["observation"]["ok"], true);
 }

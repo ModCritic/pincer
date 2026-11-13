@@ -445,8 +445,9 @@ pub fn apply(
     };
     if cut {
         header_extra.push_str(&format!(
-            "\nvalues longer than {VALUE_PREVIEW_CHARS} characters are cut (`...\" (N chars)`); \
-             full_output:true returns them whole"
+            "\nvalues longer than {VALUE_PREVIEW_CHARS} characters show only their first \
+             {VALUE_PREVIEW_CHARS} (`...\" (N chars)` gives the whole length); full_output:true \
+             returns them whole"
         ));
     }
     rewrite_tree_block(content, &md, &header_extra, &body);
@@ -1297,13 +1298,14 @@ impl DiffReport {
         // A count says how many of its rows have no `[N]` (the window's own
         // `frame` row, a label), so it matches the `[N]` rows a reader
         // counts (round 2 of the first-call test: "4 changed" with three
-        // `~ [N]` rows and the frame).
+        // `~ [N]` rows and the frame). Round 5 read "(1 of them a row with no [N])" as
+        // the row that gained an `[N]`, so it says "a row with no [N]".
         let count = |rows: &[Row], what: &str| {
             let unindexed = rows.iter().filter(|row| row.index.is_none()).count();
             if unindexed == 0 {
                 format!("{} {what}", rows.len())
             } else {
-                format!("{} {what} ({unindexed} without [N])", rows.len())
+                format!("{} {what} ({unindexed} of them a row with no [N])", rows.len())
             }
         };
         let mut out = format!(
@@ -1960,7 +1962,7 @@ mod tests {
         let report = diff_markdown(old, new, false, false).unwrap();
         let text = report.render("s1", Some("s2"), None);
         assert!(
-            text.starts_with("since s1: 0 added, 4 changed (1 without [N]), 0 removed."),
+            text.starts_with("since s1: 0 added, 4 changed (1 of them a row with no [N]), 0 removed."),
             "{text}"
         );
         assert!(

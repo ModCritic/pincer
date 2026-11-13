@@ -111,12 +111,19 @@ fn schema_tab_id() -> Value {
     })
 }
 
+/// Tail for a page action whose effect Pincer cannot see (trusted input
+/// reports delivery, not what the page did). Round 3 and 4 testers each
+/// asked what `effect: unverifiable` meant for a click that worked.
+pub(crate) const PAGE_EFFECT_UNVERIFIED: &str =
+    "not verified: read the page with get_browser_state to check";
+
 fn schema_ref() -> Value {
     json!({
         "type": "string",
         "description": "Page element ref in the p<snapshot>:<index> namespace from \
-            get_browser_state. Refs are invalidated by navigation and by newer \
-            snapshots of the same tab."
+            get_browser_state. Refs are invalidated by navigation and by every newer \
+            snapshot of the same tab, a `query` read included, and indexes are renumbered \
+            each time: take the ref from the latest snapshot by its name."
     })
 }
 
@@ -321,7 +328,7 @@ impl GetBrowserStateTool {
                     },
                     "query": {
                         "type": "string",
-                        "description": "Requires snapshot_format \"semantic_v2\". Read-only match over role, accessible name and visible text."
+                        "description": "Requires snapshot_format \"semantic_v2\". Read-only, case-insensitive substring match over role, accessible name and visible text."
                     },
                     "continuation": {
                         "type": "string",
@@ -1493,7 +1500,7 @@ impl Tool for BrowserClickTool {
             .with_detail(json!({ "delivery": "unknown", "retryable": false }))
             .to_tool_result();
         }
-        ToolResult::text(format!("clicked ({x:.0}, {y:.0}) in {tab_id}")).with_structured(json!({
+        ToolResult::text(format!("clicked ({x:.0}, {y:.0}) in {tab_id}; {PAGE_EFFECT_UNVERIFIED}")).with_structured(json!({
             "status": "ok",
             "route": "trusted",
             "delivery_mode": if foreground { "foreground" } else { "background" },
@@ -2326,10 +2333,10 @@ impl Tool for BrowserTypeTool {
             Ok(()) => ToolResult::text(if replace {
                 format!(
                     "typed {requested_chars} char(s) into {tab_id}, replacing \
-                     {replaced_chars} char(s)"
+                     {replaced_chars} char(s); {PAGE_EFFECT_UNVERIFIED}"
                 )
             } else {
-                format!("typed {requested_chars} char(s) into {tab_id}")
+                format!("typed {requested_chars} char(s) into {tab_id}; {PAGE_EFFECT_UNVERIFIED}")
             })
             .with_structured(json!({
                 "status": "ok",
@@ -2384,7 +2391,7 @@ impl BrowserDialogTool {
                         "session": schema_session(),
                         "action": { "type": "string", "enum": ["inspect", "accept", "dismiss"], "description": "inspect reads the open dialog; accept or dismiss resolves the dialog named by dialog_id." },
                         "dialog_id": { "type": "string", "description": "Current dialog id (dialog-N) from inspect or from the browser_click that opened the dialog." },
-                        "prompt_text": { "type": "string", "description": "Sensitive response text, valid only when accepting a prompt dialog." },
+                        "prompt_text": { "type": "string", "description": "Text to enter in the prompt; valid only when accepting a prompt dialog." },
                         "delivery_mode": {
                             "type": "string",
                             "enum": ["background", "foreground"],

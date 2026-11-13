@@ -167,7 +167,7 @@ impl Tool for ClipboardWriteTool {
             content_redacted_from_telemetry: true,
         };
         ToolResult::text(format!(
-            "Clipboard write succeeded as {written_type}; inspect structuredContent.types before paste."
+            "Clipboard write succeeded as {written_type}; `types` lists the formats a paste can ask for."
         ))
         .with_structured(serde_json::to_value(output).expect("clipboard output serializes"))
     }

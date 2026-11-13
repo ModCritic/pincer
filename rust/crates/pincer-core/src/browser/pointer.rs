@@ -497,9 +497,10 @@ impl BrowserPointerTool {
                             != Some(false)) =>
             {
                 ToolResult::text(format!(
-                    "dispatched synthetic {} in {}",
+                    "dispatched synthetic {} in {}; {}",
                     request.action.as_str(),
-                    validated.tab.tab_id
+                    validated.tab.tab_id,
+                    super::tools::PAGE_EFFECT_UNVERIFIED
                 ))
                 .with_structured(self.success_json(
                     request,
@@ -669,9 +670,10 @@ impl BrowserPointerTool {
             cdp_session: cdp_session.to_owned(),
         };
         ToolResult::text(format!(
-            "dispatched trusted {} in {}",
+            "dispatched trusted {} in {}; {}",
             request.action.as_str(),
-            validated.tab.tab_id
+            validated.tab.tab_id,
+            super::tools::PAGE_EFFECT_UNVERIFIED
         ))
         .with_structured(self.success_json(
             request,

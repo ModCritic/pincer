@@ -498,6 +498,12 @@ struct RecordingInner {
     /// state capture with `include_accessibility_tree: false`.
     state_budget: Option<StateCaptureBudget>,
     next_turn: u32,
+    /// Target (pid, window_id) of the last recorded mouse_button_down, for
+    /// the mouse_drag and mouse_button_up turns that act on the held button's
+    /// window without naming it (their schemas let them omit pid and
+    /// window_id). Without it those turns had no window state and
+    /// full-desktop images (round 4 of the first-call test).
+    held_target: Option<(i64, u64)>,
     session_start_ms: u64,
     /// Monotonic clock anchor for the cursor sampler so its `t_ms`
     /// matches the action-timeline anchor in `action.json`.
@@ -568,6 +574,7 @@ impl RecordingSession {
                 output_dir: None,
                 state_budget: Some(StateCaptureBudget::default()),
                 next_turn: 1,
+                held_target: None,
                 session_start_ms: 0,
                 session_monotonic_start: None,
                 last_error: None,
@@ -725,6 +732,7 @@ impl RecordingSession {
         inner.output_dir = Some(dir);
         inner.state_budget = state_budget;
         inner.next_turn = 1;
+        inner.held_target = None;
         inner.session_start_ms = started_at_ms;
         inner.session_monotonic_start = Some(monotonic_start);
         inner.last_error = video_error;
@@ -799,6 +807,7 @@ impl RecordingSession {
         inner.enabled = false;
         inner.output_dir = None;
         inner.next_turn = 1;
+        inner.held_target = None;
         inner.session_start_ms = 0;
         inner.session_monotonic_start = None;
         if let Some(error) = &stop_error {
@@ -931,7 +940,8 @@ impl RecordingSession {
         capture_visual_state: bool,
         predicted_refusal: Option<&'static str>,
     ) -> Option<PendingTurn> {
-        let (turn_dir, session_start_ms, generation, state_budget) = {
+        use crate::tool_args::ArgsExt;
+        let (turn_dir, session_start_ms, generation, state_budget, held_target) = {
             let mut inner = self.inner.lock().unwrap();
             if !inner.enabled {
                 return None;
@@ -944,11 +954,20 @@ impl RecordingSession {
             let out = inner.output_dir.clone()?;
             let idx = inner.next_turn;
             inner.next_turn += 1;
+            let held_target = inner.held_target;
+            match tool_name {
+                "mouse_button_down" => {
+                    inner.held_target = args.opt_i64("pid").zip(args.opt_u64("window_id"));
+                }
+                "mouse_button_up" => inner.held_target = None,
+                _ => {}
+            }
             (
                 out.join(format!("turn-{idx:05}")),
                 inner.session_start_ms,
                 inner.generation,
                 inner.state_budget,
+                held_target,
             )
         };
 
@@ -958,8 +977,10 @@ impl RecordingSession {
         // `call` branch (serve.rs); recording is the single chokepoint where
         // those internal keys must not leak into the persisted trajectory.
         let args = strip_internal_keys(args).into_owned();
-        use crate::tool_args::ArgsExt;
-        let pid = args.opt_i64("pid");
+        let held_target = held_target
+            .filter(|_| matches!(tool_name, "mouse_drag" | "mouse_button_up"))
+            .filter(|_| args.opt_i64("pid").is_none());
+        let pid = args.opt_i64("pid").or(held_target.map(|(pid, _)| pid));
         let element = pid.and_then(|pid| {
             ELEMENT_BOUNDS_FN.get()?(
                 pid,
@@ -969,7 +990,8 @@ impl RecordingSession {
         });
         let window_id = element
             .map(|(window, _)| window)
-            .or_else(|| args.opt_u64("window_id"));
+            .or_else(|| args.opt_u64("window_id"))
+            .or(held_target.map(|(_, window)| window));
         let click_point = resolve_click_point(
             tool_name,
             &args,

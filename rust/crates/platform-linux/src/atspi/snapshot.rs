@@ -44,11 +44,30 @@ pub struct CachedElement {
     /// D-Bus address for the cached fast paths (same object as `identity`).
     pub object_ref: Option<ObjectRef>,
     pub role: String,
+    /// The accessible name the snapshot read, for naming the element in a
+    /// result.
+    pub name: Option<String>,
     /// The node lives inside an embedded web document (bounds need the
     /// document origin, which only a walk resolves).
     pub in_web_content: bool,
     /// Screen-space frame `(x, y, w, h)` when the snapshot resolved one.
     pub bounds: Option<(i32, i32, u32, u32)>,
+}
+
+impl CachedElement {
+    /// The element as a get_window_state row shows it, `[5] push button
+    /// "Count"`, for a result to say what it acted on. A long name is cut at
+    /// 60 characters.
+    pub fn described(&self, idx: usize) -> String {
+        match self.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+            Some(name) if name.chars().count() > 60 => {
+                let cut: String = name.chars().take(60).collect();
+                format!("[{idx}] {} \"{cut}...\"", self.role)
+            }
+            Some(name) => format!("[{idx}] {} \"{name}\"", self.role),
+            None => format!("[{idx}] {}", self.role),
+        }
+    }
 }
 
 pub struct AtspiSnapshot {
@@ -78,6 +97,7 @@ impl AtspiSnapshot {
                         identity,
                         object_ref: node.object_ref.clone(),
                         role: node.role.clone(),
+                        name: node.name.clone(),
                         in_web_content: node.in_web_content,
                         bounds: None,
                     },

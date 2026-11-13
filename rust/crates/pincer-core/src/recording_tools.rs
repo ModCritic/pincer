@@ -59,8 +59,8 @@ impl Tool for StartRecordingTool {
                 and after), `evidence.json` (what was captured and why anything is missing) \
                 and, for dispatched clicks, `click.png` (before.png with a red marker at the \
                 click point). `app_state.json` and `screenshot.png` are copies of \
-                after_state.json and after.png. Beside the turn folders: `session.json` (start \
-                time, video and cursor-sample status), `cursor.jsonl` (pointer samples; always \
+                after_state.json and after.png. Beside the turn folders: `session.json` (a \
+                monotonic start stamp, video and cursor-sample status), `cursor.jsonl` (pointer samples; always \
                 empty on Linux) and, with `record_video`, `recording.mp4`.\n\n\
                 Recording lasts until stop_recording, the end of the session that started it, \
                 or a daemon restart. Replay it with replay_trajectory."

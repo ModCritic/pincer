@@ -3942,7 +3942,7 @@ fn value_part(val: &str, total_chars: Option<usize>) -> String {
     let read = val.chars().count();
     match total_chars {
         Some(total) if total > read => {
-            format!(" value=\"{shown}...\" ({total} chars, the first {read} read)")
+            format!(" value=\"{shown}...\" ({total} chars, the first {read} read; full_output reads it whole)")
         }
         _ if matches!(shown, std::borrow::Cow::Owned(_))
             && shown.chars().count() > pincer_core::window_state_view::VALUE_PREVIEW_CHARS =>
@@ -8988,7 +8988,7 @@ mod coord_tests {
         assert_eq!(read.chars().count(), 4096);
         let part = value_part(&read, Some(24_492));
         assert!(
-            part.ends_with("x...\" (24492 chars, the first 4096 read)"),
+            part.ends_with("x...\" (24492 chars, the first 4096 read; full_output reads it whole)"),
             "{part}"
         );
         // Whole, but with line breaks the row escapes: the real count.

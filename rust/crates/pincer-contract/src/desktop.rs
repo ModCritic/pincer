@@ -230,7 +230,7 @@ fn set_window_frame() -> ToolContract {
 fn invoke_menu() -> ToolContract {
     contract::<InvokeMenuInput, ActionResult>(
         "invoke_menu",
-        "Run an application menu command by its exact path of item labels, e.g. [\"Edit\",\"Undo\"]; three periods match the ellipsis character (\"Find...\" finds \"Find…\"). Each level is resolved and fired through the accessibility API, never by pixels. A missing, ambiguous or disabled segment is refused (menu_path_unavailable); for a missing one the refusal lists the labels at that level, so a guessed label costs at most one retry. The menu opened to reach the item is closed again; when one stays open, the result names it and how to close it. The command's own effect is not verified: read it back from fresh state.",
+        "Run an application menu command by its exact path of item labels, e.g. [\"Edit\",\"Undo\"]; three periods match the ellipsis character (\"Find...\" finds \"Find…\"). Each level is resolved and fired through the accessibility API, never by pixels. A missing, ambiguous or disabled segment is refused (menu_path_unavailable); for a missing one the refusal lists the labels at that level, so a guessed label costs at most one retry (a closed Qt menu's items are not in get_window_state, so its path starts as a guess). The menu opened to reach the item is closed again; when one stays open, the result names it and how to close it. The command's own effect is not verified: read it back from fresh state.",
         &["menu.path.invoke", "accessibility.menu.native"],
         ToolAnnotations {
             read_only: false,
