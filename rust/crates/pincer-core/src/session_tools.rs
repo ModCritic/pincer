@@ -368,7 +368,15 @@ impl Tool for EndSessionTool {
             }
         }
         let response_label = response_session_label(&args, &id);
-        ToolResult::text(format!("✅ Session '{response_label}' ended.")).with_structured(
+        // Without a label the session ended is the connection's default
+        // one, which results name "implicit" (round 6 asked whether that was
+        // a label to pass).
+        let text = if public_label_of(&args).is_none() {
+            format!("✅ The connection's default session ('{response_label}') ended.")
+        } else {
+            format!("✅ Session '{response_label}' ended.")
+        };
+        ToolResult::text(text).with_structured(
             serde_json::to_value(pincer_contract::EndSessionOutput {
                 session: response_label,
                 active: false,

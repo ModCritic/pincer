@@ -553,6 +553,15 @@ impl Tool for Rerender {
 fn rerender_registry(
     rows: Vec<(&'static str, &'static str)>,
 ) -> (Arc<ToolRegistry>, Arc<Mutex<RerenderState>>) {
+    rerender_registry_with(rows, false)
+}
+
+/// [`rerender_registry`], with the recording tools (replay_trajectory) when
+/// `recording`.
+fn rerender_registry_with(
+    rows: Vec<(&'static str, &'static str)>,
+    recording: bool,
+) -> (Arc<ToolRegistry>, Arc<Mutex<RerenderState>>) {
     let state = Arc::new(Mutex::new(RerenderState {
         snapshot: 40,
         rows,
@@ -577,9 +586,95 @@ fn rerender_registry(
         }));
     }
     registry.register_session_tools();
+    if recording {
+        registry.register_recording_tools();
+    }
     let registry = Arc::new(registry);
     registry.init_self_weak();
     (registry, state)
+}
+
+/// One recorded turn per `action`, as start_recording writes them.
+fn recording_dir(actions: &[Value]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    for (index, action) in actions.iter().enumerate() {
+        let turn = dir.path().join(format!("turn-{:05}", index + 1));
+        std::fs::create_dir_all(&turn).unwrap();
+        std::fs::write(turn.join("action.json"), serde_json::to_vec(action).unwrap()).unwrap();
+    }
+    dir
+}
+
+/// Round 6 of the first-call test: run_steps recorded a role/name step as
+/// the token it resolved to, and replay sent that stale token. A turn whose
+/// action.json names its element acts on that element found again.
+#[tokio::test]
+async fn replay_acts_on_a_recorded_element_found_again_by_role_and_label() {
+    let (registry, state) = rerender_registry_with(
+        vec![
+            ("AXButton", "Update event"),
+            ("AXButton", "Cinder decision LHP-CINDER"),
+        ],
+        true,
+    );
+    let dir = recording_dir(&[json!({
+        "tool": "click",
+        "arguments": {"pid": 43, "window_id": 70, "element_token": "s0000beef:14"},
+        "element": {"role": "AXButton", "label": "Cinder decision LHP-CINDER",
+                    "pid": 43, "window_id": 70},
+        "result_error": false,
+    })]);
+    let result = registry
+        .invoke(
+            "replay_trajectory",
+            json!({"dir": dir.path().to_str().unwrap(), "delay_ms": 0}),
+        )
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    assert_eq!(
+        state.lock().unwrap().clicked,
+        vec!["Cinder decision LHP-CINDER"]
+    );
+    let structured = result.structured_content.clone().unwrap();
+    assert_eq!(
+        (structured["succeeded"].clone(), structured["refound"].clone()),
+        (json!(1), json!(1)),
+        "{structured}"
+    );
+    assert!(text(&result).contains("found again by its role"), "{}", text(&result));
+}
+
+/// Without a single element of that role and label, or without `element`
+/// at all (an older recording), the turn runs with its recorded token, which
+/// the stale token fails here.
+#[tokio::test]
+async fn replay_keeps_the_recorded_token_without_a_single_match() {
+    let (registry, state) =
+        rerender_registry_with(vec![("AXButton", "OK"), ("AXButton", "OK")], true);
+    let dir = recording_dir(&[
+        json!({
+            "tool": "click",
+            "arguments": {"pid": 43, "window_id": 70, "element_token": "s0000beef:3"},
+            "element": {"role": "AXButton", "label": "OK", "pid": 43, "window_id": 70},
+        }),
+        json!({
+            "tool": "click",
+            "arguments": {"pid": 43, "window_id": 70, "element_token": "s0000beef:4"},
+        }),
+    ]);
+    let result = registry
+        .invoke(
+            "replay_trajectory",
+            json!({"dir": dir.path().to_str().unwrap(), "delay_ms": 0, "stop_on_error": false}),
+        )
+        .await;
+    let structured = result.structured_content.clone().unwrap();
+    assert_eq!(
+        (structured["failed"].clone(), structured["refound"].clone()),
+        (json!(2), json!(0)),
+        "{structured}"
+    );
+    assert!(state.lock().unwrap().clicked.is_empty());
 }
 
 #[tokio::test]

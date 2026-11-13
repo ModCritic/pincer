@@ -767,6 +767,7 @@ impl<'a> Locator<'a> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
+        remember_tokens(window, &elements);
         Ok(Read {
             window: window.clone(),
             elements,
@@ -1466,6 +1467,71 @@ fn words(text: &str) -> Vec<String> {
         .filter(|word| word.chars().count() >= 2)
         .map(str::to_owned)
         .collect()
+}
+
+/// How many element tokens [`resolved_token_element`] keeps, oldest dropped
+/// first.
+const RESOLVED_TOKENS_MAX: usize = 4096;
+
+/// Tokens this process's locator reads handed out, by token: the role and
+/// label of the element each named, and its window, oldest first.
+#[allow(clippy::type_complexity)]
+fn resolved_tokens() -> &'static std::sync::Mutex<(
+    std::collections::HashMap<String, Value>,
+    std::collections::VecDeque<String>,
+)> {
+    static TOKENS: std::sync::OnceLock<
+        std::sync::Mutex<(
+            std::collections::HashMap<String, Value>,
+            std::collections::VecDeque<String>,
+        )>,
+    > = std::sync::OnceLock::new();
+    TOKENS.get_or_init(Default::default)
+}
+
+/// Keep the labelled elements of one locator read by token. A locator read
+/// is not rendered for a caller, so window_state_view keeps no rows of it,
+/// and run_steps and run_script act with its tokens.
+fn remember_tokens(window: &Window, elements: &[Value]) {
+    let mut guard = resolved_tokens()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let (by_token, order) = &mut *guard;
+    for element in elements {
+        let (Some(token), Some(role), Some(label)) = (
+            element.get("element_token").and_then(Value::as_str),
+            element.get("role").and_then(Value::as_str),
+            label_of(element),
+        ) else {
+            continue;
+        };
+        let entry = json!({
+            "role": role,
+            "label": label,
+            "pid": window.pid,
+            "window_id": window.window_id,
+        });
+        if by_token.insert(token.to_owned(), entry).is_none() {
+            order.push_back(token.to_owned());
+        }
+    }
+    while order.len() > RESOLVED_TOKENS_MAX {
+        if let Some(oldest) = order.pop_front() {
+            by_token.remove(&oldest);
+        }
+    }
+}
+
+/// The element a token from a locator read named: `{role, label, pid,
+/// window_id}`, while this process remembers it. The recorder writes it into
+/// action.json so replay_trajectory can find the element again.
+pub(crate) fn resolved_token_element(token: &str) -> Option<Value> {
+    resolved_tokens()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .0
+        .get(token)
+        .cloned()
 }
 
 fn label_of(element: &Value) -> Option<&str> {

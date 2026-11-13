@@ -94,11 +94,15 @@ async fn check_ax_capability() -> CheckEntry {
             .await
             .unwrap_or(false);
         if bus_ok {
-            return CheckEntry::pass(
-                NAME_AX_CAPABILITY,
-                "Wayland session: org.a11y.Bus reachable on the session bus; \
-                 AT-SPI inspection will work.",
-            );
+            return match tokio::task::spawn_blocking(probe_atspi_registry).await {
+                Ok(Ok(_)) => CheckEntry::pass(
+                    NAME_AX_CAPABILITY,
+                    "Wayland session: org.a11y.Bus reachable on the session bus and the AT-SPI \
+                     registry answers; AT-SPI inspection will work.",
+                ),
+                Ok(Err(why)) => registry_failure("Wayland session: org.a11y.Bus reachable", &why),
+                Err(error) => registry_failure("Wayland session: org.a11y.Bus reachable", &error.to_string()),
+            };
         }
         return CheckEntry::fail(
             NAME_AX_CAPABILITY,
@@ -122,11 +126,21 @@ async fn check_ax_capability() -> CheckEntry {
             .await
             .unwrap_or(false);
         if a11y_ok {
-            return CheckEntry::pass(
-                NAME_AX_CAPABILITY,
-                "X11 reachable and org.a11y.Bus is on the session bus; \
-                 AT-SPI inspection + XSendEvent input will work.",
-            );
+            return match tokio::task::spawn_blocking(probe_atspi_registry).await {
+                Ok(Ok(_)) => CheckEntry::pass(
+                    NAME_AX_CAPABILITY,
+                    "X11 reachable, org.a11y.Bus is on the session bus and the AT-SPI registry \
+                     answers; AT-SPI inspection + XSendEvent input will work.",
+                ),
+                Ok(Err(why)) => registry_failure(
+                    "X11 reachable and org.a11y.Bus is on the session bus",
+                    &why,
+                ),
+                Err(error) => registry_failure(
+                    "X11 reachable and org.a11y.Bus is on the session bus",
+                    &error.to_string(),
+                ),
+            };
         }
         let hint = if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() {
             "DBUS_SESSION_BUS_ADDRESS is set but org.a11y.Bus has no owner — enable \
@@ -466,6 +480,69 @@ pub(crate) fn probe_a11y_bus() -> bool {
 pub(crate) fn probe_a11y_bus() -> bool {
     false
 }
+
+/// How long [`probe_atspi_registry`] waits for the registry.
+const REGISTRY_PROBE_BUDGET: std::time::Duration = std::time::Duration::from_millis(2500);
+
+/// Whether the AT-SPI registry answers: the number of applications its root
+/// lists, read the way a window read starts. `org.a11y.Bus` can have an
+/// owner while no registry runs, and then every window read comes back
+/// without an element tree (round 8 of the first-call test: a sandbox whose
+/// at-spi2-registryd could not open the display, while both diagnostics
+/// passed). On a desktop the accessibility bus starts the registry for this
+/// call when it is not running yet.
+#[cfg(target_os = "linux")]
+pub(crate) fn probe_atspi_registry() -> Result<usize, String> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())?;
+    rt.block_on(async {
+        tokio::time::timeout(REGISTRY_PROBE_BUDGET, async {
+            let conn = atspi_connection::AccessibilityConnection::new()
+                .await
+                .map_err(|error| format!("could not connect to the accessibility bus: {error}"))?;
+            let root = conn
+                .root_accessible_on_registry()
+                .await
+                .map_err(|error| format!("its root is unavailable: {error}"))?;
+            let apps = root
+                .get_children()
+                .await
+                .map_err(|error| format!("it did not list its applications: {error}"))?;
+            Ok(apps.len())
+        })
+        .await
+        .map_err(|_| {
+            format!(
+                "it did not answer within {} ms",
+                REGISTRY_PROBE_BUDGET.as_millis()
+            )
+        })?
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn probe_atspi_registry() -> Result<usize, String> {
+    Err("AT-SPI is Linux-only".to_owned())
+}
+
+/// The ax_capability failure for a reachable accessibility bus whose
+/// registry does not answer.
+fn registry_failure(reachable: &str, why: &str) -> CheckEntry {
+    CheckEntry::fail(
+        NAME_AX_CAPABILITY,
+        format!(
+            "{reachable}, but the AT-SPI registry (org.a11y.atspi.Registry) does not answer: \
+             {why}. Window reads will return no element tree."
+        ),
+        REGISTRY_HINT,
+    )
+}
+
+const REGISTRY_HINT: &str = "Start the registry on the accessibility bus \
+    (`/usr/lib/at-spi2-registryd`, or `/usr/libexec/at-spi2-registryd` on some distributions; \
+    it needs DISPLAY or WAYLAND_DISPLAY set), or restart the session's accessibility bus.";
 
 /// True when the Wayland backend is opted in and a Wayland session is
 /// active. Wrapper around `wayland::is_wayland()` so non-Linux builds of

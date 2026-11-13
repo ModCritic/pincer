@@ -80,9 +80,12 @@ Each action writes to `turn-NNNNN/` (five-digit zero-padded counter):
   has an explicit classification instead of disappearing from the turn.
 - `app_state.json` and `screenshot.png`: compatibility aliases for
   `after_state.json` and `after.png`.
-- `action.json`: `tool`, `arguments` exactly as called (the target `pid`
-  and `window_id` are in there), `result_summary`, `result_error`, an
-  ISO-8601 `timestamp`, and `click_point` when applicable.
+- `action.json`: `tool`, `arguments` as the tool received them (the target
+  `pid` and `window_id` are in there), `result_summary`, `result_error`, an
+  ISO-8601 `timestamp`, and `click_point` when applicable. A `run_steps` or
+  `run_script` step that named its target by role/name holds the
+  `element_token` it resolved to. A turn with a token also has `element`: the
+  role and label of the token's row, and that read's `pid` and `window_id`.
 - `click.png`: for click-family actions (`click`, `double_click`,
   `right_click`): a copy of the pre-input image with a red marker drawn at
   the click point. Usually that source is `before.png`. When Windows scrolls
@@ -113,7 +116,8 @@ Each action writes to `turn-NNNNN/` (five-digit zero-padded counter):
   cannot be resolved or rendered remain evidence failures.
 
 Beside the turn folders, the output directory holds `session.json` (start
-time, video and cursor-sample status, rewritten on stop), `cursor.jsonl`
+time in Unix epoch milliseconds, in a field named `started_at_monotonic_ms`,
+video and cursor-sample status, rewritten on stop), `cursor.jsonl`
 (about 30 pointer samples a second; always empty on Linux) and, with video,
 `recording.mp4`. `stop_recording` reports `output_dir` and `turns_written`
 for the recording it ended.
@@ -129,8 +133,10 @@ Read its live schema before use, and obtain authorization for the actions
 being replayed.
 
 Recorded PIDs, window IDs, element tokens, browser refs, and geometry can all
-be stale. Read-only snapshots are not part of the action sequence, so replay
-does not automatically refresh element handles. Pixel/key actions also need
+be stale. Read-only snapshots are not part of the action sequence. A turn with
+`element` acts on the single element with that role and label in the recorded
+window, found again at replay (`refound` in the result counts them); without
+`element` or a single match, it runs with its recorded token. Pixel/key actions also need
 the original target identity, layout, and focus; they are not portable merely
 because they lack an element token.
 

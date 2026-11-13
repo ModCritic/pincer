@@ -52,15 +52,19 @@ impl Tool for StartRecordingTool {
                 start. Read-only tools, the recording tools, start_session and end_session are \
                 not recorded. Without `session`, every call on this connection is recorded, \
                 named sessions included; other connections are not.\n\n\
-                Each turn folder holds `action.json` (`tool`, `arguments` exactly as called, \
-                pid and window_id included, `result_summary`, `result_error`, `timestamp`, and \
+                Each turn folder holds `action.json` (`tool`, `arguments` as the tool \
+                received them, pid and window_id included, so a run_steps or run_script step \
+                that named its target by role/name holds the element_token it resolved to; \
+                `element`, the role and label of the row a token named, which \
+                replay_trajectory finds again; `result_summary`, `result_error`, `timestamp`, and \
                 `click_point` for clicks), `before.png`/`after.png` (target-window \
                 screenshots), `before_state.json`/`after_state.json` (accessibility tree before \
                 and after), `evidence.json` (what was captured and why anything is missing) \
                 and, for dispatched clicks, `click.png` (before.png with a red marker at the \
                 click point). `app_state.json` and `screenshot.png` are copies of \
-                after_state.json and after.png. Beside the turn folders: `session.json` (a \
-                monotonic start stamp, video and cursor-sample status), `cursor.jsonl` (pointer samples; always \
+                after_state.json and after.png. Beside the turn folders: `session.json` (the \
+                start time in Unix epoch milliseconds, in a field named \
+                `started_at_monotonic_ms`, and video and cursor-sample status), `cursor.jsonl` (pointer samples; always \
                 empty on Linux) and, with `record_video`, `recording.mp4`.\n\n\
                 Recording lasts until stop_recording, the end of the session that started it, \
                 or a daemon restart. Replay it with replay_trajectory."
@@ -342,9 +346,12 @@ impl Tool for ReplayTrajectoryTool {
                 - A pixel click (`x`, `y`) is refused until this session has a screenshot of \
                 its window: call get_window_state(pid, window_id) on each recorded window \
                 first.\n\
-                - An `element_token` names a row of one snapshot in one session, so a recorded \
-                token click fails or hits whatever row has that token now. Record pixel clicks \
-                or keys for replay.\n\n\
+                - A recorded `element_token` names a row of one snapshot of the recording run. \
+                A turn whose action.json has `element` (its role and label) acts on the single \
+                element with that role and label in the recorded window, found again; the \
+                result's `refound` counts those turns. Without `element` (an unlabelled row, an \
+                older recording) or a single match, the turn runs with its token, which fails \
+                or hits whatever row has that token now.\n\n\
                 With recording on, the replay is itself recorded into the current output \
                 folder, so two runs can be diffed."
                 .into(),
@@ -435,6 +442,7 @@ impl Tool for ReplayTrajectoryTool {
         let mut turns_json = Vec::new();
         let mut first_failure: Option<(String, String, String)> = None;
         let mut skipped_turns: Vec<String> = Vec::new();
+        let mut refound = 0u32;
 
         for turn_dir in &turn_dirs {
             let turn_name = turn_dir
@@ -444,7 +452,7 @@ impl Tool for ReplayTrajectoryTool {
                 .to_owned();
 
             let action_path = turn_dir.join("action.json");
-            let (tool_name, tool_args, recorded_error) = match parse_action_json(&action_path) {
+            let (tool_name, mut tool_args, recorded_error, element) = match parse_action_json(&action_path) {
                 Ok(v) => v,
                 Err(e) => {
                     failed += 1;
@@ -475,6 +483,22 @@ impl Tool for ReplayTrajectoryTool {
             }
 
             attempted += 1;
+            // A recorded token belongs to a read of the recording run, and in
+            // this process it may name another row. Act on the element the
+            // recording names by role and label instead, found again in the
+            // recorded window; when that finds no single match, the turn
+            // runs as recorded.
+            let mut refound_note = None;
+            if let (Some(element), true) = (&element, tool_args.get("element_token").is_some()) {
+                if let Some((fresh, note)) =
+                    crate::batch_tools::refind_recorded_element(&registry, &tool_args, element)
+                        .await
+                {
+                    tool_args = fresh;
+                    refound_note = Some(note);
+                    refound += 1;
+                }
+            }
             let result = registry.invoke(&tool_name, tool_args).await;
             let is_err = result.is_error.unwrap_or(false);
             let summary = result
@@ -490,12 +514,16 @@ impl Tool for ReplayTrajectoryTool {
                 .unwrap_or("")
                 .to_owned();
 
-            turns_json.push(json!({
+            let mut turn_json = json!({
                 "turn": turn_name,
                 "tool": &tool_name,
                 "ok": !is_err,
                 "result_summary": &summary,
-            }));
+            });
+            if let Some(note) = refound_note {
+                turn_json["refound"] = json!(note);
+            }
+            turns_json.push(turn_json);
 
             if is_err {
                 failed += 1;
@@ -523,6 +551,12 @@ impl Tool for ReplayTrajectoryTool {
         if let Some((ref turn, ref tool, _)) = first_failure {
             summary_text.push_str(&format!(" first_failure={turn}:{tool}"));
         }
+        if refound > 0 {
+            summary_text.push_str(&format!(
+                "\n{refound} turn(s) acted on their recorded element found again by its role and \
+                 label, not by the recorded element_token."
+            ));
+        }
         if skipped > 0 {
             summary_text.push_str(&format!(
                 "\nSkipped turns recorded as failed: {}. include_failed_turns:true replays them.",
@@ -537,6 +571,7 @@ impl Tool for ReplayTrajectoryTool {
             "failed": failed,
             "skipped": skipped,
             "stop_on_error": stop_on_error,
+            "refound": refound,
             "turns": turns_json,
         });
         if let Some((turn, tool, error)) = first_failure {
@@ -567,10 +602,11 @@ fn recording_state_json(state: &RecordingState) -> Value {
     })
 }
 
-/// The tool, its recorded arguments, and whether the call failed when it was
-/// recorded. A missing `result_error` (older or hand-written turns) counts as
-/// not failed, so such turns still replay.
-fn parse_action_json(path: &std::path::Path) -> anyhow::Result<(String, Value, bool)> {
+/// The tool, its recorded arguments, whether the call failed when it was
+/// recorded, and the element its token named (`element`, absent from older
+/// recordings). A missing `result_error` (older or hand-written turns) counts
+/// as not failed, so such turns still replay.
+fn parse_action_json(path: &std::path::Path) -> anyhow::Result<(String, Value, bool, Option<Value>)> {
     if !path.exists() {
         anyhow::bail!("Missing action.json");
     }
@@ -589,7 +625,8 @@ fn parse_action_json(path: &std::path::Path) -> anyhow::Result<(String, Value, b
         .get("result_error")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    Ok((tool, tool_args, recorded_error))
+    let element = obj.get("element").filter(|element| element.is_object()).cloned();
+    Ok((tool, tool_args, recorded_error, element))
 }
 
 // ── install_ffmpeg ────────────────────────────────────────────────────────────

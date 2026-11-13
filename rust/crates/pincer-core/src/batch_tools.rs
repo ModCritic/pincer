@@ -189,8 +189,8 @@ impl Tool for RunStepsTool {
                 or text, since it does not reuse the step's target; value, value_contains, \
                 enabled and selected then test that element (`selected` is a check box's \
                 checked state, and the selected or checked state of a radio button, list item, \
-                menu item or tab). `text` matches any tree row, \
-                static text included; \
+                menu item or tab). `text` matches any tree row that contains it, \
+                case-insensitive, static text included; \
                 `gone:true` waits for it to disappear. A failed step is reported with its phase \
                 (wait_for, find, action, expect) and what was found. A step refused because its \
                 app ignores background input says how to re-send it. After a failure caused by \
@@ -781,6 +781,9 @@ impl Plan {
                     name_own_baseline(&mut result.content, since);
                     if let Some(state) = result.structured_content.as_mut() {
                         state["since_read_by"] = json!("run_steps");
+                        if let Some(Value::String(diff)) = state.get_mut("tree_diff") {
+                            name_own_baseline_in(diff, since);
+                        }
                     }
                 }
                 let summary = result
@@ -1220,23 +1223,33 @@ fn own_baseline_label(since: &str) -> String {
 /// Name the batch's own baseline read in the diff text, where it first
 /// appears (`since s00000002: ...` / `no change since s00000002`).
 fn name_own_baseline(content: &mut [Content], since: &str) {
-    let label = own_baseline_label(since);
     for item in content.iter_mut() {
         if let Content::Text { text, .. } = item {
-            for (old, new) in [
-                (format!("since {since}:"), format!("since {label}:")),
-                (
-                    format!("no change since {since}"),
-                    format!("no change since {label}"),
-                ),
-            ] {
-                if let Some(at) = text.find(&old) {
-                    text.replace_range(at..at + old.len(), &new);
-                    return;
-                }
+            if name_own_baseline_in(text, since) {
+                return;
             }
         }
     }
+}
+
+/// [`name_own_baseline`] for one string; whether it named it. The read's
+/// structured `tree_diff` gets the same words as its text, or the text
+/// renderer prints the diff a second time (round 9 of the first-call test).
+fn name_own_baseline_in(text: &mut String, since: &str) -> bool {
+    let label = own_baseline_label(since);
+    for (old, new) in [
+        (format!("since {since}:"), format!("since {label}:")),
+        (
+            format!("no change since {since}"),
+            format!("no change since {label}"),
+        ),
+    ] {
+        if let Some(at) = text.find(&old) {
+            text.replace_range(at..at + old.len(), &new);
+            return true;
+        }
+    }
+    false
 }
 
 /// One line saying what the end-of-batch read found.
@@ -1492,12 +1505,30 @@ async fn refind_stale_target(
         ),
         ..Default::default()
     };
+    let (retry, found) = refind_in_window(locator, args, &window, &role, &label).await?;
+    Some((
+        retry,
+        format!(
+            "element {token} went stale (the window changed); acted on the same {role} \"{label}\", found again as {found}"
+        ),
+    ))
+}
+
+/// The single element with `role` and exactly `label` in `window`: `args`
+/// with its fresh token, and how it was found.
+async fn refind_in_window(
+    locator: &Locator<'_>,
+    args: &Value,
+    window: &WindowSpec,
+    role: &str,
+    label: &str,
+) -> Option<(Value, String)> {
     let element = ElementSpec {
-        role: Some(role.clone()),
-        name: Some(label.clone()),
+        role: Some(role.to_owned()),
+        name: Some(label.to_owned()),
         ..Default::default()
     };
-    let found = locator.find(&window, &element, REFIND_TIMEOUT).await.ok()?;
+    let found = locator.find(window, &element, REFIND_TIMEOUT).await.ok()?;
     let same_label = found
         .element
         .get("label")
@@ -1511,12 +1542,39 @@ async fn refind_stale_target(
     let object = retry.as_object_mut()?;
     object.insert("element_token".into(), json!(fresh));
     object.remove("element_index");
+    Some((retry, found.describe()))
+}
+
+/// For replay_trajectory: the element a recorded turn acted on, found again
+/// by the role and label its recording kept (`element` in action.json), in
+/// the window its arguments name, else the window the recording names. The
+/// arguments with the element's fresh token, and a note saying so. `None`
+/// when no single element in that window has that role and label.
+pub(crate) async fn refind_recorded_element(
+    registry: &ToolRegistry,
+    args: &Value,
+    element: &Value,
+) -> Option<(Value, String)> {
+    let role = element.get("role").and_then(Value::as_str)?;
+    let label = element.get("label").and_then(Value::as_str)?;
+    let window = WindowSpec {
+        pid: args
+            .get("pid")
+            .and_then(Value::as_i64)
+            .or_else(|| element.get("pid").and_then(Value::as_i64)),
+        window_id: args
+            .get("window_id")
+            .and_then(Value::as_u64)
+            .or_else(|| element.get("window_id").and_then(Value::as_u64)),
+        ..Default::default()
+    };
+    window.pid?;
+    let session = args.get("session").and_then(Value::as_str).map(str::to_owned);
+    let locator = Locator::new(registry, session, Instant::now() + REFIND_TIMEOUT * 2);
+    let (fresh, found) = refind_in_window(&locator, args, &window, role, label).await?;
     Some((
-        retry,
-        format!(
-            "element {token} went stale (the window changed); acted on the same {role} \"{label}\", found again as {}",
-            found.describe()
-        ),
+        fresh,
+        format!("found the recorded {role} \"{label}\" again as {found}"),
     ))
 }
 
@@ -1555,7 +1613,7 @@ fn menu_bar_route(args: &Value, result: &ToolResult) -> Option<(Value, String)> 
 /// `[17] AXButton (Delete draft)`, or an AT-SPI role of several words,
 /// `[9] push button "Save"`. None for a row without a label, such as a
 /// value row `[12] AXStaticText = "Total"`.
-fn row_role_and_label(line: &str) -> Option<(String, String)> {
+pub(crate) fn row_role_and_label(line: &str) -> Option<(String, String)> {
     let rest = line.trim().strip_prefix("- ")?.trim_start();
     let rest = rest.strip_prefix('[')?;
     let (_, rest) = rest.split_once(']')?;

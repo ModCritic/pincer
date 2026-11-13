@@ -12069,9 +12069,11 @@ impl Tool for ScrollTool {
                 x11_xsendevent). direction required; amount (default 3) counts wheel steps, or with \
                 by:\"page\" pages of 3 wheel steps each, not screenfuls; the app decides how far a \
                 step moves. On X11 the result compares the window's scroll bars from \
-                the last get_window_state: an error with code no_change when nothing moved (Qt \
-                ignores synthetic wheel events; use set_value on the scroll bar row instead), \
-                unverifiable when no scroll bar is known. Where no focus-free pointer route \
+                the last get_window_state (a narrow read must include them, e.g. query:\"scroll \
+                bar\"): an error with code no_change when nothing moved, unverifiable when no \
+                scroll bar is known. Qt ignores synthetic wheel events: use delivery_mode \
+                foreground, or set_value on the scroll bar row with a value in the bar's own \
+                units (the number its row shows, not a fraction). Where no focus-free pointer route \
                 exists (a GTK3 canvas, for example) background delivery is refused with \
                 background_unavailable: retry with delivery_mode foreground. Window x,y need a \
                 get_window_state screenshot of the window earlier in the session \
@@ -12778,8 +12780,10 @@ fn scroll_outcome_result(
             ToolResult::error(format!(
                 "Nothing scrolled: sent {what} {direction} ({route}), but the window's scroll \
                  bar stayed at {value}; {why}. In background, set the scroll position with \
-                 set_value on the `scroll bar` row's element_token, or press_key pagedown / \
-                 pageup on the window; otherwise retry with delivery_mode:\"foreground\".\
+                 set_value on the `scroll bar` row's element_token, in the bar's own units (the \
+                 number its row's value shows, not a fraction), or press_key pagedown / pageup \
+                 on the window (Qt takes keys only while its window is active); otherwise retry \
+                 with delivery_mode:\"foreground\".\
                  {page_note}"
             ))
             .with_structured(json!({
@@ -12799,7 +12803,9 @@ fn scroll_outcome_result(
             if synthetic_wheel_ignored {
                 text.push_str(
                     " This toolkit (Qt, GTK or LibreOffice) ignores synthetic wheel events, so \
-                     this most likely did nothing.",
+                     this most likely did nothing: retry with delivery_mode:\"foreground\", or \
+                     read the bar with query:\"scroll bar\" and set_value its row in the bar's \
+                     own units.",
                 );
             }
             ToolResult::text(text).with_structured(json!({
@@ -16401,7 +16407,8 @@ impl Tool for MoveAlongPathTool {
         // them, so the text result does not repeat `stats` as JSON.
         ToolResult::text(format!(
             "Moved the real pointer along the path{held} in {duration_ms} ms{click}: \
-             {:.1} px from ({:.1}, {:.1}) to ({:.1}, {:.1}), {} segment(s), {} samples.",
+             {:.1} px from ({:.1}, {:.1}) to ({:.1}, {:.1}) in the coordinates passed, {} \
+             segment(s), {} samples.",
             round_tenth(sampled.length_px),
             round_tenth(first.0),
             round_tenth(first.1),
@@ -16756,15 +16763,34 @@ impl Tool for CheckPermissionsTool {
         // /run/user heuristic false-passed exactly the headless/container case
         // (/run/user exists, but no a11y bus → empty trees). Probe for real.
         let dbus_address = std::env::var("DBUS_SESSION_BUS_ADDRESS").ok();
-        let atspi_ok = tokio::task::spawn_blocking(crate::health_report::probe_a11y_bus)
+        let bus_ok = tokio::task::spawn_blocking(crate::health_report::probe_a11y_bus)
             .await
             .unwrap_or(false);
+        // The bus name can have an owner while no registry runs, and then
+        // every read comes back without a tree (round 8 of the first-call
+        // test), so ask the registry itself.
+        let registry = if bus_ok {
+            tokio::task::spawn_blocking(crate::health_report::probe_atspi_registry)
+                .await
+                .unwrap_or_else(|error| Err(error.to_string()))
+        } else {
+            Err("org.a11y.Bus is not reachable".to_owned())
+        };
+        let atspi_ok = registry.is_ok();
 
         let wayland_display = std::env::var("WAYLAND_DISPLAY").ok();
-        let atspi_status = if atspi_ok {
+        let atspi_status = if let (true, Err(why)) = (bus_ok, &registry) {
+            format!(
+                "❌ org.a11y.Bus reachable, but the AT-SPI registry does not answer: {why}. \
+                 Window reads will return no element tree; start at-spi2-registryd on the \
+                 accessibility bus"
+            )
+        } else if atspi_ok {
             match &dbus_address {
-                Some(a) => format!("✅ org.a11y.Bus reachable (DBUS_SESSION_BUS_ADDRESS={a})"),
-                None => "✅ org.a11y.Bus reachable".to_string(),
+                Some(a) => format!(
+                    "✅ org.a11y.Bus reachable and the registry answers (DBUS_SESSION_BUS_ADDRESS={a})"
+                ),
+                None => "✅ org.a11y.Bus reachable and the registry answers".to_string(),
             }
         } else if dbus_address.is_none() {
             "❌ no session bus (DBUS_SESSION_BUS_ADDRESS unset and none auto-discovered) — \
@@ -16954,8 +16980,9 @@ impl Tool for SetConfigTool {
     fn def(&self) -> &ToolDef {
         SCFG_DEF.get_or_init(|| ToolDef {
             name: "set_config".into(),
-            description: "Update the driver configuration. max_image_dimension takes effect \
-                immediately. The result echoes each key this call set as `key=value`; \
+            description: "Update the driver configuration. max_image_dimension, the long-edge \
+                cap of get_window_state screenshots, takes effect immediately (get_desktop_state \
+                ignores it and takes its own max_image_dimension). The result echoes each key this call set as `key=value`; \
                 get_config shows the rest.\n\n\
                 Pass each setting as its own field: `{\"max_image_dimension\": 0}`.\n\n\
                 The experimental_pip keys persist to ~/.pincer/config.json and apply on the \
@@ -16966,7 +16993,7 @@ impl Tool for SetConfigTool {
                 `cursor.badges` (`minimal` default, `verbose`, or `off`) sets the agent cursor badge \
                 for every cursor at once.".into(),
             input_schema: with_cursor_motion_config_properties(json!({"type":"object","properties":{
-                "max_image_dimension":{"type":"integer","description":"Max dimension for screenshot resizing (0 = no limit)."},
+                "max_image_dimension":{"type":"integer","description":"Long-edge cap in pixels for get_window_state screenshots (0 = no limit); get_desktop_state ignores it."},
                 "experimental_pip":{"type":"boolean","description":"Enable the experimental PiP preview window (applies next restart; Linux backend stubbed)."},
                 "experimental_pip_geometry":{"type":"string","description":"PiP window size + optional position in `WxH` or `WxH+X+Y` form."}
             },"additionalProperties":false})),
@@ -18585,8 +18612,11 @@ fn bring_to_front_result(
             _ => String::new(),
         }
     };
+    // "is now" only when this call changed something (round 6 read "is now
+    // ... It already was" as a contradiction).
+    let now = if unchanged { "" } else { "now " };
     ToolResult::text(format!(
-        "✅ Window {xid} is now {position} (X11 _NET_ACTIVE_WINDOW).{change}"
+        "✅ Window {xid} is {now}{position} (X11 _NET_ACTIVE_WINDOW).{change}"
     ))
     .with_structured(structured)
 }

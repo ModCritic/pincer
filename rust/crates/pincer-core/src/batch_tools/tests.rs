@@ -677,6 +677,14 @@ fn a_diff_against_the_batchs_own_read_says_so() {
         text.contains("since s00000002 (run_steps' own read before its steps): 0 added"),
         "{text}"
     );
+    // The structured `tree_diff` gets the same words, so the text renderer
+    // sees the diff it already printed.
+    let mut diff = "since s00000002: 0 added, 1 changed, 0 removed.".to_owned();
+    assert!(super::name_own_baseline_in(&mut diff, "s00000002"));
+    assert!(
+        diff.starts_with("since s00000002 (run_steps' own read before its steps): 0 added"),
+        "{diff}"
+    );
     let state = json!({
         "since": "s00000002",
         "since_status": "diff",

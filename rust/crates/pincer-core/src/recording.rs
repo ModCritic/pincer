@@ -451,6 +451,8 @@ pub struct PendingTurn {
     predicted_refusal: Option<&'static str>,
     before: TurnCapture,
     dispatch_click: Option<Arc<DispatchClickScope>>,
+    /// The element an `element_token` named, as [`recorded_element`] read it.
+    element: Option<Value>,
 }
 
 /// Trusted identity of the call that may reserve a turn.
@@ -977,10 +979,19 @@ impl RecordingSession {
         // `call` branch (serve.rs); recording is the single chokepoint where
         // those internal keys must not leak into the persisted trajectory.
         let args = strip_internal_keys(args).into_owned();
+        let recorded_element = recorded_element(&args);
         let held_target = held_target
             .filter(|_| matches!(tool_name, "mouse_drag" | "mouse_button_up"))
             .filter(|_| args.opt_i64("pid").is_none());
-        let pid = args.opt_i64("pid").or(held_target.map(|(pid, _)| pid));
+        // A call addressed by element_token alone names its window through
+        // the token: take it from the recorded element, so the turn gets
+        // the window's screenshots and tree instead of the whole desktop
+        // (round 9 of the first-call test).
+        let (element_pid, element_window) = recorded_element_target(recorded_element.as_ref());
+        let pid = args
+            .opt_i64("pid")
+            .or(held_target.map(|(pid, _)| pid))
+            .or(element_pid);
         let element = pid.and_then(|pid| {
             ELEMENT_BOUNDS_FN.get()?(
                 pid,
@@ -991,7 +1002,8 @@ impl RecordingSession {
         let window_id = element
             .map(|(window, _)| window)
             .or_else(|| args.opt_u64("window_id"))
-            .or(held_target.map(|(_, window)| window));
+            .or(held_target.map(|(_, window)| window))
+            .or(element_window);
         let click_point = resolve_click_point(
             tool_name,
             &args,
@@ -1050,6 +1062,7 @@ impl RecordingSession {
             } else {
                 None
             },
+            element: recorded_element,
         })
     }
 
@@ -1414,6 +1427,40 @@ fn write_turn(
     write_turn_with_after(pending, after, result_text, action_record, result_is_error)
 }
 
+/// The element a turn's `element_token` names: the role and label of its
+/// row in the read the token came from, and that read's pid and window. A
+/// token belongs to one snapshot of one process, and run_steps and run_script
+/// record a role/name target as the token they resolved it to, so
+/// replay_trajectory finds the element again by these instead (round 6 of
+/// the first-call test replayed name-targeted steps as stale tokens). `None`
+/// without a token, for a read this process no longer remembers, and for an
+/// element with no label.
+fn recorded_element(args: &Value) -> Option<Value> {
+    let token = args.get("element_token").and_then(Value::as_str)?;
+    let from_read = || {
+        let (snapshot_id, row) = token.split_once(':')?;
+        let stored = crate::window_state_view::snapshot_row(snapshot_id, row.parse().ok()?)?;
+        let (role, label) = crate::batch_tools::row_role_and_label(&stored.line)?;
+        Some(serde_json::json!({
+            "role": role,
+            "label": label,
+            "pid": stored.pid,
+            "window_id": stored.window_id,
+        }))
+    };
+    // A caller's own read first, then a read run_steps or run_script made
+    // to resolve a role/name target, which no caller saw.
+    from_read().or_else(|| crate::batch_tools::locate::resolved_token_element(token))
+}
+
+/// The pid and window of a [`recorded_element`].
+fn recorded_element_target(element: Option<&Value>) -> (Option<i64>, Option<u64>) {
+    (
+        element.and_then(|element| element.get("pid")).and_then(Value::as_i64),
+        element.and_then(|element| element.get("window_id")).and_then(Value::as_u64),
+    )
+}
+
 fn write_turn_with_after(
     pending: PendingTurn,
     after: TurnCapture,
@@ -1436,6 +1483,7 @@ fn write_turn_with_after(
         predicted_refusal,
         mut before,
         dispatch_click,
+        element,
     } = pending;
     let supplemental = dispatch_click
         .map(|scope| std::mem::take(&mut *scope.capture.lock().unwrap()))
@@ -1503,6 +1551,9 @@ fn write_turn_with_after(
     });
     if let Some((cx, cy)) = click_point {
         payload["click_point"] = serde_json::json!({"x": cx, "y": cy});
+    }
+    if let Some(element) = element {
+        payload["element"] = element;
     }
     if click_source.is_some() || supplemental.failure.is_some() {
         payload["click_point_image"] = serde_json::json!("click_source.png");
@@ -1660,6 +1711,39 @@ fn validate_video_metadata(meta: VideoMetadata) -> anyhow::Result<VideoMetadata>
 mod tests {
     use super::*;
 
+    /// A token turn records its element by role and label, from the read
+    /// the token came from, so replay can find it in a later run.
+    #[test]
+    fn a_token_turn_records_its_element_by_role_and_label() {
+        crate::window_state_view::remember_for_test(
+            "s0000e1e1",
+            143,
+            16777219,
+            "- frame = \"Pincer Test Pad\"\n      - [5] button \"Count\" [actions=[click]]\n\
+             - [6] scroll bar \"\" value=\"0.0\"\n",
+        );
+        assert_eq!(
+            recorded_element(&serde_json::json!({"element_token": "s0000e1e1:5"})),
+            Some(serde_json::json!({
+                "role": "button", "label": "Count", "pid": 143, "window_id": 16777219
+            }))
+        );
+        let element = recorded_element(&serde_json::json!({"element_token": "s0000e1e1:5"}));
+        assert_eq!(
+            recorded_element_target(element.as_ref()),
+            (Some(143), Some(16777219))
+        );
+        // No label, no row, no read, no token: nothing to find it by.
+        for args in [
+            serde_json::json!({"element_token": "s0000e1e1:6"}),
+            serde_json::json!({"element_token": "s0000e1e1:9"}),
+            serde_json::json!({"element_token": "s0000e1ff:5"}),
+            serde_json::json!({"x": 10, "y": 20}),
+        ] {
+            assert_eq!(recorded_element(&args), None, "{args}");
+        }
+    }
+
     #[test]
     fn pixel_mappers_follow_registry_lifetimes_and_concurrent_runtime_state() {
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -1761,6 +1845,7 @@ mod tests {
                 pid: 901,
                 capture: Mutex::new(DispatchClickCapture::default()),
             })),
+            element: None,
         }
     }
 
@@ -2139,6 +2224,7 @@ mod tests {
                 predicted_refusal: None,
                 before: TurnCapture::default(),
                 dispatch_click: None,
+                element: None,
             };
             write_turn(pending, "AT-SPI outcome", Some(&record), is_error).unwrap();
             let action: Value =
@@ -2209,6 +2295,7 @@ mod tests {
                             ..Default::default()
                         },
                         dispatch_click: None,
+                        element: None,
                     },
                     "AT-SPI outcome",
                     Some(&record),
@@ -2671,6 +2758,7 @@ mod tests {
                 ..Default::default()
             },
             dispatch_click: None,
+            element: None,
         };
         let manifest = |root: &Path| -> Value {
             serde_json::from_slice(&std::fs::read(root.join("evidence.json")).unwrap()).unwrap()

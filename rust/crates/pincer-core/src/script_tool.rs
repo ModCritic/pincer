@@ -172,10 +172,11 @@ impl Tool for RunScriptTool {
                 - app.getState(opts?) → get_window_state result (`tree_markdown` or \
                 `tree_diff`, `snapshot_id`; pass get_window_state options such as \
                 {since:\"latest\"})\n\
-                - app.query({role?, name?, text?}) → matching elements across the app's \
-                windows {element_token, role, label, value, enabled, selected, frame}, then \
-                matching static-text rows {role, label, value, text, display_only} (read text \
-                such as a status line from their `value`)\n\
+                - app.query({role?, name?, text?}) → one array: matching elements across the \
+                app's windows {element_token, role, label, value, enabled, selected, frame}, \
+                then matching static-text rows {role, label, value, text, display_only} (read \
+                text such as a status line from their `value`); `text` matches a row that \
+                contains it, case-insensitive\n\
                 - app.waitFor({role?, name?, text?, gone?, value?, timeout_ms?}) and \
                 app.verify(predicate | predicates) (verify_state)\n\
                 - app.click(t), doubleClick(t), rightClick(t), typeText(text, t?), \
