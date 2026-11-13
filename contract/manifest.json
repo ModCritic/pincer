@@ -676,7 +676,7 @@
     },
     {
       "name": "end_session",
-      "description": "End one visible lifecycle session and run its cursor, recording, configuration, and other cleanup hooks exactly once. Omit `session` to end the authenticated transport's implicit session. Idempotent.",
+      "description": "End a session and run its cleanup once: hide its agent cursor, stop a recording it started (finalizing the video), drop the window snapshots it took and its consent grants, and close isolated browsers it opened with browser_prepare. Apps it started with launch_app keep running; close them with kill_app before ending if they should not outlive it. Omit `session` to end this connection's default session. Ending an ended session succeeds again. Afterward, calls naming the session are refused with `session_ended` until start_session starts it again.",
       "platforms": [
         "macos",
         "windows",
@@ -725,7 +725,7 @@
     },
     {
       "name": "get_agent_cursor_state",
-      "description": "Return the session cursor's theme, semantic playback, position, visibility, and motion.",
+      "description": "Return the session cursor's state. `enabled`: whether set_agent_cursor_enabled lets it be drawn; an enabled cursor still hides after `motion.idle_hide_ms` without activity (15000 ms by default), and get_session's `cursor_visible` says whether it is drawn right now. `position`: where it was last drawn, in screen coordinates (desktop pixels; points on macOS), null until it first moves. `installed_themes`: the ids set_agent_cursor_theme accepts. `visual_state`: the animation playing, for the kind of tool call in `requested_action` and `resolved_action`, with `modifiers` naming its delivery (`background`, `foreground`) and how the call named its target (`ax` element token, `pixel` x/y, `browser`, else `desktop`), its `phase` and `frame`, and `preempted_count`, the animations a newer call cut short. `motion`: `effects` in use and `pinned_effects`, the ones set on or off; the others follow the style.",
       "platforms": [
         "macos",
         "windows",
@@ -759,6 +759,15 @@
         "properties": {
           "enabled": {
             "type": "boolean"
+          },
+          "installed_themes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "motion": {
             "properties": {
@@ -809,6 +818,15 @@
               },
               "idle_hide_ms": {
                 "type": "number"
+              },
+              "pinned_effects": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
               },
               "spring": {
                 "type": "number"
@@ -1233,7 +1251,7 @@
     },
     {
       "name": "get_session",
-      "description": "Read content-free lifecycle, cursor, recording, and idle status for one session visible to this authenticated transport. Omit `session` to inspect its implicit session.",
+      "description": "Read one session's status, without window content: `state` (active or ending), `cursor_visible` (its agent cursor is drawn on screen right now: false before its first action and after its idle timeout, 15000 ms by default, even while get_agent_cursor_state reports it `enabled`), `recording_active`, `idle_seconds`, `expires_in_seconds` and `transport`. Omit `session` for this connection's default session. An ended session is refused with `session_ended` (start_session with the same label starts it again); a label never started on this connection is refused with `session_not_started`.",
       "platforms": [
         "macos",
         "windows",
@@ -1982,7 +2000,7 @@
     },
     {
       "name": "invoke_menu",
-      "description": "Resolve an exact application-menu path one live native level at a time and invoke its final item through accessibility APIs. Missing, ambiguous, disabled, or structurally mismatched segments fail closed; this tool never falls back to pixels.",
+      "description": "Run an application menu command by its exact path of item labels, e.g. [\"Edit\",\"Undo\"]. Each level is resolved in the live menu through the accessibility API and the final item fires there; this tool never clicks pixels. A missing, ambiguous, disabled or mismatched segment is refused (menu_path_unavailable). The menu opened to reach the item is closed again after it fires; when one stays open, the result names it and how to close it. The command's own effect is not verified: read it back from fresh state.",
       "platforms": [
         "macos",
         "windows",
@@ -2276,7 +2294,7 @@
     },
     {
       "name": "list_sessions",
-      "description": "List content-free lifecycle summaries attached to this authenticated transport lease. It does not enumerate other callers' sessions.",
+      "description": "List this connection's active sessions, with the same fields as get_session. Ended sessions are left out, and other connections' sessions are never shown. Returns up to `limit` (default 50) per call; pass `next_cursor` back as `cursor` for the rest.",
       "platforms": [
         "macos",
         "windows",
@@ -3326,7 +3344,7 @@
     },
     {
       "name": "set_agent_cursor_motion",
-      "description": "Configure the movement style, timing, effects and visibility timing for a session cursor.",
+      "description": "Configure the movement style, timing, effects and visibility timing for a session cursor. Fields left out keep their value. An effect at `default` (where every effect starts) follows the style, so changing `style` can turn it on or off; `on` or `off` pins it. The result's `motion.effects` are the effects in use and `motion.pinned_effects` the pinned ones.",
       "platforms": [
         "macos",
         "windows",
@@ -3359,7 +3377,7 @@
           },
           "effects": {
             "additionalProperties": false,
-            "description": "Turn effects on or off. Omit a field to keep it; `\"default\"` restores the style default.",
+            "description": "Turn effects on or off. Omit a field to keep its setting. An effect at `\"default\"`\n(where it starts) follows the style, so a `style` change can turn it on or off; `\"on\"` or\n`\"off\"` pins it.",
             "properties": {
               "glow": {
                 "description": "Soft glow around the cursor that grows with speed.",
@@ -3522,6 +3540,15 @@
               "idle_hide_ms": {
                 "type": "number"
               },
+              "pinned_effects": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
               "spring": {
                 "type": "number"
               },
@@ -3581,7 +3608,7 @@
     },
     {
       "name": "set_agent_cursor_theme",
-      "description": "Select an already-installed cursor theme for a session.",
+      "description": "Select an installed cursor theme for a session. get_agent_cursor_state's `installed_themes` lists the ids; an unknown id is refused with that list.",
       "platforms": [
         "macos",
         "windows",
@@ -3615,7 +3642,7 @@
             "type": "string"
           },
           "theme_id": {
-            "description": "Id of an installed cursor theme (see `pincer cursor-theme list`).",
+            "description": "Id of an installed cursor theme: `pincer.default` is built in, and get_agent_cursor_state\nlists every installed id in `installed_themes`.",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"

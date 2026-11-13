@@ -521,6 +521,21 @@ struct RecordingInner {
     last_cursor_samples: usize,
 }
 
+/// What one stop ended (see [`RecordingSession::stop_owner_reporting`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoppedRecording {
+    /// Folder the recording wrote to.
+    pub output_dir: String,
+    /// Turn folders this recording numbered: `turn-00001` to `turn-NNNNN`.
+    /// A turn still in flight when recording stopped keeps its folder but
+    /// may lack `action.json`.
+    pub turns: u32,
+    /// The finalized video, when video was on and finalized.
+    pub video_path: Option<String>,
+    /// Why the video could not be finalized; the turns are kept regardless.
+    pub video_error: Option<String>,
+}
+
 /// Snapshot of the current recording state (cheap to clone).
 #[derive(Debug, Clone)]
 pub struct RecordingState {
@@ -737,9 +752,24 @@ impl RecordingSession {
     /// The guard lives inside the lock so it is race-free against a concurrent
     /// `start()`. Supersedes the #1775 generation-token `stop()`.
     pub fn stop_owner(&self, requester: Option<&str>) -> anyhow::Result<()> {
+        match self.stop_owner_reporting(requester) {
+            Some(StoppedRecording {
+                video_error: Some(error),
+                ..
+            }) => anyhow::bail!("video finalization failed: {error}"),
+            _ => Ok(()),
+        }
+    }
+
+    /// [`Self::stop_owner`] that says what it stopped, read under the same
+    /// lock: the folder and how many turn folders this recording numbered.
+    /// `None` when nothing was running or `requester` does not own it. A
+    /// failed video finalization is reported in the summary, not as an error,
+    /// so the caller can still name the turns that were written.
+    pub fn stop_owner_reporting(&self, requester: Option<&str>) -> Option<StoppedRecording> {
         let mut inner = self.inner.lock().unwrap();
         if !inner.enabled {
-            return Ok(());
+            return None;
         }
         if let Some(req) = requester {
             // A targeted stop only acts when the requester owns the live
@@ -747,11 +777,14 @@ impl RecordingSession {
             // never torn down by a session-scoped stop — only an unconditional
             // `stop_owner(None)` reaches it.
             if inner.owner.as_deref() != Some(req) {
-                return Ok(());
+                return None;
             }
         }
         inner.owner = None;
         let dir = inner.output_dir.clone();
+        // `next_turn` is reserved per turn before dispatch, so every number
+        // below it named a turn folder of this recording.
+        let turns = inner.next_turn.saturating_sub(1);
         let started_at_ms = inner.session_start_ms;
         let (video_meta, stop_error) = match inner.video.take().map(|rec| rec.stop()) {
             Some(Ok(meta)) => match validate_video_metadata(meta) {
@@ -780,7 +813,7 @@ impl RecordingSession {
         // Rewrite session.json with final video metadata + cursor count
         // so the renderer (and any external analysis) sees what actually
         // landed.
-        if let Some(dir) = dir {
+        if let Some(dir) = &dir {
             let video_block = if let Some(ref m) = video_meta {
                 video_session_payload(true, None, Some(m))
             } else {
@@ -794,10 +827,14 @@ impl RecordingSession {
             });
             let _ = write_json_atomic(&dir.join("session.json"), &session_payload);
         }
-        if let Some(error) = stop_error {
-            anyhow::bail!("video finalization failed: {error}");
-        }
-        Ok(())
+        Some(StoppedRecording {
+            output_dir: dir
+                .map(|dir| dir.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            turns,
+            video_path: video_meta.map(|meta| meta.path.to_string_lossy().into_owned()),
+            video_error: stop_error,
+        })
     }
 
     /// Legacy toggle API kept as a thin shim over `start()`/`stop()` so

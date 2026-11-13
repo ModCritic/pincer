@@ -270,6 +270,11 @@ pub struct CursorMotionOutput {
     /// predate motion styles.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<crate::CursorMotionEffectsOutput>,
+    /// Effects set `on` or `off`, which keep their value when the style
+    /// changes; every other effect follows the style. Absent from daemons
+    /// that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_effects: Option<Vec<String>>,
 }
 
 // Optional enums advertise the bare string enum (Gemini rejects `null` in
@@ -347,6 +352,10 @@ pub struct GetAgentCursorStateOutput {
     pub theme: CursorThemeOutput,
     pub visual_state: CursorVisualOutput,
     pub motion: CursorMotionOutput,
+    /// Ids `set_agent_cursor_theme` accepts. Absent from daemons that
+    /// predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_themes: Option<Vec<String>>,
 }
 
 impl ToolOutput for GetAgentCursorStateOutput {}

@@ -53,7 +53,7 @@ fn start() -> ToolContract {
 fn get() -> ToolContract {
     contract::<GetSessionInput, SessionOutput>(
         "get_session",
-        "Read content-free lifecycle, cursor, recording, and idle status for one session visible to this authenticated transport. Omit `session` to inspect its implicit session.",
+        "Read one session's status, without window content: `state` (active or ending), `cursor_visible` (its agent cursor is drawn on screen right now: false before its first action and after its idle timeout, 15000 ms by default, even while get_agent_cursor_state reports it `enabled`), `recording_active`, `idle_seconds`, `expires_in_seconds` and `transport`. Omit `session` for this connection's default session. An ended session is refused with `session_ended` (start_session with the same label starts it again); a label never started on this connection is refused with `session_not_started`.",
         &["session.lifecycle.read"],
         ToolAnnotations {
             read_only: true,
@@ -67,7 +67,7 @@ fn get() -> ToolContract {
 fn list() -> ToolContract {
     contract::<ListSessionsInput, ListSessionsOutput>(
         "list_sessions",
-        "List content-free lifecycle summaries attached to this authenticated transport lease. It does not enumerate other callers' sessions.",
+        "List this connection's active sessions, with the same fields as get_session. Ended sessions are left out, and other connections' sessions are never shown. Returns up to `limit` (default 50) per call; pass `next_cursor` back as `cursor` for the rest.",
         &["session.lifecycle.list"],
         ToolAnnotations {
             read_only: true,
@@ -81,7 +81,7 @@ fn list() -> ToolContract {
 fn end() -> ToolContract {
     contract::<EndSessionInput, EndSessionOutput>(
         "end_session",
-        "End one visible lifecycle session and run its cursor, recording, configuration, and other cleanup hooks exactly once. Omit `session` to end the authenticated transport's implicit session. Idempotent.",
+        "End a session and run its cleanup once: hide its agent cursor, stop a recording it started (finalizing the video), drop the window snapshots it took and its consent grants, and close isolated browsers it opened with browser_prepare. Apps it started with launch_app keep running; close them with kill_app before ending if they should not outlive it. Omit `session` to end this connection's default session. Ending an ended session succeeds again. Afterward, calls naming the session are refused with `session_ended` until start_session starts it again.",
         &["session.lifecycle.end"],
         ToolAnnotations {
             read_only: false,
@@ -105,5 +105,20 @@ mod tests {
         assert!(description.contains("revive a name ended with end_session"));
         assert!(description.contains("ordinary actions never revive those"));
         assert!(description.contains("idle for 30 min ends, and its next call restarts it fresh"));
+    }
+
+    #[test]
+    fn ended_sessions_are_described_as_refused_or_left_out() {
+        // Measured on Linux at 3eefd3e: get_session on an ended label refused
+        // with `session_ended`, list_sessions dropped it, and an app started
+        // with launch_app in the session was still running after end_session.
+        let get = get().description;
+        assert!(get.contains("refused with `session_ended`"));
+        assert!(get.contains("`session_not_started`"));
+        assert!(list().description.contains("Ended sessions are left out"));
+        let end = end().description;
+        assert!(end.contains("Apps it started with launch_app keep running"));
+        assert!(end.contains("close isolated browsers it opened with browser_prepare"));
+        assert!(end.contains("refused with `session_ended`"));
     }
 }

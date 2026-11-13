@@ -25,6 +25,44 @@ fn typed_text_is_confirmed_only_when_read_back() {
 }
 
 #[test]
+fn a_read_back_quotes_the_typed_text_with_a_little_context() {
+    // Round 1 quoted the first ~200 characters of the whole document.
+    let doc = format!(
+        "{}HELLO FROM T2 {}",
+        "001 The quick brown fox jumps over the lazy dog.\n".repeat(3),
+        "002 The quick brown fox jumps over the lazy dog.\n".repeat(50)
+    );
+    let result = type_text_readback_result(1, 0, "HELLO FROM T2 ", "r", Some(doc), None);
+    let s = result.structured_content.clone().unwrap();
+    assert_eq!(s["effect"], "confirmed");
+    assert_eq!(
+        s["readback"],
+        "... over the lazy dog.\\nHELLO FROM T2 002 The quick brown ..."
+    );
+    // A short value is quoted whole.
+    let short = type_text_readback_result(1, 0, "ab", "r", Some("xxab".into()), None);
+    assert_eq!(short.structured_content.unwrap()["readback"], "xxab");
+    // Long typed text is confirmed without echoing it.
+    let typed = "z".repeat(100);
+    let long = type_text_readback_result(
+        1,
+        0,
+        &typed,
+        "r",
+        Some(format!("{}{typed}", "a".repeat(100))),
+        None,
+    );
+    let s = long.structured_content.clone().unwrap();
+    assert_eq!(s["effect"], "confirmed");
+    assert!(s.get("readback").is_none());
+    let said = format!("{:?}", long.content);
+    assert!(
+        said.contains("reads back the typed text in place"),
+        "{said}"
+    );
+}
+
+#[test]
 fn typing_into_a_password_field_is_judged_by_how_much_it_grew() {
     let masks = |n: usize| Some("\u{25cf}".repeat(n));
     let grew = type_text_readback_result(1, 8, "xyz", "via targeted AT-SPI", masks(11), Some(8));

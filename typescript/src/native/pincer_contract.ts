@@ -1584,7 +1584,13 @@ export type CursorMotionOutput = {
      * Effects in use after the style defaults. Absent from daemons that
      * predate motion styles.
      */
-    effects?: CursorMotionEffectsOutput
+    effects?: CursorMotionEffectsOutput,
+    /**
+     * Effects set `on` or `off`, which keep their value when the style
+     * changes; every other effect follows the style. Absent from daemons
+     * that predate it.
+     */
+    pinnedEffects?: Array<string>
 }
 
 /**
@@ -1619,7 +1625,8 @@ const FfiConverterTypeCursorMotionOutput = (() => {
                 turnRadius: FfiConverterFloat64.read(from),
                 style: FfiConverterOptionalTypeCursorMotionStyle.read(from),
                 timing: FfiConverterOptionalTypeCursorMotionTiming.read(from),
-                effects: FfiConverterOptionalTypeCursorMotionEffectsOutput.read(from)
+                effects: FfiConverterOptionalTypeCursorMotionEffectsOutput.read(from),
+                pinnedEffects: FfiConverterOptionalSequenceString.read(from)
             };
         }
         write(value: TypeName, into: RustBuffer): void {
@@ -1635,6 +1642,7 @@ const FfiConverterTypeCursorMotionOutput = (() => {
             FfiConverterOptionalTypeCursorMotionStyle.write(value.style, into);
             FfiConverterOptionalTypeCursorMotionTiming.write(value.timing, into);
             FfiConverterOptionalTypeCursorMotionEffectsOutput.write(value.effects, into);
+            FfiConverterOptionalSequenceString.write(value.pinnedEffects, into);
         }
         allocationSize(value: TypeName): number {
             return FfiConverterFloat64.allocationSize(value.startHandle) +
@@ -1648,7 +1656,8 @@ const FfiConverterTypeCursorMotionOutput = (() => {
              FfiConverterFloat64.allocationSize(value.turnRadius) +
              FfiConverterOptionalTypeCursorMotionStyle.allocationSize(value.style) +
              FfiConverterOptionalTypeCursorMotionTiming.allocationSize(value.timing) +
-             FfiConverterOptionalTypeCursorMotionEffectsOutput.allocationSize(value.effects);
+             FfiConverterOptionalTypeCursorMotionEffectsOutput.allocationSize(value.effects) +
+             FfiConverterOptionalSequenceString.allocationSize(value.pinnedEffects);
 
         }
     };
@@ -2487,7 +2496,12 @@ export type GetAgentCursorStateOutput = {
     position?: CursorPointOutput,
     theme: CursorThemeOutput,
     visualState: CursorVisualOutput,
-    motion: CursorMotionOutput
+    motion: CursorMotionOutput,
+    /**
+     * Ids `set_agent_cursor_theme` accepts. Absent from daemons that
+     * predate it.
+     */
+    installedThemes?: Array<string>
 }
 
 /**
@@ -2516,7 +2530,8 @@ const FfiConverterTypeGetAgentCursorStateOutput = (() => {
                 position: FfiConverterOptionalTypeCursorPointOutput.read(from),
                 theme: FfiConverterTypeCursorThemeOutput.read(from),
                 visualState: FfiConverterTypeCursorVisualOutput.read(from),
-                motion: FfiConverterTypeCursorMotionOutput.read(from)
+                motion: FfiConverterTypeCursorMotionOutput.read(from),
+                installedThemes: FfiConverterOptionalSequenceString.read(from)
             };
         }
         write(value: TypeName, into: RustBuffer): void {
@@ -2526,6 +2541,7 @@ const FfiConverterTypeGetAgentCursorStateOutput = (() => {
             FfiConverterTypeCursorThemeOutput.write(value.theme, into);
             FfiConverterTypeCursorVisualOutput.write(value.visualState, into);
             FfiConverterTypeCursorMotionOutput.write(value.motion, into);
+            FfiConverterOptionalSequenceString.write(value.installedThemes, into);
         }
         allocationSize(value: TypeName): number {
             return FfiConverterString.allocationSize(value.session) +
@@ -2533,7 +2549,8 @@ const FfiConverterTypeGetAgentCursorStateOutput = (() => {
              FfiConverterOptionalTypeCursorPointOutput.allocationSize(value.position) +
              FfiConverterTypeCursorThemeOutput.allocationSize(value.theme) +
              FfiConverterTypeCursorVisualOutput.allocationSize(value.visualState) +
-             FfiConverterTypeCursorMotionOutput.allocationSize(value.motion);
+             FfiConverterTypeCursorMotionOutput.allocationSize(value.motion) +
+             FfiConverterOptionalSequenceString.allocationSize(value.installedThemes);
 
         }
     };
@@ -4047,7 +4064,9 @@ export type SetAgentCursorMotionInput = {
      */
     timing?: CursorMotionTiming,
     /**
-     * Turn effects on or off. Omit a field to keep it; `"default"` restores the style default.
+     * Turn effects on or off. Omit a field to keep its setting. An effect at `"default"`
+     * (where it starts) follows the style, so a `style` change can turn it on or off; `"on"` or
+     * `"off"` pins it.
      */
     effects?: CursorMotionEffects,
     /**
@@ -4216,7 +4235,8 @@ export type SetAgentCursorThemeInput = {
      */
     session: string,
     /**
-     * Id of an installed cursor theme (see `pincer cursor-theme list`).
+     * Id of an installed cursor theme: `pincer.default` is built in, and get_agent_cursor_state
+     * lists every installed id in `installed_themes`.
      */
     themeId: string,
     /**
@@ -5175,6 +5195,9 @@ const FfiConverterOptionalTypeCursorMotionTiming = new FfiConverterOptional(FfiC
 // FfiConverter for CursorMotionEffectsOutput | undefined
 const FfiConverterOptionalTypeCursorMotionEffectsOutput = new FfiConverterOptional(FfiConverterTypeCursorMotionEffectsOutput);
 
+// FfiConverter for Array<string> | undefined
+const FfiConverterOptionalSequenceString = new FfiConverterOptional(FfiConverterSequenceString);
+
 // FfiConverter for CursorMotionEffects | undefined
 const FfiConverterOptionalTypeCursorMotionEffects = new FfiConverterOptional(FfiConverterTypeCursorMotionEffects);
 
@@ -5186,9 +5209,6 @@ const FfiConverterOptionalTypeDesktopScope = new FfiConverterOptional(FfiConvert
 
 // FfiConverter for bigint | undefined
 const FfiConverterOptionalUInt64 = new FfiConverterOptional(FfiConverterUInt64);
-
-// FfiConverter for Array<string> | undefined
-const FfiConverterOptionalSequenceString = new FfiConverterOptional(FfiConverterSequenceString);
 
 // FfiConverter for boolean | undefined
 const FfiConverterOptionalBoolean = new FfiConverterOptional(FfiConverterBool);

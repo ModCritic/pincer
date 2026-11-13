@@ -486,6 +486,12 @@ struct Visited<'a> {
     checked: Option<bool>,
     enabled: Option<bool>,
     selected: Option<bool>,
+    /// States the Markdown row shows ([`row_state_marks`]), so a re-read or
+    /// a `since` diff shows a toggle.
+    marks: Vec<&'static str>,
+    /// The field's whole length in characters (AT-SPI `CharacterCount`) when
+    /// `value` is its text and holds only the first [`TEXT_READ_CHARS`].
+    value_total_chars: Option<usize>,
     selectable: bool,
     /// False when the toolkit's state set is known and marks the widget
     /// neither `Showing` nor `Visible`: it exists in the tree but is hidden
@@ -2093,6 +2099,11 @@ async fn collect_visited_bounded_opts<'a>(
             .as_ref()
             .and_then(|state| state.as_ref().ok())
             .is_some_and(|state| state.contains(State::Expanded));
+        let marks = state_r
+            .as_ref()
+            .and_then(|state| state.as_ref().ok())
+            .map(|state| row_state_marks(&role_lower, state))
+            .unwrap_or_default();
         let under_menubar = menubar_children.remove(&(oref.name.clone(), oref.path.clone()));
         let selected = if role_lower.contains("check") {
             checked
@@ -2115,6 +2126,7 @@ async fn collect_visited_bounded_opts<'a>(
         let mut actions: Vec<String> = Vec::new();
         let mut value: Option<String> = None;
         let mut text_content = String::new();
+        let mut text_total: Option<usize> = None;
         if has_action || has_value || has_text {
             // The interface set read above, not `acc.proxies()`, which would
             // ask GetInterfaces again.
@@ -2154,9 +2166,12 @@ async fn collect_visited_bounded_opts<'a>(
                         .and_then(|r| r.ok())
                         .unwrap_or(0);
                     if count > 0 {
-                        let end = count.min(4096);
+                        let end = count.min(TEXT_READ_CHARS as i32);
                         if let Some(Ok(t)) = call(tp.get_text(0, end)).await {
                             text_content = t;
+                        }
+                        if count > end {
+                            text_total = usize::try_from(count).ok();
                         }
                     }
                 }
@@ -2170,6 +2185,8 @@ async fn collect_visited_bounded_opts<'a>(
         // A password field's content is never surfaced.
         let editable_text = has_editable && !role_lower.contains("password");
         value = editable_text_value(editable_text, has_value, value, &text_content);
+        let value_total_chars =
+            text_total.filter(|_| value.as_deref() == Some(text_content.as_str()));
 
         // Surface Text content as the display name when the widget has no
         // name — for text widgets. A value control (GtkSpinButton implements
@@ -2336,6 +2353,8 @@ async fn collect_visited_bounded_opts<'a>(
             checked,
             enabled,
             selected,
+            marks,
+            value_total_chars,
             selectable,
             showing,
             offscreen,
@@ -2602,7 +2621,7 @@ fn render(visited: &[Visited<'_>], only_frame: Option<usize>) -> (String, Vec<At
             }
             let act_str = v.actions.join(",");
             let val_part = match &v.value {
-                Some(val) if !val.is_empty() => format!(" value=\"{}\"", one_line(val)),
+                Some(val) if !val.is_empty() => value_part(val, v.value_total_chars),
                 _ => String::new(),
             };
             let description_shown = (!v.description.is_empty() && v.description != name)
@@ -2615,8 +2634,15 @@ fn render(visited: &[Visited<'_>], only_frame: Option<usize>) -> (String, Vec<At
                 .as_ref()
                 .map(|note| format!(" ({note})"))
                 .unwrap_or_default();
+            // After the actions block, so the value's end (`" [actions=[`)
+            // stays where the value cutter looks for it.
+            let marks_shown = if v.marks.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", v.marks.join(", "))
+            };
             md.push_str(&format!(
-                "{indent}- [{idx}] {role} \"{name}\"{desc}{val_part} [actions=[{act_str}]]{collapsed_note}{unlabelled_shown}
+                "{indent}- [{idx}] {role} \"{name}\"{desc}{val_part} [actions=[{act_str}]]{marks_shown}{collapsed_note}{unlabelled_shown}
 ",
                 role = v.role,
                 name = one_line(&name),
@@ -2660,12 +2686,21 @@ fn render(visited: &[Visited<'_>], only_frame: Option<usize>) -> (String, Vec<At
             });
             idx += 1;
         } else if emit && !v.name.is_empty() && v.showing {
+            let mut marker: Vec<&str> =
+                passive_marker(&v.role, !v.actions.is_empty(), v.has_component, v.enabled)
+                    .into_iter()
+                    .collect();
+            marker.extend(v.marks.iter().copied());
+            let marker = if marker.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", marker.join(", "))
+            };
             md.push_str(&format!(
                 "{indent}- {role} = \"{name}\"{marker}
 ",
                 role = v.role,
                 name = one_line(&v.name),
-                marker = passive_marker(&v.role, !v.actions.is_empty(), v.has_component, v.enabled),
             ));
         }
     }
@@ -2682,7 +2717,7 @@ fn passive_marker(
     has_action: bool,
     has_component: bool,
     enabled: Option<bool>,
-) -> &'static str {
+) -> Option<&'static str> {
     let control = has_action
         || (has_component
             && matches!(
@@ -2694,11 +2729,50 @@ fn passive_marker(
                     | "check box"
                     | "radio button"
             ));
-    if control && enabled == Some(false) {
-        " (disabled)"
-    } else {
-        ""
+    (control && enabled == Some(false)).then_some("disabled")
+}
+
+/// The states a tree row shows, in a fixed order: `checked` / `unchecked`
+/// (check boxes and check menu items say both; radio buttons, toggle buttons
+/// and other checkable controls only `checked`), `mixed`, `pressed`,
+/// `expanded` (and `collapsed` for an expandable list, tree or table item),
+/// and `selected` for an item of a list, tree, table or tab bar. Menus get no
+/// `expanded`: their rows already say whether they are open. Without these a
+/// check box read the same before and after a toggle, so a `since` diff could
+/// not show it (the Test Pad's Grid box, 2026-11-11).
+fn row_state_marks(role_lower: &str, state: &StateSet) -> Vec<&'static str> {
+    let mut marks = Vec::new();
+    let menu = role_lower.contains("menu");
+    let check_role = role_lower.contains("check");
+    let checkable = check_role
+        || role_lower.contains("radio")
+        || role_lower.contains("toggle")
+        || state.contains(State::Checkable);
+    if state.contains(State::Indeterminate) && checkable {
+        marks.push("mixed");
+    } else if state.contains(State::Checked) {
+        marks.push("checked");
+    } else if check_role {
+        marks.push("unchecked");
     }
+    if state.contains(State::Pressed) {
+        marks.push("pressed");
+    }
+    let item = matches!(
+        role_lower,
+        "list item" | "tree item" | "table cell" | "cell" | "table row" | "row"
+    );
+    if !menu && state.contains(State::Expanded) {
+        marks.push("expanded");
+    } else if item && state.contains(State::Expandable) {
+        marks.push("collapsed");
+    }
+    if (item || matches!(role_lower, "page tab" | "tab" | "icon"))
+        && state.contains(State::Selected)
+    {
+        marks.push("selected");
+    }
+    marks
 }
 
 /// GTK, Qt, VCL and the browser bridges publish `Showing` for a widget that
@@ -3833,6 +3907,34 @@ impl AtPointHit {
     }
 }
 
+/// Characters of a text field read into its tree value. A field holds its
+/// whole document (KWrite's notes.txt is 24,492 characters), so the walk
+/// reads only this much of it.
+const TEXT_READ_CHARS: usize = 4096;
+
+/// The ` value="..."` part of a row. Its character count is written here
+/// whenever the shown text is not the whole value or the count of the shown
+/// text would be wrong: a field longer than [`TEXT_READ_CHARS`] (` value=
+/// "<first 4096>..." (24492 chars, the first 4096 read)`), and a long value
+/// with line breaks, which the row escapes as two characters each. The value
+/// cutter in pincer-core keeps a count it finds here instead of counting the
+/// escaped text (it said 4146 for a 24,492-character document).
+fn value_part(val: &str, total_chars: Option<usize>) -> String {
+    let shown = one_line(val);
+    let read = val.chars().count();
+    match total_chars {
+        Some(total) if total > read => {
+            format!(" value=\"{shown}...\" ({total} chars, the first {read} read)")
+        }
+        _ if matches!(shown, std::borrow::Cow::Owned(_))
+            && shown.chars().count() > pincer_core::window_state_view::VALUE_PREVIEW_CHARS =>
+        {
+            format!(" value=\"{shown}\" ({read} chars)")
+        }
+        _ => format!(" value=\"{shown}\""),
+    }
+}
+
 /// Text as it goes into one markdown row. `query` filters the tree line by
 /// line, so a newline inside a name, description or value turned the text
 /// after it into a stray row (Kate's document text, 2026-10-25). The
@@ -3917,13 +4019,20 @@ fn exact_menu_path_matches(visited: &[Visited<'_>], path: &[String]) -> Vec<usiz
 /// (LibreOffice publishes every document window's menubar in one AT-SPI
 /// application), the hop under `xid`'s frame wins instead of the path being
 /// ambiguous.
-pub fn invoke_menu_path_in(pid: u32, xid: u64, path: &[String]) -> Result<()> {
+///
+/// Once the final item has fired, the menu the first hop opened is closed
+/// when the toolkit left it open (see [`close_opened_menu`]).
+pub fn invoke_menu_path_in(pid: u32, xid: u64, path: &[String]) -> Result<MenuCleanup> {
     bounded(
         async {
             let conn = shared_connection().await?;
             // The entry the previous hop activated: the next segment is
             // looked for inside it first.
             let mut anchor: Option<RawObjectRef> = None;
+            // The first hop (the menu-bar entry), its action proxy and the
+            // action index that opened its menu.
+            let mut opener: Option<(RawObjectRef, atspi::proxy::action::ActionProxy<'_>, i32)> =
+                None;
             for depth in 0..path.len() {
                 let previous = depth.checked_sub(1).map(|index| path[index].as_str());
                 let targeted =
@@ -3955,15 +4064,120 @@ pub fn invoke_menu_path_in(pid: u32, xid: u64, path: &[String]) -> Result<()> {
                 if !accepted {
                     anyhow::bail!("menu path segment {depth} rejected its native action");
                 }
+                if depth == 0 && path.len() > 1 {
+                    opener = Some((hop.oref.clone(), action, chosen as i32));
+                }
                 anchor = Some(hop.oref);
                 if depth + 1 != path.len() {
                     tokio::time::sleep(Duration::from_millis(80)).await;
                 }
             }
-            Ok(())
+            Ok(match opener {
+                Some((entry, action, index)) => {
+                    close_opened_menu(conn, pid, &entry, &action, index, &path[0]).await
+                }
+                None => MenuCleanup::NoneOpen,
+            })
         },
         || Err(anyhow!("invoke_menu timed out for pid {pid}")),
     )
+}
+
+/// What became of the menu `invoke_menu` opened on its way to the final item.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MenuCleanup {
+    /// Nothing is left open: a one-segment path, or a toolkit that closes
+    /// its menus when an item fires (GTK3: View > Zoom > Zoom In on the Test
+    /// Pad, 2026-11-11).
+    NoneOpen,
+    /// The menu was still open after the final item fired, and Pincer closed
+    /// it. `menu` is the first path segment.
+    Closed { menu: String },
+    /// The menu is still open: the toolkit is not one Pincer knows how to
+    /// close a menu in without input, or the close did not take.
+    StillOpen { menu: String },
+}
+
+/// How long the toolkit gets to close its own menus after the final item
+/// fired, before Pincer looks.
+const MENU_CLOSE_SETTLE: Duration = Duration::from_millis(60);
+/// How long Pincer waits for a menu it closed to stop showing.
+const MENU_CLOSE_WAIT: Duration = Duration::from_millis(600);
+
+/// Close the menu that menu-bar entry `entry` opened, when it is still open
+/// after the final item fired. Qt runs an item's accessible `Press` action as
+/// `QAction::trigger()`, which leaves every menu on the way open, holding a
+/// keyboard grab (KWrite Edit > Undo, 2026-11-11). Qt's `Show Menu` action on
+/// a menu-bar entry whose menu is visible hides that menu instead of opening
+/// it (`QAccessibleMenuItem::doAction` in qtbase
+/// src/widgets/accessible/qaccessiblemenu.cpp, v6.12.0), and hiding the top
+/// menu also closes the submenus open below it (KWrite Settings > Toolbars
+/// Shown > Main Toolbar left two popups; one `Show Menu` on Settings unmapped
+/// both, 2026-11-11). So the same action index that opened the menu closes
+/// it, in the background, with no key event.
+///
+/// Only Qt gets that second action: on another toolkit the same action could
+/// open the menu again, so an open menu there is reported as
+/// [`MenuCleanup::StillOpen`]. The action is always called with its index
+/// argument (Qt crashes on an `Action` call without it; see
+/// qt-atspi-crash.md in the C tool bench).
+async fn close_opened_menu(
+    conn: &AccessibilityConnection,
+    pid: u32,
+    entry: &RawObjectRef,
+    action: &atspi::proxy::action::ActionProxy<'_>,
+    index: i32,
+    label: &str,
+) -> MenuCleanup {
+    let menu = label.to_owned();
+    tokio::time::sleep(MENU_CLOSE_SETTLE).await;
+    if !entry_menu_showing(conn, entry).await {
+        return MenuCleanup::NoneOpen;
+    }
+    let qt = match app_for_pid(conn, pid).await {
+        Ok(Some(app)) => is_collection_toolkit_app(&app).await,
+        _ => false,
+    };
+    if !qt {
+        return MenuCleanup::StillOpen { menu };
+    }
+    if !matches!(call(action.do_action(index)).await, Some(Ok(true))) {
+        return MenuCleanup::StillOpen { menu };
+    }
+    let deadline = tokio::time::Instant::now() + MENU_CLOSE_WAIT;
+    loop {
+        if !entry_menu_showing(conn, entry).await {
+            return MenuCleanup::Closed { menu };
+        }
+        if tokio::time::Instant::now() >= deadline || deadline_passed() {
+            return MenuCleanup::StillOpen { menu };
+        }
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+}
+
+/// Whether the menu below menu-bar entry `entry` is open: one of its
+/// children is a menu or menu entry with `Showing` (Qt's `popup menu`, GTK's
+/// and VCL's items). An unanswered read counts as closed.
+async fn entry_menu_showing(conn: &AccessibilityConnection, entry: &RawObjectRef) -> bool {
+    let Some(Ok(children)) = call(raw_children(conn.connection(), entry)).await else {
+        return false;
+    };
+    for child in children.iter().take(MENU_LOOKUP_NODES) {
+        let Some(Ok(acc)) = call(accessible_for(conn, child)).await else {
+            continue;
+        };
+        let Some(Ok(role)) = call(acc.get_role_name()).await else {
+            continue;
+        };
+        if !is_menu_role(&role) {
+            continue;
+        }
+        if matches!(call(acc.get_state()).await, Some(Ok(state)) if is_showing_state(&state)) {
+            return true;
+        }
+    }
+    false
 }
 
 /// One resolved menu path segment, ready to activate.
@@ -6894,6 +7108,49 @@ async fn selected_child_name(
     call(acc.name()).await?.ok()
 }
 
+/// The text of the element at `object_ref` from `before` characters ahead of
+/// its caret to `after` characters past it. An insert through EditableText
+/// leaves the caret after the inserted text (KWrite: 14 characters typed at
+/// 1:1 left the caret at 1:15, 2026-11-11), so this reads what was typed in
+/// a document of any length, where [`read_value_ref`] stops at 4,096
+/// characters. Returns the text and whether the field goes on before and
+/// after it; `None` when the element has no Text interface or no caret.
+pub fn read_text_around_caret(
+    object_ref: &ObjectRef,
+    before: i32,
+    after: i32,
+) -> Result<Option<(String, bool, bool)>> {
+    bounded_for(
+        REF_ACTION_BUDGET,
+        async {
+            let conn = shared_connection().await?;
+            let (acc, _) = live_accessible(conn, object_ref).await?;
+            let Some(Ok(proxies)) = call(acc.proxies()).await else {
+                return Ok(None);
+            };
+            let Some(Ok(text)) = call(proxies.text()).await else {
+                return Ok(None);
+            };
+            let Some(Ok(caret)) = call(text.caret_offset()).await else {
+                return Ok(None);
+            };
+            let Some(Ok(count)) = call(text.character_count()).await else {
+                return Ok(None);
+            };
+            if caret < 0 || count <= 0 {
+                return Ok(None);
+            }
+            let start = caret.saturating_sub(before).max(0);
+            let end = caret.saturating_add(after).min(count);
+            match call(text.get_text(start, end)).await {
+                Some(Ok(around)) => Ok(Some((around, start > 0, end < count))),
+                _ => Ok(None),
+            }
+        },
+        || Ok(None),
+    )
+}
+
 /// Current value of a cached element for read-back after a write: the
 /// `Value` interface's number, else the `Text` content. `None` when the
 /// element exposes neither (or does not answer in time).
@@ -6924,7 +7181,9 @@ pub fn read_value_ref(object_ref: &ObjectRef) -> Result<Option<String>> {
                         .await
                         .and_then(|r| r.ok())
                         .unwrap_or(0);
-                    if let Some(Ok(t)) = call(tp.get_text(0, count.min(4096))).await {
+                    if let Some(Ok(t)) =
+                        call(tp.get_text(0, count.min(TEXT_READ_CHARS as i32))).await
+                    {
                         return Ok(Some(t));
                     }
                 }
@@ -8262,9 +8521,9 @@ mod coord_tests {
         hyprland_document_top_inset, is_activation_action, is_enabled_state,
         is_indexable_capabilities, is_passive_role, is_showing_state, is_web_process_bus,
         listing_state, menu_step, one_line, passive_marker, prefer_authoritative_wayland_origin,
-        project_screen_extents, rebase_renderer_window_offset, scoped_component_nodes,
-        screen_extent_rebase, select_click_target, select_web_document, ApplicationSelection,
-        MenuStep,
+        project_screen_extents, rebase_renderer_window_offset, row_state_marks,
+        scoped_component_nodes, screen_extent_rebase, select_click_target, select_web_document,
+        value_part, ApplicationSelection, MenuStep,
     };
     use atspi::{State, StateSet};
     use std::time::Duration;
@@ -8502,14 +8761,88 @@ mod coord_tests {
         // A visible but insensitive button keeps a marker in the markdown.
         assert_eq!(
             passive_marker("push button", true, true, Some(false)),
-            " (disabled)"
+            Some("disabled")
         );
         assert_eq!(
             passive_marker("push button", false, true, Some(false)),
-            " (disabled)"
+            Some("disabled")
         );
-        assert_eq!(passive_marker("push button", true, true, Some(true)), "");
-        assert_eq!(passive_marker("label", false, true, Some(false)), "");
+        assert_eq!(passive_marker("push button", true, true, Some(true)), None);
+        assert_eq!(passive_marker("label", false, true, Some(false)), None);
+    }
+
+    #[test]
+    fn rows_show_the_states_a_toggle_changes() {
+        let marks = |role: &str, states: &[State]| {
+            let mut set = StateSet::empty();
+            for state in states {
+                set.insert(*state);
+            }
+            row_state_marks(role, &set)
+        };
+        // A check box says both ways, so a toggle changes its row.
+        assert_eq!(marks("check box", &[State::Enabled]), vec!["unchecked"]);
+        assert_eq!(
+            marks("check box", &[State::Enabled, State::Checked]),
+            vec!["checked"]
+        );
+        assert_eq!(
+            marks("check box", &[State::Checkable, State::Indeterminate]),
+            vec!["mixed"]
+        );
+        assert_eq!(
+            marks("check menu item", &[State::Checkable, State::Checked]),
+            vec!["checked"]
+        );
+        // Radio and toggle buttons say only the positive state.
+        assert!(marks("radio button", &[State::Checkable]).is_empty());
+        assert_eq!(
+            marks("toggle button", &[State::Checkable, State::Pressed]),
+            vec!["pressed"]
+        );
+        // Items: expanded / collapsed and selected.
+        assert_eq!(
+            marks("tree item", &[State::Expandable, State::Selected]),
+            vec!["collapsed", "selected"]
+        );
+        assert_eq!(
+            marks("tree item", &[State::Expandable, State::Expanded]),
+            vec!["expanded"]
+        );
+        assert_eq!(marks("page tab", &[State::Selected]), vec!["selected"]);
+        assert_eq!(
+            marks("combo box", &[State::Expandable, State::Expanded]),
+            vec!["expanded"]
+        );
+        // Plain controls and menus stay unmarked.
+        assert!(marks("push button", &[State::Enabled, State::Focusable]).is_empty());
+        assert!(marks("menu item", &[State::Expanded, State::Selected]).is_empty());
+    }
+
+    #[test]
+    fn a_long_text_value_carries_its_real_length() {
+        // KWrite's notes.txt: 24,492 characters, of which the walk reads
+        // the first 4,096; the row used to say 4146 (escaped line breaks).
+        let read = "line\n".repeat(819) + "x";
+        assert_eq!(read.chars().count(), 4096);
+        let part = value_part(&read, Some(24_492));
+        assert!(
+            part.ends_with("x...\" (24492 chars, the first 4096 read)"),
+            "{part}"
+        );
+        // Whole, but with line breaks the row escapes: the real count.
+        let whole = "ab\n".repeat(100);
+        assert!(
+            value_part(&whole, None).ends_with("\" (300 chars)"),
+            "{}",
+            value_part(&whole, None)
+        );
+        // Short or single-line values carry no count.
+        assert_eq!(value_part("a\nb", None), " value=\"a\\nb\"");
+        assert_eq!(
+            value_part(&"y".repeat(300), None),
+            format!(" value=\"{}\"", "y".repeat(300))
+        );
     }
 
     #[test]

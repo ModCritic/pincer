@@ -213,6 +213,61 @@ impl MotionConfig {
         self.effects.resolve(self.style.default_effects())
     }
 
+    /// Each effect's name, whether it is in use, and its pinned setting
+    /// (`None`: it follows the style).
+    pub fn effect_settings(&self) -> [(&'static str, bool, Option<bool>); 5] {
+        let used = self.resolved_effects();
+        [
+            ("trail", used.trail, self.effects.trail),
+            ("glow", used.glow, self.effects.glow),
+            ("magnet", used.magnet, self.effects.magnet),
+            ("ripple", used.ripple, self.effects.ripple),
+            ("squish", used.squish, self.effects.squish),
+        ]
+    }
+
+    /// One line on the effects for a set_agent_cursor_motion result: those
+    /// in use, those pinned, and those that following the style turned on
+    /// or off since `before`.
+    pub fn effects_summary(&self, before: &MotionConfig) -> String {
+        let list = |names: Vec<&str>| {
+            if names.is_empty() {
+                "none".to_owned()
+            } else {
+                names.join(", ")
+            }
+        };
+        let now = self.effect_settings();
+        let was = before.effect_settings();
+        let used = list(now.iter().filter(|e| e.1).map(|e| e.0).collect());
+        let pinned = list(now.iter().filter(|e| e.2.is_some()).map(|e| e.0).collect());
+        let mut line = format!(
+            "Effects in use: {used}. Pinned (on or off): {pinned}; the others follow the style."
+        );
+        let flipped = |on: bool| -> Vec<&str> {
+            now.iter()
+                .zip(was.iter())
+                .filter(|(now, was)| now.2.is_none() && now.1 != was.1 && now.1 == on)
+                .map(|(now, _)| now.0)
+                .collect()
+        };
+        let (turned_on, turned_off) = (flipped(true), flipped(false));
+        if !turned_on.is_empty() || !turned_off.is_empty() {
+            let mut changes = Vec::new();
+            if !turned_on.is_empty() {
+                changes.push(format!("turned {} on", turned_on.join(", ")));
+            }
+            if !turned_off.is_empty() {
+                changes.push(format!("turned {} off", turned_off.join(", ")));
+            }
+            line.push_str(&format!(
+                " Following the style {}; pin an effect with effects:{{<name>:\"on\"}} or \"off\" to keep it.",
+                changes.join(" and ")
+            ));
+        }
+        line
+    }
+
     /// The fields that shape motion, for `pincer_cursor_motion::plan_move`.
     pub fn params(&self) -> pincer_cursor_motion::MotionParams {
         pincer_cursor_motion::MotionParams {
@@ -233,10 +288,18 @@ impl MotionConfig {
     }
 
     /// The `motion` object echoed by `set_agent_cursor_motion` and
-    /// `get_agent_cursor_state` on every platform.
+    /// `get_agent_cursor_state` on every platform. `effects` are the effects
+    /// in use; `pinned_effects` names the ones set `on` or `off`, while the
+    /// rest follow the style and so change with it.
     pub fn output_json(&self) -> Value {
         let effects = self.resolved_effects();
+        let pinned: Vec<&str> = self
+            .effect_settings()
+            .into_iter()
+            .filter_map(|(name, _, pinned)| pinned.map(|_| name))
+            .collect();
         serde_json::json!({
+            "pinned_effects": pinned,
             "start_handle": self.start_handle,
             "end_handle": self.end_handle,
             "arc_size": self.arc_size,

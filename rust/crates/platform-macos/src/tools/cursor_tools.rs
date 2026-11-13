@@ -241,7 +241,9 @@ impl Tool for SetAgentCursorThemeTool {
             Ok(theme) => theme,
             Err(error) => {
                 return ToolResult::error(format!(
-                    "Cursor theme '{theme_id}' cannot be selected: {error}"
+                    "Cursor theme '{theme_id}' cannot be selected: {error:#}. Installed theme \
+                     ids: {}.",
+                    installed_cursor_themes().join(", ")
                 ));
             }
         };
@@ -303,6 +305,13 @@ fn canonical_cursor_def(name: &str) -> ToolDef {
     ToolDef::from_contract(&contract)
 }
 
+/// The ids set_agent_cursor_theme accepts: the built-in default plus the
+/// theme store's files. An unreadable store still leaves the built-in.
+fn installed_cursor_themes() -> Vec<String> {
+    cursor_overlay::list_installed_themes()
+        .unwrap_or_else(|_| vec![cursor_overlay::DEFAULT_THEME_ID.to_owned()])
+}
+
 #[async_trait]
 impl Tool for GetAgentCursorStateTool {
     fn def(&self) -> &ToolDef {
@@ -346,6 +355,7 @@ impl Tool for GetAgentCursorStateTool {
                 "session": session,
                 "enabled": enabled,
                 "position": position,
+                "installed_themes": installed_cursor_themes(),
                 "theme": {
                     "id": theme_id,
                     "version": version,

@@ -413,7 +413,9 @@ pub struct SetAgentCursorMotionInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "cursor_motion_timing_schema")]
     pub timing: Option<crate::CursorMotionTiming>,
-    /// Turn effects on or off. Omit a field to keep it; `"default"` restores the style default.
+    /// Turn effects on or off. Omit a field to keep its setting. An effect at `"default"`
+    /// (where it starts) follows the style, so a `style` change can turn it on or off; `"on"` or
+    /// `"off"` pins it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<crate::CursorMotionEffects>,
     /// Arc control point offset from the start, as a fraction of the distance (`signature_arc`,
@@ -462,7 +464,8 @@ impl ToolInput for SetAgentCursorMotionInput {
 pub struct SetAgentCursorThemeInput {
     /// Public label of the session that owns the cursor.
     pub session: String,
-    /// Id of an installed cursor theme (see `pincer cursor-theme list`).
+    /// Id of an installed cursor theme: `pincer.default` is built in, and get_agent_cursor_state
+    /// lists every installed id in `installed_themes`.
     #[schemars(schema_with = "cursor_theme_id_schema")]
     pub theme_id: String,
     /// Theme animation policy: `on` uses the theme's reduced-motion frames, `off` always

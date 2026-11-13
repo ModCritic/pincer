@@ -11,6 +11,133 @@ fn text(result: &ToolResult) -> String {
         .unwrap_or_default()
 }
 
+fn foreground_report(
+    focus_after: crate::input::FocusAfter,
+    window_change: Option<&str>,
+) -> crate::input::ForegroundReport {
+    crate::input::ForegroundReport {
+        already_active: false,
+        retried_activation: false,
+        confirm_ms: 5,
+        focus_after,
+        window_change: window_change.map(str::to_owned),
+        window_change_owned: true,
+        popup_target: None,
+        popup_closed: false,
+    }
+}
+
+#[test]
+fn a_foreground_key_result_never_says_not_verified_next_to_confirmed() {
+    // press_key escape closed the Test Pad's menu (round 1): the text said
+    // "not verified" while the effect line said confirmed.
+    let closed = key_route_result(
+        "Pressed key 'escape'",
+        KeyRoute::Foreground(foreground_report(
+            crate::input::FocusAfter::Target,
+            Some("closed: popup window 16777259"),
+        )),
+        "foreground",
+    );
+    let structured = closed.structured_content.clone().unwrap();
+    assert_eq!(structured["effect"], "confirmed");
+    let said = text(&closed);
+    assert!(!said.contains("not verified"), "{said}");
+    assert!(
+        said.contains("confirmed by a window change: closed: popup window 16777259"),
+        "{said}"
+    );
+
+    let unchanged = key_route_result(
+        "Pressed key 'end'",
+        KeyRoute::Foreground(foreground_report(crate::input::FocusAfter::Target, None)),
+        "foreground",
+    );
+    assert_eq!(
+        unchanged.structured_content.clone().unwrap()["effect"],
+        "unverifiable"
+    );
+    assert!(
+        text(&unchanged).contains("not verified"),
+        "{}",
+        text(&unchanged)
+    );
+
+    let elsewhere = key_route_result(
+        "Pressed key 'end'",
+        KeyRoute::Foreground(foreground_report(crate::input::FocusAfter::Elsewhere, None)),
+        "foreground",
+    );
+    assert_eq!(
+        elsewhere.structured_content.clone().unwrap()["effect"],
+        "suspected_noop"
+    );
+    let said = text(&elsewhere);
+    assert!(said.contains("left the target process"), "{said}");
+    assert!(!said.contains('\u{2014}'), "{said}");
+}
+
+#[test]
+fn synthetic_keys_to_an_inactive_window_say_qt_drops_them() {
+    // KWrite with the Test Pad active: background ctrl+End did nothing.
+    let result = key_route_result(
+        "Pressed ctrl+end on pid 200",
+        KeyRoute::SyntheticToInactive(16777223),
+        "background",
+    );
+    let said = text(&result);
+    assert!(said.contains("not the active window"), "{said}");
+    assert!(said.contains("delivery_mode foreground"), "{said}");
+    assert_eq!(
+        result.structured_content.unwrap()["target_window_active"],
+        false
+    );
+}
+
+#[test]
+fn invoke_menu_says_what_became_of_the_menu_it_opened() {
+    use crate::atspi::native::MenuCleanup;
+    let closed = invoke_menu_result(
+        "delivery_mode=background, focus untouched",
+        &MenuCleanup::Closed {
+            menu: "Edit".into(),
+        },
+        1,
+        2,
+        "background",
+    );
+    let said = text(&closed);
+    assert!(
+        said.contains("then closed the Edit menu it had opened to reach the item"),
+        "{said}"
+    );
+    assert_eq!(closed.structured_content.unwrap()["menu_closed"], "Edit");
+
+    let open = invoke_menu_result(
+        "delivery_mode=background, focus untouched",
+        &MenuCleanup::StillOpen {
+            menu: "Edit".into(),
+        },
+        1,
+        2,
+        "background",
+    );
+    let said = text(&open);
+    assert!(
+        said.contains("The Edit menu Pincer opened to reach the item is still open"),
+        "{said}"
+    );
+    assert!(said.contains("press_key escape on window 2"), "{said}");
+    assert_eq!(open.structured_content.unwrap()["menu_left_open"], "Edit");
+
+    let none = invoke_menu_result("r", &MenuCleanup::NoneOpen, 1, 2, "background");
+    assert_eq!(
+        text(&none),
+        "Resolved the live native menu path and dispatched its final accessibility action \
+         (r); verify the command's semantic effect from fresh state."
+    );
+}
+
 #[test]
 fn a_scroll_bar_that_did_not_move_is_no_change_not_success() {
     // KWrite, 300 lines, 10 synthetic wheel steps down (desc-test round 2):

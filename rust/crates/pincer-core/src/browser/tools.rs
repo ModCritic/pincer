@@ -233,6 +233,16 @@ fn semantic_ref_value(listed: &super::engine::SemanticListedRef) -> Value {
     })
 }
 
+/// Said when a semantic query selects nothing, so an empty ref list is not
+/// mistaken for an empty page.
+fn no_query_match_note(query: &str) -> String {
+    format!(
+        "no node matches query {}; query matches words in roles, accessible names, values and \
+         page text, so retry with words shown on the page, or omit query to read the viewport",
+        serde_json::to_string(query.trim()).unwrap_or_default()
+    )
+}
+
 fn with_tab_screenshot(mut result: ToolResult, screenshot: BrowserTabScreenshot) -> ToolResult {
     if let Some(structured) = result.structured_content.as_mut() {
         structured["screenshot"] = json!({
@@ -425,14 +435,23 @@ impl Tool for GetBrowserStateTool {
                             .iter()
                             .map(semantic_ref_value)
                             .collect::<Vec<_>>();
-                        ToolResult::text(format!(
+                        let no_match_note = args
+                            .opt_str("query")
+                            .filter(|query| !query.trim().is_empty())
+                            .filter(|_| refs.is_empty() && content_refs.is_empty())
+                            .map(|query| no_query_match_note(&query));
+                        let mut summary = format!(
                             "semantic snapshot p{} of {}: {} action ref(s), {} content ref(s)",
                             outcome.snapshot_id,
                             outcome.url,
                             refs.len(),
                             content_refs.len()
-                        ))
-                        .with_structured(json!({
+                        );
+                        if let Some(note) = &no_match_note {
+                            summary.push_str("; ");
+                            summary.push_str(note);
+                        }
+                        let mut result = ToolResult::text(summary).with_structured(json!({
                             "status": "ok",
                             "mode": "snapshot",
                             "target_id": target_id,
@@ -467,7 +486,13 @@ impl Tool for GetBrowserStateTool {
                                 "status": outcome.oopif.as_str(),
                                 "frames": outcome.oopif.frames(),
                             },
-                        }))
+                        }));
+                        if let (Some(note), Some(structured)) =
+                            (no_match_note, result.structured_content.as_mut())
+                        {
+                            structured["note"] = json!(note);
+                        }
+                        result
                     }
                     Err(refusal) => return refusal.to_tool_result(),
                 };
@@ -1480,8 +1505,9 @@ fn open_dialog_refusal(tab_id: &str, dialog: &CdpDialogState) -> ToolResult {
     BrowserRefusal::new(
         BrowserRefusalCode::BrowserActionUnavailable,
         format!(
-            "a {} dialog (dialog-{}) is open in {tab_id}; accept or dismiss it with browser_dialog first",
-            dialog.kind, dialog.generation
+            "{} dialog (dialog-{}) is open in {tab_id}; accept or dismiss it with browser_dialog first",
+            with_article(&dialog.kind),
+            dialog.generation
         ),
     )
     .with_detail(json!({ "dialog": dialog_json(dialog), "next_call": "browser_dialog" }))
@@ -1495,22 +1521,38 @@ fn dialog_json(dialog: &CdpDialogState) -> Value {
 /// Why a click that opened a dialog reports `effect: "confirmed"`: the
 /// browser's `Page.javascriptDialogOpening` proves the page's handler ran.
 /// The action record keeps "confirmed" only with published evidence.
-fn dialog_evidence(dialog: &CdpDialogState) -> Value {
+pub(super) fn dialog_evidence(dialog: &CdpDialogState) -> Value {
     json!([{
         "kind": "browser_readback",
         "detail": format!(
-            "the page opened a {} JavaScript dialog (dialog-{})",
-            dialog.kind, dialog.generation
+            "the page opened {} JavaScript dialog (dialog-{})",
+            with_article(&dialog.kind),
+            dialog.generation
         ),
     }])
 }
 
-fn dialog_opened_note(dialog: &CdpDialogState) -> String {
+pub(super) fn dialog_opened_note(dialog: &CdpDialogState) -> String {
     format!(
-        "the click opened a {} dialog (dialog-{}); the page is blocked until browser_dialog \
+        "the click opened {} dialog (dialog-{}); the page is blocked until browser_dialog \
          accepts or dismisses it",
-        dialog.kind, dialog.generation
+        with_article(&dialog.kind),
+        dialog.generation
     )
+}
+
+/// "an alert", "a confirm": the indefinite article for a dialog kind.
+fn with_article(word: &str) -> String {
+    let article = if word
+        .chars()
+        .next()
+        .is_some_and(|first| "aeiouAEIOU".contains(first))
+    {
+        "an"
+    } else {
+        "a"
+    };
+    format!("{article} {word}")
 }
 
 /// Center of the content quad from a `DOM.getBoxModel` result.
@@ -2325,15 +2367,15 @@ impl BrowserDialogTool {
         Self {
             def: ToolDef {
                 name: "browser_dialog".into(),
-                description: "Inspect or resolve a page-owned JavaScript alert, confirm, prompt, or beforeunload dialog on one exactly-bound tab. This never handles browser permission UI, extension UI, native dialogs, or file pickers. Inspect returns an opaque dialog_id; accept/dismiss require that exact current id. Resolution defaults to background delivery; Linux callers must explicitly request foreground delivery because Chromium's native modal cannot be resolved there without changing foreground posture.".into(),
+                description: "Inspect or resolve a page-owned JavaScript alert, confirm, prompt, or beforeunload dialog on one exactly-bound tab. Never handles browser permission UI, extension UI, native dialogs, or file pickers. inspect returns kind, message, a prompt's default_prompt, and the dialog_id. accept and dismiss need the current dialog_id: the one inspect returns, or the one the browser_click that opened the dialog already printed (\"the click opened an alert dialog (dialog-1)\"); a stale id is refused. Linux refuses accept and dismiss in the default background delivery: pass delivery_mode \"foreground\".".into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
                         "target_id": schema_target_id(),
                         "tab_id": schema_tab_id(),
                         "session": schema_session(),
-                        "action": { "type": "string", "enum": ["inspect", "accept", "dismiss"], "description": "inspect returns the current dialog and its dialog_id; accept or dismiss resolves that exact dialog." },
-                        "dialog_id": { "type": "string", "description": "Opaque current dialog generation returned by action=inspect." },
+                        "action": { "type": "string", "enum": ["inspect", "accept", "dismiss"], "description": "inspect reads the open dialog; accept or dismiss resolves the dialog named by dialog_id." },
+                        "dialog_id": { "type": "string", "description": "Current dialog id (dialog-N) from inspect or from the browser_click that opened the dialog." },
                         "prompt_text": { "type": "string", "description": "Sensitive response text, valid only when accepting a prompt dialog." },
                         "delivery_mode": {
                             "type": "string",
@@ -2469,11 +2511,24 @@ impl Tool for BrowserDialogTool {
         };
         let dialog_id = format!("dialog-{}", dialog.generation);
         if action == "inspect" {
-            return ToolResult::text(format!("{} dialog is open in {tab_id}", dialog.kind))
-                .with_structured(json!({
-                    "status": "ok", "target_id": target_id, "tab_id": tab_id,
-                    "present": true, "dialog_id": dialog_id, "kind": dialog.kind
-                }));
+            // The message and prompt default are page-authored text, the
+            // same class as a snapshot's page text. They go only in the
+            // structured result, which the MCP client shows; the text line
+            // stays generic because session recordings keep it as the
+            // result summary.
+            let mut structured = json!({
+                "status": "ok", "target_id": target_id, "tab_id": tab_id,
+                "present": true, "dialog_id": dialog_id, "kind": dialog.kind,
+                "message": dialog.message,
+            });
+            if let Some(default_prompt) = &dialog.default_prompt {
+                structured["default_prompt"] = json!(default_prompt);
+            }
+            return ToolResult::text(format!(
+                "{} dialog ({dialog_id}) is open in {tab_id}",
+                with_article(&dialog.kind)
+            ))
+            .with_structured(structured);
         }
 
         let supplied_id = match args.require_str("dialog_id") {
@@ -2532,7 +2587,7 @@ impl BrowserSetInputFilesTool {
         Self {
             def: ToolDef {
                 name: "browser_set_input_files".into(),
-                description: "Assign one or more explicit absolute local files to an exact live <input type=file> ref through CDP. This bypasses native file pickers, rejects symlinks and non-regular files, and never returns local paths.".into(),
+                description: "Assign one or more absolute local files to a page's file input through CDP, without the native file picker. Pass the ref whose actions include upload: a semantic snapshot lists an <input type=file> as a button (for example button \"Attachment\": No file chosen, actions [click, upload, pointer]), and other refs are refused. Rejects symlinks and non-regular files. Returns the assigned file count, never the paths.".into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {

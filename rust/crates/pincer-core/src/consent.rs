@@ -277,6 +277,46 @@ pub struct ProtectedResourceGrants {
 #[derive(Default)]
 pub struct ProtectedResourceOwnershipStore {
     processes_by_session: Mutex<HashMap<String, HashMap<i64, crate::browser::ProcessFingerprint>>>,
+    /// Processes launched by sessions that have ended, by the runtime scope
+    /// prefix (`__pincer_runtime_<generation>:`) of the session that launched
+    /// them. While its session is live a launch is that session's alone to
+    /// terminate; once the session ends nobody owns it any more, so any call
+    /// of the same runtime may (`kill_app` used to refuse it everywhere, even
+    /// with the revived session label).
+    released_by_runtime: Mutex<HashMap<String, HashMap<i64, crate::browser::ProcessFingerprint>>>,
+}
+
+/// The runtime scope prefix of a namespaced session id: everything up to and
+/// including the first `:` of `__pincer_runtime_<generation>:<label>` (the
+/// generation is a simple UUID, which has no colon). `None` for an id that
+/// is not namespaced.
+fn runtime_scope_of(session: &str) -> Option<&str> {
+    if !session.starts_with("__pincer_runtime_") {
+        return None;
+    }
+    session.find(':').map(|end| &session[..=end])
+}
+
+/// [`ProtectedResourceOwnershipStore::reprove_driver_owned_process`] on one
+/// map of records.
+fn reprove_in(
+    map: &mut HashMap<String, HashMap<i64, crate::browser::ProcessFingerprint>>,
+    key: &str,
+    current: &crate::browser::ProcessFingerprint,
+) -> bool {
+    let Some(processes) = map.get_mut(key) else {
+        return false;
+    };
+    let matches = processes
+        .get(&current.pid)
+        .is_some_and(|recorded| recorded.matches(current));
+    if !matches {
+        processes.remove(&current.pid);
+    }
+    if processes.is_empty() {
+        map.remove(key);
+    }
+    matches
 }
 
 impl ProtectedResourceOwnershipStore {
@@ -322,24 +362,47 @@ impl ProtectedResourceOwnershipStore {
         session: &str,
         current: &crate::browser::ProcessFingerprint,
     ) -> bool {
-        let mut sessions = self.processes_by_session.lock().unwrap();
-        let Some(processes) = sessions.get_mut(session) else {
-            return false;
-        };
-        let matches = processes
-            .get(&current.pid)
-            .is_some_and(|recorded| recorded.matches(current));
-        if !matches {
-            processes.remove(&current.pid);
-        }
-        if processes.is_empty() {
-            sessions.remove(session);
-        }
-        matches
+        reprove_in(
+            &mut self.processes_by_session.lock().unwrap(),
+            session,
+            current,
+        )
+    }
+
+    /// Re-prove that a session of runtime scope `runtime_prefix` that has
+    /// since ended launched the process (see `released_by_runtime`).
+    pub fn reprove_released_process(
+        &self,
+        runtime_prefix: &str,
+        current: &crate::browser::ProcessFingerprint,
+    ) -> bool {
+        reprove_in(
+            &mut self.released_by_runtime.lock().unwrap(),
+            runtime_prefix,
+            current,
+        )
     }
 
     pub fn remove_session(&self, session: &str) {
         self.processes_by_session.lock().unwrap().remove(session);
+    }
+
+    /// The session ended: its launches stop being its own and become any
+    /// call's of the same runtime to terminate. Records of a session id that
+    /// is not namespaced are dropped, as before.
+    pub fn release_session(&self, session: &str) {
+        let Some(processes) = self.processes_by_session.lock().unwrap().remove(session) else {
+            return;
+        };
+        let Some(runtime) = runtime_scope_of(session) else {
+            return;
+        };
+        self.released_by_runtime
+            .lock()
+            .unwrap()
+            .entry(runtime.to_owned())
+            .or_default()
+            .extend(processes);
     }
 }
 
@@ -697,6 +760,34 @@ mod tests {
         crate::session_authorization::SessionAuthorizationRegistry::with_ceiling(ceiling)
             .compatibility_context(mode, Some(manifest))
             .unwrap()
+    }
+
+    #[test]
+    fn an_ended_sessions_launches_become_its_runtimes_to_terminate() {
+        let store = ProtectedResourceOwnershipStore::default();
+        let launched = crate::browser::ProcessFingerprint {
+            pid: 42,
+            start_time: Some(100),
+            executable: Some("/usr/bin/dolphin".to_owned()),
+        };
+        store.mark_driver_owned_process("__pincer_runtime_abc:k", launched.clone());
+        // While session k is live its launch is its own.
+        assert!(!store.reprove_released_process("__pincer_runtime_abc:", &launched));
+        store.release_session("__pincer_runtime_abc:k");
+        assert!(!store.reprove_driver_owned_process("__pincer_runtime_abc:k", &launched));
+        // Another runtime never gets it; the same runtime does, from any session.
+        assert!(!store.reprove_released_process("__pincer_runtime_def:", &launched));
+        assert!(store.reprove_released_process("__pincer_runtime_abc:", &launched));
+        // A reused pid is still not the launched process.
+        let reused = crate::browser::ProcessFingerprint {
+            start_time: Some(101),
+            ..launched.clone()
+        };
+        assert!(!store.reprove_released_process("__pincer_runtime_abc:", &reused));
+        // An id outside the runtime namespace is dropped, as before.
+        store.mark_driver_owned_process("plain", launched.clone());
+        store.release_session("plain");
+        assert!(!store.reprove_driver_owned_process("plain", &launched));
     }
 
     #[test]

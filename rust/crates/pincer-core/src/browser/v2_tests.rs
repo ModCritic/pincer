@@ -2141,6 +2141,16 @@ async fn semantic_query_and_content_scope_are_read_only_and_precise() {
     assert_eq!(queried["snapshot"]["scope"], "query", "{queried}");
     assert_eq!(queried["refs"].as_array().unwrap().len(), 1, "{queried}");
     assert_eq!(queried["refs"][0]["name"], "Archive item 304");
+    assert!(queried.get("note").is_none(), "{queried}");
+
+    let nothing = semantic_snapshot_with(&f, &target, &tab, json!({"query": "zebra"})).await;
+    assert_eq!(nothing["refs"].as_array().unwrap().len(), 0, "{nothing}");
+    assert!(
+        nothing["note"]
+            .as_str()
+            .is_some_and(|note| note.starts_with("no node matches query \"zebra\"")),
+        "{nothing}"
+    );
 
     let natural =
         semantic_snapshot_with(&f, &target, &tab, json!({"query": "reply archive 304"})).await;
@@ -2270,7 +2280,28 @@ async fn a_click_that_opens_a_dialog_returns_at_once_with_the_dialog() {
         let inspected = structured(&inspected);
         assert_eq!(inspected["present"], true, "{inspected}");
         assert_eq!(inspected["dialog_id"], dialog_id.as_str());
+        assert_eq!(inspected["message"], "Sure?", "{inspected}");
+        assert!(inspected.get("default_prompt").is_none(), "{inspected}");
     }
+}
+
+#[test]
+fn dialog_notes_use_the_right_article() {
+    let dialog = |kind: &str| super::cdp_ws::CdpDialogState {
+        generation: 1,
+        kind: kind.to_owned(),
+        session_id: "s".to_owned(),
+        message: String::new(),
+        default_prompt: None,
+    };
+    assert!(super::tools::dialog_opened_note(&dialog("alert"))
+        .starts_with("the click opened an alert dialog (dialog-1)"));
+    assert!(super::tools::dialog_opened_note(&dialog("confirm"))
+        .starts_with("the click opened a confirm dialog (dialog-1)"));
+    assert_eq!(
+        super::tools::dialog_evidence(&dialog("alert"))[0]["detail"],
+        "the page opened an alert JavaScript dialog (dialog-1)"
+    );
 }
 
 #[tokio::test]

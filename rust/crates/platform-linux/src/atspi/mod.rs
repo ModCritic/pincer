@@ -692,6 +692,23 @@ pub fn read_value_in(pid: u32, xid: u64, idx: usize) -> Option<String> {
     native::read_value_ref(&object_ref).ok().flatten()
 }
 
+/// The text around the caret of element `idx` of a cached snapshot, and
+/// whether the field goes on before and after it (see
+/// [`native::read_text_around_caret`]).
+pub fn read_text_around_caret_in(
+    pid: u32,
+    xid: u64,
+    idx: usize,
+    before: usize,
+    after: usize,
+) -> Option<(String, bool, bool)> {
+    let object_ref = cache::cached_element(pid, xid, idx)?.object_ref?;
+    let clamp = |n: usize| i32::try_from(n).unwrap_or(i32::MAX);
+    native::read_text_around_caret(&object_ref, clamp(before), clamp(after))
+        .ok()
+        .flatten()
+}
+
 /// Insert `text` into an editable field of window `xid` (0: any window of
 /// the app) via AT-SPI EditableText, focus-free and toolkit-agnostic, unlike
 /// X11 key injection which only reaches the *focused* toplevel's focused

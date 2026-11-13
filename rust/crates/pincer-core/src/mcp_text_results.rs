@@ -15,7 +15,8 @@
 //! so session history and telemetry read the same result in either mode. Any
 //! other value of the variable, or none, leaves responses byte-identical.
 
-use std::cell::{Cell, OnceCell};
+use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use serde_json::{json, Map, Value};
@@ -129,6 +130,12 @@ pub fn render_tool_result(result: &mut Value) {
 ///   does not already say, then the other fields. `route` is never shown:
 ///   names such as `global_input` read as "the real pointer moved".
 /// - Anything else: the text, then every field.
+///
+/// The fields after the text are deduplicated one top-level key at a time:
+/// a key is left out only when the text already says its whole value (see
+/// [`skip_field`]), and a key that stays is printed whole. Nothing inside an
+/// object or an array is dropped for being in the text, so a list or object
+/// in the tail is never a partial copy that reads as complete.
 pub fn render_text(text: &str, structured: &Value, is_error: bool) -> String {
     render_text_with(text, structured, is_error, TOKEN_SCANS_BEFORE_INDEX)
 }
@@ -145,8 +152,8 @@ fn render_text_with(
     let shown = Shown::new(text, scans_before_index);
     let Value::Object(fields) = structured else {
         push_body(&mut lines, text);
-        if let Some(value) = render_value(structured, &shown, false, false) {
-            lines.push(value);
+        if !value_shown("", structured, &shown) {
+            lines.push(render_value(structured, false, &shown));
         }
         return lines.join("\n");
     };
@@ -264,6 +271,13 @@ struct Shown<'a> {
     /// scanned the whole text per leaf: about 3 ms for list_apps' 800
     /// entries.
     starts: OnceCell<TokenStarts>,
+    /// Lines where tokens under three bytes and `key=value` flags occur as
+    /// whole tokens. The index cannot serve those, so each would scan the
+    /// whole text again; they repeat a lot (`0`, `1`, `running=true` once
+    /// per app) and are few, so the map stays small.
+    memo: RefCell<HashMap<String, Vec<usize>>>,
+    /// Byte offset where each line of `raw` starts, built on first use.
+    line_starts: OnceCell<Vec<usize>>,
 }
 
 impl<'a> Shown<'a> {
@@ -273,7 +287,51 @@ impl<'a> Shown<'a> {
             normalized: normalized(raw),
             scans_left: Cell::new(scans_before_index),
             starts: OnceCell::new(),
+            memo: RefCell::new(HashMap::new()),
+            line_starts: OnceCell::new(),
         }
+    }
+
+    /// The line of `raw` that byte offset `at` is on, counted from 0.
+    fn line_of(&self, at: usize) -> usize {
+        let starts = self.line_starts.get_or_init(|| {
+            std::iter::once(0)
+                .chain(self.raw.match_indices('\n').map(|(at, _)| at + 1))
+                .collect()
+        });
+        starts.partition_point(|&start| start <= at) - 1
+    }
+
+    /// The lines (ascending, no repeats) holding each offset `offsets` yields.
+    fn lines_of(&self, offsets: impl Iterator<Item = usize>) -> Vec<usize> {
+        let mut lines: Vec<usize> = offsets.map(|at| self.line_of(at)).collect();
+        lines.dedup();
+        lines
+    }
+
+    /// `compute`'s lines for `key`, computed once.
+    fn memoized(&self, key: String, compute: impl FnOnce() -> Vec<usize>) -> Vec<usize> {
+        if let Some(known) = self.memo.borrow().get(&key) {
+            return known.clone();
+        }
+        let lines = compute();
+        self.memo.borrow_mut().insert(key, lines.clone());
+        lines
+    }
+
+    /// Lines where the text states the flag `key` as `key=value` or
+    /// `key: value`.
+    fn flag_lines(&self, key: &str, value: bool) -> Vec<usize> {
+        self.memoized(format!("{key}\u{0}{value}"), || {
+            let mut lines = self.lines_of(
+                [format!("{key}={value}"), format!("{key}: {value}")]
+                    .iter()
+                    .flat_map(|needle| assignments(needle, self.raw)),
+            );
+            lines.sort_unstable();
+            lines.dedup();
+            lines
+        })
     }
 
     /// Offsets in `raw` where `token` may start, ascending, a superset of
@@ -309,6 +367,32 @@ impl<'a> Shown<'a> {
     /// `token` appears in the text as a whole token: not run into a longer
     /// number (`1354` matches `2560x1354`) or a longer word.
     fn has_token(&self, token: &str) -> bool {
+        if token.len() < 3 {
+            return !self.token_lines(token).is_empty();
+        }
+        self.find_token(token, |_| true)
+    }
+
+    /// The lines where `token` appears as a whole token.
+    fn token_lines(&self, token: &str) -> Vec<usize> {
+        let scan = || {
+            let mut offsets = Vec::new();
+            self.find_token(token, |at| {
+                offsets.push(at);
+                false
+            });
+            self.lines_of(offsets.into_iter())
+        };
+        if token.len() < 3 {
+            self.memoized(token.to_owned(), scan)
+        } else {
+            scan()
+        }
+    }
+
+    /// Call `found` with the offset of each whole-token match of `token`,
+    /// leftmost first, until it returns `true`; whether it did.
+    fn find_token(&self, token: &str, mut found: impl FnMut(usize) -> bool) -> bool {
         let (Some(first), Some(last)) = (token.chars().next(), token.chars().next_back()) else {
             return false;
         };
@@ -319,7 +403,10 @@ impl<'a> Shown<'a> {
                 && !after.is_some_and(|c| continues(last, c))
         };
         let Some(candidates) = self.candidate_starts(token) else {
-            return self.raw.match_indices(token).any(|(at, _)| whole(at));
+            return self
+                .raw
+                .match_indices(token)
+                .any(|(at, _)| whole(at) && found(at));
         };
         // The same matches `match_indices` yields: leftmost first, and none
         // overlapping the previous one ("a-a" in "xa-a-a" is only at 1).
@@ -329,10 +416,10 @@ impl<'a> Shown<'a> {
             if at < free_from || !self.raw.as_bytes()[at..].starts_with(token.as_bytes()) {
                 continue;
             }
-            if whole(at) {
+            free_from = at + token.len();
+            if whole(at) && found(at) {
                 return true;
             }
-            free_from = at + token.len();
         }
         false
     }
@@ -433,7 +520,8 @@ fn normalized(value: &str) -> String {
 /// cut by it says so through `truncated` and the text).
 const NOISE_KEYS: &[&str] = &["tree_format", "screenshot_mime_type", "timeout_ms"];
 
-/// One `key: value` line per field, in the object's key order.
+/// One `key: value` line per field, in the object's key order. A field is
+/// left out whole or printed whole, never in part.
 fn push_fields(
     lines: &mut Vec<String>,
     fields: &Map<String, Value>,
@@ -450,22 +538,15 @@ fn push_fields(
         }
         match value {
             Value::Array(items) if items.iter().any(|item| item.is_object() || item.is_array()) => {
-                let rows: Vec<String> = items
-                    .iter()
-                    .filter(|item| !container_restated(key, item, shown))
-                    .filter_map(|item| render_value(item, shown, true, protected(key, value)))
-                    .collect();
-                if !rows.is_empty() {
-                    lines.push(format!("{key}:"));
-                    lines.extend(rows.into_iter().map(|row| format!("- {row}")));
-                }
+                lines.push(format!("{key}:"));
+                lines.extend(
+                    items
+                        .iter()
+                        .map(|item| format!("- {}", render_value(item, true, shown))),
+                );
             }
             Value::String(value) if value.contains('\n') => push_multiline(lines, key, value),
-            _ => {
-                if let Some(value) = render_value(value, shown, false, protected(key, value)) {
-                    lines.push(format!("{key}: {value}"));
-                }
-            }
+            _ => lines.push(format!("{key}: {}", render_value(value, false, shown))),
         }
     }
 }
@@ -477,7 +558,8 @@ fn push_multiline(lines: &mut Vec<String>, key: &str, value: &str) {
     lines.extend(rows.map(|row| format!("  {row}")));
 }
 
-/// Fields that would only repeat the text or state a default.
+/// A top-level field to leave out: noise, an empty value, a default flag,
+/// a copy of a sibling, or a value the text already says whole.
 fn skip_field(key: &str, value: &Value, siblings: &Map<String, Value>, shown: &Shown) -> bool {
     if NOISE_KEYS.contains(&key) {
         return true;
@@ -485,22 +567,19 @@ fn skip_field(key: &str, value: &Value, siblings: &Map<String, Value>, shown: &S
     match value {
         Value::Null => true,
         Value::String(text) => text.is_empty() || (!protected(key, value) && shown.restates(text)),
-        Value::Array(items) => {
-            items.is_empty()
-                || items
-                    .iter()
-                    .all(|item| item.as_str().is_some_and(|item| shown.restates(item)))
-                || container_restated(key, value, shown)
-        }
-        Value::Object(fields) => fields.is_empty() || container_restated(key, value, shown),
+        Value::Array(items) => items.is_empty() || value_shown(key, value, shown),
+        Value::Object(fields) => fields.is_empty() || value_shown(key, value, shown),
         Value::Bool(true) => key.ends_with("_complete") || key.ends_with("_valid"),
         Value::Bool(false) => key == "truncated",
-        // Flat window geometry next to a `bounds` object that holds it.
-        Value::Number(_) => {
-            matches!(key, "x" | "y" | "width" | "height")
-                && siblings.get("bounds").and_then(|bounds| bounds.get(key)) == Some(value)
-        }
+        Value::Number(_) => duplicate_geometry(key, value, siblings),
     }
+}
+
+/// Flat window geometry next to a `bounds` object that holds it (the
+/// legacy `x`/`y`/`width`/`height` aliases of a window record).
+fn duplicate_geometry(key: &str, value: &Value, siblings: &Map<String, Value>) -> bool {
+    matches!(key, "x" | "y" | "width" | "height")
+        && siblings.get("bounds").and_then(|bounds| bounds.get(key)) == Some(value)
 }
 
 /// A field the dedupe rules must keep whatever the text says: an error or a
@@ -512,37 +591,114 @@ fn protected(key: &str, value: &Value) -> bool {
         || (key.ends_with("_complete") && value == &Value::Bool(false))
 }
 
-/// An object or array whose identifying leaves the text already shows: at
-/// least two strings or numbers of 3+ characters, each one a whole token in
-/// the text (or a long string it restates). Shorter leaves and booleans do
-/// not count either way, so a skipped container takes its flags with it.
-fn container_restated(key: &str, value: &Value, shown: &Shown) -> bool {
-    let mut leaves = Vec::new();
-    collect_leaves(key, value, &mut leaves)
-        && leaves.len() >= 2
-        && leaves
-            .iter()
-            .all(|leaf| shown.has_token(leaf) || shown.restates(leaf))
+/// Flags a text may leave unsaid because they hold their usual value: a
+/// window line that does not say it is off screen is on screen, and Linux
+/// apps are never `active` (list_apps reserves the field). Any other flag
+/// counts as said only as `key=value` or `key: value`.
+const USUAL_FLAGS: &[(&str, bool)] = &[("is_on_screen", true), ("active", false)];
+
+/// The text already says the whole of an object or array. An array of
+/// objects or arrays is a list of records, each checked on its own; any
+/// other value is one record. Never true for a value holding something
+/// [`protected`].
+fn value_shown(key: &str, value: &Value, shown: &Shown) -> bool {
+    match value {
+        Value::Array(items) if items.iter().any(|item| item.is_object() || item.is_array()) => {
+            items.iter().all(|item| record_shown(key, item, shown))
+        }
+        _ => record_shown(key, value, shown),
+    }
 }
 
-/// Gather a container's qualifying leaves. `false` when anything inside it
-/// is [`protected`].
-fn collect_leaves(key: &str, value: &Value, leaves: &mut Vec<String>) -> bool {
+/// The text says every leaf of one record:
+///
+/// - a string or number of 3+ characters appears anywhere as a whole token
+///   (a long string may also differ in case, spacing, quoting and trailing
+///   punctuation); at least one such leaf is required;
+/// - a shorter string or number (`0`, `22`, `on`), and a flag stated as
+///   `key=value` or `key: value`, appears on a line that shows one of the
+///   record's longer values, since a short value elsewhere in the text
+///   ("4 ms") says nothing about this record;
+/// - a flag in [`USUAL_FLAGS`], a null and an empty string need nothing.
+///
+/// This rests on producers keeping each record's short values on the same
+/// line as its ids (list_windows' `z=0` after the window_id), which every
+/// list in this crate's tests and the Linux tools does.
+fn record_shown(key: &str, record: &Value, shown: &Shown) -> bool {
+    let mut leaves = Vec::new();
+    if !collect_leaves(key, record, &mut leaves) {
+        return false;
+    }
+    let mut identifying = Vec::new();
+    let mut short = Vec::new();
+    for (key, leaf) in leaves {
+        match leaf {
+            Value::Null => {}
+            Value::String(text) if text.is_empty() => {}
+            Value::String(text) if text.chars().count() >= 3 => {
+                if shown.has_token(text) {
+                    identifying.push(text.clone());
+                } else if !shown.restates(text) {
+                    return false;
+                }
+            }
+            Value::Number(number) if number.to_string().len() >= 3 => {
+                let number = number.to_string();
+                if !shown.has_token(&number) {
+                    return false;
+                }
+                identifying.push(number);
+            }
+            Value::Bool(flag) if USUAL_FLAGS.contains(&(key, *flag)) => {}
+            leaf => short.push((key, leaf)),
+        }
+    }
+    if identifying.is_empty() {
+        return false;
+    }
+    if short.is_empty() {
+        return true;
+    }
+    let mut lines: Vec<usize> = identifying
+        .iter()
+        .flat_map(|token| shown.token_lines(token))
+        .collect();
+    lines.sort_unstable();
+    lines.dedup();
+    short.into_iter().all(|(key, leaf)| {
+        let leaf_lines = match leaf {
+            Value::Bool(flag) => shown.flag_lines(key, *flag),
+            Value::Number(number) => shown.token_lines(&number.to_string()),
+            Value::String(text) => shown.token_lines(text),
+            _ => Vec::new(),
+        };
+        leaf_lines
+            .iter()
+            .any(|line| lines.binary_search(line).is_ok())
+    })
+}
+
+/// Gather a record's leaves with the key each sits under (an array item
+/// takes its array's key). `false` when anything inside it is
+/// [`protected`].
+fn collect_leaves<'v>(
+    key: &'v str,
+    value: &'v Value,
+    leaves: &mut Vec<(&'v str, &'v Value)>,
+) -> bool {
     if protected(key, value) {
         return false;
     }
     match value {
-        Value::String(value) if value.chars().count() >= 3 => leaves.push(value.clone()),
-        Value::Number(value) if value.to_string().len() >= 3 => leaves.push(value.to_string()),
-        Value::Object(fields) => {
-            return fields.iter().all(|(key, value)| {
-                NOISE_KEYS.contains(&key.as_str()) || collect_leaves(key, value, leaves)
-            })
+        Value::Object(fields) => fields.iter().all(|(key, value)| {
+            NOISE_KEYS.contains(&key.as_str()) || collect_leaves(key, value, leaves)
+        }),
+        Value::Array(items) => items.iter().all(|item| collect_leaves(key, item, leaves)),
+        leaf => {
+            leaves.push((key, leaf));
+            true
         }
-        Value::Array(items) => return items.iter().all(|item| collect_leaves(key, item, leaves)),
-        _ => {}
     }
-    true
 }
 
 /// A top-level scalar the text already prints as `key=value`, such as the
@@ -554,12 +710,19 @@ fn restated_assignment(key: &str, value: &Value, text: &str) -> bool {
         Value::Bool(value) => value.to_string(),
         _ => return false,
     };
-    let needle = format!("{key}={value}");
+    assignments(&format!("{key}={value}"), text)
+        .next()
+        .is_some()
+}
+
+/// Offsets where `needle` (`key=value`) stands as a whole assignment: no
+/// word character before it, none or a `.` after it.
+fn assignments<'t>(needle: &'t str, text: &'t str) -> impl Iterator<Item = usize> + 't {
     let word = |c: char| c.is_alphanumeric() || c == '_';
-    text.match_indices(&needle).any(|(at, _)| {
+    text.match_indices(needle).filter_map(move |(at, _)| {
         let before = text[..at].chars().next_back();
         let after = text[at + needle.len()..].chars().next();
-        !before.is_some_and(word) && !after.is_some_and(|c| word(c) || c == '.')
+        (!before.is_some_and(word) && !after.is_some_and(|c| word(c) || c == '.')).then_some(at)
     })
 }
 
@@ -582,45 +745,44 @@ fn restated_scalar(key: &str, value: &Value, shown: &Shown) -> bool {
         && (shown.has_token(key) || shown.has_token(last))
 }
 
+/// Stands in for a multi-line string inside a kept value that the text
+/// already shows whole (run_steps' observation holds the window's whole
+/// tree as `tree_markdown`, which the text prints above it).
+const SAME_AS_TEXT: &str = "(same as the text above)";
+
 /// One value on a single line: objects as `{k: v, …}`, arrays as `[a, …]`.
-/// `None` when nothing in it is left to show. Inside a `guarded` value (one
-/// under a [`protected`] key) only empty fields and noise are dropped.
-fn render_value(value: &Value, shown: &Shown, nested: bool, guarded: bool) -> Option<String> {
+/// Printed whole: inside it only null and empty fields, [`NOISE_KEYS`] and
+/// the flat geometry copy of a sibling `bounds` are left out, none of which
+/// depends on the text. A multi-line string the text restates keeps its
+/// key, with [`SAME_AS_TEXT`] in place of a second, escaped copy.
+fn render_value(value: &Value, nested: bool, shown: &Shown) -> String {
     match value {
-        Value::Null => Some("null".to_owned()),
-        Value::Bool(value) => Some(value.to_string()),
-        Value::Number(value) => Some(value.to_string()),
-        Value::String(value) => Some(scalar_string(value, nested)),
-        Value::Array(items) => Some(format!(
+        Value::Null => "null".to_owned(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) if nested && value.contains('\n') && shown.restates(value) => {
+            SAME_AS_TEXT.to_owned()
+        }
+        Value::String(value) => scalar_string(value, nested),
+        Value::Array(items) => format!(
             "[{}]",
             items
                 .iter()
-                .filter(|item| {
-                    guarded
-                        || !(item.is_object() || item.is_array())
-                        || !container_restated("", item, shown)
-                })
-                .filter_map(|item| render_value(item, shown, true, guarded))
+                .map(|item| render_value(item, true, shown))
                 .collect::<Vec<_>>()
                 .join(", ")
-        )),
-        Value::Object(fields) => {
-            let parts: Vec<String> = fields
+        ),
+        Value::Object(fields) => format!(
+            "{{{}}}",
+            fields
                 .iter()
                 .filter(|(key, value)| {
-                    if guarded {
-                        !empty_or_noise(key, value)
-                    } else {
-                        !skip_field(key, value, fields, shown)
-                    }
+                    !empty_or_noise(key, value) && !duplicate_geometry(key, value, fields)
                 })
-                .filter_map(|(key, value)| {
-                    render_value(value, shown, true, guarded || protected(key, value))
-                        .map(|value| format!("{key}: {value}"))
-                })
-                .collect();
-            (!parts.is_empty()).then(|| format!("{{{}}}", parts.join(", ")))
-        }
+                .map(|(key, value)| format!("{key}: {}", render_value(value, true, shown)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
 }
 
@@ -862,22 +1024,207 @@ mod tests {
         );
     }
 
+    fn kate_window(z_index: Value, is_on_screen: bool) -> Value {
+        json!({
+            "app_name": "kate", "bounds": {"height": 1354, "width": 2560, "x": 0, "y": 22},
+            "height": 1354, "is_on_screen": is_on_screen, "pid": 90758,
+            "title": "kate-scratch.txt  — Kate", "width": 2560, "window_id": 94371847,
+            "x": 0, "y": 22, "z_index": z_index,
+        })
+    }
+
     /// list_windows prints each window on a text line, so the structured
     /// copy of the same window adds nothing.
     #[test]
     fn a_window_the_text_already_lists_is_dropped() {
-        let text = "Found 1 windows:\n  window_id=94371847 pid=90758 \"kate-scratch.txt  — Kate\" 2560x1354+0+22 app=kate";
+        let text = "Found 1 window(s):\n  window_id=94371847 pid=90758 \"kate-scratch.txt  — Kate\" 2560x1354+0+22 z=5 app=kate";
         let result = rendered(json!({
             "content": [{"type": "text", "text": text}],
-            "structuredContent": {"windows": [{
-                "app_name": "kate", "bounds": {"height": 1354, "width": 2560, "x": 0, "y": 22},
-                "height": 1354, "is_on_screen": true, "pid": 90758,
-                "title": "kate-scratch.txt  — Kate", "width": 2560, "window_id": 94371847,
-                "x": 0, "y": 22, "z_index": 5,
-            }]},
+            "structuredContent": {"windows": [kate_window(json!(5), true)]},
         }));
 
         assert_eq!(text_of(&result), text);
+    }
+
+    /// The 3eefd3e list_windows line had no z_index, and the renderer still
+    /// dropped the record that carried it: a field the text does not show
+    /// keeps the whole record.
+    #[test]
+    fn a_window_whose_z_index_the_text_omits_is_kept_whole() {
+        let text = "Found 1 windows:\n  window_id=94371847 pid=90758 \"kate-scratch.txt  — Kate\" 2560x1354+0+22 app=kate";
+        let rendered = render_text(
+            text,
+            &json!({"windows": [kate_window(json!(5), true)]}),
+            false,
+        );
+
+        assert_eq!(
+            rendered,
+            format!(
+                "{text}\nwindows:\n\
+                 - {{app_name: kate, bounds: {{height: 1354, width: 2560, x: 0, y: 22}}, \
+                 is_on_screen: true, pid: 90758, title: kate-scratch.txt  — Kate, \
+                 window_id: 94371847, z_index: 5}}"
+            )
+        );
+    }
+
+    /// A flag holding its usual value needs no words; any other flag needs
+    /// `key=value` or `key: value` in the text.
+    #[test]
+    fn a_flag_counts_as_shown_only_when_usual_or_stated() {
+        let line = "  window_id=94371847 pid=90758 \"kate-scratch.txt  — Kate\" 2560x1354+0+22 z=5 app=kate";
+        let hidden = json!({"windows": [kate_window(json!(5), false)]});
+
+        assert!(render_text(line, &hidden, false).contains("is_on_screen: false"));
+        assert_eq!(
+            render_text(&format!("{line} is_on_screen=false"), &hidden, false),
+            format!("{line} is_on_screen=false")
+        );
+        let null_z = json!({"windows": [kate_window(Value::Null, true)]});
+        assert_eq!(
+            render_text(&line.replace("z=5", "z=?"), &null_z, false),
+            line.replace("z=5", "z=?")
+        );
+    }
+
+    /// health_report at 3eefd3e: the text names every check, but its status
+    /// only as an icon. Each check stays whole with its name and message;
+    /// before, four lost their name and eight their message.
+    #[test]
+    fn a_list_the_text_says_in_part_is_kept_whole() {
+        let checks = json!([
+            {"name": "binary_version", "status": "pass", "message": "pincer 0.35.4"},
+            {"name": "platform_supported", "status": "pass", "message": "Arch Linux (x86_64)",
+             "data": {"architecture": "x86_64", "os_version": "Arch Linux"}},
+            {"name": "tcc_accessibility", "status": "skip", "message": "not applicable on Linux"},
+        ]);
+        let text = "✅ pincer 0.35.4 on linux — ok\n  \
+                    ✅ binary_version: pincer 0.35.4\n  \
+                    ✅ platform_supported: Arch Linux (x86_64)\n  \
+                    ⏭ tcc_accessibility: not applicable on Linux";
+        let rendered = render_text(text, &json!({"checks": checks, "overall": "ok"}), false);
+
+        assert_eq!(
+            rendered,
+            format!(
+                "{text}\nchecks:\n\
+                 - {{message: pincer 0.35.4, name: binary_version, status: pass}}\n\
+                 - {{data: {{architecture: x86_64, os_version: Arch Linux}}, \
+                 message: Arch Linux (x86_64), name: platform_supported, status: pass}}\n\
+                 - {{message: not applicable on Linux, name: tcc_accessibility, status: skip}}\n\
+                 overall: ok"
+            )
+        );
+
+        // With each status written out, the text carries the whole list.
+        let text = text
+            .replace("binary_version:", "binary_version (pass):")
+            .replace("platform_supported:", "platform_supported (pass):")
+            .replace("tcc_accessibility:", "tcc_accessibility (skip):");
+        assert_eq!(render_text(&text, &json!({"checks": checks}), false), text);
+    }
+
+    /// get_accessibility_tree at 3eefd3e: the text printed argv[0] and the
+    /// structured list the kernel's 15-character name, so the processes
+    /// that matched were dropped and the rest stayed: 13 of 17 read as the
+    /// whole list. Now the list stays whole; the windows, all in the text,
+    /// go.
+    #[test]
+    fn processes_the_text_names_differently_keep_the_whole_list() {
+        let text = "3 running process(es), 1 visible window(s)\n\
+                    - python3 (pid 1)\n\
+                    - /usr/lib/at-spi-bus-launcher (pid 15)\n\
+                    - kwrite (pid 166)\n\n\
+                    Windows:\n\
+                    - pid=166 window_id=16777223 \"notes.txt  — KWrite\" 640x480+960+494";
+        let structured = json!({
+            "processes": [
+                {"name": "python3", "pid": 1},
+                {"name": "at-spi-bus-laun", "pid": 15},
+                {"name": "kwrite", "pid": 166},
+            ],
+            "windows": [{"window_id": 16777223, "pid": 166, "title": "notes.txt  — KWrite",
+                         "x": 960, "y": 494, "width": 640, "height": 480}],
+        });
+
+        assert_eq!(
+            render_text(text, &structured, false),
+            format!(
+                "{text}\nprocesses:\n\
+                 - {{name: python3, pid: 1}}\n\
+                 - {{name: at-spi-bus-laun, pid: 15}}\n\
+                 - {{name: kwrite, pid: 166}}"
+            )
+        );
+    }
+
+    /// run_script at 3eefd3e kept `value: {clicks: 4}`: `label` was dropped
+    /// for being in the text and `clicks` kept for being short.
+    #[test]
+    fn a_returned_object_is_dropped_or_kept_whole() {
+        let value = json!({"clicks": 4, "label": "Count: 5   Strokes: 0"});
+        let text = "run_script: ok in 4 ms, 0 driver call(s)\n\
+                    return value: {\"clicks\":4,\"label\":\"Count: 5   Strokes: 0\"}";
+        assert_eq!(
+            render_text(text, &json!({"ok": true, "value": value}), false),
+            format!("{text}\nok: true")
+        );
+
+        let text = "run_script: ok in 4 ms\nlabel read: Count: 5   Strokes: 0";
+        assert_eq!(
+            render_text(text, &json!({"value": value}), false),
+            format!("{text}\nvalue: {{clicks: 4, label: Count: 5   Strokes: 0}}")
+        );
+    }
+
+    /// run_steps' observation holds flags and an app_name the text never
+    /// says, so it stays whole; the tree inside it, which the text prints
+    /// in full, keeps its key with a pointer instead of an escaped copy.
+    #[test]
+    fn a_kept_object_points_to_a_tree_the_text_shows() {
+        let tree = "- frame = \"Pincer Test Pad\"\n  - [5] button \"Count\" [actions=[click]]\n";
+        let text = format!("run_steps: 1/1 steps ok\nobservation: full read (below)\n{tree}");
+        let rendered = render_text(
+            &text,
+            &json!({"observation": {
+                "ok": true,
+                "state": {"app_name": "Pincer-test-pad", "elements_complete": true,
+                          "tree_markdown": tree},
+            }}),
+            false,
+        );
+
+        assert_eq!(
+            rendered,
+            format!(
+                "{}\nobservation: {{ok: true, state: {{app_name: Pincer-test-pad, \
+                 elements_complete: true, tree_markdown: (same as the text above)}}}}",
+                text.trim_end()
+            )
+        );
+    }
+
+    /// A short value proves nothing on its own: an object whose only leaves
+    /// are `0` and `1` stays even when the text has both.
+    #[test]
+    fn short_values_alone_do_not_drop_a_field() {
+        let text = "moved 0 of 1";
+        assert_eq!(
+            render_text(text, &json!({"offset": {"x": 0, "y": 1}}), false),
+            format!("{text}\noffset: {{x: 0, y: 1}}")
+        );
+    }
+
+    /// set_config echoes each key it set as `key=value`, so nothing follows.
+    #[test]
+    fn set_config_echoes_its_keys_once() {
+        let text = "Config updated: cursor.motion.style=comet_swoop (applies to sessions \
+                    started from now on)";
+        assert_eq!(
+            render_text(text, &json!({"cursor.motion.style": "comet_swoop"}), false),
+            text
+        );
     }
 
     /// The click refusal's suggestion differs from the text only in its last
@@ -1089,6 +1436,8 @@ mod tests {
         }
     }
 
+    const LISTED: usize = 50;
+
     /// A list_apps-sized result whose text mentions much of what its
     /// structured half holds, whole, run into other tokens, or not at all.
     fn large_varied_result(rng: &mut Rng) -> (String, Value) {
@@ -1113,8 +1462,16 @@ mod tests {
             }
             apps.push(app);
         }
+        // A list the text carries whole, as list_windows' does.
+        let listed: Vec<Value> = (0..LISTED)
+            .map(|i| {
+                text.push_str(&format!("\n- listed-app-{i} (pid {})", 70_000 + i));
+                json!({"name": format!("listed-app-{i}"), "pid": 70_000 + i})
+            })
+            .collect();
         let structured = json!({
             "apps": apps,
+            "listed": listed,
             "processes": (0..300).map(|_| rng.value(3)).collect::<Vec<_>>(),
             "pid": rng.number(),
             "since": rng.word(),
@@ -1193,17 +1550,26 @@ mod tests {
             let indexed = render_text_with(&text, &structured, is_error, 0);
             assert_eq!(indexed, scanned, "round {round}");
             assert_eq!(render_text(&text, &structured, is_error), scanned);
-            // The text decides what is dropped: against unrelated text of the
-            // same length more rows stay.
-            let rows = |rendered: &str| rendered.lines().filter(|l| l.starts_with("- {")).count();
+            // The text decides what is dropped, one top-level key at a time:
+            // the list it carries goes, against unrelated text of the same
+            // length it stays, and a list is never cut short.
             let unrelated = render_text_with(&"#".repeat(text.len()), &structured, is_error, 0);
-            assert!(
-                rows(&scanned) > 300 && rows(&scanned) < rows(&unrelated),
-                "round {round}: {} rows, {} against unrelated text",
-                rows(&scanned),
-                rows(&unrelated)
+            assert_eq!(rows_after(&scanned, "listed:"), None, "round {round}");
+            assert_eq!(
+                rows_after(&unrelated, "listed:"),
+                Some(LISTED),
+                "round {round}"
             );
+            assert_eq!(rows_after(&scanned, "apps:"), Some(900), "round {round}");
+            assert_eq!(rows_after(&unrelated, "apps:"), Some(900), "round {round}");
         }
+    }
+
+    /// The `- ` rows under the line `header`, or `None` without it.
+    fn rows_after(rendered: &str, header: &str) -> Option<usize> {
+        let mut lines = rendered.lines().skip_while(|line| *line != header);
+        lines.next()?;
+        Some(lines.take_while(|line| line.starts_with("- ")).count())
     }
 
     /// `key=value` is matched as a whole assignment, never inside another.

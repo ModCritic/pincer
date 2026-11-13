@@ -112,7 +112,7 @@ fn main() {
     );
     let t6 = extract_text(&serde_json::from_str(r6.trim()).unwrap());
     assert!(
-        t6.starts_with("✅ Recording stopped."),
+        t6.starts_with("✅ Recording stopped:"),
         "Stop text wrong: {t6:?}"
     );
 

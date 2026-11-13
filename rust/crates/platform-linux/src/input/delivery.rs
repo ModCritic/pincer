@@ -18,14 +18,14 @@
 //!     (`PORTAL_INPUT_ENABLED == false`) the tool returns a structured
 //!     `background_unavailable` error so the caller can escalate to foreground.
 //!
-//! - `foreground` — activate the target first, inject, then restore the prior
-//!   active window.
+//! - `foreground` — activate the target first, then inject. On X11 the target
+//!   stays active afterwards (see `input/foreground.rs`: restoring the prior
+//!   window would close a menu the action just opened).
 //!   - **X11**: EWMH `_NET_ACTIVE_WINDOW` client message (the `wmctrl -a`
 //!     equivalent) raise + activate.
 //!   - **Wayland**: compositor-specific activate where supported; else the
 //!     libei-to-focus path with an honest note.
-//!   The agent's explicit last resort; a brief focus swap unless the target was
-//!   already active. Matches the macOS / Windows `foreground` rung.
+//!   The agent's explicit last resort: it moves focus to the target. Matches the macOS / Windows `foreground` rung.
 
 use serde_json::Value;
 
@@ -45,9 +45,9 @@ pub fn delivery_mode_schema() -> Value {
          Wayland it reaches only the focused window. Targets that cannot take \
          background input (Chromium/Electron, WebKitGTK, toolkits reachable only \
          through the focused widget, Wayland without libei) return \
-         background_unavailable. \"foreground\" activates the window (the pointer may \
-         move), acts, then restores the prior active window. Use it only when a \
-         background attempt is refused or unverifiable.",
+         background_unavailable. \"foreground\" activates and raises the window (the \
+         pointer may move) and acts; the window stays active afterwards. Use it only \
+         when a background attempt is refused or unverifiable.",
     );
     v["default"] = serde_json::json!("background");
     v

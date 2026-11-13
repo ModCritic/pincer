@@ -300,7 +300,7 @@ impl BrowserPointerTool {
         Self {
             def: ToolDef {
                 name: "browser_pointer".into(),
-                description: "Perform hover, right-click, double-click, scroll, or drag in an exactly-bound browser tab. Semantic refs must declare pointer for hover, right-click, double-click, and drag; scroll accepts a scroll or pointer capability. The trusted route uses CDP Input events and refuses if standalone background posture cannot be preserved. The explicit dom_event route requires a page ref and synthesizes full-background DOM events. Never activates or brings a tab to the foreground.".into(),
+                description: "Perform hover, right-click, double-click, scroll, or drag in an exactly-bound browser tab, at a ref or at x/y (drag to destination_ref or to_x/to_y). A semantic ref must list pointer in its actions for hover, right-click, double-click, and drag; scroll also accepts scroll. Plain elements such as a div with mouse listeners show up only as content refs with no actions, so use x/y for them: these are viewport CSS px, which get_browser_state with include_screenshot:true gives you (image pixels times its pixel_to_css_scale_x/y; 1:1 when the scale is 1). The default trusted route sends CDP Input events and, in background delivery, refuses where that would activate the browser window (Linux Chromium): retry with delivery_mode \"foreground\", or with input_route \"dom_event\" and refs to synthesize DOM events in the page. Never activates or brings a tab to the foreground.".into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {

@@ -250,6 +250,15 @@ fn assert_tools_list_schema_shape(mut d: RawDriver) {
         // macOS set_value has no delivery ladder.
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         "set_value",
+        // The held-button tools exist only on Linux: background is synthetic
+        // X11 events, foreground a real XTest button; mouse_drag and
+        // mouse_button_up follow the mode the button was pressed with.
+        #[cfg(target_os = "linux")]
+        "mouse_button_down",
+        #[cfg(target_os = "linux")]
+        "mouse_drag",
+        #[cfg(target_os = "linux")]
+        "mouse_button_up",
     ];
     for tool in DELIVERY_MODE_TOOLS {
         let delivery = &properties(tool)["delivery_mode"];

@@ -148,6 +148,14 @@ outside it, or click one of its rows by element_token after
 into a Qt file dialog opens its completer after the first `/`; prefer
 `set_value` on the "File name" field, which writes the path in one go.
 
+**Background keys without a virtual keyboard.** The focus-free virtual
+keyboard needs Xorg with a writable `/dev/uinput`, and it is off on KDE Plasma
+X11 and XWayland. Without it `press_key` / `hotkey` send synthetic X key
+events: a GTK target is refused with `background_unavailable`, and Qt acts on
+them only while its window is the active one (the result says when the target
+is not). `type_text` with an element_token still types in the background
+through AT-SPI; other keys need `delivery_mode:"foreground"`.
+
 **Popup walks, labels, descriptions.** `get_window_state(pid, window_id=<popup>)`
 returns the popup's own rows (list / tree / menu items), never the main
 window's menubar. A window read walks only that window: a dialog or a message
@@ -305,7 +313,12 @@ operation, resolves each labelled AT-SPI menu descendant again after the prior
 menu expands, and refuses missing, duplicate, disabled, or non-actionable
 segments. It works through AT-SPI on both X11 and Wayland and never falls back
 to coordinates. Verify the command's semantic effect from fresh state; the
-native `do_action` acknowledgement alone is not task completion.
+native `do_action` acknowledgement alone is not task completion. Qt runs the
+final item without closing the menus on the way (they would keep a keyboard
+grab), so `invoke_menu` then closes the menu it opened with the menu-bar
+entry's own `Show Menu` action, in the background; GTK closes its menus
+itself. A menu that stays open is named in the result with how to close it
+(`press_key` Escape on the window).
 
 ## AT-SPI needs the session bus (headless / containers / `runuser`)
 

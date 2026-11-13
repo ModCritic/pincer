@@ -322,8 +322,12 @@ pub fn parse_string_set(v: Option<&Value>) -> BTreeSet<String> {
 // ── Text summary ─────────────────────────────────────────────────────────────
 
 /// Compact human-readable summary of a report, for clients squinting at
-/// MCP traces. `structuredContent` is the authoritative wire format;
-/// this text is decorative.
+/// MCP traces. `structuredContent` is the authoritative wire format.
+///
+/// Each check says its name, status word, message, then its hint and any
+/// `data` field the message does not already say, so the text holds every
+/// check whole. Plain-text MCP results (`crate::mcp_text_results`) then
+/// leave out the structured `checks` list instead of repeating it.
 pub fn text_summary(report: &Report) -> String {
     let overall_icon = match report.overall {
         Overall::Ok => "✅",
@@ -340,12 +344,39 @@ pub fn text_summary(report: &Report) -> String {
         report.driver_version, report.platform
     )];
     for entry in &report.checks {
-        let icon = match entry.status {
-            CheckStatus::Pass => "✅",
-            CheckStatus::Fail => "❌",
-            CheckStatus::Skip => "⏭",
+        let (icon, word) = match entry.status {
+            CheckStatus::Pass => ("✅", "pass"),
+            CheckStatus::Fail => ("❌", "fail"),
+            CheckStatus::Skip => ("⏭", "skip"),
         };
-        lines.push(format!("  {icon} {}: {}", entry.name, entry.message));
+        lines.push(format!(
+            "  {icon} {} ({word}): {}",
+            entry.name, entry.message
+        ));
+        if let Some(hint) = &entry.hint {
+            lines.push(format!("      hint: {hint}"));
+        }
+        let data = entry
+            .data
+            .as_ref()
+            .and_then(|data| serde_json::to_value(data).ok())
+            .and_then(|data| data.as_object().cloned())
+            .unwrap_or_default();
+        let unsaid: Vec<String> = data
+            .iter()
+            .map(|(key, value)| {
+                let value = value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string());
+                (key, value)
+            })
+            .filter(|(_, value)| !entry.message.contains(value.as_str()))
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect();
+        if !unsaid.is_empty() {
+            lines.push(format!("      data: {}", unsaid.join(", ")));
+        }
     }
     lines.join("\n")
 }
@@ -370,51 +401,31 @@ static DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 fn def() -> &'static ToolDef {
     DEF.get_or_init(|| ToolDef {
         name: "health_report".into(),
-        // The description is part of the public contract — downstream
-        // consumers depend on it spelling out `schema_version="1"` and the per-
-        // platform check matrix. A test pins this commitment.
-        description: r#"Single-call end-to-end driver diagnostics. Designed to let downstream consumers ship one stable call instead of stitching together check_permissions, doctor, version, bundle attribution, and platform capability status. On macOS, prompt-capable direct capture is deliberately skipped. For standalone Pincer, use `pincer permissions grant` to verify it explicitly. For an embedded or linked driver, use the host's permission flow for the app or executable macOS attributes this process's permission request to; the standalone command does not verify the host's capture readiness. pincer owns the health model; consumers stay thin.
+        // The description is part of the public contract: downstream
+        // consumers depend on it spelling out `schema_version="1"` and the
+        // check names. A test pins this commitment. The check lists match the
+        // providers' `check_names()` in platform-macos, platform-windows and
+        // platform-linux.
+        description: r#"Check in one call whether Pincer can work here. Never fails as a tool call: problems show in `overall` and `checks`, and a failed check carries a `hint` with the fix. `include` runs only the named checks and `skip` leaves named checks out (`include` wins); a check not run still appears with status `skip`.
 
-Input — all optional:
-  {
-    "include": ["<check_name>", ...],   // run only these
-    "skip":    ["<check_name>", ...]    // skip these
-  }
-If both are given, `include` wins.
+Checks, in this order, on every platform: binary_version, platform_supported, session_active, bundle_identity, tcc_accessibility, tcc_screen_recording, ax_capability (the accessibility tree: AX, UIA or AT-SPI), screen_capture_capability. bundle_identity and tcc_* are macOS permission checks and report `skip` on Linux and Windows. On macOS screen_capture_capability is always `skip`, since probing it could show a consent prompt; its message says how to verify capture. Linux adds wayland_backend, `skip` unless the session is Wayland with PINCER_ENABLE_WAYLAND=1.
 
-Canonical check names:
-  macOS  : binary_version, platform_supported, session_active,
-           bundle_identity, tcc_accessibility, tcc_screen_recording,
-           ax_capability, screen_capture_capability
-  Windows: binary_version, platform_supported, session_active,
-           ax_capability (via UIA), screen_capture_capability (via DXGI)
-  Linux  : binary_version, platform_supported, session_active,
-           ax_capability (via AT-SPI), screen_capture_capability (via X11)
-
-Output — stable contract, schema_version="1":
+Output, schema_version="1":
   {
     "schema_version": "1",
     "platform": "darwin" | "win32" | "linux",
     "driver_version": "<semver>",
     "overall": "ok" | "degraded" | "failed",
-    "checks": [
-      {
-        "name": "<one of the canonical names above>",
-        "status": "pass" | "fail" | "skip",
-        "message": "<one-line summary, always present>",
-        "hint": "<remediation step, present when status=fail>",
-        "data": { /* check-specific structured fields */ }
-      },
-      ...
-    ]
+    "checks": [{
+      "name": "<check name>",
+      "status": "pass" | "fail" | "skip",
+      "message": "<one line, always present>",
+      "hint": "<fix, present when status is fail>",
+      "data": { <optional check-specific fields> }
+    }, ...],
+    "build": { "version", "git_sha", "exe_sha256" }
   }
-
-`overall` rules:
-  - `ok`       — every non-skipped check passes
-  - `degraded` — at least one non-core check fails (binary is still usable)
-  - `failed`   — any core check fails (binary_version, platform_supported, session_active)
-
-Stability: schema_version="1" is the contract. Future breaking changes will be `"2"`. Adding new check names under the same schema_version is non-breaking; consumers must tolerate unknown check names."#.into(),
+`overall` is `failed` when a core check (binary_version, platform_supported, session_active) fails, `degraded` when any other check fails, and `ok` otherwise. Breaking changes will use schema_version "2"; new check names can appear under "1", so tolerate unknown names."#.into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -594,11 +605,36 @@ mod tests {
     }
 
     #[test]
-    fn advertised_capture_remediation_is_owner_scoped() {
+    fn capture_remediation_is_left_to_the_check_message() {
+        // The owner-scoped remediation (standalone `pincer permissions grant`
+        // versus an embedding host's permission flow) lives in the macOS
+        // screen_capture_capability message, so the description must not
+        // offer the standalone command as the general fix.
         let description = &def().description;
-        assert!(description.contains("For standalone Pincer"));
-        assert!(description.contains("does not verify"));
+        assert!(!description.contains("pincer permissions grant"));
+        assert!(description.contains("its message says how to verify capture"));
         assert!(def().read_only);
+    }
+
+    #[test]
+    fn description_names_every_check_each_platform_reports() {
+        // Linux reports the full macOS list (bundle and TCC checks as skip)
+        // plus wayland_backend; Windows reports the macOS list.
+        let description = &def().description;
+        for name in [
+            NAME_BINARY_VERSION,
+            NAME_PLATFORM_SUPPORTED,
+            NAME_SESSION_ACTIVE,
+            NAME_BUNDLE_IDENTITY,
+            NAME_TCC_ACCESSIBILITY,
+            NAME_TCC_SCREEN_RECORDING,
+            NAME_AX_CAPABILITY,
+            NAME_SCREEN_CAPTURE_CAPABILITY,
+            "wayland_backend",
+        ] {
+            assert!(description.contains(name), "{name}");
+        }
+        assert!(description.contains("report `skip` on Linux and Windows"));
     }
 
     // ── compute_overall ──────────────────────────────────────────────
@@ -698,6 +734,63 @@ mod tests {
             let status = entry["status"].as_str().unwrap();
             assert!(matches!(status, "pass" | "fail" | "skip"));
         }
+    }
+
+    /// The text holds every check whole (name, status word, message, hint,
+    /// unsaid data), so the plain-text MCP result needs no `checks` list:
+    /// at 3eefd3e its partial copy left `{status: pass}` rows unnamed.
+    #[tokio::test]
+    async fn text_says_every_check_whole() {
+        let provider = Arc::new(FixtureProvider {
+            names: macos_names(),
+            platform: "darwin",
+            fail_names: BTreeSet::from([NAME_TCC_ACCESSIBILITY.to_owned()]),
+        });
+        let result = HealthReportTool::new(provider)
+            .invoke(json!({ "skip": [NAME_BUNDLE_IDENTITY] }))
+            .await;
+        let text = match &result.content[0] {
+            crate::protocol::Content::Text { text, .. } => text.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert!(text.contains("  ✅ binary_version (pass): "), "{text}");
+        assert!(
+            text.contains("  ❌ tcc_accessibility (fail): tcc_accessibility failed in fixture\n      hint: remediate"),
+            "{text}"
+        );
+        assert!(
+            text.contains("  ⏭ bundle_identity (skip): Skipped by include/skip filter."),
+            "{text}"
+        );
+
+        let wire = serde_json::to_value(&result).unwrap();
+        let mut rendered = wire.clone();
+        crate::mcp_text_results::render_tool_result(&mut rendered);
+        let rendered = rendered["content"][0]["text"].as_str().unwrap().to_owned();
+        assert!(rendered.starts_with(&text), "{rendered}");
+        assert!(!rendered.contains("checks:"), "{rendered}");
+    }
+
+    #[test]
+    fn text_names_data_the_message_does_not_say() {
+        let entry =
+            CheckEntry::pass(NAME_PLATFORM_SUPPORTED, "Arch Linux (x86_64)").with_data(CheckData {
+                os_version: Some("Arch Linux".into()),
+                architecture: Some("x86_64".into()),
+                display_count: Some(2),
+                ..Default::default()
+            });
+        let report = Report {
+            schema_version: "1".into(),
+            platform: "linux".into(),
+            driver_version: "0.0.0".into(),
+            overall: Overall::Ok,
+            checks: vec![entry],
+            build: None,
+        };
+        assert!(text_summary(&report).ends_with(
+            "  ✅ platform_supported (pass): Arch Linux (x86_64)\n      data: display_count=2"
+        ));
     }
 
     #[tokio::test]

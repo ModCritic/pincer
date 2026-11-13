@@ -463,7 +463,10 @@ overflow container can therefore be scrollable without gaining click, hover,
 or drag authority. The synthetic route requires a current ref; drag also
 requires `destination_ref` in the same proven frame. Coordinate origins and
 destinations are available only where the trusted route can preserve the
-requested posture.
+requested posture. A plain element such as a `div` with mouse listeners is
+listed only as a content ref without actions, so hover or drag it by `x`/`y`:
+viewport CSS pixels, which you can read from `get_browser_state` with
+`include_screenshot:true` (image pixels times `pixel_to_css_scale_x`/`_y`).
 
 ```text
 browser_pointer
@@ -475,8 +478,11 @@ browser_pointer
 ### JavaScript dialogs
 
 `browser_dialog` handles only page-owned `alert`, `confirm`, `prompt`, and
-`beforeunload` dialogs. First inspect the exact tab, then accept or dismiss the
-returned opaque `dialog_id`. A prompt response is allowed only with
+`beforeunload` dialogs. `inspect` returns the dialog's `kind`, `message`, a
+prompt's `default_prompt`, and its `dialog_id`. Accept or dismiss with that
+`dialog_id`; the `browser_click` that opened the dialog already printed the
+same id (`the click opened an alert dialog (dialog-1)`), so inspect is needed
+only to read the message. A prompt response is allowed only with
 `action:"accept"` on a current prompt. Browser permission UI and native dialogs
 remain outside this tool. Creating Chromium's native modal can activate the
 browser; after the caller restores occlusion, inspecting and resolving the
@@ -488,20 +494,27 @@ driver refuses that mode before dispatch; retry explicitly with
 
 ### File inputs
 
-Use a current semantic ref whose `actions` contains `upload`, then call
+Use a current semantic ref whose `actions` contains `upload` (a snapshot lists
+`<input type=file>` as a button, for example `button "Attachment": No file
+chosen` with actions `[click, upload, pointer]`), then call
 `browser_set_input_files` with one to 32 absolute regular-file paths. The tool
 rejects symlinks and directories, bypasses the native file picker, and returns
 only the assigned file count. Paths are redacted from trajectory arguments.
 
 ### Downloads
 
-`browser_download` activates one exact ref under a destructive MCP-host
-approval and saves the result under an existing canonical absolute
-`destination_root`. It correlates browser download events to the exact frame,
-serializes Chromium's browser-wide download setting, restores that setting on
-every outcome, and returns only an opaque download id and byte count. It never
-returns the source URL, filename, or destination path. Direct raw calls without
-the host approval proof are refused.
+`browser_download` clicks one exact ref and saves the download in an existing
+canonical absolute `destination_root`. It correlates browser download events
+to the exact frame, serializes Chromium's browser-wide download setting, and
+restores that setting on every outcome. The file keeps the page's suggested
+filename, sanitized (path separators, control characters and characters
+Windows forbids become `_`, leading dots are removed), and gets a numbered
+suffix such as `report (1).txt` instead of overwriting an existing file. The
+result carries `file_name`, `bytes` and an opaque `download_id`; the file is
+`destination_root/file_name`. It never returns the source URL or a local
+path. The tool is annotated destructive, so the MCP client may ask the user
+before each call; calls that do not come through an MCP client are refused
+with `browser_consent_required`.
 
 ## Browser chrome and native fallbacks
 

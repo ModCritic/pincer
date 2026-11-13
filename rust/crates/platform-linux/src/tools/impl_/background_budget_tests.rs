@@ -68,7 +68,40 @@ fn desktop_window_lines_expose_pid_and_window_id() {
     assert!(text.contains("app=libreoffice"));
     assert!(text.contains("get_window_state(pid, window_id)"));
     assert!(desktop_window_lines(&[], 1.0).contains("none"));
-    // A downsized desktop screenshot reports window rects in ITS pixels.
+    assert!(text.contains("1920x1053+0+27 desktop px z=?"), "{text}");
+    // A downsized desktop screenshot reports window rects in ITS pixels,
+    // labeled, then in desktop pixels as the structured records hold them.
     let scaled = desktop_window_lines(&windows, 1.5);
-    assert!(scaled.contains("1280x702 at (0,18)"), "{scaled}");
+    assert!(
+        scaled.contains("1280x702 at (0,18) screenshot px, 1920x1053+0+27 desktop px z=?"),
+        "{scaled}"
+    );
+}
+
+/// The text renderer drops the structured window records only when the
+/// lines say all of them: at 3eefd3e the line had no desktop bounds or
+/// z_index, and the records stayed with their title cut out.
+#[test]
+fn desktop_window_lines_say_the_whole_record() {
+    let window = crate::x11::WindowInfo {
+        xid: 16777223,
+        pid: Some(166),
+        app_name: "kwrite".into(),
+        title: "notes.txt  — KWrite".into(),
+        is_on_screen: true,
+        z_index: Some(0),
+        x: 960,
+        y: 494,
+        width: 640,
+        height: 480,
+    };
+    let text = format!(
+        "✅ Desktop screenshot 1280x720 (screen 2560x1440){}",
+        desktop_window_lines(std::slice::from_ref(&window), 2.0)
+    );
+    let structured = json!({"windows": [window_record_json(&window)]});
+    assert_eq!(
+        pincer_core::mcp_text_results::render_text(&text, &structured, false),
+        text
+    );
 }

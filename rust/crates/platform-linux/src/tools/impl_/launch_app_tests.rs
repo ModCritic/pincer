@@ -116,3 +116,33 @@ fn refuses_ambiguous_substring_and_unknown_names() {
     assert!(match_installed_app(&apps, "gnome-calculator").is_none());
     assert!(match_installed_app(&apps, "").is_none());
 }
+
+#[tokio::test]
+async fn urls_with_a_named_app_are_appended_to_its_arguments() {
+    // `{name:"KWrite", urls:[<file>]}` used to hand the file to xdg-open and
+    // drop the named app. The urls now follow additional_arguments on the
+    // app's own command line: here `/bin/sh -c <script> <url>`, so the
+    // script sees the url as $0 and writes it to the marker file.
+    let directory = tempfile::tempdir().unwrap();
+    let marker = directory.path().join("argv");
+    let _ = LaunchAppTool
+        .invoke(json!({
+            "launch_path": "/bin/sh",
+            "additional_arguments": ["-c", format!("printf %s \"$0\" > '{}'", marker.display())],
+            "urls": ["/tmp/notes.txt"],
+        }))
+        .await;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !marker.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(std::fs::read_to_string(&marker).unwrap(), "/tmp/notes.txt");
+}
+
+#[tokio::test]
+async fn urls_are_checked_for_remote_debugging_flags() {
+    let refused = LaunchAppTool
+        .invoke(json!({"launch_path": "/bin/sh", "urls": ["--remote-debugging-port=0"]}))
+        .await;
+    assert_eq!(refused.is_error, Some(true));
+}

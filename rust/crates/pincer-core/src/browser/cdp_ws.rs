@@ -111,13 +111,42 @@ pub struct CdpEvent {
     pub params: Value,
 }
 
-/// Bounded state for one page-owned JavaScript dialog. Message text and URLs
-/// are deliberately not retained.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Bounded state for one page-owned JavaScript dialog. The page URL is not
+/// retained. The message and a prompt's default text are kept, cut to
+/// [`MAX_DIALOG_TEXT_CHARS`], only so `browser_dialog` inspect can show them
+/// to the caller (the same page-authored text a snapshot shows); `Debug`
+/// leaves them out so logs never carry page text.
+#[derive(Clone, PartialEq, Eq)]
 pub struct CdpDialogState {
     pub generation: u64,
     pub kind: String,
     pub session_id: String,
+    pub message: String,
+    /// A prompt's default answer; `None` for other kinds.
+    pub default_prompt: Option<String>,
+}
+
+impl std::fmt::Debug for CdpDialogState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CdpDialogState")
+            .field("generation", &self.generation)
+            .field("kind", &self.kind)
+            .field("session_id", &self.session_id)
+            .field("message_chars", &self.message.chars().count())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Longest dialog message or prompt default kept, in characters.
+pub const MAX_DIALOG_TEXT_CHARS: usize = 2_000;
+
+fn bounded_dialog_text(value: Option<&Value>) -> String {
+    value
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .chars()
+        .take(MAX_DIALOG_TEXT_CHARS)
+        .collect()
 }
 
 /// What [`CdpConnection::call_until_dialog`] ended with.
@@ -225,6 +254,10 @@ async fn read_loop(mut read: SplitStream<WsStream>, demux: Arc<Demux>) {
                                     generation,
                                     kind: kind.to_owned(),
                                     session_id: session_id.to_owned(),
+                                    message: bounded_dialog_text(event.params.get("message")),
+                                    default_prompt: (kind == "prompt").then(|| {
+                                        bounded_dialog_text(event.params.get("defaultPrompt"))
+                                    }),
                                 },
                             );
                             demux.dialog_opened.send_replace(generation);
@@ -1370,6 +1403,7 @@ mod tests {
                 params: json!({
                     "type": "prompt",
                     "message": "private dialog text",
+                    "defaultPrompt": "private default",
                     "url": "https://private.example"
                 }),
             }]),
@@ -1389,6 +1423,9 @@ mod tests {
         let dialog = conn.dialog_state("page-target").expect("dialog journaled");
         assert_eq!(dialog.kind, "prompt");
         assert_eq!(dialog.session_id, "tab-session-a");
+        assert_eq!(dialog.message, "private dialog text");
+        assert_eq!(dialog.default_prompt.as_deref(), Some("private default"));
+        // Logs never carry page text.
         assert!(!format!("{dialog:?}").contains("private"));
         conn.call(Some("tab-session-a"), "Dialog.close", json!({}))
             .await

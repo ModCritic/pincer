@@ -217,14 +217,10 @@ fn unknown_argument(def: &ToolDef, args: &Value) -> Option<String> {
     const NAME_TARGET: &[&str] = &["role", "name", "label", "app", "window", "nth"];
     let name_targeted = crate::batch_tools::BATCHABLE_TOOLS.contains(&def.name.as_str())
         && unknown.iter().all(|name| NAME_TARGET.contains(name));
+    // Every advertised name, `session` included: a list without it read as
+    // "session is not accepted" (parallel_mouse_drag, 2026-11-11).
     let accepted: Vec<&str> = properties
-        .map(|properties| {
-            properties
-                .keys()
-                .map(String::as_str)
-                .filter(|name| *name != "session")
-                .collect()
-        })
+        .map(|properties| properties.keys().map(String::as_str).collect())
         .unwrap_or_default();
     let noun = if unknown.len() == 1 {
         "argument"
@@ -1167,7 +1163,7 @@ impl ToolRegistry {
             crate::session::register_scoped_session_end_hook(move |session_id| {
                 crate::agent_cursor::forget_input_origin(session_id);
                 if let Some(ownership) = weak_ownership.upgrade() {
-                    ownership.remove_session(session_id);
+                    ownership.release_session(session_id);
                 }
                 if let Some(captures) = weak_captures.upgrade() {
                     captures.retire_session_id(session_id);
@@ -1847,6 +1843,9 @@ impl ToolRegistry {
                 .is_some_and(|fingerprint| {
                     self.protected_resource_ownership
                         .reprove_driver_owned_process(&process_ownership_key, fingerprint)
+                        || self
+                            .protected_resource_ownership
+                            .reprove_released_process(&runtime_prefix, fingerprint)
                 });
 
         if context.mode() == crate::authorization::PermissionMode::Standard
@@ -1855,7 +1854,7 @@ impl ToolRegistry {
         {
             return protected_refusal(
                 "foreign_process_termination_denied",
-                "standard mode may terminate only a process proven to have been launched by this Pincer runtime",
+                FOREIGN_PROCESS_TERMINATION_MESSAGE,
             );
         }
         if runtime_proves_driver_owned {
@@ -3351,6 +3350,13 @@ fn requires_desktop_coordination(tool: &str, args: &Value, independent_lane: boo
         && args["dispatch"] != "foreground";
     !(independent_lane && exact_background_window)
 }
+
+/// Why `kill_app` refused a process in standard mode, and the way out.
+const FOREIGN_PROCESS_TERMINATION_MESSAGE: &str =
+    "standard mode terminates only a process this Pincer runtime launched (launch_app or \
+     browser_prepare), from the session that launched it, or from any session once that \
+     session has ended; this pid is not one of those. Close the app through its own Quit \
+     item instead (invoke_menu, e.g. [\"File\",\"Quit\"])";
 
 /// Bucket that owns the processes a call is allowed to terminate.
 ///
@@ -5426,6 +5432,33 @@ resources:
         );
     }
 
+    #[tokio::test]
+    async fn a_launch_whose_session_ended_can_be_terminated_from_another_session() {
+        // end_session used to drop the launch's provenance, so the process
+        // it left running could not be terminated through Pincer at all.
+        let hits = Arc::new(AtomicUsize::new(0));
+        let registry = attested_registry("kill_app", None, hits.clone(), false);
+        let context = standard_context();
+        let launching = context.runtime_session_key("ended-launcher");
+        registry
+            .protected_resource_ownership()
+            .mark_driver_owned_process(
+                &launching,
+                crate::browser::ProcessFingerprint {
+                    pid: 424242,
+                    start_time: Some(7),
+                    executable: Some(fixture_executable()),
+                },
+            );
+        crate::session::fire_session_end(&launching);
+
+        let result = registry
+            .invoke_with_context("kill_app", serde_json::json!({"pid": 424242}), context)
+            .await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
     #[test]
     fn anonymous_process_ownership_key_cannot_be_selected_by_a_session_argument() {
         let prefix = "__pincer_runtime_scope:";
@@ -7307,7 +7340,7 @@ mod argument_shape_tests {
         .unwrap();
         assert_eq!(
             detail,
-            "arguments height, width; accepted: pid, window_id, x1, x2, y1, y2"
+            "arguments height, width; accepted: pid, session, window_id, x1, x2, y1, y2"
         );
         let detail = unknown_argument(&zoom_def(), &json!({"window_id": 1, "height": 2})).unwrap();
         assert!(

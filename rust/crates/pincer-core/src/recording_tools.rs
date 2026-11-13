@@ -45,25 +45,25 @@ impl Tool for StartRecordingTool {
     fn def(&self) -> &ToolDef {
         START_REC_DEF.get_or_init(|| ToolDef {
             name: "start_recording".into(),
-            description: "Start trajectory recording for the calling session: each action-tool \
-                call (click, right_click, scroll, type_text, press_key, hotkey, set_value) from \
-                that session writes a turn folder (`turn-00001/`, `turn-00002/`, ..., numbered \
-                from 1 on each start) under `output_dir`. Without `session`, every call on this \
-                connection is recorded, named sessions included. Other connections and \
-                start_session/end_session are not recorded. CLI recordings (`pincer recording \
-                start`) are daemon-wide.\n\n\
-                Each turn folder holds `before_state.json`/`after_state.json` (accessibility \
-                state before and after the action), `before.png`/`after.png` (target-window \
-                screenshots), `evidence.json` (capture status, and why an expected artifact is \
-                missing), `app_state.json` (post-action snapshot of the target pid), \
-                `screenshot.png` (alias of after.png), `action.json` (tool, arguments, result \
-                summary, error flag, pid, click point, ISO-8601 timestamp) and, for dispatched \
-                clicks, `click.png` (before.png with a red marker at the click point). An action \
-                refused before dispatch (such as an expired capture_id) gets no state walk; its \
-                state is classified `action_refused_before_dispatch`.\n\n\
-                Video is off by default (see `record_video`). Recording lasts until \
-                `stop_recording` or a daemon restart (nothing is kept on disk); video also stops \
-                when the MCP client disconnects. `stop_recording` finalizes the mp4."
+            description: "Start trajectory recording: each later call to a tool that changes \
+                something (click, type_text, press_key, scroll, set_value, launch_app, and so \
+                on, including the steps inside run_steps and run_script) writes one turn folder \
+                under `output_dir`, numbered `turn-00001/`, `turn-00002/`, ... from 1 on each \
+                start. Read-only tools, the recording tools, start_session and end_session are \
+                not recorded. Without `session`, every call on this connection is recorded, \
+                named sessions included; other connections are not.\n\n\
+                Each turn folder holds `action.json` (`tool`, `arguments` exactly as called, \
+                pid and window_id included, `result_summary`, `result_error`, `timestamp`, and \
+                `click_point` for clicks), `before.png`/`after.png` (target-window \
+                screenshots), `before_state.json`/`after_state.json` (accessibility tree before \
+                and after), `evidence.json` (what was captured and why anything is missing) \
+                and, for dispatched clicks, `click.png` (before.png with a red marker at the \
+                click point). `app_state.json` and `screenshot.png` are copies of \
+                after_state.json and after.png. Beside the turn folders: `session.json` (start \
+                time, video and cursor-sample status), `cursor.jsonl` (pointer samples; always \
+                empty on Linux) and, with `record_video`, `recording.mp4`.\n\n\
+                Recording lasts until stop_recording, the end of the session that started it, \
+                or a daemon restart. Replay it with replay_trajectory."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -187,16 +187,11 @@ impl Tool for StopRecordingTool {
     fn def(&self) -> &ToolDef {
         STOP_REC_DEF.get_or_init(|| ToolDef {
             name: "stop_recording".into(),
-            description: "Stop trajectory recording. Disables further per-turn capture \
-                and, when video was enabled, gracefully terminates the ffmpeg subprocess \
-                so the mp4's moov atom is finalized (the file is playable). Calling \
-                stop on an already-stopped session is a no-op. The response carries \
-                `last_video_path` pointing at the finalized mp4 (when video was on).\n\n\
-                A manual `stop_recording` is **unconditional** — it stops whatever \
-                recording is active regardless of which session started it. \
-                Ownership-scoped teardown (so one client disconnecting can't stop a \
-                recording a later client started) is handled by the registry's \
-                `session_end` lifecycle hook, not by this tool."
+            description: "Stop trajectory recording, whichever session started it, and \
+                finalize the mp4 when video was on. Returns the folder (`output_dir`), how many \
+                turn folders were written (`turns_written`: `turn-00001` up to that number) \
+                and, with video, `last_video_path`. With nothing recording it changes nothing \
+                and says so (`stopped: false`)."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -214,19 +209,44 @@ impl Tool for StopRecordingTool {
         // Manual stop is unconditional — `None` requester tears down whatever
         // recording is active. Session-scoped teardown is driven by the
         // registry-owned session-end hook, which calls `stop_owner(sid)`.
-        match self.session.stop_owner(None) {
-            Ok(()) => {
-                let state = self.session.current_state();
-                let video_note = state
-                    .last_video_path
-                    .as_deref()
-                    .map(|p| format!(" (video → {p})"))
-                    .unwrap_or_default();
-                ToolResult::text(format!("✅ Recording stopped.{video_note}"))
-                    .with_structured(recording_state_json(&state))
-            }
-            Err(e) => ToolResult::error(format!("Failed to stop recording: {e}")),
+        let stopped = self.session.stop_owner_reporting(None);
+        let state = self.session.current_state();
+        // The result describes the recording that just ended. The recorder's
+        // `next_turn` has already reset to 1 for the next start, so it is left
+        // out: shown beside a stop, it read like an empty recording.
+        let mut structured = json!({
+            "recording": false,
+            "enabled": false,
+            "stopped": stopped.is_some(),
+            "video_active": state.video_active,
+            "last_error": state.last_error,
+        });
+        let Some(stopped) = stopped else {
+            return ToolResult::text("Recording was not running; nothing to stop.")
+                .with_structured(structured);
+        };
+        structured["output_dir"] = json!(stopped.output_dir);
+        structured["turns_written"] = json!(stopped.turns);
+        structured["last_video_path"] = json!(stopped.video_path);
+        let turns = match stopped.turns {
+            0 => "no turn folders".to_owned(),
+            1 => "1 turn folder (turn-00001)".to_owned(),
+            n => format!("{n} turn folders (turn-00001 to turn-{n:05})"),
+        };
+        let summary = format!("{turns} in {}", stopped.output_dir);
+        if let Some(error) = stopped.video_error {
+            return ToolResult::error(format!(
+                "Recording stopped with {summary}, but the video could not be finalized: {error}"
+            ))
+            .with_structured(structured);
         }
+        let video_note = stopped
+            .video_path
+            .as_deref()
+            .map(|path| format!(" Video: {path}."))
+            .unwrap_or_default();
+        ToolResult::text(format!("✅ Recording stopped: {summary}.{video_note}"))
+            .with_structured(structured)
     }
 }
 
@@ -301,26 +321,28 @@ impl Tool for ReplayTrajectoryTool {
     fn def(&self) -> &ToolDef {
         REPLAY_DEF.get_or_init(|| ToolDef {
             name: "replay_trajectory".into(),
-            // Description ported from Swift `ReplayTrajectoryTool.swift`
-            // with its caveats about element-indexed actions and recording-
-            // during-replay semantics.
-            description: "Replay a recorded trajectory by re-invoking every turn's tool call \
-                in lexical order. `dir` must point at a directory previously written by \
-                `start_recording`. Each `turn-NNNNN/` is parsed for `action.json`, and the \
-                recorded tool is called with its recorded `arguments` via the same dispatch \
-                path an MCP / CLI call uses.\n\n\
-                Caveats:\n\
-                - Element-token actions (`click({pid, element_token})` etc.) will fail \
-                  because element tokens are per-snapshot and don't survive across \
-                  sessions. Pixel clicks (`click({pid, x, y})`) and all keyboard tools \
-                  replay cleanly. Failures are reported but don't stop replay unless \
-                  `stop_on_error` is true.\n\
-                - `get_window_state` and other read-only tools are not recorded, \
-                  so replays do not re-populate the per-(pid, window_id) element cache.\n\
-                - If recording is enabled while replay runs, the replay itself is recorded \
-                  into the currently configured output directory.  That's deliberate: \
-                  recording a replay against a new build and diffing the two trajectories \
-                  is the regression-test workflow.".into(),
+            // The caveats below were measured on Linux at 3eefd3e: a replay
+            // in a new session refused every pixel click until
+            // get_window_state had read that window, and a relaunched app
+            // (new pid) failed every turn.
+            description: "Replay a recording: call the tool in each `turn-NNNNN/action.json` \
+                with its recorded `arguments`, in folder order, through the normal dispatch \
+                path. Returns attempted, succeeded and failed counts, each turn's result, and \
+                the first failure. Stops at the first failure unless `stop_on_error` is \
+                false.\n\n\
+                Turns replay against the recorded pid and window_id:\n\
+                - If the app was relaunched (new pid), every turn fails. Edit `pid` and \
+                `window_id` in each action.json's `arguments` to the new values, or reset the \
+                app instead of relaunching it.\n\
+                - A pixel click (`x`, `y`) is refused until this session has a screenshot of \
+                its window: call get_window_state(pid, window_id) on each recorded window \
+                first.\n\
+                - An `element_token` names a row of one snapshot in one session, so a recorded \
+                token click fails or hits whatever row has that token now. Record pixel clicks \
+                or keys for replay.\n\n\
+                With recording on, the replay is itself recorded into the current output \
+                folder, so two runs can be diffed."
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "required": ["dir"],
@@ -547,6 +569,80 @@ fn parse_action_json(path: &std::path::Path) -> anyhow::Result<(String, Value)> 
 pub struct InstallFfmpegTool;
 static INSTALL_FFMPEG_DEF: OnceLock<ToolDef> = OnceLock::new();
 
+/// `found` as the file that runs: `find_ffmpeg` answers the bare name
+/// `ffmpeg` when it starts from PATH, so look it up in PATH's directories
+/// in order, as the process spawner's PATH search does (execvp on Unix; on
+/// Windows with `.exe` added). A name no PATH entry holds stays as it is.
+fn resolved_on_path(found: std::path::PathBuf) -> std::path::PathBuf {
+    let dirs = std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).collect())
+        .unwrap_or_default();
+    resolved_in(found, dirs)
+}
+
+fn resolved_in(found: std::path::PathBuf, dirs: Vec<std::path::PathBuf>) -> std::path::PathBuf {
+    if found.components().count() != 1 {
+        return found;
+    }
+    let names = if cfg!(windows) {
+        vec![found.with_extension("exe"), found.clone()]
+    } else {
+        vec![found.clone()]
+    };
+    dirs.iter()
+        .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
+        .find(|candidate| is_executable_file(candidate))
+        .unwrap_or(found)
+}
+
+#[cfg(all(test, unix))]
+mod ffmpeg_path_tests {
+    use super::resolved_in;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+
+    /// install_ffmpeg at 3eefd3e answered `path: ffmpeg`.
+    #[test]
+    fn a_bare_name_resolves_to_the_first_executable_on_path() {
+        let root = tempfile::tempdir().unwrap();
+        let [plain, first, second] = ["plain", "first", "second"].map(|dir| {
+            let dir = root.path().join(dir);
+            std::fs::create_dir(&dir).unwrap();
+            dir
+        });
+        std::fs::write(plain.join("ffmpeg"), "").unwrap();
+        for dir in [&first, &second] {
+            let file = dir.join("ffmpeg");
+            std::fs::write(&file, "").unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let found = resolved_in(PathBuf::from("ffmpeg"), vec![plain, first.clone(), second]);
+        assert_eq!(found, first.join("ffmpeg"));
+        assert_eq!(
+            resolved_in(PathBuf::from("ffmpeg"), vec![]),
+            PathBuf::from("ffmpeg")
+        );
+        let absolute = PathBuf::from("/opt/ffmpeg/bin/ffmpeg");
+        assert_eq!(resolved_in(absolute.clone(), vec![first]), absolute);
+    }
+}
+
+fn is_executable_file(path: &std::path::Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        metadata.is_file()
+    }
+}
+
 #[async_trait]
 impl Tool for InstallFfmpegTool {
     fn def(&self) -> &ToolDef {
@@ -572,7 +668,7 @@ impl Tool for InstallFfmpegTool {
     async fn invoke(&self, args: Value) -> ToolResult {
         use crate::tool_args::ArgsExt;
 
-        if let Some(path) = crate::video_ffmpeg::find_ffmpeg() {
+        if let Some(path) = crate::video_ffmpeg::find_ffmpeg().map(resolved_on_path) {
             return ToolResult::text(format!(
                 "✅ ffmpeg already available ({}). Nothing to install.",
                 path.display()
@@ -663,5 +759,48 @@ mod tests {
             );
             session.stop_owner(None).unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn stop_recording_reports_the_turns_it_wrote_not_the_reset_counter() {
+        // At 3eefd3e a stop right after three recorded turns answered
+        // `enabled: false, next_turn: 1`, which read like an empty recording.
+        let session = Arc::new(RecordingSession::new());
+        let directory = tempfile::tempdir().unwrap();
+        let dir = directory.path().to_str().unwrap();
+        session.start(dir, false, None).unwrap();
+        // Off the (pid 1, window 2) target whose screenshot phase another test counts.
+        let args = json!({"pid": 51, "window_id": 52, "x": 3, "y": 4});
+        for _ in 0..3 {
+            let pending = session
+                .begin_turn(
+                    "click",
+                    &args,
+                    crate::recording::now_ms(),
+                    crate::recording::RecordingCaller::default(),
+                )
+                .expect("an anonymous recording keeps every call");
+            session.finish_turn(pending, "clicked");
+        }
+
+        let stop = StopRecordingTool::new(session.clone());
+        let stopped = stop.invoke(json!({})).await;
+        assert_ne!(stopped.is_error, Some(true));
+        let structured = stopped.structured_content.as_ref().unwrap();
+        assert_eq!(structured["stopped"], true);
+        assert_eq!(structured["turns_written"], 3);
+        assert_eq!(structured["output_dir"], dir);
+        assert!(structured.get("next_turn").is_none());
+        let text = format!("{:?}", stopped.content);
+        assert!(
+            text.contains("3 turn folders (turn-00001 to turn-00003)"),
+            "{text}"
+        );
+        assert!(directory.path().join("turn-00003/action.json").exists());
+
+        let again = stop.invoke(json!({})).await;
+        assert_ne!(again.is_error, Some(true));
+        assert_eq!(again.structured_content.as_ref().unwrap()["stopped"], false);
+        assert!(format!("{:?}", again.content).contains("nothing to stop"));
     }
 }

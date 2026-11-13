@@ -80,9 +80,9 @@ Each action writes to `turn-NNNNN/` (five-digit zero-padded counter):
   has an explicit classification instead of disappearing from the turn.
 - `app_state.json` and `screenshot.png`: compatibility aliases for
   `after_state.json` and `after.png`.
-- `action.json`: the tool name, full input arguments, result
-  summary, result-error flag, pid, click point (when applicable), ISO-8601
-  timestamp.
+- `action.json`: `tool`, `arguments` exactly as called (the target `pid`
+  and `window_id` are in there), `result_summary`, `result_error`, an
+  ISO-8601 `timestamp`, and `click_point` when applicable.
 - `click.png`: for click-family actions (`click`, `double_click`,
   `right_click`): a copy of the pre-input image with a red marker drawn at
   the click point. Usually that source is `before.png`. When Windows scrolls
@@ -112,6 +112,12 @@ Each action writes to `turn-NNNNN/` (five-digit zero-padded counter):
   Out-of-image points are rejected, never moved to an image edge. Other dispatched clicks whose markers
   cannot be resolved or rendered remain evidence failures.
 
+Beside the turn folders, the output directory holds `session.json` (start
+time, video and cursor-sample status, rewritten on stop), `cursor.jsonl`
+(about 30 pointer samples a second; always empty on Linux) and, with video,
+`recording.mp4`. `stop_recording` reports `output_dir` and `turns_written`
+for the recording it ended.
+
 ## Replay is a new action sequence
 
 `replay_trajectory` invokes recorded arguments in turn order; it is not a
@@ -124,6 +130,12 @@ be stale. Read-only snapshots are not part of the action sequence, so replay
 does not automatically refresh element handles. Pixel/key actions also need
 the original target identity, layout, and focus; they are not portable merely
 because they lack an element token.
+
+In practice: a pixel click is refused until the replaying session has called
+`get_window_state` on the recorded window, so read each recorded window
+first. If the app was relaunched, its pid changed and every turn fails;
+rewrite `pid` and `window_id` in each `action.json`'s `arguments` to the new
+values, or reset the app instead of relaunching it.
 
 Use trajectories as evidence unless current targets and preconditions are
 independently established. Never replay canceled, partial, or unknown actions

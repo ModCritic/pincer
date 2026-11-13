@@ -662,6 +662,39 @@ async fn click_step_refuses_null_target_and_button_five() {
 #[path = "reliability_tests.rs"]
 mod reliability_tests;
 
+#[test]
+fn a_diff_against_the_batchs_own_read_says_so() {
+    // The caller never saw s00000002: run_steps read it before its steps.
+    let mut content = vec![crate::protocol::Content::text(
+        "window_id=7 pid=42 snapshot_id=s00000004\nsince s00000002: 0 added, 1 changed, 0 removed. \
+         Use element_tokens s00000004:N for every row except - rows; - ids are from s00000002.\n",
+    )];
+    super::name_own_baseline(&mut content, "s00000002");
+    let crate::protocol::Content::Text { text, .. } = &content[0] else {
+        panic!("text content");
+    };
+    assert!(
+        text.contains("since s00000002 (run_steps' own read before its steps): 0 added"),
+        "{text}"
+    );
+    let state = json!({
+        "since": "s00000002",
+        "since_status": "diff",
+        "since_read_by": "run_steps",
+        "diff_counts": {"added": 0, "changed": 1, "removed": 0},
+    });
+    assert_eq!(
+        super::observation_summary(&state),
+        "changed since s00000002 (run_steps' own read before its steps): 0 added, 1 changed, 0 removed"
+    );
+    // A diff against the caller's own read names it plainly.
+    let state = json!({"since": "s00000001", "since_status": "no_change"});
+    assert_eq!(
+        super::observation_summary(&state),
+        "no change since s00000001"
+    );
+}
+
 // The Linux runtime historically accepts JSON numbers for set_value. The
 // provider-facing string schema must not narrow direct or batched calls.
 #[cfg(target_os = "linux")]

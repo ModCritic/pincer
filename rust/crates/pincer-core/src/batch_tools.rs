@@ -252,7 +252,7 @@ impl Tool for RunStepsTool {
                     },
                     "observe": {
                         "type": "object",
-                        "description": "End-of-batch get_window_state arguments; `pid`/`window_id` default to the last step that names both. Defaults: since=\"latest\" (a diff against your last read of that window, or a full read if none), include_screenshot=false, max_elements=250. Pass include_screenshot=true to see the window or since=null for a full read. Omit to read nothing; {} observes the last window."
+                        "description": "End-of-batch get_window_state arguments; `pid`/`window_id` default to the last step that names both. Defaults: since=\"latest\" (a diff against your last read of that window made with no query and the default max_elements; without one, against a read run_steps takes before its first step that finds an element by role or name, which the diff names as its own; else a full read), include_screenshot=false, max_elements=250. Pass include_screenshot=true to see the window or since=null for a full read. Omit to read nothing; {} observes the last window."
                     }
                 },
                 "additionalProperties": false
@@ -764,6 +764,23 @@ impl Plan {
             let ok = result.is_error != Some(true);
             let mut report = json!({ "ok": ok, "tool": OBSERVE_TOOL });
             if ok {
+                let mut result = result;
+                // The diff baseline is a read this batch took (the caller had
+                // no read of this window with this view): say so, since the
+                // caller never saw that snapshot id.
+                let own_baseline = result
+                    .structured_content
+                    .as_ref()
+                    .and_then(|state| state.get("since"))
+                    .and_then(Value::as_str)
+                    .filter(|since| locator.took_baseline(since))
+                    .map(str::to_owned);
+                if let Some(since) = &own_baseline {
+                    name_own_baseline(&mut result.content, since);
+                    if let Some(state) = result.structured_content.as_mut() {
+                        state["since_read_by"] = json!("run_steps");
+                    }
+                }
                 let summary = result
                     .structured_content
                     .as_ref()
@@ -1193,10 +1210,42 @@ fn fill_observed_window(args: &mut Value, last: Option<&Window>) -> bool {
     true
 }
 
+/// How a diff names a baseline read the batch took itself.
+fn own_baseline_label(since: &str) -> String {
+    format!("{since} (run_steps' own read before its steps)")
+}
+
+/// Name the batch's own baseline read in the diff text, where it first
+/// appears (`since s00000002: ...` / `no change since s00000002`).
+fn name_own_baseline(content: &mut [Content], since: &str) {
+    let label = own_baseline_label(since);
+    for item in content.iter_mut() {
+        if let Content::Text { text, .. } = item {
+            for (old, new) in [
+                (format!("since {since}:"), format!("since {label}:")),
+                (
+                    format!("no change since {since}"),
+                    format!("no change since {label}"),
+                ),
+            ] {
+                if let Some(at) = text.find(&old) {
+                    text.replace_range(at..at + old.len(), &new);
+                    return;
+                }
+            }
+        }
+    }
+}
+
 /// One line saying what the end-of-batch read found.
 fn observation_summary(state: &Value) -> String {
     let status = state.get("since_status").and_then(Value::as_str);
     let since = state.get("since").and_then(Value::as_str).unwrap_or("");
+    let since = if state.get("since_read_by").and_then(Value::as_str) == Some("run_steps") {
+        own_baseline_label(since)
+    } else {
+        since.to_owned()
+    };
     match status {
         Some("diff") => {
             let counts = &state["diff_counts"];

@@ -30,9 +30,51 @@ struct Snapshot<S> {
     /// Window size in points when the screenshot was taken. A tree-only read
     /// keeps the screenshot frame only while the window still has this size.
     screenshot_window_size: Option<(f64, f64)>,
+    /// Why `screenshot_scale` is `None`, for the refusal text.
+    frame_loss: FrameLoss,
     zoom: Option<ZoomContext>,
     semantic: bool,
     payload: S,
+}
+
+/// Why a snapshot carries no screenshot frame. Only read while its
+/// `screenshot_scale` is `None`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FrameLoss {
+    /// No read of the window so far took a screenshot.
+    NeverCaptured,
+    /// A screenshot-less read after the window changed size retired the frame.
+    Resized,
+    /// A screenshot-less read could not read the window size, so the earlier
+    /// frame could not be kept.
+    SizeUnknown,
+    /// The earlier screenshot belongs to another session.
+    OtherSessionFrame,
+}
+
+impl FrameLoss {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::NeverCaptured => "never_captured",
+            Self::Resized => "resized",
+            Self::SizeUnknown => "size_unknown",
+            Self::OtherSessionFrame => "other_session_frame",
+        }
+    }
+
+    /// Why a screenshot-less read published for `session` keeps no frame,
+    /// given the snapshot it replaced.
+    fn after<S>(previous: Option<&Snapshot<S>>, session: Option<&str>, resized: bool) -> Self {
+        match previous {
+            None => Self::NeverCaptured,
+            Some(previous) if previous.screenshot_scale.is_none() => previous.frame_loss,
+            Some(previous) if previous.screenshot_owner.as_deref() != session => {
+                Self::OtherSessionFrame
+            }
+            Some(_) if resized => Self::Resized,
+            Some(_) => Self::SizeUnknown,
+        }
+    }
 }
 
 impl<S> Snapshot<S> {
@@ -77,10 +119,9 @@ impl ZoomContext {
 enum MissingFrame {
     /// This pid has no snapshot of the window at all in this runtime.
     WindowNeverRead,
-    /// The window's current snapshot carries no screenshot frame: the last
-    /// read skipped the screenshot after the window changed size, or no
-    /// screenshot was ever taken of it.
-    NoScreenshot,
+    /// The window's current snapshot carries no screenshot frame, for the
+    /// recorded cause.
+    NoScreenshot(FrameLoss),
     /// The current screenshot frame belongs to another session.
     OtherSession,
     /// No window was named and the process's snapshots disagree.
@@ -91,7 +132,7 @@ impl MissingFrame {
     fn as_str(self) -> &'static str {
         match self {
             Self::WindowNeverRead => "window_never_read",
-            Self::NoScreenshot => "no_screenshot",
+            Self::NoScreenshot(_) => "no_screenshot",
             Self::OtherSession => "other_session",
             Self::Ambiguous => "ambiguous_window",
         }
@@ -117,10 +158,27 @@ fn screenshot_context_refusal(
              and take x,y from that window's own screenshot; pixels read off another window's \
              screenshot do not apply to it."
         ),
-        MissingFrame::NoScreenshot => format!(
-            "No screenshot frame for {window}: its latest read had no screenshot and the window \
-             changed size since the last one (or it was never captured). Call {read} with the \
-             default screenshot and take x,y from that image."
+        MissingFrame::NoScreenshot(loss) => format!(
+            "No screenshot frame for {window}: {}. Call {read} with the default screenshot \
+             and take x,y from that image.",
+            match loss {
+                FrameLoss::NeverCaptured => {
+                    "no read of it in this session has taken a screenshot yet (its reads had \
+                     include_screenshot:false, or the capture failed)"
+                }
+                FrameLoss::Resized => {
+                    "its latest read had no screenshot, and the window changed size since the \
+                     last screenshot, so that screenshot's pixels no longer apply"
+                }
+                FrameLoss::SizeUnknown => {
+                    "its latest read had no screenshot, and the window's size could not be read \
+                     to keep the earlier screenshot"
+                }
+                FrameLoss::OtherSessionFrame => {
+                    "its latest read had no screenshot, and the earlier screenshot belongs to \
+                     another session"
+                }
+            }
         ),
         MissingFrame::OtherSession => format!(
             "The current screenshot of {window} belongs to another session. Call {read} on \
@@ -131,12 +189,16 @@ fn screenshot_context_refusal(
              frame. Then call {read} if that window has no screenshot yet."
         ),
     };
-    ToolResult::error(message).with_structured(serde_json::json!({
+    let mut structured = serde_json::json!({
         "code": "screenshot_context_missing",
         "reason": why.as_str(),
         "pid": pid,
         "window_id": window_id,
-    }))
+    });
+    if let MissingFrame::NoScreenshot(loss) = why {
+        structured["cause"] = serde_json::json!(loss.as_str());
+    }
+    ToolResult::error(message).with_structured(structured)
 }
 
 fn stale_token_refusal<S>(pid: i32, lane: &[Snapshot<S>]) -> ToolResult {
@@ -404,18 +466,24 @@ impl<S: SnapshotPayload> SnapshotStore<S> {
             }
             // A new screenshot brings its own frame. A tree-only read keeps the
             // replaced snapshot's frame while the window keeps its size.
-            let (scale, frame_size) = match (screenshot_scale, window_size) {
-                (Some(scale), size) => (Some(scale), size),
-                (None, Some(now)) => retired
-                    .first()
-                    .filter(|previous| previous.screenshot_owner.as_deref() == session)
-                    .and_then(|previous| {
-                        let then = previous.screenshot_window_size?;
-                        let same = (then.0 - now.0).abs() < 0.5 && (then.1 - now.1).abs() < 0.5;
-                        same.then_some((previous.screenshot_scale?, then))
-                    })
-                    .map_or((None, None), |(scale, size)| (Some(scale), Some(size))),
-                (None, None) => (None, None),
+            let previous = retired.first();
+            let (scale, frame_size, frame_loss) = match (screenshot_scale, window_size) {
+                (Some(scale), size) => (Some(scale), size, FrameLoss::NeverCaptured),
+                (None, Some(now)) => {
+                    let then = previous.and_then(|previous| previous.screenshot_window_size);
+                    let resized = then.is_some_and(|then| {
+                        (then.0 - now.0).abs() >= 0.5 || (then.1 - now.1).abs() >= 0.5
+                    });
+                    previous
+                        .filter(|previous| previous.screenshot_owner.as_deref() == session)
+                        .and_then(|previous| Some((previous.screenshot_scale?, then?)))
+                        .filter(|_| !resized)
+                        .map_or_else(
+                            || (None, None, FrameLoss::after(previous, session, resized)),
+                            |(scale, size)| (Some(scale), Some(size), FrameLoss::NeverCaptured),
+                        )
+                }
+                (None, None) => (None, None, FrameLoss::after(previous, session, false)),
             };
             if lane.len() == LRU_CAP_PER_PID {
                 retired.push(lane.remove(0));
@@ -427,6 +495,7 @@ impl<S: SnapshotPayload> SnapshotStore<S> {
                 screenshot_owner: session.map(str::to_owned),
                 screenshot_scale: scale,
                 screenshot_window_size: frame_size,
+                frame_loss,
                 zoom: None,
                 semantic,
                 payload,
@@ -465,7 +534,7 @@ impl<S: SnapshotPayload> SnapshotStore<S> {
                     let why = if snapshot.screenshot_scale.is_some() {
                         MissingFrame::OtherSession
                     } else {
-                        MissingFrame::NoScreenshot
+                        MissingFrame::NoScreenshot(snapshot.frame_loss)
                     };
                     screenshot_context_refusal(Some(pid), Some(window_id), why)
                 })
@@ -474,7 +543,8 @@ impl<S: SnapshotPayload> SnapshotStore<S> {
                 let mut contexts = lane.iter().map(|snapshot| snapshot.screenshot(session));
                 let why = match lane {
                     [] => MissingFrame::WindowNeverRead,
-                    [_] => MissingFrame::NoScreenshot,
+                    [only] if only.screenshot_scale.is_some() => MissingFrame::OtherSession,
+                    [only] => MissingFrame::NoScreenshot(only.frame_loss),
                     _ => MissingFrame::Ambiguous,
                 };
                 contexts
@@ -547,7 +617,8 @@ impl<S: SnapshotPayload> SnapshotStore<S> {
                 [(_, snapshot)] if snapshot.screenshot_scale.is_some() => {
                     MissingFrame::OtherSession
                 }
-                _ => MissingFrame::NoScreenshot,
+                [(_, snapshot)] => MissingFrame::NoScreenshot(snapshot.frame_loss),
+                _ => MissingFrame::NoScreenshot(FrameLoss::NeverCaptured),
             },
         };
         Err(screenshot_context_refusal(None, Some(window_id), why))
@@ -1228,10 +1299,41 @@ mod tests {
         assert!(text.contains("another window's"), "{text}");
 
         cache.publish_for_session(10, 20, Payload(vec![1]), Some("a"), None);
-        assert_eq!(reason(&cache, 20).0, "no_screenshot");
+        let (why, text) = reason(&cache, 20);
+        assert_eq!(why, "no_screenshot");
+        assert!(text.contains("no read of it in this session"), "{text}");
+        assert!(!text.contains("changed size"), "{text}");
 
         cache.publish_for_session(10, 20, Payload(vec![1]), Some("b"), Some(1.0));
         assert_eq!(reason(&cache, 20).0, "other_session");
+
+        // The cause is stated: a resize retired the frame, or nothing did.
+        let cause = |cache: &SnapshotStore<Payload>, window: u64| {
+            cache
+                .screenshot_context(10, Some(window), Some("a"))
+                .unwrap_err()
+                .structured_content
+                .unwrap()["cause"]
+                .clone()
+        };
+        let sized = |scale, size| {
+            cache.publish_sized_for_session(10, 21, Payload(vec![1]), Some("a"), scale, size)
+        };
+        sized(Some(1.0), Some((100.0, 100.0)));
+        sized(None, Some((100.0, 100.0)));
+        assert!(cache.screenshot_context(10, Some(21), Some("a")).is_ok());
+        sized(None, Some((200.0, 100.0)));
+        assert_eq!(cause(&cache, 21), "resized");
+        let (_, text) = reason(&cache, 21);
+        assert!(text.contains("changed size"), "{text}");
+        // Later screenshot-less reads keep the first cause.
+        sized(None, Some((200.0, 100.0)));
+        assert_eq!(cause(&cache, 21), "resized");
+        sized(Some(1.0), Some((200.0, 100.0)));
+        sized(None, None);
+        assert_eq!(cause(&cache, 21), "size_unknown");
+        cache.publish_for_session(10, 20, Payload(vec![1]), Some("a"), None);
+        assert_eq!(cause(&cache, 20), "other_session_frame");
     }
 
     #[test]

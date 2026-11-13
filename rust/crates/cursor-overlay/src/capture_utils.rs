@@ -17,6 +17,10 @@ pub struct CropResult {
     pub origin_x: f64,
     /// Y of the padded crop origin in full-window pixel space.
     pub origin_y: f64,
+    /// Width of the padded crop in full-window pixel space, before any resize.
+    pub crop_w: u32,
+    /// Height of the padded crop in full-window pixel space, before any resize.
+    pub crop_h: u32,
     /// Inverse of the resize scale: `cw / out_w`.
     /// Multiply a zoom-image X coordinate by this to get the full-window offset from origin.
     /// Equal to 1.0 when no downscale was applied.
@@ -101,6 +105,8 @@ pub fn crop_image_to_jpeg(
         out_h,
         origin_x: cx1 as f64,
         origin_y: cy1 as f64,
+        crop_w: cw,
+        crop_h: ch,
         scale_inv,
     })
 }

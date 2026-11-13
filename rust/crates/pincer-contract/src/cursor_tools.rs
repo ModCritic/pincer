@@ -20,19 +20,19 @@ pub fn contracts() -> Vec<ToolContract> {
         ),
         contract::<SetAgentCursorMotionInput, SetAgentCursorMotionOutput>(
             "set_agent_cursor_motion",
-            "Configure the movement style, timing, effects and visibility timing for a session cursor.",
+            "Configure the movement style, timing, effects and visibility timing for a session cursor. Fields left out keep their value. An effect at `default` (where every effect starts) follows the style, so changing `style` can turn it on or off; `on` or `off` pins it. The result's `motion.effects` are the effects in use and `motion.pinned_effects` the pinned ones.",
             &["agent_cursor.set_motion"],
             false,
         ),
         contract::<SetAgentCursorThemeInput, SetAgentCursorThemeOutput>(
             "set_agent_cursor_theme",
-            "Select an already-installed cursor theme for a session.",
+            "Select an installed cursor theme for a session. get_agent_cursor_state's `installed_themes` lists the ids; an unknown id is refused with that list.",
             &["agent_cursor.set_theme"],
             false,
         ),
         contract::<GetAgentCursorStateInput, GetAgentCursorStateOutput>(
             "get_agent_cursor_state",
-            "Return the session cursor's theme, semantic playback, position, visibility, and motion.",
+            "Return the session cursor's state. `enabled`: whether set_agent_cursor_enabled lets it be drawn; an enabled cursor still hides after `motion.idle_hide_ms` without activity (15000 ms by default), and get_session's `cursor_visible` says whether it is drawn right now. `position`: where it was last drawn, in screen coordinates (desktop pixels; points on macOS), null until it first moves. `installed_themes`: the ids set_agent_cursor_theme accepts. `visual_state`: the animation playing, for the kind of tool call in `requested_action` and `resolved_action`, with `modifiers` naming its delivery (`background`, `foreground`) and how the call named its target (`ax` element token, `pixel` x/y, `browser`, else `desktop`), its `phase` and `frame`, and `preempted_count`, the animations a newer call cut short. `motion`: `effects` in use and `pinned_effects`, the ones set on or off; the others follow the style.",
             &["agent_cursor.state"],
             true,
         ),

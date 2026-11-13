@@ -87,6 +87,11 @@ struct DomMeta {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DomIndex {
     nodes: HashMap<i64, DomMeta>,
+    /// Backend ids of nodes inside user-agent shadow roots (the editor div
+    /// Chromium builds inside every `<input>` and `<textarea>`, media
+    /// controls, and so on). They stay out of `nodes`, so they get no DOM
+    /// order or actions of their own; see `RawAxIndex::is_text_field_internal`.
+    user_agent_shadow: HashSet<i64>,
     pub(crate) css_hidden_count: usize,
 }
 
@@ -336,6 +341,7 @@ pub(crate) fn build_dom_index(root: &Value) -> DomIndex {
         if let Some(shadow_roots) = node.get("shadowRoots").and_then(Value::as_array) {
             for shadow_root in shadow_roots {
                 if shadow_root.get("shadowRootType").and_then(Value::as_str) == Some("user-agent") {
+                    collect_backend_ids(shadow_root, &mut index.user_agent_shadow);
                     continue;
                 }
                 walk(
@@ -357,6 +363,19 @@ pub(crate) fn build_dom_index(root: &Value) -> DomIndex {
                 order,
                 index,
             );
+        }
+    }
+
+    fn collect_backend_ids(node: &Value, out: &mut HashSet<i64>) {
+        if let Some(backend) = node.get("backendNodeId").and_then(Value::as_i64) {
+            out.insert(backend);
+        }
+        for key in ["children", "shadowRoots"] {
+            if let Some(children) = node.get(key).and_then(Value::as_array) {
+                for child in children {
+                    collect_backend_ids(child, out);
+                }
+            }
         }
     }
 
@@ -490,6 +509,83 @@ pub(crate) fn parse_viewport(metrics: &Value) -> Viewport {
     }
 }
 
+/// Parent links of every AX node, ignored ones included, so a walk up the
+/// tree does not stop at an ignored wrapper.
+struct RawAxIndex<'a> {
+    by_id: HashMap<&'a str, &'a Value>,
+}
+
+impl<'a> RawAxIndex<'a> {
+    fn new(ax_nodes: &'a [Value]) -> Self {
+        Self {
+            by_id: ax_nodes
+                .iter()
+                .filter_map(|ax| Some((ax.get("nodeId")?.as_str()?, ax)))
+                .collect(),
+        }
+    }
+
+    fn parent(&self, ax: &Value) -> Option<&'a Value> {
+        let parent_id = ax.get("parentId")?.as_str()?;
+        self.by_id.get(parent_id).copied()
+    }
+
+    /// The DOM order of the nearest ancestor with an indexed DOM node.
+    fn ancestor_dom_order(&self, ax: &Value, dom: &DomIndex) -> Option<usize> {
+        let mut current = self.parent(ax);
+        for _ in 0..self.by_id.len() {
+            let node = current?;
+            if let Some(meta) = node
+                .get("backendDOMNodeId")
+                .and_then(Value::as_i64)
+                .and_then(|backend| dom.nodes.get(&backend))
+            {
+                return Some(meta.order);
+            }
+            current = self.parent(node);
+        }
+        None
+    }
+
+    /// Whether `ax` is part of the editor Chromium builds inside an
+    /// `<input>` or `<textarea>`: a node in a user-agent shadow root whose
+    /// host (the first ancestor outside that shadow root) is editable.
+    /// Chromium 156 exposes that editor as an editable `generic` child of the
+    /// textbox, with an editable `statictext` child holding the typed value
+    /// (checked live over CDP: its backend node sits under
+    /// `INPUT#user-agent/#document-fragment/DIV`). The textbox ref already
+    /// carries the value and the type action, while the inner nodes have no
+    /// DOM order or layout of their own, so they only added stray `type` refs
+    /// with unknown visibility, drawn under unrelated nodes.
+    fn is_text_field_internal(&self, ax: &Value, dom: &DomIndex) -> bool {
+        let in_user_agent_shadow = |node: &Value| {
+            node.get("backendDOMNodeId")
+                .and_then(Value::as_i64)
+                .is_some_and(|backend| dom.user_agent_shadow.contains(&backend))
+        };
+        if !in_user_agent_shadow(ax) {
+            return false;
+        }
+        let mut current = self.parent(ax);
+        for _ in 0..self.by_id.len() {
+            let Some(node) = current else {
+                return false;
+            };
+            if !in_user_agent_shadow(node) {
+                return is_editable_state(&ax_states(node));
+            }
+            current = self.parent(node);
+        }
+        false
+    }
+}
+
+fn is_editable_state(states: &BTreeMap<String, Value>) -> bool {
+    states.get("editable").is_some_and(|value| {
+        value.as_bool() == Some(true) || value.as_str().is_some_and(|value| value != "false")
+    })
+}
+
 pub(crate) fn compose_accessibility_tree(
     ax_tree: &Value,
     dom: &DomIndex,
@@ -505,9 +601,13 @@ pub(crate) fn compose_accessibility_tree(
         };
     };
 
+    let raw = RawAxIndex::new(ax_nodes);
     let mut nodes = Vec::new();
     for (fallback_order, ax) in ax_nodes.iter().enumerate() {
         if ax.get("ignored").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        if raw.is_text_field_internal(ax, dom) {
             continue;
         }
         let ax_id = ax
@@ -532,7 +632,15 @@ pub(crate) fn compose_accessibility_tree(
         let actions = action_kinds(&role, dom_meta, &states, layout_meta);
         let name = ax_value_string(ax.get("name")).and_then(clean_semantic_text);
         let value = ax_value_string(ax.get("value")).and_then(clean_semantic_text);
-        let document_order = dom_meta.map_or(fallback_order, |meta| meta.order);
+        // A node with no indexed DOM node of its own (pseudo-element content,
+        // user-agent shadow content) sorts with its nearest DOM ancestor.
+        // The AX list position used to stand in for it, but that counts AX
+        // nodes, not DOM nodes, so such a node was drawn in the outline under
+        // whatever unrelated element had the same DOM position.
+        let document_order = dom_meta
+            .map(|meta| meta.order)
+            .or_else(|| raw.ancestor_dom_order(ax, dom))
+            .unwrap_or(fallback_order);
         nodes.push(SemanticNode {
             ax_id,
             parent_ax_id: ax
@@ -814,13 +922,12 @@ fn action_kinds(
         actions.push(BrowserActionKind::Click);
     }
     let tag = dom.map(|meta| meta.tag.as_str()).unwrap_or("");
-    let editable = states.get("editable").is_some_and(|value| {
-        value.as_bool() == Some(true) || value.as_str().is_some_and(|value| value != "false")
-    }) || dom.is_some_and(|meta| {
-        meta.attrs
-            .get("contenteditable")
-            .is_some_and(|value| value.is_empty() || value.eq_ignore_ascii_case("true"))
-    });
+    let editable = is_editable_state(states)
+        || dom.is_some_and(|meta| {
+            meta.attrs
+                .get("contenteditable")
+                .is_some_and(|value| value.is_empty() || value.eq_ignore_ascii_case("true"))
+        });
     let file_input = tag == "input"
         && dom.is_some_and(|meta| {
             meta.attrs
@@ -1114,16 +1221,9 @@ fn render_outline(nodes: &[SemanticNode], selected: &HashSet<usize>) -> String {
         .enumerate()
         .map(|(idx, node)| (node.ax_id.as_str(), idx))
         .collect();
-    let mut ordered: Vec<usize> = selected.iter().copied().collect();
-    ordered.sort_by_key(|idx| nodes[*idx].document_order);
-    let mut lines = Vec::new();
-    for idx in ordered {
-        let node = &nodes[idx];
-        if matches!(node.role.as_str(), "rootwebarea" | "webarea") {
-            continue;
-        }
+    let depth_of = |idx: usize| {
         let mut depth = 0;
-        let mut parent = node.parent_ax_id.as_deref();
+        let mut parent = nodes[idx].parent_ax_id.as_deref();
         while let Some(parent_id) = parent {
             let Some(parent_idx) = by_ax_id.get(parent_id).copied() else {
                 break;
@@ -1134,6 +1234,20 @@ fn render_outline(nodes: &[SemanticNode], selected: &HashSet<usize>) -> String {
                 depth += 1;
             }
             parent = nodes[parent_idx].parent_ax_id.as_deref();
+        }
+        depth
+    };
+    let mut ordered: Vec<(usize, usize)> =
+        selected.iter().map(|&idx| (idx, depth_of(idx))).collect();
+    // A node that took its document order from an ancestor ties with it;
+    // the shallower node goes first. `selected` is a set, so the AX list
+    // position settles any remaining tie and keeps the outline stable.
+    ordered.sort_by_key(|&(idx, depth)| (nodes[idx].document_order, depth, idx));
+    let mut lines = Vec::new();
+    for (idx, depth) in ordered {
+        let node = &nodes[idx];
+        if matches!(node.role.as_str(), "rootwebarea" | "webarea") {
+            continue;
         }
         let mut line = format!("{}- {}", "  ".repeat(depth), node.role);
         if let Some(name) = &node.name {
@@ -1185,6 +1299,145 @@ mod tests {
 
     fn frame() -> FrameRef {
         FrameRef::main_unproven()
+    }
+
+    /// The shape Chromium 156 returned for the round-1 test page: a Name
+    /// input whose user-agent shadow root holds the editor div and the typed
+    /// text, followed by a paragraph and a link. The AX list holds the inner
+    /// nodes last, so their AX positions (37, 38) used to collide with the
+    /// DOM order of the link and they were drawn under it as `type` refs.
+    #[test]
+    fn text_field_internals_stay_inside_their_textbox() {
+        let dom = build_dom_index(&json!({
+            "nodeType": 9,
+            "backendNodeId": 1,
+            "children": [
+                {"nodeType": 1, "nodeName": "LABEL", "backendNodeId": 2, "children": [
+                    {"nodeType": 1, "nodeName": "INPUT", "backendNodeId": 3,
+                     "attributes": ["id", "name"],
+                     "shadowRoots": [{"nodeType": 11, "backendNodeId": 30,
+                                      "shadowRootType": "user-agent", "children": [
+                        {"nodeType": 1, "nodeName": "DIV", "backendNodeId": 31, "children": [
+                            {"nodeType": 3, "nodeName": "#text", "backendNodeId": 32}
+                        ]}
+                    ]}]}
+                ]},
+                {"nodeType": 1, "nodeName": "P", "backendNodeId": 4, "children": [
+                    {"nodeType": 3, "nodeName": "#text", "backendNodeId": 5}
+                ]},
+                {"nodeType": 1, "nodeName": "A", "backendNodeId": 6,
+                 "attributes": ["href", "page2.html"]},
+                {"nodeType": 1, "nodeName": "P", "backendNodeId": 7, "children": [
+                    {"nodeType": 1, "nodeName": "SPAN", "backendNodeId": 8}
+                ]}
+            ]
+        }));
+        let editable =
+            json!([{"name": "editable", "value": {"type": "token", "value": "plaintext"}}]);
+        let ax = json!({"nodes": [
+            {"nodeId": "root", "ignored": false, "role": {"value": "RootWebArea"},
+             "backendDOMNodeId": 1, "childIds": ["label", "para", "link", "para2"]},
+            {"nodeId": "label", "parentId": "root", "ignored": false,
+             "backendDOMNodeId": 2, "role": {"value": "LabelText"}, "childIds": ["name"]},
+            {"nodeId": "name", "parentId": "label", "ignored": false,
+             "backendDOMNodeId": 3, "role": {"value": "textbox"},
+             "name": {"value": "Name"}, "value": {"value": "Ada"},
+             "properties": editable, "childIds": ["inner"]},
+            {"nodeId": "para", "parentId": "root", "ignored": false,
+             "backendDOMNodeId": 4, "role": {"value": "paragraph"}, "childIds": ["greeting"]},
+            {"nodeId": "greeting", "parentId": "para", "ignored": false,
+             "backendDOMNodeId": 5, "role": {"value": "StaticText"},
+             "name": {"value": "Hello, Ada!"}},
+            {"nodeId": "link", "parentId": "root", "ignored": false,
+             "backendDOMNodeId": 6, "role": {"value": "link"},
+             "name": {"value": "Go to page two"}},
+            {"nodeId": "para2", "parentId": "root", "ignored": false,
+             "backendDOMNodeId": 7, "role": {"value": "paragraph"}, "childIds": ["marker"]},
+            // No indexed DOM node (like ::before content): sorts with para2.
+            {"nodeId": "marker", "parentId": "para2", "ignored": false,
+             "backendDOMNodeId": 99, "role": {"value": "StaticText"},
+             "name": {"value": "Note:"}},
+            {"nodeId": "inner", "parentId": "name", "ignored": false,
+             "backendDOMNodeId": 31, "role": {"value": "generic"},
+             "properties": editable, "childIds": ["inner-text"]},
+            {"nodeId": "inner-text", "parentId": "inner", "ignored": false,
+             "backendDOMNodeId": 32, "role": {"value": "StaticText"},
+             "name": {"value": "Ada"}, "properties": editable}
+        ]});
+        let document = compose_accessibility_tree(
+            &ax,
+            &dom,
+            &LayoutIndex::default(),
+            &Viewport::default(),
+            frame(),
+        );
+        assert!(
+            document
+                .nodes
+                .iter()
+                .all(|node| !matches!(node.ax_id.as_str(), "inner" | "inner-text")),
+            "text field internals must not become nodes of their own"
+        );
+        let typable = document
+            .nodes
+            .iter()
+            .filter(|node| node.actions.contains(&BrowserActionKind::Type))
+            .map(|node| node.ax_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(typable, ["name"]);
+
+        let page = document.page(0, 300, None, None);
+        assert_eq!(
+            page.outline,
+            [
+                "- labeltext",
+                "  - textbox \"Name\": Ada [editable=\"plaintext\"]",
+                "- paragraph",
+                "  - statictext \"Hello, Ada!\"",
+                "- link \"Go to page two\"",
+                "- paragraph",
+                "  - statictext \"Note:\"",
+            ]
+            .join("\n")
+        );
+        let query = document.page(0, 300, Some("Ada"), None);
+        assert!(
+            !query.outline.contains("generic"),
+            "a query must not surface the inner editor: {}",
+            query.outline
+        );
+    }
+
+    #[test]
+    fn user_agent_shadow_nodes_of_non_editable_hosts_are_kept() {
+        let dom = build_dom_index(&json!({
+            "nodeType": 9,
+            "children": [
+                {"nodeType": 1, "nodeName": "VIDEO", "backendNodeId": 1,
+                 "shadowRoots": [{"nodeType": 11, "backendNodeId": 10,
+                                  "shadowRootType": "user-agent", "children": [
+                    {"nodeType": 1, "nodeName": "INPUT", "backendNodeId": 11,
+                     "attributes": ["type", "button", "aria-label", "play"]}
+                ]}]}
+            ]
+        }));
+        let ax = json!({"nodes": [
+            {"nodeId": "root", "ignored": false, "role": {"value": "RootWebArea"},
+             "childIds": ["video"]},
+            {"nodeId": "video", "parentId": "root", "ignored": false,
+             "backendDOMNodeId": 1, "role": {"value": "Video"}, "childIds": ["play"]},
+            {"nodeId": "play", "parentId": "video", "ignored": false,
+             "backendDOMNodeId": 11, "role": {"value": "button"},
+             "name": {"value": "play"}}
+        ]});
+        let document = compose_accessibility_tree(
+            &ax,
+            &dom,
+            &LayoutIndex::default(),
+            &Viewport::default(),
+            frame(),
+        );
+        assert!(document.nodes.iter().any(|node| node.ax_id == "play"));
     }
 
     #[test]

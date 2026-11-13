@@ -2,8 +2,17 @@
 //!
 //! Chromium's download behavior is browser-wide, so this tool enables it only
 //! for the bounded interval around one exact ref mutation and restores the
-//! default before returning. Output deliberately omits URLs, filenames, and
-//! local paths.
+//! default before returning.
+//!
+//! Chromium saves the file as `<destination_root>/<download guid>`
+//! (`allowAndName`), which lets the tool prove the exact file it waited for is
+//! a regular file directly inside the approved directory. Once that proof
+//! holds, the file is renamed to the page's suggested filename, sanitized
+//! here and never replacing an existing file, and the result returns that
+//! bare name so the caller can find it. Output still omits the source URL
+//! (download URLs often carry access tokens) and every local path: the
+//! caller already holds `destination_root`, and session recordings redact it
+//! from the arguments, so the result text names no path or file either.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -43,7 +52,7 @@ impl BrowserDownloadTool {
         Self {
             def: ToolDef {
                 name: "browser_download".into(),
-                description: "Trigger one download through an exact live browser ref and save it inside an explicitly approved directory. Requires MCP-host destructive-tool approval, refuses ambiguous or stale capabilities, and never returns the source URL, filename, or destination path.".into(),
+                description: "Click one live page ref that starts a download (a ref with the click action, such as a link) and save the file in destination_root. The file keeps the page's suggested filename with path separators, control characters and characters Windows forbids replaced by _ and leading dots removed; if that name is taken it gets a numbered suffix (report (1).txt), so no file is overwritten. The result carries file_name (the file is destination_root/file_name), bytes and download_id, never the source URL or a local path. Waits up to 30 s for the download to finish and deletes a partial file when it fails. The tool is marked destructive, so the MCP client may ask the user before each call; calls from outside an MCP client are refused with browser_consent_required.".into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -62,7 +71,7 @@ impl BrowserDownloadTool {
                         },
                         "destination_root": {
                             "type": "string",
-                            "description": "Absolute, existing, canonical directory approved to receive the download."
+                            "description": "Existing directory that receives the file, as an absolute canonical path (no symlink or .. anywhere in it)."
                         }
                     },
                     "required": ["session", "target_id", "tab_id", "ref", "destination_root"],
@@ -190,6 +199,127 @@ fn completed_download_size(root: &Path, guid: &str) -> Result<u64, BrowserRefusa
     Ok(metadata.len())
 }
 
+/// Longest saved filename in UTF-8 bytes. Linux and macOS allow 255; this
+/// leaves room for a " (99)" suffix.
+const MAX_FILE_NAME_BYTES: usize = 200;
+/// Highest numbered suffix tried before the download keeps its id name.
+const MAX_NAME_SUFFIX: u32 = 99;
+/// Used when the page suggests no usable name.
+const FALLBACK_FILE_NAME: &str = "download";
+
+/// The page's suggested filename made safe to create in `destination_root`,
+/// or `None` when nothing usable is left. The page controls this string, so:
+/// only its last path component is kept; control, bidirectional-override and
+/// zero-width characters and the characters Windows forbids in names
+/// (`<>:"/\|?*`) become `_`; leading and trailing dots and spaces are trimmed
+/// (a leading dot would make a hidden file such as `.bashrc` when the
+/// destination is a home directory; Windows drops trailing ones); a Windows
+/// device name such as `CON` or `nul.txt` gets a `_` prefix; and the name is
+/// cut to [`MAX_FILE_NAME_BYTES`], keeping a short extension. The browser
+/// computes `suggestedFilename` itself (Chromium 156 reported `report.txt`
+/// for `<a download="report.txt">`), but this does not count on the browser
+/// having made it safe.
+fn safe_download_file_name(suggested: &str) -> Option<String> {
+    let last = suggested.rsplit(['/', '\\']).next().unwrap_or_default();
+    let replaced = last
+        .chars()
+        .map(|ch| {
+            let unsafe_char = ch.is_control()
+                || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+                || matches!(ch, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}')
+                || matches!(ch, '\u{2066}'..='\u{2069}' | '\u{feff}');
+            if unsafe_char {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect::<String>();
+    let trimmed = replaced.trim_matches(|ch: char| ch == '.' || ch.is_whitespace());
+    if trimmed.is_empty() || trimmed.chars().all(|ch| ch == '_') {
+        return None;
+    }
+    let mut name = trimmed.to_owned();
+    let device_stem = name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    let is_device = matches!(device_stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((device_stem.starts_with("COM") || device_stem.starts_with("LPT"))
+            && device_stem.len() == 4
+            && device_stem.as_bytes()[3].is_ascii_digit());
+    if is_device {
+        name.insert(0, '_');
+    }
+    if name.len() > MAX_FILE_NAME_BYTES {
+        let (stem, extension) = match split_extension(&name) {
+            (stem, extension) if extension.len() <= 20 => (stem, extension),
+            _ => (name.as_str(), ""),
+        };
+        // `stem` is longer than the budget here, so the cut is inside it.
+        let mut stem_budget = MAX_FILE_NAME_BYTES - extension.len();
+        while !stem.is_char_boundary(stem_budget) {
+            stem_budget -= 1;
+        }
+        name = format!("{}{extension}", stem[..stem_budget].trim_end());
+    }
+    Some(name)
+}
+
+/// `("report", ".txt")` for `report.txt`; no extension for `README` or a
+/// name whose only dot is the first character.
+fn split_extension(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(dot) if dot > 0 => name.split_at(dot),
+        _ => (name, ""),
+    }
+}
+
+fn numbered_name(name: &str, number: u32) -> String {
+    let (stem, extension) = split_extension(name);
+    format!("{stem} ({number}){extension}")
+}
+
+/// Rename the proven `<root>/<guid>` file to the sanitized suggested name,
+/// adding " (N)" until the name is free, and return the name it ended up
+/// with. A name is claimed by creating it with `create_new` (fails if
+/// anything, even a dangling symlink, already has that name), then the
+/// download is renamed over that empty placeholder, so an existing file is
+/// never replaced. If no name can be claimed or the rename fails, the file
+/// keeps its id name, which is still a correct answer.
+fn give_download_its_name(root: &Path, guid: &str, suggested: Option<&str>) -> String {
+    let source = root.join(guid);
+    let base = suggested
+        .and_then(safe_download_file_name)
+        .unwrap_or_else(|| FALLBACK_FILE_NAME.to_owned());
+    if base == guid {
+        return base;
+    }
+    let candidates = std::iter::once(base.clone())
+        .chain((1..=MAX_NAME_SUFFIX).map(|number| numbered_name(&base, number)));
+    for candidate in candidates {
+        let target = root.join(&candidate);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+        {
+            Ok(placeholder) => {
+                drop(placeholder);
+                if std::fs::rename(&source, &target).is_ok() {
+                    return candidate;
+                }
+                let _ = std::fs::remove_file(&target);
+                return guid.to_owned();
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return guid.to_owned(),
+        }
+    }
+    guid.to_owned()
+}
+
 async fn reset_download_behavior(conn: &CdpConnection) {
     let _ = conn
         .call(
@@ -210,6 +340,7 @@ async fn await_download(
     events: &mut tokio::sync::mpsc::UnboundedReceiver<super::cdp_ws::CdpEvent>,
     expected_frame_id: &str,
     observed_guid: &mut Option<String>,
+    suggested_filename: &mut Option<String>,
 ) -> DownloadEventOutcome {
     while let Some(event) = events.recv().await {
         match event.method.as_str() {
@@ -220,6 +351,11 @@ async fn await_download(
                 *observed_guid = event
                     .params
                     .get("guid")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                *suggested_filename = event
+                    .params
+                    .get("suggestedFilename")
                     .and_then(Value::as_str)
                     .map(str::to_owned);
             }
@@ -459,9 +595,15 @@ impl Tool for BrowserDownloadTool {
         }
 
         let mut observed_guid = None;
+        let mut suggested_filename = None;
         let outcome = tokio::time::timeout(
             DOWNLOAD_TIMEOUT,
-            await_download(&mut events, &expected_frame_id, &mut observed_guid),
+            await_download(
+                &mut events,
+                &expected_frame_id,
+                &mut observed_guid,
+                &mut suggested_filename,
+            ),
         )
         .await;
         reset_download_behavior(&validated.conn).await;
@@ -469,9 +611,21 @@ impl Tool for BrowserDownloadTool {
         match outcome {
             Ok(DownloadEventOutcome::Completed { guid }) => {
                 match completed_download_size(&destination_root, &guid) {
-                    Ok(bytes) => ToolResult::text("browser download completed").with_structured(
-                        json!({ "status": "completed", "download_id": guid, "bytes": bytes }),
-                    ),
+                    Ok(bytes) => {
+                        let file_name = give_download_its_name(
+                            &destination_root,
+                            &guid,
+                            suggested_filename.as_deref(),
+                        );
+                        // The text stays free of the name: recordings keep
+                        // it as the result summary (see the module comment).
+                        ToolResult::text("browser download completed").with_structured(json!({
+                            "status": "completed",
+                            "download_id": guid,
+                            "bytes": bytes,
+                            "file_name": file_name,
+                        }))
+                    }
                     Err(refusal) => refusal.to_tool_result(),
                 }
             }
@@ -568,6 +722,102 @@ mod tests {
 
         remove_proven_partial(&canonical, Some("opaque-guid"));
         assert!(!partial.exists());
+    }
+
+    #[test]
+    fn suggested_names_are_made_safe() {
+        let safe = |name: &str| safe_download_file_name(name);
+        assert_eq!(safe("report.txt").as_deref(), Some("report.txt"));
+        assert_eq!(safe("../../etc/passwd").as_deref(), Some("passwd"));
+        assert_eq!(safe(r"..\..\boot.ini").as_deref(), Some("boot.ini"));
+        assert_eq!(safe(".bashrc").as_deref(), Some("bashrc"));
+        assert_eq!(safe(" notes.txt. ").as_deref(), Some("notes.txt"));
+        assert_eq!(
+            safe("a<b>c:d\"e|f?g*h.txt").as_deref(),
+            Some("a_b_c_d_e_f_g_h.txt")
+        );
+        assert_eq!(
+            safe("line\nbreak\u{0}.txt").as_deref(),
+            Some("line_break_.txt")
+        );
+        // A right-to-left override can disguise "exe" as "txt".
+        assert_eq!(
+            safe("invoice\u{202e}txt.exe").as_deref(),
+            Some("invoice_txt.exe")
+        );
+        assert_eq!(safe("CON").as_deref(), Some("_CON"));
+        assert_eq!(safe("nul.txt").as_deref(), Some("_nul.txt"));
+        assert_eq!(safe("com1.log").as_deref(), Some("_com1.log"));
+        assert_eq!(safe("console.log").as_deref(), Some("console.log"));
+        assert_eq!(safe(""), None);
+        assert_eq!(safe("..."), None);
+        assert_eq!(safe("dir/"), None);
+        assert_eq!(safe("???"), None);
+
+        let long = format!("{}.pdf", "é".repeat(150));
+        let cut = safe(&long).unwrap();
+        assert!(cut.len() <= MAX_FILE_NAME_BYTES, "{}", cut.len());
+        assert!(cut.ends_with(".pdf"));
+        let long_extension = format!("a.{}", "b".repeat(300));
+        let cut = safe(&long_extension).unwrap();
+        assert_eq!(cut.len(), MAX_FILE_NAME_BYTES);
+        assert!(cut.starts_with("a.bbb"));
+    }
+
+    #[test]
+    fn numbered_names_go_before_the_extension() {
+        assert_eq!(numbered_name("report.txt", 1), "report (1).txt");
+        assert_eq!(numbered_name("README", 2), "README (2)");
+        assert_eq!(numbered_name("archive.tar.gz", 3), "archive.tar (3).gz");
+    }
+
+    #[test]
+    fn completed_download_takes_the_suggested_name_without_overwriting() {
+        let root = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(root.path()).unwrap();
+        std::fs::write(root.join("report.txt"), b"older").unwrap();
+        std::fs::write(root.join("report (1).txt"), b"older too").unwrap();
+        std::fs::write(root.join("guid-a"), b"new report").unwrap();
+
+        let name = give_download_its_name(&root, "guid-a", Some("report.txt"));
+        assert_eq!(name, "report (2).txt");
+        assert_eq!(std::fs::read(root.join("report.txt")).unwrap(), b"older");
+        assert_eq!(
+            std::fs::read(root.join("report (1).txt")).unwrap(),
+            b"older too"
+        );
+        assert_eq!(std::fs::read(root.join(&name)).unwrap(), b"new report");
+        assert!(!root.join("guid-a").exists());
+
+        std::fs::write(root.join("guid-b"), b"x").unwrap();
+        assert_eq!(give_download_its_name(&root, "guid-b", None), "download");
+        std::fs::write(root.join("guid-c"), b"y").unwrap();
+        assert_eq!(
+            give_download_its_name(&root, "guid-c", Some("../.profile")),
+            "profile"
+        );
+        assert!(!root.join(".profile").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_name_is_not_followed() {
+        use std::os::unix::fs::symlink;
+
+        let outside = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(root.path()).unwrap();
+        let escape = outside.path().join("written-through-link");
+        symlink(&escape, root.join("report.txt")).unwrap();
+        std::fs::write(root.join("guid"), b"data").unwrap();
+
+        let name = give_download_its_name(&root, "guid", Some("report.txt"));
+        assert_eq!(name, "report (1).txt");
+        assert!(!escape.exists());
+        assert!(std::fs::symlink_metadata(root.join("report.txt"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[test]

@@ -454,6 +454,10 @@ pub(crate) struct Locator<'a> {
     /// read of a window the caller never read.
     baseline_max_elements: Option<u64>,
     baselined: std::sync::Mutex<std::collections::HashSet<(i64, u64)>>,
+    /// Snapshot ids of the baseline reads this batch took itself, so the end
+    /// observation can say a diff is against the batch's own read rather
+    /// than one the caller made.
+    baseline_ids: std::sync::Mutex<Vec<String>>,
 }
 
 impl<'a> Locator<'a> {
@@ -464,7 +468,17 @@ impl<'a> Locator<'a> {
             deadline,
             baseline_max_elements: None,
             baselined: Default::default(),
+            baseline_ids: Default::default(),
         }
+    }
+
+    /// Whether `snapshot_id` is a baseline read this batch took itself.
+    pub fn took_baseline(&self, snapshot_id: &str) -> bool {
+        self.baseline_ids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|id| id == snapshot_id)
     }
 
     pub fn with_observe_baseline(mut self, max_elements: u64) -> Self {
@@ -707,7 +721,7 @@ impl<'a> Locator<'a> {
             );
             if first && !remembered {
                 // Best effort: a failed baseline only means a full end read.
-                let _ = self
+                let baseline = self
                     .call(
                         "get_window_state",
                         json!({
@@ -718,6 +732,17 @@ impl<'a> Locator<'a> {
                         }),
                     )
                     .await;
+                if let Some(id) = baseline
+                    .ok()
+                    .as_ref()
+                    .and_then(|state| state.get("snapshot_id"))
+                    .and_then(Value::as_str)
+                {
+                    self.baseline_ids
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(id.to_owned());
+                }
             }
         }
         let state = self

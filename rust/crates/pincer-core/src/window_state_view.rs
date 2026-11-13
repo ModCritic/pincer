@@ -459,8 +459,11 @@ pub const VALUE_PREVIEW_CHARS: usize = 200;
 /// Cut every `value="..."` longer than [`VALUE_PREVIEW_CHARS`] to its start
 /// plus `..." (N chars)`. A text area's value is its whole document: a
 /// 300-line file cost about 2,500 tokens on every read (desc-test round 3).
-/// The value ends at the last `" [actions=[` of the row (values are not
-/// quote-escaped), else at the row's last quote.
+/// The value ends at a count the platform wrote after it (`" (24492 chars`),
+/// else at the last `" [actions=[` of the row (values are not quote-escaped),
+/// else at the row's last quote. A count the platform wrote is kept as it is:
+/// it is the field's real length, where counting the shown text would count
+/// each escaped line break twice and stop at what the platform read.
 pub fn shorten_long_values(md: &str) -> std::borrow::Cow<'_, str> {
     const OPEN: &str = " value=\"";
     if !md.lines().any(|line| {
@@ -484,11 +487,12 @@ pub fn shorten_long_values(md: &str) -> std::borrow::Cow<'_, str> {
             let chars = value.chars().count();
             (chars > VALUE_PREVIEW_CHARS).then(|| {
                 let keep: String = value.chars().take(VALUE_PREVIEW_CHARS).collect();
-                format!(
-                    "{}{keep}...\" ({chars} chars){}",
-                    &line[..from],
-                    &line[end + 1..]
-                )
+                let rest = &line[end + 1..];
+                if platform_count_len(rest).is_some() {
+                    format!("{}{keep}...\"{rest}", &line[..from])
+                } else {
+                    format!("{}{keep}...\" ({chars} chars){rest}", &line[..from])
+                }
             })
         });
         match cut {
@@ -502,9 +506,32 @@ pub fn shorten_long_values(md: &str) -> std::borrow::Cow<'_, str> {
 /// Byte offset of the quote that closes a value starting at `from`.
 fn value_end(line: &str, from: usize) -> Option<usize> {
     let tail = &line[from..];
-    tail.rfind("\" [actions=[")
+    // A count that ends the row or comes right before its actions, so text
+    // inside the value that only looks like one is not taken for it.
+    tail.rmatch_indices("\" (")
+        .map(|(at, _)| at)
+        .find(|at| {
+            platform_count_len(&tail[at + 1..]).is_some_and(|len| {
+                let after = &tail[at + 1 + len..];
+                after.is_empty() || after.starts_with(" [actions=[")
+            })
+        })
+        .or_else(|| tail.rfind("\" [actions=["))
         .or_else(|| tail.rfind('"'))
         .map(|end| from + end)
+}
+
+/// Length of a character count the platform wrote right after a value
+/// (` (24492 chars)` or ` (24492 chars, the first 4096 read)`) at the start
+/// of `rest`; `None` when `rest` does not start with one.
+fn platform_count_len(rest: &str) -> Option<usize> {
+    let inner = rest.strip_prefix(" (")?;
+    let digits = inner.find(|c: char| !c.is_ascii_digit())?;
+    if digits == 0 || !inner[digits..].starts_with(" chars") {
+        return None;
+    }
+    let close = inner.find(')')?;
+    Some(2 + close + 1)
 }
 
 /// Walk diagnostics cost every read context and no caller acts on them:
@@ -1688,6 +1715,36 @@ mod tests {
         );
         assert!(text_of(&content).contains(&doc));
         assert_eq!(s["tree_markdown"], md);
+    }
+
+    #[test]
+    fn a_count_the_platform_wrote_is_kept_when_the_value_is_cut() {
+        // The platform read 4,096 of 24,492 characters and said so; the cut
+        // keeps that instead of counting the shown, escaped text.
+        let doc = "line\\n".repeat(700);
+        let md = format!(
+            "- [1] text \"f.txt\" value=\"{doc}...\" (24492 chars, the first 4096 read) [actions=[]]"
+        );
+        let short = shorten_long_values(&md);
+        assert!(
+            short.ends_with("...\" (24492 chars, the first 4096 read) [actions=[]]"),
+            "{short}"
+        );
+        assert_eq!(short.matches("chars").count(), 1, "{short}");
+        // A whole long value with a platform count keeps it too.
+        let md = format!("- [1] text \"f.txt\" value=\"{doc}\" (3500 chars) [actions=[]]");
+        let short = shorten_long_values(&md);
+        assert!(
+            short.ends_with("...\" (3500 chars) [actions=[]]"),
+            "{short}"
+        );
+        // Text inside a value that only looks like a count is not one.
+        let md = format!(
+            "- [1] entry \"q\" value=\"{}\" (5 chars) and more\" [actions=[]]",
+            "y".repeat(250)
+        );
+        let short = shorten_long_values(&md);
+        assert!(short.ends_with("...\" (270 chars) [actions=[]]"), "{short}");
     }
 
     #[test]

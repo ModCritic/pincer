@@ -535,6 +535,18 @@ enum MpxHotplugBlock {
 }
 
 impl MpxHotplugBlock {
+    /// [`Self::refusal`] without the foreground advice, for a tool that has
+    /// no foreground route (parallel_mouse_drag).
+    fn reason(self) -> &'static str {
+        match self {
+            Self::KdeX11 => "disabled on KDE Plasma X11",
+            Self::Xwayland => {
+                "disabled on XWayland: uinput devices never reach XWayland and adding an XI2 \
+                 master crashes Qt XWayland clients"
+            }
+        }
+    }
+
     fn refusal(self) -> &'static str {
         match self {
             Self::KdeX11 => "disabled on KDE Plasma X11; retry with delivery_mode='foreground'",
@@ -616,11 +628,19 @@ pub(crate) fn uinput_accessible() -> bool {
 }
 
 pub fn real_pointer_input_available() -> bool {
+    real_pointer_unavailable_reason().is_none()
+}
+
+/// Why the MPX/uinput real-pointer route cannot run in this session, or
+/// `None` when it can ([`real_pointer_input_available`]). The reason carries
+/// no retry advice, so a tool without a foreground route (parallel_mouse_drag)
+/// can refuse with its own.
+pub fn real_pointer_unavailable_reason() -> Option<String> {
     // Do not even probe /dev/uinput on an affected KDE/X11 or XWayland
     // session. Creating the devices is itself the dangerous operation; a later
     // fallback is too late once the X server has announced them to Qt clients.
-    if mpx_hotplug_block_for_session().is_some() {
-        return false;
+    if let Some(block) = mpx_hotplug_block_for_session() {
+        return Some(block.reason().to_owned());
     }
 
     // `ensure_master_pointer` creates an XI2 master before attaching the
@@ -629,19 +649,22 @@ pub fn real_pointer_input_available() -> bool {
     // pair until Xorg terminates the client with BadAlloc. Skip MPX entirely
     // when the required device is inaccessible.
     if !uinput_accessible() {
-        return false;
+        return Some("this process cannot open /dev/uinput".to_owned());
     }
     let Ok(display) = open_display() else {
-        return false;
+        return Some("the X display cannot be opened".to_owned());
     };
-    let supported = real_pointer_capabilities_available(
-        supports_parallel_pointer_injection(display).is_ok(),
-        is_xvfb_process_running(),
-        true,
-        false,
-    );
+    let server = supports_parallel_pointer_injection(display);
+    let xvfb = is_xvfb_process_running();
     unsafe { x11::xlib::XCloseDisplay(display) };
-    supported
+    if real_pointer_capabilities_available(server.is_ok(), xvfb, true, false) {
+        return None;
+    }
+    Some(match server {
+        Err(error) => error.to_string(),
+        Ok(()) => "the X server is Xvfb, which never attaches uinput devices as X input devices"
+            .to_owned(),
+    })
 }
 
 fn ensure_master_pointer(cursor_id: &str) -> Result<MasterPointerIds> {
@@ -2524,6 +2547,29 @@ fn window_children(
     kids
 }
 
+/// The client window inside a window manager frame: the first descendant
+/// that names a pid, at most three levels down. KWin nests the client in a
+/// wrapper inside the frame (frame, wrapper, client; checked with `xwininfo
+/// -tree` under KWin on X11, 2026-11-11), so the direct children alone miss
+/// it. Caller installs the error handler.
+fn client_below(display: *mut x11::xlib::Display, frame: x11::xlib::Window) -> Option<u64> {
+    let mut level = vec![frame];
+    for _ in 0..3 {
+        let children: Vec<x11::xlib::Window> = level
+            .iter()
+            .flat_map(|window| window_children(display, *window))
+            .collect();
+        if let Some(client) = children
+            .iter()
+            .find(|kid| crate::x11::window_pid(**kid).is_some())
+        {
+            return Some(*client);
+        }
+        level = children;
+    }
+    None
+}
+
 /// The toplevel (root child) the virtual pointer would press on at `(x, y)`
 /// when the caller means `window`. `Ok(None)` when the point is over the
 /// target itself (its WM frame) or over an override-redirect popup (a menu or
@@ -2552,9 +2598,7 @@ fn occluding_window(
     match (under, frame) {
         (Some(under), Some(frame)) if under != frame && !is_override_redirect(display, under) => {
             let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
-            let covering_client = window_children(display, under)
-                .into_iter()
-                .find(|kid| crate::x11::window_pid(*kid).is_some());
+            let covering_client = client_below(display, under);
             let covering_pid = crate::x11::window_pid(under)
                 .or_else(|| covering_client.and_then(crate::x11::window_pid));
             unsafe {
@@ -2562,7 +2606,7 @@ fn occluding_window(
                 x11::xlib::XSetErrorHandler(previous_handler);
             }
             let target_pid = crate::x11::window_pid(window);
-            let title = window_title_for_report(display, under);
+            let title = window_title_for_report(display, covering_client.unwrap_or(under));
             // The app's own window (a dialog, a file chooser) sits over the
             // point: the press goes where the caller can see it, on that
             // window, and the effect reports the retarget.
@@ -2574,7 +2618,9 @@ fn occluding_window(
             }
             Ok(PointCover::Occluded(TargetOccluded {
                 target_window: window,
-                covering_window: under,
+                // The client (list_windows id) when one is found, not the
+                // window manager's frame around it.
+                covering_window: covering_client.unwrap_or(under),
                 covering_title: title,
                 covering_pid,
                 x,
@@ -2606,6 +2652,25 @@ pub struct SameAppCover {
     /// Client window id (the `list_windows` id, not the WM frame).
     pub window: u64,
     pub title: String,
+}
+
+/// The occlusion check of the MPX pointer routes, for a route that has none
+/// of its own (the held-button tools): refuse a press at screen `(x, y)`
+/// meant for window `xid` when another application's window covers the
+/// point ([`TargetOccluded`]) or the point lies outside the window
+/// ([`PointOutsideWindow`]). A window of the target's own process over the
+/// point (its dialog) and an override-redirect popup pass.
+pub fn refuse_covered_point(xid: u64, x: i32, y: i32) -> Result<()> {
+    let display = open_display()?;
+    let cover = occluding_window(display, xid as x11::xlib::Window, x, y);
+    unsafe {
+        x11::xlib::XCloseDisplay(display);
+    }
+    match cover? {
+        PointCover::Clear | PointCover::SameApp(_) => Ok(()),
+        PointCover::Occluded(occluded) => Err(occluded.into()),
+        PointCover::Outside(outside) => Err(outside.into()),
+    }
 }
 
 /// True when neither the EWMH active window nor the core focus moved since
@@ -3986,6 +4051,39 @@ pub fn send_move_xtest_desktop(x: i32, y: i32) -> Result<()> {
     let root = conn.setup().roots[screen_num].root;
     conn.xtest_fake_input(MOTION_NOTIFY_EVENT, 0, 0, root, x as i16, y as i16, 0)?;
     conn.flush()?;
+    let _ = conn.get_input_focus()?.reply();
+    Ok(())
+}
+
+/// One edge of a held button on the real X11 pointer: move to the
+/// screen-absolute `(x, y)` when given, then press (`press`) or release
+/// `button` there via XTest. The foreground route of the held-button tools
+/// (mouse_button_down / mouse_drag / mouse_button_up); motion while the
+/// button is down is [`send_move_xtest_desktop`]. A faked press stays down
+/// on the core pointer after this short-lived connection closes, until a
+/// faked release: checked on Xvfb under KWin (2026-11-11), where a press, a
+/// motion and a release from three separate calls drew one GTK3 stroke.
+pub fn send_button_xtest_desktop(point: Option<(i32, i32)>, button: u8, press: bool) -> Result<()> {
+    use x11rb::protocol::xtest::ConnectionExt as _;
+    let (conn, screen_num) = connect_x11_for_input()?;
+    let root = conn.setup().roots[screen_num].root;
+    let (x, y) = match point {
+        Some((x, y)) => {
+            conn.xtest_fake_input(MOTION_NOTIFY_EVENT, 0, 0, root, x as i16, y as i16, 0)?;
+            (x, y)
+        }
+        None => {
+            let pointer = conn.query_pointer(root)?.reply()?;
+            (i32::from(pointer.root_x), i32::from(pointer.root_y))
+        }
+    };
+    let kind = if press {
+        BUTTON_PRESS_EVENT
+    } else {
+        BUTTON_RELEASE_EVENT
+    };
+    conn.xtest_fake_input(kind, button, 0, root, x as i16, y as i16, 0)?
+        .check()?;
     let _ = conn.get_input_focus()?.reply();
     Ok(())
 }
