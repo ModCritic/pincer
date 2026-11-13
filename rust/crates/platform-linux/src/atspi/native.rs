@@ -424,8 +424,6 @@ mod listener_startup_tests {
     }
 }
 
-/// A node discovered during the pre-order walk, with its proxy retained so the
-/// per-index operations can act on it without re-walking the tree.
 /// The `value` of one walked node: its Value-interface value, else, for an
 /// editable text widget without a Value interface, its non-empty Text
 /// content (the typed string). A SpinButton implements Text and Value, so it
@@ -474,6 +472,8 @@ mod editable_text_value_tests {
     }
 }
 
+/// A node discovered during the pre-order walk, with its proxy retained so the
+/// per-index operations can act on it without re-walking the tree.
 struct Visited<'a> {
     depth: usize,
     role: String,
@@ -1106,6 +1106,9 @@ const FRAME_MATCH_TOLERANCE_PX: u64 = 160;
 /// coin flip.
 const FRAME_MATCH_MARGIN_PX: u64 = 24;
 
+/// An AT-SPI frame ordinal and its screen extents (x, y, width, height).
+type FrameExtents = (usize, (i32, i32, i32, i32));
+
 /// Pick the unique application top-level that corresponds to native window
 /// `xid`, or `None` when the correspondence cannot be proven.
 ///
@@ -1115,9 +1118,6 @@ const FRAME_MATCH_MARGIN_PX: u64 = 24;
 /// coordinates against the X11 outer geometry the caller already named. This
 /// refuses ties rather than guessing, because callers use the result to decide
 /// which window they are about to act inside.
-/// An AT-SPI frame ordinal and its screen extents (x, y, width, height).
-type FrameExtents = (usize, (i32, i32, i32, i32));
-
 ///
 /// One exception to the tie rule: Qt publishes a QMessageBox as two top-level
 /// accessibles with the same name and extents, both driving the one dialog
@@ -3584,20 +3584,15 @@ pub fn insert_text(pid: u32, xid: u64, text: &str) -> Result<bool> {
     )
 }
 
-/// Classify what holds keyboard focus in `pid`'s tree, so `type_text` can target
-/// the thing the user just clicked rather than the first editable anywhere:
-///   `Some(true)`  — a focused **editable** widget (a text entry/box). AT-SPI
-///                   EditableText insertion targets it correctly.
-///   `Some(false)` — a focused **non-editable** widget that still accepts typed
-///                   input (a spreadsheet cell/grid, a terminal, a canvas). An
-///                   AT-SPI editable search would grab the wrong field here (e.g.
-///                   gnumeric's name box), so the caller should synth-type into
-///                   the focused widget instead.
-///   `None`        — nothing is focused (or the app is unreachable): fall back to
-///                   the focus-free "first editable" path for background typing.
-/// What holds the keyboard focus in window `xid` (0: any window of the app):
-/// `Some(true)` an editable, `Some(false)` a non-editable input, `None`
-/// nothing found, including a focus that is in another window of the app.
+/// What holds the keyboard focus in window `xid` (0: any window of the app),
+/// so `type_text` can target the thing the user just clicked rather than the
+/// first editable anywhere. `Some(true)` is a focused editable widget (a text
+/// entry or box), which AT-SPI EditableText insertion targets correctly.
+/// `Some(false)` is a focused non-editable widget that still accepts typed
+/// input (a spreadsheet cell, a terminal, a canvas); an AT-SPI editable search
+/// would grab the wrong field there (e.g. gnumeric's name box), so the caller
+/// should synth-type into the focused widget instead. `None` means nothing was
+/// found, including a focus that is in another window of the app.
 pub fn focused_is_editable(pid: u32, xid: u64) -> Result<Option<bool>> {
     bounded_for(
         INPUT_QUERY_BUDGET,
@@ -4649,7 +4644,7 @@ fn dedupe_menu_matches(visited: &[Visited<'_>], matches: Vec<usize>) -> Vec<usiz
     candidates
 }
 
-/// Perform the first action of element `idx` of window `xid`, resolved
+/// Perform the activation action of element `idx` of window `xid`, resolved
 /// against a fresh walk of that window (the index space of its snapshot).
 pub fn perform_action(pid: u32, xid: u64, idx: usize) -> Result<(String, bool, bool)> {
     bounded_for(
@@ -6579,11 +6574,6 @@ pub fn perform_action_at_screen_point(
     )
 }
 
-/// Roles that draw text/graphics but don't *do* anything when actuated. GTK4
-/// nests a `label` inside every `button` with a near-identical (slightly
-/// smaller) frame, so an area-only hit-test lands on the inert label —
-/// `do_action` is a silent no-op (the "false success"). Treat these as
-/// last-resort click targets.
 /// AT-SPI roles whose `activate`/`press` action does not move the widget
 /// focus into them (Chromium and GTK entries, spin buttons, sliders, table
 /// cells), so a following keystroke would land elsewhere; a real pointer
@@ -6613,6 +6603,11 @@ pub(crate) fn is_tooltip_role(role: &str) -> bool {
     )
 }
 
+/// Roles that draw text/graphics but don't *do* anything when actuated. GTK4
+/// nests a `label` inside every `button` with a near-identical (slightly
+/// smaller) frame, so an area-only hit-test lands on the inert label, where
+/// `do_action` is a silent no-op (the "false success"). Treat these as
+/// last-resort click targets.
 pub(crate) fn is_passive_role(role: &str) -> bool {
     matches!(
         role,
@@ -7358,11 +7353,6 @@ pub fn read_value_ref(object_ref: &ObjectRef) -> Result<Option<String>> {
     )
 }
 
-/// Resolve element `idx` against a fresh walk and read its screen bounds.
-/// `xid != 0` walks the caller's window FIRST — the same visiting order (and
-/// therefore the same index space) `get_window_state` used for the snapshot
-/// the index came from; an application-wide pre-order would number a
-/// multi-window app (GIMP's docks, LibreOffice dialogs) differently.
 /// Screen bounds a walk resolved are usable for a pointer action only when
 /// they have a real size and intersect the display. `display` is `None` when
 /// the display size is unknown (Wayland); the size check still applies.
@@ -7384,6 +7374,11 @@ pub(crate) fn walk_bounds_usable(
     Some((x, y, w, h))
 }
 
+/// Resolve element `idx` against a fresh walk and read its screen bounds.
+/// `xid != 0` walks the caller's window FIRST, in the same visiting order (and
+/// therefore the same index space) `get_window_state` used for the snapshot
+/// the index came from; an application-wide pre-order would number a
+/// multi-window app (GIMP's docks, LibreOffice dialogs) differently.
 fn element_bounds_by_walk(pid: u32, xid: u64, idx: usize) -> Result<(i32, i32, u32, u32)> {
     // Synchronous X11 lookups stay on the caller's blocking thread, outside
     // the AT-SPI runtime.
@@ -7507,8 +7502,6 @@ pub fn get_element_bounds_for_window(
     )
 }
 
-/// Real on-screen origin (root-relative top-left) of an X11 window, or `None`
-/// if it can't be resolved. Mirrors `list_windows`' geometry path.
 /// Size of the X11 display, for sanity-checking screen extents.
 fn x11_display_size() -> Option<(u32, u32)> {
     use x11rb::connection::Connection as _;
@@ -7566,6 +7559,8 @@ fn native_wayland_origin_attested(pid: u32, xid: u64) -> bool {
         && crate::wayland::hyprland::native_client_attested(xid, pid)
 }
 
+/// Real on-screen origin (root-relative top-left) of an X11 window, or `None`
+/// if it can't be resolved. Mirrors `list_windows`' geometry path.
 pub(crate) fn x11_window_origin(xid: u64) -> Option<(i32, i32)> {
     use x11rb::protocol::xproto::*;
 

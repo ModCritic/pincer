@@ -32,9 +32,8 @@ pub const TERMINAL_WM_CLASS_SUBSTRINGS: &[&str] = &[
 ];
 
 /// Process names (as returned by `process_name(pid)`) for known
-/// terminal emulators. Kept in sync with the inline list in
-/// `tools/impl_.rs::is_terminal_process` — this constant is the
-/// canonical source.
+/// terminal emulators. `tools/impl_.rs::is_terminal_process` reads
+/// it through `is_terminal_process_name`; this is the only list.
 pub const TERMINAL_PROCESS_NAMES: &[&str] = &[
     "alacritty",
     "ghostty",

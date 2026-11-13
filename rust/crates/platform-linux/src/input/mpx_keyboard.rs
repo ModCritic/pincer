@@ -15,8 +15,8 @@
 //! Lifecycle mirrors the MPX pointer click: the master pair is created (or
 //! reused) for the session, the keyboard slave is attached, the target window
 //! is focused for that master only, keys are emitted, delivery is confirmed
-//! through the server's raw key events, and the pair is torn down again so a
-//! non-MPX-aware WM never sees a lingering foreign master.
+//! through the server's raw key events, and the pair is kept for the session
+//! (removed on end_session, after the idle TTL, or by the startup reaper).
 
 use super::*;
 use x11rb::protocol::xproto::{ConnectionExt as _, GetKeyboardMappingReply};
@@ -32,7 +32,7 @@ const MAX_EVDEV_KEY: u16 = 0xff;
 /// Unicode keysyms are the codepoint with this bit set (X11 keysym encoding).
 const UNICODE_KEYSYM_BASE: u32 = 0x0100_0000;
 /// How long the server gets to report the last emitted key through a raw
-/// event before the pair is torn down.
+/// event before delivery is reported as unconfirmed.
 const DELIVERY_CONFIRM_TIMEOUT: Duration = Duration::from_millis(1500);
 
 static UINPUT_KEYBOARDS: OnceLock<Mutex<HashMap<String, Arc<Mutex<VirtualDevice>>>>> =

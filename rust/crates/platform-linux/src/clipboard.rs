@@ -143,7 +143,7 @@ mod tests {
     /// The live clipboard tests below share the display's one clipboard.
     static LIVE_CLIPBOARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    /// Needs an X server; CI runs it under `xvfb-run` in ci-rust-linux.yml.
+    /// Needs an X server; run it under `xvfb-run`.
     #[test]
     #[ignore = "requires an X11 display (run under xvfb-run)"]
     fn native_clipboard_round_trips_text_on_x11() {

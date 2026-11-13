@@ -157,7 +157,7 @@ fn snapshot_window_resolver(
     })
 }
 
-// ── DriverConfig + ZoomRegistry ─────────────────────────────────────────────
+// ── DriverConfig ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct DriverConfig {
@@ -855,8 +855,8 @@ fn build_element_entry(
     if unlabelled {
         entry["unlabelled"] = json!(true);
     }
-    // Surface the element's value separately from `label` (which collapses
-    // name→value→description): a field with both a name AND typed text would
+    // Surface the element's value separately from `label` (which is the
+    // name, else the description): a field with both a name AND typed text would
     // otherwise hide the text from a caller reading the structured side,
     // leaving it only in tree_markdown. See the macOS get_window_state builder
     // for the rationale.
@@ -3519,8 +3519,6 @@ fn window_local_to_screen(xid: u64, x: f64, y: f64) -> anyhow::Result<(f64, f64)
     Ok((reply.dst_x as f64 + x, reply.dst_y as f64 + y))
 }
 
-/// `scope:"desktop"` alongside a pid/window target: the caller read `x,y` off
-/// `get_desktop_state` (screen pixels) but still names the window to act on.
 /// Upper bound for one AT-SPI element operation (bounds lookup / action).
 /// The AT-SPI layer bounds single bus calls, but a full tree walk over a large
 /// GTK/VCL window chains many of them; observed stalls ran to minutes.
@@ -4988,7 +4986,8 @@ impl PointerRoute {
     /// Structured fields shared by click / double_click / right_click / drag:
     /// `path`, `verified`, `effect`, and for the MPX route the post-checks
     /// (`focus_unchanged`, `region_diff_pct`). `verified:true` + `effect:
-    /// "landed"` only when the screen around the point visibly reacted.
+    /// "confirmed"` only for an AT-SPI selection read-back; a region change
+    /// is recorded but never confirms.
     fn structured(&self, mode_label: &str) -> Value {
         let mut v = json!({
             "verified": false,
@@ -5267,18 +5266,6 @@ impl std::fmt::Display for BackgroundPointerFailed {
 }
 impl std::error::Error for BackgroundPointerFailed {}
 
-/// X11 no-focus-steal pixel click. On a real Xorg host the MPX uinput pointer
-/// lands a *true* button event on XInput2 toolkits (GTK3/4, VCL, Qt,
-/// Chromium) that silently drop synthetic `XSendEvent` pointers — so right /
-/// middle / double clicks actually register. It refuses (typed
-/// [`crate::input::TargetOccluded`]) when another toplevel covers the point.
-/// On Xvfb / Xtigervnc / unsupported servers (`real_pointer_input_available()`
-/// returns false) it falls back to the legacy `XSendEvent` path so headless
-/// tests and core-only toolkits keep working; when the MPX attempt itself
-/// fails, the fallback is only taken for toolkits that accept synthetic
-/// events, otherwise a typed [`BackgroundPointerFailed`] is returned. `lx`,`ly`
-/// are window-local; screen-absolute coords for the warp are derived here.
-/// Blocking — call inside spawn_blocking.
 /// `popup window A "x" (..), popup window B (..)` for evidence text.
 fn popup_list(popups: &[crate::input::PopupWindow]) -> String {
     if popups.is_empty() {
@@ -5322,6 +5309,18 @@ fn with_pixel_points(
     result
 }
 
+/// X11 no-focus-steal pixel click. On a real Xorg host the MPX uinput pointer
+/// lands a *true* button event on XInput2 toolkits (GTK3/4, VCL, Qt,
+/// Chromium) that silently drop synthetic `XSendEvent` pointers, so right /
+/// middle / double clicks actually register. It refuses (typed
+/// [`crate::input::TargetOccluded`]) when another toplevel covers the point.
+/// On Xvfb / Xtigervnc / unsupported servers (`real_pointer_input_available()`
+/// returns false) it falls back to the legacy `XSendEvent` path so headless
+/// tests and core-only toolkits keep working; when the MPX attempt itself
+/// fails, the fallback is only taken for toolkits that accept synthetic
+/// events, otherwise a typed [`BackgroundPointerFailed`] is returned. `lx`,`ly`
+/// are window-local; screen-absolute coords for the warp are derived here.
+/// Blocking; call inside spawn_blocking.
 fn x11_pixel_click_no_focus_steal(
     cursor_id: &str,
     xid: u64,
@@ -7192,11 +7191,6 @@ fn explicit_keyboard_cursor_target(
     window_local_to_screen(xid, x, y).ok()
 }
 
-/// Position and reveal a named session's cursor before keyboard/value input.
-/// `preserve_legacy_element_visual` retains the existing element-only feedback
-/// for type_text/set_value anonymous calls without adding session-style fallback
-/// placement to them. Geometry and overlay failures are observational and never
-/// affect the tool's actual input result.
 /// Tell the cursor hook where an anonymous keyboard action types, before the
 /// keystrokes: the element or pixel target, else the window's center. The
 /// overlay is left alone (anonymous calls keep their legacy visuals); only an
@@ -7225,6 +7219,11 @@ async fn announce_keyboard_target(
     }
 }
 
+/// Position and reveal a named session's cursor before keyboard/value input.
+/// `preserve_legacy_element_visual` retains the existing element-only feedback
+/// for type_text/set_value anonymous calls without adding session-style fallback
+/// placement to them. Geometry and overlay failures are observational and never
+/// affect the tool's actual input result.
 async fn position_named_session_keyboard_cursor(
     state: &ToolState,
     args: &Value,
@@ -8342,9 +8341,8 @@ impl Tool for ClickTool {
         };
         let button = parse_mouse_button(button_str);
 
-        // Surface 6: element_token / element_index precedence resolution.
-        // We resolve before the legacy `opt_u64("element_index")` branch
-        // so a token-only call (no integer arg) still takes the element path.
+        // Surface 6: resolve `element_token` to its element and window
+        // before any pixel path.
         let capture_id_arg = args.opt_str("capture_id");
         let window_id_arg = args.opt_u64("window_id");
         let resolved = match self.state.snapshots.resolve(pid as i32, &args) {
@@ -12718,8 +12716,6 @@ impl Tool for ScrollTool {
     }
 }
 
-/// Wheel steps for one `by: "page"` step on X11 (Hyprland's documented
-/// approximation).
 /// X11 wheel button for a scroll direction: 4 up, 5 down, 6 left, 7 right.
 fn wheel_button(direction: &str) -> u8 {
     match direction {
@@ -12803,6 +12799,8 @@ fn modified_scroll_result(
     }))
 }
 
+/// Wheel steps for one `by: "page"` step on X11 (Hyprland's documented
+/// approximation).
 const WHEEL_STEPS_PER_PAGE: usize = 3;
 
 /// What a wheel scroll did to the window's scroll bars.
@@ -12958,7 +12956,7 @@ fn scroll_outcome_result(
 
 // `ScreenshotTool` and `ScreenshotCompatTool` removed in PR #1692 — see the
 // matching note in platform-windows/src/tools/impl_.rs. `get_window_state` is
-// the canonical screenshot path (it always returns a screenshot now); the
+// the canonical screenshot path (it returns one by default); the
 // underlying capture machinery (XGetImage / `import` shell-out / etc.)
 // stays reachable through GetWindowStateTool.
 
@@ -17722,10 +17720,9 @@ impl Tool for TypeTextCharsTool {
             input_schema: json!({
                 "type":"object","required":["pid","text"],"properties":{
                     "pid":{"type":"integer","description":"Target process ID."},
-                    "window_id":{"type":"integer","description":"Window id from list_windows. Required with element_index."},
+                    "window_id":{"type":"integer","description":"Window id from list_windows."},
                     "text":{"type":"string","description":"Text to type, one character at a time."},
-                    "delay_ms":{"type":"integer","description":"Milliseconds between chars (default 30)."},
-                    "type_chars_only":{"type":"boolean","description":"Skip element focus, type directly. Default false."}
+                    "delay_ms":{"type":"integer","description":"Milliseconds between chars (default 30)."}
                 },"additionalProperties":false
             }),
             read_only: false, destructive: true, idempotent: false, open_world: true,
@@ -18333,7 +18330,8 @@ impl Tool for SetWindowFrameTool {
                 description: format!(
                     "{} On Linux the frame is the client area, as in list_windows bounds: \
                      the window manager's title bar and borders lie outside it, so the title \
-                     bar sits above y. The result gives the frame read back as WxH+X+Y.",
+                     bar sits above y. On X11 a maximized or full-screen window is restored \
+                     first. The result gives the frame read back as WxH+X+Y.",
                     contract.description
                 ),
                 input_schema: contract.input_schema,
@@ -19084,7 +19082,7 @@ pub fn build_registry_with_provider(
     );
     // `screenshot` removed - see the matching comment in
     // platform-windows/src/tools/impl_.rs::build_registry. Canonical
-    // screenshot path is `get_window_state` (it always returns a screenshot now).
+    // screenshot path is `get_window_state` (it returns one by default).
     let _ = compat;
     r.register(Box::new(GetScreenSizeTool));
     r.register(Box::new(GetDesktopStateTool {

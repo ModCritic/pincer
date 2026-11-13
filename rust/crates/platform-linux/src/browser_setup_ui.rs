@@ -172,11 +172,12 @@ fn omnibox_holds_setup_url(node: &AtspiNode, descriptor: &BrowserSetupDescriptor
 
 /// Navigate the approved window to its fixed setup page.
 ///
-/// This mirrors the macOS and Windows adapters rather than synthesizing the URL
-/// keystroke by keystroke: write the whole URL into the address field through
-/// the accessibility API, read it back to prove it landed, and only then commit
-/// with a single Enter. `set_text_contents` is the AT-SPI counterpart of UIA's
-/// `ValuePattern::SetValue` and AppKit's `AXValue`.
+/// The whole URL goes in at once instead of keystroke by keystroke: it is
+/// staged on the clipboard and pasted (`ctrl+a`, `ctrl+v`, then the user's
+/// clipboard is put back), then committed with a single Enter. Chromium's
+/// omnibox takes no AT-SPI writes and exposes no readable value, so instead of
+/// the field read-back the macOS and Windows adapters do, the flow proves the
+/// tab reached the setup page by its title.
 ///
 /// Per-character synthesis was the wrong primitive here. XTEST keysym lookup is
 /// keyboard-layout dependent and wlroots virtual-keyboard seats drop
@@ -184,9 +185,9 @@ fn omnibox_holds_setup_url(node: &AtspiNode, descriptor: &BrowserSetupDescriptor
 /// omnibox treats as a search term, silently navigating to a search-engine
 /// results page. Nothing downstream could tell that apart from a slow-loading
 /// setup page, so the flow reported a readiness timeout while leaving the user
-/// on someone else's website. Writing the value whole removes the layout
-/// dependency, and the read-back turns any residual mangling into an immediate,
-/// accurate refusal.
+/// on someone else's website. Pasting the value whole removes the layout
+/// dependency, and checking the destination page turns any residual mangling
+/// into an accurate refusal.
 fn trusted_setup_navigation(
     pid: u32,
     window_id: u64,

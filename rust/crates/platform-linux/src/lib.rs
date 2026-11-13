@@ -4,8 +4,8 @@
 //! - /proc filesystem for process enumeration
 //! - X11 _NET_CLIENT_LIST for window enumeration
 //! - X11 XSendEvent for background mouse/keyboard injection (no focus steal)
-//! - AT-SPI D-Bus protocol for accessibility tree (via subprocess bridge)
-//! - xwd/scrot/import for window screenshots
+//! - AT-SPI over D-Bus (the `atspi` crate, no subprocess) for the accessibility tree
+//! - MIT-SHM or `XGetImage`, with ImageMagick `import` as a fallback, for window screenshots
 //!
 //! Wayland: falls back to xdg-output and virtual-keyboard protocols when
 //! running under a Wayland compositor with XWayland support.
@@ -182,7 +182,7 @@ pub(crate) mod test_env {
 
 /// Pure WSL-detection predicate, split out from [`is_wsl`] so both branches
 /// are unit-testable without the process-global env / `OnceLock` cache.
-/// `wsl_env` mirrors `$WSL_DISTRO_NAME`/`$WSL_INTEROP` being set; `osrelease`
+/// `wsl_env_set` mirrors `$WSL_DISTRO_NAME`/`$WSL_INTEROP` being set; `osrelease`
 /// is the `/proc/sys/kernel/osrelease` contents.
 fn detect_wsl(wsl_env_set: bool, osrelease: Option<&str>) -> bool {
     if wsl_env_set {
@@ -239,10 +239,9 @@ pub fn register_tools() -> ToolRegistry {
     tools::build_registry(false)
 }
 
-/// `compat=true` enables Claude Code computer-use compatibility mode:
-/// the regular `screenshot` tool is replaced by a window-scoped variant
-/// (pid + window_id required, JPEG @ 85%, text note pointing at pixel
-/// tools). See `tools::impl_::ScreenshotCompatTool`.
+/// `compat` is accepted for API compatibility and ignored: the `screenshot`
+/// tool it used to swap for a window-scoped variant was removed, and
+/// `get_window_state` is the screenshot path.
 pub fn register_tools_with_cursor(cfg: cursor_overlay::CursorConfig, compat: bool) -> ToolRegistry {
     register_tools_with_cursor_and_provider(None, cfg, compat)
 }

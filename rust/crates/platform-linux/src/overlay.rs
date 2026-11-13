@@ -1043,9 +1043,9 @@ pub fn run_on_thread() {
     // Wayland layer-shell overlay is started LAZILY on the first
     // send_command_for() that targets a Wayland session (see the
     // wayland::overlay::forward() path). Starting it eagerly here added
-    // ~100-300ms to pincer mcp startup — enough to push the CI
-    // `cursor-click-gif` test (20s budget for the full launch_app →
-    // click → type sequence) over its limit, intermittently. The
+    // ~100-300ms to pincer mcp startup, enough to push upstream's CI
+    // cursor test (a 20s budget for launch_app, click and type) over its
+    // limit intermittently. The
     // forward() path's own ensure_started() OnceLock guarantees the
     // thread spins up on demand without losing any commands (the
     // first send_command_for that triggers it spawns the thread,
@@ -1087,9 +1087,8 @@ impl RenderEntry for RenderState {
     fn apply_command(&mut self, cmd: OverlayCommand) -> bool {
         // Linux uses the non-sentinel-snap behaviour for both MoveTo and
         // ClickPulse: every command updates `self.pos` unconditionally.
-        // Custom-shape / gradient / focus-rect commands are not rendered on
-        // Linux at present; `apply_command_base` consumes SetShape +
-        // SetGradient and returns false for ShowFocusRect — both cases drop
+        // Focus-rect commands are not rendered on Linux at present:
+        // `apply_command_base` returns false for ShowFocusRect, which drops
         // the visual update silently so callers don't see an error.
         self.core.apply_command_base(cmd, false, false)
     }
@@ -2003,8 +2002,8 @@ impl<'a, C: x11rb::connection::Connection> ZOrderEnforcer for X11ZOrderEnforcer<
         // Per the ZOrderEnforcer trait contract, a stale `target` (window
         // gone) should fall back to the `None` behavior — top of the
         // normal stack, no sibling. Using a stale XID as a `sibling` here
-        // triggers BadWindow on every tick of the overlay-enforcer loop
-        // (~125 Hz), spamming the X server and silently skipping the
+        // triggers BadWindow on every reassertion of the overlay enforcer
+        // (up to every 80 ms), spamming the X server and silently skipping the
         // intended z-reassertion. Resolving the root-child ancestor both
         // probes liveness and yields the only sibling the server will
         // accept under a reparenting WM (see resolve_x11_root_child).

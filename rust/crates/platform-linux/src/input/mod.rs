@@ -1,8 +1,10 @@
-//! Background input injection for Linux via X11 XSendEvent.
+//! Input injection for Linux on X11.
 //!
-//! XSendEvent sends synthetic events directly to a window without changing
-//! input focus — the Linux equivalent of PostMessage on Windows, and the
-//! mechanism behind the cross-platform "no focus steal" contract.
+//! Background routes: a per-session MPX master pointer and keyboard (an XI2
+//! master with a uinput slave) where the session allows it, and XSendEvent,
+//! which sends synthetic events directly to a window without changing input
+//! focus (the Linux equivalent of PostMessage on Windows). XTest is the
+//! foreground route.
 //!
 //! Note: a few apps check the `send_event` flag and ignore synthetic events.
 //! Terminal emulators are the notable case (xterm's `allowSendEvents` is off by
@@ -1696,9 +1698,9 @@ pub fn send_parallel_virtual_pointer_drags(drags: &[(String, VirtualPointerDrag)
 /// for `count` > 1) at one screen point.
 ///
 /// This is what lands **right / middle / double** clicks (and any left click
-/// the AT-SPI path can't actuate) on XInput2 toolkits: GTK3/4, VCL, Qt and
-/// Chromium silently drop synthetic `XSendEvent` pointer events, so those
-/// clicks are otherwise no-ops. Coordinates are screen-absolute;
+/// the AT-SPI path can't actuate) on XInput2 toolkits: GTK3/4, VCL and
+/// Chromium silently drop synthetic `XSendEvent` pointer events (Qt drops only
+/// wheel buttons), so those clicks are otherwise no-ops. Coordinates are screen-absolute;
 /// `target_window` is the X11 toplevel the caller means to hit. The press is
 /// delivered straight from the virtual master: no XI2 shield grab. On GNOME
 /// (mutter) the click-to-focus passive grab is installed for the Virtual Core
@@ -1871,7 +1873,6 @@ fn bounds_contain(bounds: (i32, i32, u32, u32), x: i32, y: i32) -> bool {
     x >= bx && y >= by && x < bx.saturating_add(bw as i32) && y < by.saturating_add(bh as i32)
 }
 
-/// Describe a mapped override-redirect root child as a [`PopupWindow`].
 /// Whether a root child's attributes allow it to be a menu, popover or combo
 /// list: mapped, override-redirect, bigger than a pixel, and able to draw.
 /// `InputOnly` windows have no pixels; KWin keeps a screen-sized one on
@@ -1885,6 +1886,7 @@ fn could_be_popup(attrs: &x11::xlib::XWindowAttributes) -> bool {
         && attrs.height > 1
 }
 
+/// Describe a mapped override-redirect root child as a [`PopupWindow`].
 fn popup_info(display: *mut x11::xlib::Display, child: x11::xlib::Window) -> Option<PopupWindow> {
     let mut attrs: x11::xlib::XWindowAttributes = unsafe { std::mem::zeroed() };
     let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
@@ -2924,8 +2926,9 @@ pub struct VirtualPointerScroll {
 
 /// Land a discrete scroll via the MPX real-input pipeline (see
 /// [`VirtualPointerScroll`]). Warps the dedicated master pointer over the target
-/// point, then emits `|ticks|` wheel detents on the uinput slave. The master is
-/// torn down and focus restored on exit, matching the click/drag paths.
+/// point, then emits `|ticks|` wheel detents on the uinput slave. The master
+/// pair is kept for the session and focus is restored on exit, matching the
+/// click/drag paths.
 pub fn send_virtual_pointer_scroll(cursor_id: &str, scroll: &VirtualPointerScroll) -> Result<()> {
     let _op = mpx_op_guard(cursor_id);
     let display = open_display()?;
@@ -3953,8 +3956,8 @@ pub fn send_key_xtest(key: &str, modifiers: &[&str]) -> Result<()> {
 /// global-HID `CGEvent` desktop click).
 ///
 /// XTest delivering to the focused / under-pointer window is precisely why the
-/// *background* paths above use `XSendEvent` instead (see the module header) —
-/// but it is exactly what desktop scope wants: the agent has located the target
+/// *background* paths above use the MPX master or `XSendEvent` instead (see the
+/// module header). But it is exactly what desktop scope wants: the agent has located the target
 /// by vision on the whole screen and issues a real screen-absolute pointer
 /// click. `button` is an X button number (1=left, 2=middle, 3=right).
 pub fn send_click_xtest_desktop(x: i32, y: i32, button: u8, count: usize) -> Result<()> {

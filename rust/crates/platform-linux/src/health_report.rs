@@ -239,8 +239,9 @@ async fn check_screen_capture_capability() -> CheckEntry {
              xdg-desktop-portal-wlr.",
         );
     }
-    // On Linux the canonical capture path is X11 GetImage / xwd / scrot
-    // — all require an open X11 connection. The probe is the same one
+    // On Linux the canonical capture path is X11 MIT-SHM or GetImage
+    // (ImageMagick `import` as a fallback); all require an open X11
+    // connection. The probe is the same one
     // we use for ax_capability, but the consumer-facing message and
     // hint differ so future drift between the two doesn't break either
     // contract.

@@ -572,9 +572,10 @@ fn open_eis_context() -> anyhow::Result<(reis::ei::Context, PortalKeepAlive)> {
 // EventLoop driving the ei::Context Generic source, with a separate
 // channel source for inbound Cmd messages.
 //
-// For v1 we implement the handshake + seat-bind dance and provide
-// click/move/type via the negotiated pointer/keyboard/text interfaces.
-// Region selection picks the first announced ei_device::Region.
+// The worker negotiates the handshake and seat bind, then serves click,
+// move, scroll, drag, key sequences and typing through the negotiated
+// pointer/keyboard/text interfaces. Absolute points go to the device whose
+// Region contains them (the first device as a fallback).
 
 fn run_calloop(context: reis::ei::Context, rx: Receiver<Cmd>) -> anyhow::Result<()> {
     use calloop::{generic::Generic, EventLoop, Interest, Mode};
@@ -598,7 +599,7 @@ fn run_calloop(context: reis::ei::Context, rx: Receiver<Cmd>) -> anyhow::Result<
     // only advances while `dispatch` runs, and the portal consent-and-connect
     // path (#2105) returns before the device is live. Running a command against
     // a not-yet-negotiated device fails with "no EIS device negotiated yet". So
-    // queue commands and run each only once `input_ready()`; fail any that wait
+    // queue commands and run each only once `cmd_ready()` holds; fail any that wait
     // longer than READY_TIMEOUT (handle_command then replies with the natural
     // "no device" error) so a caller blocked on the reply never hangs forever.
     let mut pending: Vec<(Cmd, std::time::Instant)> = Vec::new();
@@ -1145,10 +1146,10 @@ impl EisState {
             Cmd::TypeText { text, .. } => {
                 // Prefer ei_text (libei 1.6+ — a UTF-8 string, layout-correct).
                 // Mutter does NOT advertise ei_text, so fall back to keycode
-                // typing via ei_keyboard: map each char to a US-layout evdev
-                // keycode + shift and emit press/release. Chars with no US-layout
-                // keycode are skipped (a documented limitation — full layout
-                // support needs an xkb keymap, like reis's type-text example).
+                // typing via ei_keyboard: map each char through the
+                // compositor's xkb keymap (the US table if no keymap arrived)
+                // and emit press/release. Chars with no keycode are skipped
+                // and counted.
                 if let Some(device) = self.device_with_interface("ei_text") {
                     let serial = self.last_serial;
                     let text_iface =
@@ -1311,10 +1312,10 @@ impl EisState {
 }
 
 /// Map a character to a US-layout evdev keycode + whether Shift is needed.
-/// Used by the keyboard-typing fallback when the compositor's EIS exposes no
-/// `ei_text` interface (e.g. Mutter). Returns `None` for characters outside the
-/// US-ASCII printable set — those are skipped rather than mistyped. Full
-/// layout-correct typing would need an xkb keymap (see reis `type-text` example).
+/// The last-resort table for keyboard typing when the compositor's EIS
+/// exposes no `ei_text` interface (e.g. Mutter) and delivered no xkb keymap
+/// (see `keymap_chars`). Returns `None` for characters outside the US-ASCII
+/// printable set; those are skipped rather than mistyped.
 fn char_to_evdev(c: char) -> Option<(u32, bool)> {
     // Letter codes follow the QWERTY scancode layout (input-event-codes.h).
     fn letter(c: char) -> u32 {

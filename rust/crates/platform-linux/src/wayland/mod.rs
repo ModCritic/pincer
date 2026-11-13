@@ -668,8 +668,9 @@ fn foreign_toplevel_state_is_activated(state: &[u8]) -> bool {
 /// Enumerate native Wayland toplevels via wlr-foreign-toplevel-management.
 /// `xid` begins as the foreign-toplevel handle's connection-scoped protocol id.
 /// The dispatcher replaces it with a stable compositor or AT-SPI identity when
-/// available. pid is unknown (not exposed by the protocol); geometry is 0
-/// (the protocol does not surface position/size). app_id is folded into the
+/// available. The protocol exposes neither pid nor geometry; on Sway both are
+/// filled from the IPC tree, elsewhere pid is None and geometry is 0. app_id
+/// is folded into the
 /// title (`"<title> [<app_id>]"`) so callers matching on either still match.
 pub fn list_windows() -> anyhow::Result<Vec<WindowInfo>> {
     let conn = Connection::connect_to_env()?;
@@ -904,8 +905,8 @@ fn capture_via_screencopy() -> anyhow::Result<Vec<u8>> {
 /// Returns the raw fd and the mmap pointer; the caller is responsible for
 /// passing both to [`cleanup_mmap`] when done.
 pub(crate) fn anon_shm(size: usize) -> anyhow::Result<(i32, *mut libc::c_void)> {
-    // memfd_create is Linux-only and is the cleanest path; fall back to
-    // shm_open if memfd isn't available for any reason.
+    // memfd_create is Linux-only and needs no filesystem path; on failure
+    // this returns an error.
     let name = b"pincer-scrcopy\0";
     let fd = unsafe { libc::memfd_create(name.as_ptr() as *const libc::c_char, libc::MFD_CLOEXEC) };
     if fd < 0 {
@@ -3199,7 +3200,7 @@ fn inject_scroll_desktop(x: i32, y: i32, direction: &str, amount: u32) -> anyhow
 }
 
 /// Reject any character the nested compositor cannot type before it reaches the
-/// wire. The compositor's chartab (`pincer_init_keymap`) only covers printable
+/// wire. The compositor's chartab (`cua_init_keymap`) only covers printable
 /// ASCII (`0x20..=0x7E`) plus newline and tab; anything else — Unicode, other
 /// control bytes — would be silently dropped, so fail loudly instead.
 fn validate_injectable_text(text: &str) -> anyhow::Result<()> {

@@ -105,7 +105,7 @@ fn map_ashpd_err<E: std::fmt::Display>(e: E) -> anyhow::Error {
 /// Screenshot interface, so it doesn't cache a consent grant on GNOME /
 /// KDE backends that gate Screenshot on user prompts. The doctor uses
 /// this to surface portal availability without burning an interactive
-/// dialog every time `hermes computer-use doctor` runs.
+/// dialog every time `pincer doctor` runs.
 ///
 /// Note: a true return here means the portal *service* is present. The
 /// Screenshot *interface* on that service may still be missing or

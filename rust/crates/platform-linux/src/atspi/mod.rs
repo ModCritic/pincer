@@ -329,7 +329,7 @@ fn lists_rows_below_the_window(markdown: &str) -> bool {
     markdown.lines().any(|line| line.starts_with(' '))
 }
 
-/// Perform the first advertised action on element `idx` of the last
+/// Perform the activation action of element `idx` of the last
 /// `get_window_state` snapshot of window `xid`: the cached object first (no
 /// re-walk), a fresh walk of that window (the snapshot's index space) when
 /// the cached object is gone.
