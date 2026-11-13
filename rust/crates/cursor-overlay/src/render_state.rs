@@ -1242,7 +1242,7 @@ pub fn render_frame(
 ///
 /// Everything that operates in pixmap-pixel space (the cursor anchor `px/py`,
 /// bloom radius, click-pulse ring radius, stroke widths, focus-rect coords,
-/// arrow `display_size`) is multiplied by `backing_scale` so the cursor still
+/// theme artwork) is multiplied by `backing_scale` so the cursor still
 /// occupies the same on-screen logical footprint but at higher pixel fidelity.
 ///
 /// Quiescent / hidden cursors early-return before touching the pixmap, so an

@@ -2,9 +2,8 @@
 //!
 //! Desktop-scope is pincer's *foreground*, vision-only, **screen-absolute**
 //! loop (the "Computer-Use 1.0" mode), the complement to the default per-window
-//! background model that `harness_bg_modality_test` / `e2e_windows_bg_input_test`
-//! cover. This test exercises the Windows Phase-1 actuator end-to-end against a
-//! real harness app:
+//! background model that the `harness_*` suites cover. This test exercises
+//! the Windows Phase-1 actuator end-to-end against a real harness app:
 //!
 //!   1. `get_desktop_state` returns a full-display capture with true
 //!      `screen_width/height` (no downscale).
