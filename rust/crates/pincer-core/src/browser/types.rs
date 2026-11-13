@@ -149,7 +149,7 @@ pub enum EndpointOwnershipMethod {
     /// The listening loopback socket's owning pid was resolved via the
     /// OS socket table and matches the browser pid (or a child of it).
     ListeningSocketPid,
-    /// The port was read from the profile's `DevToolsActivePorts` file
+    /// The port was read from the profile's `DevToolsActivePort` file
     /// belonging to the browser's own user-data dir.
     DevtoolsActivePortsFile,
     /// The driver itself launched the browser with the debugging port,

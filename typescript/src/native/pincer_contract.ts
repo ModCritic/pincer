@@ -4991,8 +4991,8 @@ export type WindowStateOutput = {
     since?: string,
     /**
      * `diff`, `no_change`, or the reason a full read was returned instead
-     * (`unknown_snapshot`, `other_window`, `view_changed`, `too_much_changed`,
-     * `diff_too_large`, `no_snapshot`).
+     * (`no_baseline`, `unknown_snapshot`, `other_window`, `view_changed`,
+     * `too_much_changed`, `diff_too_large`, `no_snapshot`).
      */
     sinceStatus?: string,
     /**

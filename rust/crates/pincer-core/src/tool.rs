@@ -740,13 +740,11 @@ pub fn default_capabilities_for(tool_name: &str) -> Vec<String> {
         // Terminal / mintty / GVim, etc. See the per-platform
         // `terminal` module for the matched list and the structured
         // `path: "ax" | "key_events"` field on the response.
-        // `type_text_chars` is a deprecated alias resolved at invoke
-        // time on macOS/Windows. On Linux it's still registered (see
-        // platform-linux/impl_.rs). The Linux implementation runs
-        // XSendEvent per-character without the terminal short-circuit,
-        // so we deliberately do NOT claim `terminal_safe` here — the
-        // contract is intentionally narrower than `type_text`'s. It
-        // still accepts `element_token`, hence the tokens claim.
+        // `type_text_chars` is a deprecated alias that `invoke` resolves
+        // to `type_text` on every platform; no registry lists it. The
+        // entry stays narrower than `type_text`'s (no `terminal_safe`
+        // claim) for callers that still read it by name. It accepts
+        // `element_token`, hence the tokens claim.
         "type_text_chars" => &["input.keyboard.type", "accessibility.element_tokens"],
         "set_value" => &[
             // Bulk-set an editable field's value — semantically a
@@ -7023,9 +7021,8 @@ mod capability_tests {
     fn type_text_claims_terminal_safe_capability() {
         // The terminal-emulator fallback shipped per platform must be
         // discoverable as a capability so consumers can pick `type_text`
-        // confidently over `type_text_chars` (whose Linux implementation
-        // is the bare per-char XSendEvent path, with no terminal
-        // short-circuit). Freezing the token name here makes a
+        // confidently over the deprecated `type_text_chars` name, whose
+        // capability entry makes no terminal claim. Freezing the token name here makes a
         // future-PR rename a hard test failure.
         let caps = default_capabilities_for("type_text");
         let cap_strs: Vec<&str> = caps.iter().map(String::as_str).collect();

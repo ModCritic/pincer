@@ -187,7 +187,7 @@ impl Tool for RunScriptTool {
                 window pixels.\n\
                 - `pincer.call(tool, args)` for any other allowed tool: click, double_click, \
                 right_click, set_value, type_text, press_key, hotkey, scroll, drag, \
-                launch_app, list_apps, list_windows, get_window_state, verify_state, zoom.\n\
+                move_cursor, move_along_path, launch_app, list_apps, list_windows, get_window_state, verify_state, zoom.\n\
                 A failed driver call throws a PincerError (catch it to recover). Every call goes \
                 through the same session, permission and approval checks as a direct call.\n\n\
                 Limits: `timeout_ms` wall time (default 30000, max 120000), `max_calls` driver \

@@ -8,10 +8,9 @@
 //! Per-platform polling:
 //! - **Windows:** `GetCursorPos` (returns physical screen coords)
 //! - **macOS:** `CGEventCreate` + `CGEventGetLocation`
-//! - **Linux X11:** `XQueryPointer` against the root window
-//! - **Linux Wayland:** no portable API exists; sampler runs but logs
-//!   no samples — the resulting cursor.jsonl is empty and the zoom
-//!   renderer falls back to the click-point-only path.
+//! - **Linux:** not implemented on X11 or Wayland; the sampler runs but
+//!   logs no samples, so cursor.jsonl is empty and the zoom renderer
+//!   falls back to the click-point-only path.
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -143,14 +142,9 @@ fn sample_cursor() -> Option<(f64, f64)> {
 
 #[cfg(target_os = "linux")]
 fn sample_cursor() -> Option<(f64, f64)> {
-    // Wayland has no equivalent portable poll; on X11 use XQueryPointer.
-    // We try the X11 path via the `x11` crate if available; otherwise
-    // return None and the sampler writes an empty cursor.jsonl.
-    //
-    // The X11 dep isn't always present in pincer's Linux build
-    // (Wayland-only hosts), so this fallback is "no-op when X11 isn't
-    // wired up" — the renderer copes by falling back to click-point-
-    // only zoom (no cursor-follow between actions).
+    // Not implemented: no pointer poll is wired up on X11 or Wayland, so
+    // the sampler writes an empty cursor.jsonl and the renderer falls back
+    // to click-point-only zoom (no cursor-follow between actions).
     None
 }
 

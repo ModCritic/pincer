@@ -304,9 +304,9 @@ impl GetBrowserStateTool {
                 ranks visible content before retained/offscreen state; and returns a \
                 semantic outline, typed action refs, content refs, scoped reads, and \
                 opaque continuation. Never performs setup: a browser that is not \
-                attached yet refuses with browser_consent_required or \
-                browser_requires_setup, and detail.next_call names the browser_prepare call \
-                that attaches it. Use this route for any web page in Chrome, Edge or Brave; \
+                attached yet refuses with browser_consent_required, whose detail.next_call \
+                names the browser_prepare call that attaches it, or browser_requires_setup \
+                (run browser_prepare). Use this route for any web page in Chrome, Edge or Brave; \
                 desktop pointer tools move the user's pointer."
                 .into(),
             input_schema: json!({

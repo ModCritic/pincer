@@ -1,8 +1,8 @@
 //! The cursor hook must publish its platform limitation explicitly.
 //!
-//! `AGENTS.md`: "When a platform cannot support the same contract, return or
+//! The rule: when a platform cannot support the same contract, return or
 //! publish that limitation explicitly instead of substituting misleading
-//! behavior."
+//! behavior.
 //!
 //! The macOS and Linux adapters emit cursor events; the Windows adapter has no
 //! cursor write path wired to the hook. But `set_cursor_hook_fn`

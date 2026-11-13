@@ -1,6 +1,6 @@
 //! Reliable framed write to the pincer daemon socket.
 //!
-//! Split out of `serve.rs::send_request` so its EAGAIN-retry logic is unit
+//! Split out of `daemon::send_request` so its EAGAIN-retry logic is unit
 //! testable without linking the platform crates (and their Swift/Metal interop)
 //! that the `pincer` binary pulls in.
 

@@ -7,12 +7,17 @@
 //! - **macOS:** native ScreenCaptureKit via `platform_macos::video_sckit`
 //!   (no extra TCC grant — inherits pincer's own Screen Recording
 //!   permission, no subprocess).
-//! - **Windows + Linux:** ffmpeg subprocess via `video_ffmpeg`
-//!   (`gdigrab` / `x11grab` input + libx264 encode).
+//! - **Windows:** ffmpeg subprocess via `video_ffmpeg` (`gdigrab` input +
+//!   libx264 encode).
+//! - **Linux:** on X11 the same ffmpeg backend with `x11grab` input (refused
+//!   on a rootless XWayland); on Wayland `wf-recorder` on wlroots, or the
+//!   GNOME Shell helper's frames encoded through ffmpeg
+//!   (`platform_linux::video_wayland`).
 //!
-//! The factory is registered with `set_video_backend_factory` from each
-//! platform's `main.rs` startup block, mirroring how `SCREENSHOT_FN` /
-//! `AX_SNAPSHOT_FN` are wired in `recording.rs`.
+//! The factory is registered with `set_video_backend_factory` by the
+//! pincer-sdk runtime setup (`configure_*_runtime` in `runtime.rs`),
+//! mirroring how `SCREENSHOT_FN` / `AX_SNAPSHOT_FN` are wired in
+//! `recording.rs`.
 //!
 //! `VideoMetadata` is the shape `RecordingSession` stamps into
 //! `session.json` after `stop()` — kept identical to the prior concrete

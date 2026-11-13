@@ -112,9 +112,8 @@ pub fn render(
         // expressions all evaluate every output frame.
         //
         // Knobs:
-        //   - z (zoom factor): expression from `build_zoom_expression`
-        //   - x, y (top-left of source crop window in input coords):
-        //         expressions from `build_xy_expressions`
+        //   - z (zoom factor) and x, y (top-left of the source crop window
+        //     in input coords): expressions from `build_zoompan_expressions`
         //   - d=1: produce one output frame per input frame (zoompan's
         //         default is 90 which is a slideshow assumption)
         //   - fps=30: target frame rate

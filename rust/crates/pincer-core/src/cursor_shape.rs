@@ -2,7 +2,7 @@
 //!
 //! This is the *system* cursor — the I-beam over a text field, the resize
 //! cursor on a window edge, the pointing hand over a link. It is distinct from
-//! the agent-cursor overlay (`cursor_overlay`), which draws Cua's own cursor,
+//! the agent-cursor overlay (`cursor_overlay`), which draws Pincer's own cursor,
 //! and from [`crate::cursor_hook`], which reports where a cursor *is*. A remote
 //! viewer needs both: position says where to draw, shape says what to draw.
 //!

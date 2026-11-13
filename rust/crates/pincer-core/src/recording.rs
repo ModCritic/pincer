@@ -607,11 +607,12 @@ impl RecordingSession {
     /// for the lifetime of the session. NOTE: the MCP `start_recording` tool
     /// now defaults `record_video` to *false* (opt-in) — see
     /// `recording_tools.rs` — so video only records when explicitly requested.
-    /// The legacy CLI `recording start` path via `configure()` still forces
-    /// video on. If ffmpeg isn't on PATH the start still succeeds —
-    /// the per-turn capture (action.json + pre/post evidence) is independent
-    /// of video — but the structured state carries the ffmpeg error so
-    /// the caller can surface it.
+    /// The CLI `recording start` also goes through that tool, so it records no
+    /// video either; only the unused `configure()` shim forces video on. If
+    /// ffmpeg isn't on PATH the start still succeeds, since the per-turn
+    /// capture (action.json + pre/post evidence) does not depend on video,
+    /// and the structured state carries the ffmpeg error so the caller can
+    /// surface it.
     ///
     /// `owner` stamps the session that owns this recording (the daemon-injected
     /// `_session_id`). `None` marks an anonymous start (CLI one-shot / legacy
@@ -848,11 +849,10 @@ impl RecordingSession {
         })
     }
 
-    /// Legacy toggle API kept as a thin shim over `start()`/`stop()` so
-    /// existing callers (CLI subcommand, tests) keep compiling during the
-    /// rename window. Forces `record_video` on for this legacy CLI path — the
-    /// MCP `start_recording` tool now defaults video OFF (see
-    /// `recording_tools.rs`), but the CLI `recording start` keeps video on.
+    /// Legacy toggle API, a thin shim over `start()`/`stop()`. Nothing in the
+    /// workspace calls it any more: the CLI `recording start` sends the
+    /// `start_recording` tool, which defaults video off. This shim forces
+    /// `record_video` on.
     pub fn configure(&self, enabled: bool, output_dir: Option<&str>) -> anyhow::Result<()> {
         if !enabled {
             return self.stop_owner(None);

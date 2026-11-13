@@ -8,7 +8,7 @@
 //! - `replay_trajectory`   — replay a previously recorded trajectory
 //!
 //! Renamed from the older `set_recording(enabled: bool)` toggle in
-//! `02f1f033..` — see `JOURNAL_VIDEO.md` for rationale. The split makes
+//! `02f1f033..`. The split makes
 //! the verbs match the CLI subcommand names (`pincer recording start|
 //! stop|status`) and removes the "is this a setting write?" ambiguity of
 //! the old `set_*` name.
@@ -67,7 +67,8 @@ impl Tool for StartRecordingTool {
                 `started_at_monotonic_ms`, and video and cursor-sample status), `cursor.jsonl` (pointer samples; always \
                 empty on Linux) and, with `record_video`, `recording.mp4`.\n\n\
                 Recording lasts until stop_recording, the end of the session that started it, \
-                or a daemon restart. Replay it with replay_trajectory."
+                5 minutes with no tool calls (PINCER_RECORDING_IDLE_TTL_SECS), or a daemon \
+                restart. Replay it with replay_trajectory."
                 .into(),
             input_schema: json!({
                 "type": "object",

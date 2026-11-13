@@ -165,7 +165,7 @@ impl Tool for RunStepsTool {
                 get_window_state.\n\n\
                 Each step is `{tool, args}` or `{\"<tool>\": args}`; `tool` is one of click, \
                 double_click, right_click, set_value, type_text, press_key, hotkey, scroll, drag, \
-                move_cursor, and `args` are that tool's arguments. `pid`/`window_id` (or \
+                move_cursor, move_along_path, and `args` are that tool's arguments. `pid`/`window_id` (or \
                 `app`/`window`) and `delivery_mode` on run_steps are defaults for steps that set \
                 none; a step with scope \"desktop\" takes neither and acts on whatever has focus \
                 (its checks search the app's windows). Reads between steps are skipped; a final get_window_state is the \

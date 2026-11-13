@@ -6,7 +6,8 @@
 //! Those concrete registries live OUTSIDE this core crate:
 //! - the agent cursor → `platform-macos::CursorRegistry` + the overlay,
 //! - per-session config overrides → `platform-macos::SessionConfigRegistry`,
-//! - the owned recording → stopped by `serve.rs`'s recording hook.
+//! - the owned recording → stopped by the pincer-sdk runtime when it ends
+//!   the session.
 //!
 //! None of them is reachable from a core-only test. They are ALL wired to
 //! disposal through ONE mechanism: each registers a `register_session_end_hook`,
@@ -59,7 +60,7 @@ fn unique_id(tag: &str) -> String {
 /// production `register_session_end_hook` registration:
 /// - `cursor_removed`   → `platform-macos`: `CursorRegistry::remove` + overlay.
 /// - `config_cleared`   → `platform-macos`: `SessionConfigRegistry::clear`.
-/// - `recording_stopped`→ `serve.rs`: `RecordingSession::stop_owner(Some(sid))`.
+/// - `recording_stopped`→ pincer-sdk `runtime.rs`: `RecordingSession::stop_owner(Some(sid))`.
 ///
 /// Each counts fires for ONE specific session id (hooks are process-global, so we
 /// filter). A correctly-disposed session shows all three == 1.
