@@ -1,10 +1,15 @@
 <div align="center">
   <img src="docs/pincer-logo.svg" alt="Pincer logo" width="160">
   <h1>Pincer</h1>
-  <p>Linux desktop control for AI agents over MCP.</p>
+  <p>A computer-use MCP server for Linux, optimized for Claude models.</p>
 </div>
 
 ## About this fork
+
+Pincer is a computer-use MCP server. It lets an AI agent read and operate the
+apps on a Linux desktop through the Model Context Protocol. It is optimized
+for Claude models, with tool descriptions and results written for Claude and
+tested with Claude; see [Optimized for Claude](#optimized-for-claude).
 
 Pincer is a fork of Cua Driver, taken from `libs/cua-driver` in
 [trycua/cua](https://github.com/trycua/cua) at commit `e6a244a8d`. It is
@@ -20,6 +25,13 @@ read.
 
 Changes from upstream:
 
+- Tool descriptions and results are tuned and tested for Claude models, and
+  an opt-in plain-text result format suits Claude Code; see
+  [Optimized for Claude](#optimized-for-claude).
+- Linux fixes found through that testing, mostly for Qt and GTK apps:
+  `invoke_menu` closes the Qt menus it opened, clicks report the popups they
+  open, a background scroll that moved nothing says so, and recordings
+  replay by element instead of by stale element tokens.
 - Linux gains a `capture_series` tool, which takes screenshots on a schedule
   and can stop early once the image stops changing, and an optional `region`
   crop for `get_desktop_state`.
@@ -39,6 +51,8 @@ Changes from upstream:
 - `skills install` and `skills update` write the skill pack built into the
   binary instead of downloading it from GitHub, so they work offline.
   `--from main` is refused.
+- The default agent cursor is restyled for Pincer, and key combinations show
+  under it as keycaps.
 
 The driver makes no network calls of its own; the browser tools only talk to
 a browser on your machine through its loopback debugging port.
@@ -52,6 +66,28 @@ the macOS and Windows code from upstream is still in the tree.
 
 See [MCP protocol and skills](docs/mcp-protocol-and-skills.md) for the modern
 stdio profile, legacy compatibility, bundled skill resources, and HTTP limits.
+
+## Optimized for Claude
+
+Upstream's tools target any MCP agent. Pincer tunes them for Claude models
+and checks the result with Claude.
+
+- **First-call testing.** Fresh Claude Opus and Sonnet sessions, each in a
+  sandboxed desktop, call every Linux tool once from its description alone
+  and report each call that failed and each result they misread. The
+  descriptions, the results and the driver itself are fixed until those
+  first calls are right. Over nine rounds in November 2026, the tools each
+  model used correctly on the first call went from 49 of 60 to all 60.
+- **Plain-text results.** As of Claude Code 2.1.308 (checked 2026-10-30), a
+  tool result that carries structured content reaches the model as that
+  content's JSON, and its text blocks are dropped. With
+  `PINCER_MCP_RESULTS=text`, Pincer sends one plain-text block instead: the
+  result's own text, then only the fields the text does not already state,
+  then any images. See [Connect an agent](#connect-an-agent).
+- **Results that say what to do next.** Refusals say what to try instead,
+  and an action Pincer cannot confirm points at the read that checks it.
+- **Smaller re-reads.** A `get_window_state` re-read with `since` returns
+  only the rows that changed, and no screenshot unless one is asked for.
 
 ## Build from source
 
@@ -85,8 +121,13 @@ Register the binary with Claude Code for your user account, using its
 absolute path.
 
 ```bash
-claude mcp add --scope user pincer -- /path/to/pincer mcp
+claude mcp add pincer --scope user -e PINCER_MCP_RESULTS=text -- /path/to/pincer mcp
 ```
+
+`PINCER_MCP_RESULTS=text` turns on the plain-text results described in
+[Optimized for Claude](#optimized-for-claude); only the exact value `text`
+does. Leave it out for structured results: an `outputSchema` for each tool
+and `structuredContent` in each result.
 
 The agent cursor overlay is on by default: an arrow that shows where the
 driver points, clicks and types, and follows every pointer move it makes.
@@ -95,20 +136,26 @@ XWayland mode, the overlay only draws on KDE Plasma (KWin); on other
 compositors it stays off. On Linux and Windows, `pincer mcp` owns its
 runtime directly and shuts it down when stdin closes.
 
-On Linux, you can also deny the driver network access by starting it with
-`unshare -cn`, which runs it in a new user and network namespace whose only
-interface is a loopback device that is down.
+On Linux, you can also deny the driver network access by running it in new
+user and network namespaces. This form brings the namespace's loopback
+interface up, so the browser tools can still reach a browser's local
+debugging port:
 
 ```bash
-claude mcp add --scope user pincer -- \
-  unshare -cn /path/to/pincer mcp
+claude mcp add pincer --scope user -e PINCER_MCP_RESULTS=text -- \
+  unshare -rn sh -c "ip link set lo up && exec unshare --map-user=$(id -u) --map-group=$(id -g) /path/to/pincer mcp"
 ```
 
-This needs unprivileged user namespaces. Inside the namespace the driver
-cannot open TCP/IP connections, including to a browser's loopback debugging
-port, so the browser tools do not work. Abstract Unix sockets are isolated as
-well (see `network_namespaces(7)`); Unix sockets with a filesystem path are
-not.
+The outer `unshare -rn` makes you root inside the new namespaces, so `ip` can
+bring loopback up; the inner `unshare` maps you back to your own user before
+the driver starts. Your shell fills in `$(id -u)` and `$(id -g)` when you run
+`claude mcp add`. This needs unprivileged user namespaces. The driver can
+reach nothing beyond its own loopback interface. Abstract Unix sockets are
+isolated as well (see `network_namespaces(7)`); Unix sockets with a
+filesystem path are not.
+
+`unshare -cn /path/to/pincer mcp` is a shorter form that leaves loopback
+down, so the browser tools do not work under it.
 
 `pincer mcp-config --client <name>` prints setup for other MCP clients.
 
@@ -167,8 +214,9 @@ This traces a circle with a 200-pixel radius around (800, 500) in 1.5 seconds:
 pincer call move_along_path '{"scope":"desktop","parametric":{"x":"800+200*cos(t)","y":"500+200*sin(t)","t_from":0,"t_to":6.2832},"duration_ms":1500}'
 ```
 
-The reply ends with one JSON line giving the number of segments and samples,
-the path length in pixels, the duration, and the start and end points.
+The reply says how long the glide took, the path length in pixels, its start
+and end points in the coordinates passed, and the number of segments and
+samples.
 
 ## Agent skill pack
 
@@ -302,11 +350,11 @@ checkout.
 
 macOS attributes Accessibility and Screen Recording grants to a responsible app identity, not simply to an executable path. Use one of these supported launch modes:
 
-- **Standalone:** install `Pincer.app`, grant permissions to it, and start its daemon with `open -n -g -a Pincer --args serve`. The installed `pincer mcp` CLI may proxy through this daemon automatically.
+- **Standalone:** build `PincerLocal.app` with `scripts/install-local.sh`, grant permissions to it, and start its daemon with `open -n -g -a PincerLocal --args serve`. The installed `pincer-local mcp` CLI may proxy through this daemon automatically.
 - **Explicit direct MCP:** `pincer mcp --direct` makes the MCP process own
   its runtime. On macOS this deliberately uses the spawning host's TCC
   attribution and does not provide the AppKit cursor overlay without a
   certified host adapter.
 - **Embedded:** have the macOS app that owns the grants use the generated `EmbeddedPincerHost` to spawn a private daemon and return both SDK and MCP connection details. The daemon stays in the app's responsibility chain and inherits its grants. A gateway, terminal, or unrelated helper must not spawn the daemon on the app's behalf. `pincer-driver/embedded` is an organizational alias for the same Rust host exported at the package root; it has no separate lifecycle implementation.
 
-Directly spawning a raw `pincer serve` outside `Pincer.app` without embedded mode is unsupported: it has no stable bundle identity for TCC attribution. Do not grant permissions to arbitrary binary paths or rely on that configuration in production. See [`rust/Skills/pincer/EMBEDDING.md`](rust/Skills/pincer/EMBEDDING.md) for the embedding contract and examples.
+Directly spawning a raw `pincer serve` outside `PincerLocal.app` without embedded mode is unsupported: it has no stable bundle identity for TCC attribution. Do not grant permissions to arbitrary binary paths or rely on that configuration in production. See [`rust/Skills/pincer/EMBEDDING.md`](rust/Skills/pincer/EMBEDDING.md) for the embedding contract and examples.
