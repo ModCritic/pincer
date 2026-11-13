@@ -37,6 +37,7 @@ use crate::{
     protocol::{Content, ToolResult},
     recording_tools::ReplayRegistrySlot,
     tool::{Tool, ToolDef, ToolRegistry, DISABLE_CONFIG_KEY, LEGACY_CONFIG_KEY},
+    untrusted_text,
 };
 
 mod engine;
@@ -59,6 +60,10 @@ const MEMORY_BYTES: usize = 32 * 1024 * 1024;
 const STACK_BYTES: usize = 1024 * 1024;
 const THREAD_STACK_BYTES: usize = 16 * 1024 * 1024;
 const RETURN_TEXT_LIMIT: usize = 8_000;
+/// Most bytes of the return value, as JSON, that the structured `value`
+/// carries. The script chooses what it returns and can hold a whole tree or
+/// page; a longer value comes back cut, as a string.
+const RETURN_VALUE_LIMIT_BYTES: usize = 64 * 1024;
 const CALL_TEXT_LIMIT: usize = 12_000;
 const IMAGES_KEPT: usize = 2;
 /// Extra time the engine thread gets to notice a deadline or cancel.
@@ -193,7 +198,8 @@ impl Tool for RunScriptTool {
                 Limits: `timeout_ms` wall time (default 30000, max 120000), `max_calls` driver \
                 calls (default 100, max 500), 32 MiB heap. Returns the return value, console \
                 output, and a per-call log; an error names the script line, the call and the \
-                reason."
+                reason. A return value over 64 KiB as JSON comes back cut, as a string, with \
+                `value_truncated: true` and its full size in `value_bytes`."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -771,15 +777,32 @@ fn render(
     let is_error = match &outcome.result {
         Ok(value) => {
             structured["ok"] = json!(true);
-            structured["value"] = value.clone();
+            let serialized = value.to_string();
             lines.push(format!(
                 "run_script: ok in {elapsed_ms} ms, {} driver call(s)",
                 outcome.calls
             ));
+            // JSON escapes line breaks and C0 controls, not DEL, C1, line
+            // separators or invisible format characters.
             lines.push(format!(
                 "return value: {}",
-                clip(&value.to_string(), RETURN_TEXT_LIMIT)
+                untrusted_text::invisible(&untrusted_text::clip(&serialized, RETURN_TEXT_LIMIT))
             ));
+            if serialized.len() > RETURN_VALUE_LIMIT_BYTES {
+                let cut = char_floor(&serialized, RETURN_VALUE_LIMIT_BYTES);
+                structured["value"] = json!(&serialized[..cut]);
+                structured["value_truncated"] = json!(true);
+                structured["value_bytes"] = json!(serialized.len());
+                lines.push(format!(
+                    "The return value is {} bytes as JSON: structured `value` holds its first \
+                     {cut} bytes, as a string (`value_truncated`). Return less, or return it \
+                     over several runs.",
+                    serialized.len()
+                ));
+            } else {
+                structured["value"] = value.clone();
+                structured["value_truncated"] = json!(false);
+            }
             false
         }
         Err(failure) => {
@@ -796,9 +819,9 @@ fn render(
                 location.push(format!("line {line}"));
             }
             if let Some(record) = failed_call {
-                location.push(format!("call {} ({})", record.number, record.op));
+                location.push(format!("call {} ({})", record.number, one_line(&record.op)));
             } else if let Some(op) = &failure.op {
-                location.push(format!("call to {op}"));
+                location.push(format!("call to {}", one_line(op)));
             }
             structured["error"] = json!({
                 "kind": failure.kind.as_str(),
@@ -808,6 +831,11 @@ fn render(
                 "op": failure.op,
                 "code": failure.code,
             });
+            // The message may be the script's own (a thrown Error) or carry
+            // what an app showed: its later lines are indented like console
+            // lines, so none of it starts at column 0.
+            let message = untrusted_text::block(&failure.message);
+            let mut message_lines = message.split('\n');
             lines.push(format!(
                 "run_script: ERROR ({}){}: {}",
                 failure.kind.as_str(),
@@ -816,8 +844,9 @@ fn render(
                 } else {
                     format!(" at {}", location.join(", "))
                 },
-                failure.message
+                message_lines.next().unwrap_or_default()
             ));
+            lines.extend(message_lines.map(|line| format!("  {line}")));
             lines.push(format!(
                 "after {elapsed_ms} ms and {} driver call(s); calls before the error took effect",
                 outcome.calls
@@ -835,7 +864,16 @@ fn render(
                 ""
             }
         ));
-        lines.extend(outcome.console.iter().map(|line| format!("  {line}")));
+        // Console text is the script's, often what an app or page showed:
+        // every line of it is indented, so none can pass for a line of
+        // Pincer's (`calls:`, `return value:`), and controls are escaped.
+        for entry in &outcome.console {
+            lines.extend(
+                untrusted_text::block(entry)
+                    .split('\n')
+                    .map(|line| format!("  {line}")),
+            );
+        }
     }
     if !log.is_empty() {
         lines.push("calls:".to_owned());
@@ -848,13 +886,13 @@ fn render(
                 } else {
                     String::new()
                 },
-                record.op,
+                one_line(&record.op),
                 if record.ok { "ok" } else { "ERROR" },
                 record.elapsed.as_millis(),
                 if record.detail.is_empty() {
                     String::new()
                 } else {
-                    format!(": {}", clip(&record.detail, 160))
+                    format!(": {}", one_line(&untrusted_text::clip(&record.detail, 160)))
                 }
             ));
         }
@@ -867,6 +905,24 @@ fn render(
         structured_content: Some(structured),
         ..Default::default()
     }
+}
+
+/// Untrusted text for one row of the call log, where it is not inside quotes
+/// and often holds a quoted label already (`on [2] AXButton "Save"`), or for
+/// an op name the script chose. [`untrusted_text::block`] escapes controls
+/// and invisible characters but leaves quotes and backslashes alone, so a
+/// label escaped where it was described is not escaped twice; the line
+/// breaks it keeps become `\n` here, so the row stays one line.
+fn one_line(text: &str) -> String {
+    untrusted_text::block(text).replace('\n', "\\n")
+}
+
+/// The largest char boundary of `text` at or below `max` bytes.
+fn char_floor(text: &str, max: usize) -> usize {
+    (0..=max.min(text.len()))
+        .rev()
+        .find(|&at| text.is_char_boundary(at))
+        .unwrap_or(0)
 }
 
 fn clip(text: &str, max: usize) -> String {

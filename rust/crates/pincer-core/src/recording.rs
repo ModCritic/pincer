@@ -670,7 +670,7 @@ impl RecordingSession {
         }
 
         let dir = expand_tilde(output_dir);
-        std::fs::create_dir_all(&dir)?;
+        create_private_dir_all(&dir)?;
 
         // Single monotonic anchor shared by video, cursor sampler, and
         // per-turn `t_ms_from_session_start` math in `record()` — so all
@@ -702,6 +702,10 @@ impl RecordingSession {
         // post-hoc analysis, so we run it anyway — the cost is one
         // background thread + a small jsonl file.
         let cursor_path = dir.join("cursor.jsonl");
+        // The sampler opens this name with a plain create. Put a fresh private
+        // file there first, so a link planted in a reused folder is replaced
+        // rather than written through.
+        let _ = write_private_file(&cursor_path, b"");
         match CursorSampler::start(cursor_path, monotonic_start) {
             Ok(s) => {
                 inner.cursor = Some(s);
@@ -1237,12 +1241,12 @@ fn write_phase_artifacts(
     phase: &str,
     capture: &TurnCapture,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(turn_dir)?;
+    ensure_turn_dir(turn_dir)?;
     if let Some(state) = &capture.state.bytes {
-        std::fs::write(turn_dir.join(format!("{phase}_state.json")), state)?;
+        write_private_file(&turn_dir.join(format!("{phase}_state.json")), state)?;
     }
     if let Some(screenshot) = &capture.screenshot {
-        std::fs::write(turn_dir.join(format!("{phase}.png")), screenshot)?;
+        write_private_file(&turn_dir.join(format!("{phase}.png")), screenshot)?;
     }
     Ok(())
 }
@@ -1518,7 +1522,7 @@ fn write_turn_with_after(
             }),
             None => click_point,
         };
-    std::fs::create_dir_all(&turn_dir)?;
+    ensure_turn_dir(&turn_dir)?;
     let now = now_ms();
     let click_family = matches!(tool_name.as_str(), "click" | "double_click" | "right_click");
     let action_refused = action_record
@@ -1570,15 +1574,15 @@ fn write_turn_with_after(
     write_json_atomic(&turn_dir.join("action.json"), &payload)?;
     write_phase_artifacts(&turn_dir, "after", &after)?;
     if let Some(source) = click_source {
-        std::fs::write(turn_dir.join("click_source.png"), source)?;
+        write_private_file(&turn_dir.join("click_source.png"), source)?;
     }
 
     // Preserve the original post-action names for existing trajectory readers.
     if let Some(state) = &after.state.bytes {
-        std::fs::write(turn_dir.join("app_state.json"), state)?;
+        write_private_file(&turn_dir.join("app_state.json"), state)?;
     }
     if let Some(screenshot) = &after.screenshot {
-        std::fs::write(turn_dir.join("screenshot.png"), screenshot)?;
+        write_private_file(&turn_dir.join("screenshot.png"), screenshot)?;
     }
 
     // A click marker describes where the action was aimed, so ground it on
@@ -1590,7 +1594,7 @@ fn write_turn_with_after(
             (click_point, marker_source, CLICK_MARKER_FN.get())
         {
             if let Some(click_png) = marker(screenshot, cx, cy) {
-                std::fs::write(turn_dir.join("click.png"), click_png)?;
+                write_private_file(&turn_dir.join("click.png"), &click_png)?;
                 click_captured = true;
             }
         }
@@ -1620,10 +1624,116 @@ fn write_turn_with_after(
 }
 
 fn write_json_atomic(path: &Path, value: &Value) -> anyhow::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(value)?)?;
-    std::fs::rename(&tmp, path)?;
+    write_private_file(path, serde_json::to_string_pretty(value)?.as_bytes())
+}
+
+// ── private, link-safe output ────────────────────────────────────────────────
+//
+// A recording holds typed text, screenshots and accessibility trees, and its
+// output folder may be shared (`/tmp/<name>`) or reused from an earlier run.
+// On Unix every folder Pincer creates for it is 0700 and every file 0600; a
+// folder the user chose that already exists keeps its own mode. No write
+// follows a link planted in the output folder: a turn folder that is a
+// symbolic link is refused, and every file is written to a fresh temporary
+// file beside its name (created with O_EXCL and O_NOFOLLOW, never opened
+// when it exists) and then renamed over the name, which replaces a link
+// instead of writing through it. The checks are by path, so someone who can
+// rename entries in the output folder while a turn is being written could
+// still swap a checked turn folder for a link; a folder only the user can
+// write to (the default for one Pincer creates) leaves no such window.
+
+fn private_dir_builder() -> std::fs::DirBuilder {
+    #[allow(unused_mut)]
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder
+}
+
+/// Create `path` and any missing parents, 0700 on Unix.
+fn create_private_dir_all(path: &Path) -> std::io::Result<()> {
+    private_dir_builder().recursive(true).create(path)
+}
+
+/// Make `turn_dir` a folder to write a turn into: create it (0700 on Unix,
+/// with the output folder if that went missing), and refuse it when it is a
+/// symbolic link or not a folder.
+fn ensure_turn_dir(turn_dir: &Path) -> anyhow::Result<()> {
+    if let Some(output_dir) = turn_dir.parent() {
+        create_private_dir_all(output_dir)?;
+    }
+    match private_dir_builder().create(turn_dir) {
+        Ok(()) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
+    let file_type = std::fs::symlink_metadata(turn_dir)?.file_type();
+    if file_type.is_symlink() {
+        anyhow::bail!(
+            "refusing to record into {}: it is a symbolic link",
+            turn_dir.display()
+        );
+    }
+    if !file_type.is_dir() {
+        anyhow::bail!(
+            "refusing to record into {}: it is not a folder",
+            turn_dir.display()
+        );
+    }
     Ok(())
+}
+
+/// Create a new file at `path` for writing, 0600 on Unix. Fails when anything
+/// is at `path` already, a link included.
+fn create_new_private_file(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    options.open(path)
+}
+
+/// Write `bytes` to `path` through a fresh private temporary file beside it,
+/// renamed over `path`: never through a link at `path`, and never into a file
+/// someone else left there.
+fn write_private_file(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        anyhow::bail!("not a file path: {}", path.display());
+    };
+    let name = name.to_string_lossy();
+    for _ in 0..16 {
+        let temporary = dir.join(format!(
+            ".{name}.{}-{}.tmp",
+            std::process::id(),
+            NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut file = match create_new_private_file(&temporary) {
+            Ok(file) => file,
+            // Someone else's file under this name: take the next name.
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        };
+        let written = file.write_all(bytes);
+        drop(file);
+        if let Err(error) = written.and_then(|()| std::fs::rename(&temporary, path)) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error.into());
+        }
+        return Ok(());
+    }
+    anyhow::bail!(
+        "could not create a temporary file beside {}",
+        path.display()
+    )
 }
 
 /// Current wall-clock time as milliseconds since Unix epoch.
@@ -3093,5 +3203,128 @@ mod tests {
 
         assert!(output_dir.join("turn-00001").join("action.json").exists());
         assert!(output_dir.join("turn-00002").join("action.json").exists());
+    }
+
+    /// Record one press_key turn into `output` and stop. Off the targets
+    /// other tests count screenshots for.
+    fn record_one_turn(output: &Path, pid: i64) -> RecordingState {
+        let session = RecordingSession::new();
+        session
+            .start(output.to_str().expect("utf-8 output dir"), false, None)
+            .expect("start recording");
+        let pending = session
+            .begin_turn(
+                "press_key",
+                &serde_json::json!({"pid": pid, "window_id": pid + 1, "key": "a"}),
+                now_ms(),
+                RecordingCaller::default(),
+            )
+            .expect("an anonymous recording keeps every call");
+        session.finish_turn(pending, "pressed");
+        let state = session.current_state();
+        session.stop_owner(None).expect("stop recording");
+        state
+    }
+
+    /// REC-1: a recording holds typed text, screenshots and accessibility
+    /// trees. At 0048ec6 its folders and files took the umask (0755 and
+    /// 0644 under the usual 022), so every local user could read them.
+    #[cfg(unix)]
+    #[test]
+    fn recording_output_is_private_to_the_user() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().expect("temp dir");
+        let output = root.path().join("new").join("recording");
+        record_one_turn(&output, 61);
+
+        let mode = |path: &Path| {
+            std::fs::symlink_metadata(path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        let turn = output.join("turn-00001");
+        for dir in [root.path().join("new"), output.clone(), turn.clone()] {
+            assert_eq!(mode(&dir), 0o700, "{}", dir.display());
+        }
+        assert_eq!(mode(&output.join("session.json")), 0o600);
+        let files: Vec<_> = std::fs::read_dir(&turn)
+            .expect("read turn folder")
+            .map(|entry| entry.expect("turn entry").path())
+            .collect();
+        assert!(
+            files.iter().any(|file| file.ends_with("action.json")),
+            "{files:?}"
+        );
+        for file in files {
+            assert_eq!(mode(&file), 0o600, "{}", file.display());
+        }
+    }
+
+    /// REC-2: an output folder may be shared or reused, and whoever can
+    /// write in it can plant links where the next recording writes. At
+    /// 0048ec6 every write followed them and overwrote the link's target.
+    #[cfg(unix)]
+    #[test]
+    fn recording_writes_never_follow_a_planted_symlink() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().expect("temp dir");
+        let victim = root.path().join("victim.txt");
+        std::fs::write(&victim, "keep").expect("write victim");
+        let output = root.path().join("shared");
+        let turn = output.join("turn-00001");
+        std::fs::create_dir_all(&turn).expect("plant turn folder");
+        for name in [
+            "before.png",
+            "before_state.json",
+            "action.json",
+            "action.tmp",
+            "evidence.tmp",
+        ] {
+            symlink(&victim, turn.join(name)).expect("plant link");
+        }
+        symlink(&victim, output.join("session.tmp")).expect("plant link");
+
+        // The phase writer with a screenshot and a tree, as begin_turn calls
+        // it when the platform hooks answer.
+        let capture = TurnCapture {
+            state: StateCapture::captured(b"{}".to_vec()),
+            screenshot: Some(b"png".to_vec()),
+            screenshot_classification: None,
+        };
+        write_phase_artifacts(&turn, "before", &capture).expect("write phase artifacts");
+        assert_eq!(std::fs::read(turn.join("before.png")).unwrap(), b"png");
+        // A whole recorded turn and the session manifest.
+        record_one_turn(&output, 63);
+
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
+        assert!(std::fs::symlink_metadata(turn.join("action.json"))
+            .unwrap()
+            .file_type()
+            .is_file());
+        let action: Value =
+            serde_json::from_slice(&std::fs::read(turn.join("action.json")).unwrap()).unwrap();
+        assert_eq!(action["tool"], "press_key");
+    }
+
+    /// REC-2: a turn folder planted as a link to another folder. At 0048ec6
+    /// the turn's files were written into the link's target.
+    #[cfg(unix)]
+    #[test]
+    fn recording_refuses_a_turn_folder_that_is_a_symlink() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let elsewhere = root.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).expect("create target");
+        let output = root.path().join("shared");
+        std::fs::create_dir(&output).expect("create output");
+        std::os::unix::fs::symlink(&elsewhere, output.join("turn-00001")).expect("plant link");
+
+        let state = record_one_turn(&output, 65);
+
+        let written: Vec<_> = std::fs::read_dir(&elsewhere).unwrap().collect();
+        assert!(written.is_empty(), "written through the link: {written:?}");
+        let error = state.last_error.unwrap_or_default();
+        assert!(error.contains("symbolic link"), "{error}");
     }
 }

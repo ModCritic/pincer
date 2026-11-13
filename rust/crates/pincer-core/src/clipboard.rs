@@ -59,6 +59,26 @@ pub struct ClipboardReadTool {
     backend: Arc<dyn ClipboardBackend>,
 }
 
+/// Most bytes of clipboard text clipboard_read returns. Any app or page can
+/// fill the clipboard, and its text goes to the model; longer text comes back
+/// cut at a character boundary, with `text_truncated` and `text_bytes`.
+const READ_TEXT_LIMIT_BYTES: usize = 1 << 20;
+
+/// Cut `text` to at most [`READ_TEXT_LIMIT_BYTES`] at a character boundary.
+/// Returns its length before the cut when it was cut.
+fn cut_to_read_limit(text: &mut String) -> Option<usize> {
+    let original = text.len();
+    if original <= READ_TEXT_LIMIT_BYTES {
+        return None;
+    }
+    let cut = (0..=READ_TEXT_LIMIT_BYTES)
+        .rev()
+        .find(|&at| text.is_char_boundary(at))
+        .unwrap_or(0);
+    text.truncate(cut);
+    Some(original)
+}
+
 static READ_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
 #[async_trait]
@@ -84,11 +104,13 @@ impl Tool for ClipboardReadTool {
         })
         .await;
 
-        let (types, text) = match result {
+        let (types, mut text) = match result {
             Ok(Ok(value)) => value,
             Ok(Err(error)) => return unavailable("read", error),
             Err(error) => return unavailable("read", format!("worker failed: {error}")),
         };
+        let cut_from = text.as_mut().and_then(cut_to_read_limit);
+        let kept = text.as_ref().map_or(0, String::len);
         let output = ClipboardReadOutput {
             supported: true,
             types,
@@ -96,7 +118,7 @@ impl Tool for ClipboardReadTool {
             privacy_sensitive: true,
             content_redacted_from_telemetry: true,
         };
-        ToolResult::text(format!(
+        let mut summary = format!(
             "Clipboard read succeeded ({} available type(s); text {}).",
             output.types.len(),
             if input.include_text {
@@ -104,8 +126,17 @@ impl Tool for ClipboardReadTool {
             } else {
                 "omitted"
             }
-        ))
-        .with_structured(serde_json::to_value(output).expect("clipboard output serializes"))
+        );
+        let mut structured = serde_json::to_value(output).expect("clipboard output serializes");
+        if let Some(original) = cut_from {
+            summary.push_str(&format!(
+                " The text is {original} bytes: `text` holds its first {kept} bytes \
+                 (`text_truncated`)."
+            ));
+            structured["text_truncated"] = Value::Bool(true);
+            structured["text_bytes"] = Value::from(original);
+        }
+        ToolResult::text(summary).with_structured(structured)
     }
 }
 
@@ -299,5 +330,39 @@ mod tests {
             .to_string()
             .find("no display clipboard provider")
             .is_none());
+    }
+
+    /// CLIP-1: any app or page can fill the clipboard. At 0048ec6
+    /// clipboard_read returned all of it, however large.
+    #[tokio::test]
+    async fn a_huge_clipboard_text_is_cut_and_says_so() {
+        let backend = Arc::new(FakeClipboard::default());
+        // Three bytes a character, so 1 MiB does not fall on a boundary.
+        let huge = "\u{20ac}".repeat(400_000);
+        backend.write_text(huge.clone()).unwrap();
+        let read = ClipboardReadTool { backend }
+            .invoke(serde_json::json!({"include_text": true}))
+            .await;
+        assert_ne!(read.is_error, Some(true));
+        let output = read.structured_content.clone().unwrap();
+        let text = output["text"].as_str().unwrap();
+        assert_eq!(text.len(), (1 << 20) - 1);
+        assert!(huge.starts_with(text));
+        assert_eq!(output["text_truncated"], true);
+        assert_eq!(output["text_bytes"], huge.len());
+        assert!(
+            format!("{:?}", read.content).contains("1200000 bytes"),
+            "{:?}",
+            read.content
+        );
+
+        let backend = Arc::new(FakeClipboard::default());
+        backend.write_text("short".into()).unwrap();
+        let read = ClipboardReadTool { backend }
+            .invoke(serde_json::json!({"include_text": true}))
+            .await;
+        let output = read.structured_content.unwrap();
+        assert_eq!(output["text"], "short");
+        assert!(output.get("text_truncated").is_none());
     }
 }
