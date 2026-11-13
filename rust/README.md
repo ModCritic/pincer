@@ -17,7 +17,11 @@ implementations, testkit, and helper crates.
 | `pincer-uia` | Windows UIAccess worker |
 | `cursor-overlay` | Cross-platform semantic cursor renderer and bounded compiled-theme loader |
 | `cursor-theme-cli` | Short-lived dotLottie validation, compilation, preview, and installation sidecar |
-| `pip-preview` | Packaging preview helper |
+| `pip-preview` | Shared types for the experimental picture-in-picture preview window |
+| `pincer-contract` | Platform-neutral tool contract; generates `contract/manifest.json` |
+| `pincer-sdk` | Typed SDK and UniFFI boundary for the Python and TypeScript packages |
+| `pincer-cursor-motion` | Agent cursor paths, timing and effects |
+| `pincer-bindgen` | UniFFI binding generator entry point |
 
 Platform crates are selected with `cfg(target_os)` from the main driver crate.
 Keep platform-specific behavior inside the matching `platform-<os>` crate.
@@ -29,9 +33,10 @@ cargo build -p pincer
 cargo build -p pincer --release
 ```
 
-The Python wrapper and install scripts expect the built binary at
-`target/<profile>/pincer` (or `pincer.exe` on Windows), unless
-`PINCER_BINARY` is set.
+The local install scripts (`scripts/install-local.sh` and
+`scripts/install-local.ps1`) take the built binary from
+`target/<profile>/pincer` (`pincer.exe` on Windows); the shell script honors
+`CARGO_TARGET_DIR`. The Python wrapper runs the binary bundled in its package.
 
 ## Formatting
 
@@ -104,7 +109,7 @@ calls through `allow.rules`, and explicit overrides through `deny.tools`:
 
 ```yaml
 allow:
-  tools: [screenshot, scroll, wait]
+  tools: [get_window_state, list_windows, scroll]
   rules:
     - tool: click
       constraints:
@@ -115,10 +120,10 @@ allow:
         text: { max_length: 1000, pattern: "^[a-zA-Z0-9\\s]+$" }
     - tool: launch_app
       constraints:
-        app:
+        name:
           allowed: [Calculator, TextEdit, Safari]
 deny:
-  tools: [shell_execute, file_delete]
+  tools: [kill_app, run_script]
 ```
 
 Rego policies must expose a boolean rule at `data.pincer.policy.allow`. The input
