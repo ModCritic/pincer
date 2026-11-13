@@ -579,6 +579,9 @@ export type BoundsExpectation = {
     y: number,
     width: number,
     height: number,
+    /**
+     * Allowed difference in each number. Default 1.
+     */
     tolerancePx?: number
 }
 
@@ -2255,7 +2258,15 @@ const FfiConverterTypeElementFrame = (() => {
 })();
 
 export type ElementSelector = {
+    /**
+     * As get_window_state prints it (`push button`, `check box`); case,
+     * spaces and an `AX` prefix are ignored, `button` matches `push button`.
+     */
     role?: string,
+    /**
+     * Case-insensitive substring of the quoted name in the element's
+     * get_window_state row.
+     */
     labelContains?: string
 }
 
@@ -2298,13 +2309,13 @@ const FfiConverterTypeElementSelector = (() => {
 })();
 
 export type ElementPredicate = {
+    /**
+     * Searches the rows get_window_state tags `[N]` (macOS: display-only
+     * rows too), so a disabled Qt button, which has no `[N]`, is not found.
+     */
     selector: ElementSelector,
     /**
-     * Assert that at least one trusted element matches the selector.
-     *
-     * Element walks are not yet exhaustive on every platform, so absence
-     * cannot be proven. `false` is rejected instead of returning an
-     * indefinitely-unknown predicate.
+     * True: an element matches. `false` is refused: absence cannot be proven.
      */
     exists?: boolean,
     valueEquals?: string,
@@ -2769,8 +2780,8 @@ export type GetWindowStateInput = {
      */
     verbose?: boolean,
     /**
-     * Restore the previous full response (both representations, all
-     * metadata, platform walk limits).
+     * Restore the previous full response (both representations, whole
+     * values, all metadata, platform walk limits).
      */
     fullOutput?: boolean
 }
@@ -2916,11 +2927,8 @@ const FfiConverterTypeHotkeyInput = (() => {
 })();
 
 /**
- * Exact, immediate-child application menu path to resolve and invoke through
- * the operating system's accessibility API. Path labels are matched after
- * trimming surrounding whitespace and otherwise remain case-sensitive. On
- * macOS, three periods in a label also match the ellipsis character that
- * native menu titles use (`Save As...` finds `Save As…`).
+ * Application menu path. Labels are matched after trimming surrounding
+ * whitespace, case-sensitively; three periods match the ellipsis character.
  */
 export type InvokeMenuInput = {
     /**
@@ -4571,6 +4579,9 @@ const FfiConverterTypeStartSessionOutput = (() => {
 
 export type WindowPredicate = {
     exists?: boolean,
+    /**
+     * As list_windows reports them (Linux: desktop pixels of the client area).
+     */
     bounds?: BoundsExpectation
 }
 
@@ -4740,8 +4751,7 @@ export type VerifyStateInput = {
      */
     stableSamples?: bigint,
     /**
-     * Return the final window screenshot as image content for a multimodal
-     * caller. The driver does not interpret that image.
+     * Also return the final window screenshot.
      */
     includeScreenshot?: boolean
 }

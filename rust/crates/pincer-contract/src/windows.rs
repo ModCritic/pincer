@@ -117,8 +117,8 @@ pub struct GetWindowStateInput {
     #[schemars(schema_with = "bool_schema")]
     #[uniffi(default = None)]
     pub verbose: Option<bool>,
-    /// Restore the previous full response (both representations, all
-    /// metadata, platform walk limits).
+    /// Restore the previous full response (both representations, whole
+    /// values, all metadata, platform walk limits).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "bool_schema")]
     #[uniffi(default = None)]

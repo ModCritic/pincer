@@ -81,6 +81,7 @@ pub mod key_pacing;
 pub mod launch_guard;
 pub mod mcp_result;
 pub mod mcp_text_results;
+pub mod menu_label;
 pub mod pip_hook;
 pub mod pointer_shape;
 pub mod policy;

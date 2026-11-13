@@ -89,7 +89,7 @@ pub fn schema_properties() -> Value {
         },
         "full_output": {
             "type": "boolean",
-            "description": "Default false. True returns everything: `elements` and `tree_markdown`, all metadata, and the platform's own walk limits unless max_elements/max_depth are set. Not with `since`."
+            "description": "Default false. True returns everything: `elements` and `tree_markdown`, whole values (Linux: up to 250,000 characters), all metadata, and the platform's own walk limits unless max_elements/max_depth are set. Not with `since`."
         },
         "display_only": {
             "type": "boolean",
@@ -242,7 +242,7 @@ impl ViewOptions {
 /// What a `since` read resolved to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum SinceOutcome {
-    Diff(DiffReport),
+    Diff(Box<DiffReport>),
     Fallback(&'static str),
 }
 
@@ -957,7 +957,7 @@ fn resolve_since(
             if !report.is_empty() && report.render_len() * 100 > shown * DIFF_MAX_PERCENT_OF_FULL {
                 SinceOutcome::Fallback("too_much_changed")
             } else {
-                SinceOutcome::Diff(report)
+                SinceOutcome::Diff(Box::new(report))
             }
         }
     }
@@ -982,6 +982,10 @@ struct Row {
 pub struct DiffReport {
     added: Vec<Row>,
     changed: Vec<Row>,
+    /// The `[N]` each `changed` row had in the old read (same order), so a
+    /// row whose index changed with it says so instead of reading as the
+    /// element the old read had at its new index.
+    changed_old_index: Vec<Option<u64>>,
     removed: Vec<Row>,
     reindexed: Vec<(u64, u64, i64)>,
     /// `role "name"` of the first old row of each `reindexed` run, so the
@@ -1096,24 +1100,29 @@ fn diff_markdown(
     let flush_hunk =
         |dels: &mut Vec<usize>, inss: &mut Vec<usize>, report: &mut DiffReport, last: bool| {
             let mut used = vec![false; dels.len()];
-            let mut paired = vec![false; inss.len()];
+            // The old row each new row is paired with.
+            let mut paired: Vec<Option<usize>> = vec![None; inss.len()];
             for (k, &i) in inss.iter().enumerate() {
                 let pair = dels
                     .iter()
                     .enumerate()
                     .find(|(d, &o)| !used[*d] && old[o].identity == new[i].identity);
-                if let Some((d, _)) = pair {
+                if let Some((d, &o)) = pair {
                     used[d] = true;
-                    paired[k] = true;
+                    paired[k] = Some(o);
                 }
             }
             // Both reads reached a paired row, so only rows after the last pair
             // can sit past a cut.
             let reached_old = used.iter().rposition(|&u| u).map_or(0, |d| d + 1);
-            let reached_new = paired.iter().rposition(|&p| p).map_or(0, |k| k + 1);
+            let reached_new = paired
+                .iter()
+                .rposition(Option::is_some)
+                .map_or(0, |k| k + 1);
             for (k, &i) in inss.iter().enumerate() {
-                if paired[k] {
+                if let Some(o) = paired[k] {
                     report.changed.push(new[i].clone());
+                    report.changed_old_index.push(old[o].index);
                 } else if last && old_cut && k >= reached_new {
                     report.first_read.push(new[i].clone());
                 } else {
@@ -1285,17 +1294,37 @@ impl DiffReport {
             ));
             return out;
         }
+        // A count says how many of its rows have no `[N]` (the window's own
+        // `frame` row, a label), so it matches the `[N]` rows a reader
+        // counts (round 2 of the first-call test: "4 changed" with three
+        // `~ [N]` rows and the frame).
+        let count = |rows: &[Row], what: &str| {
+            let unindexed = rows.iter().filter(|row| row.index.is_none()).count();
+            if unindexed == 0 {
+                format!("{} {what}", rows.len())
+            } else {
+                format!("{} {what} ({unindexed} without [N])", rows.len())
+            }
+        };
         let mut out = format!(
-            "since {since}: {} added, {} changed, {} removed. Use element_tokens {new_id}:N for every row except - rows; - ids are from {since}.\n",
-            self.added.len(),
-            self.changed.len(),
-            self.removed.len()
+            "since {since}: {}, {}, {}. Use element_tokens {new_id}:N for every row except - rows; - ids are from {since}.\n",
+            count(&self.added, "added"),
+            count(&self.changed, "changed"),
+            count(&self.removed, "removed")
         );
         for row in &self.added {
             out.push_str(&format!("+ {}\n", row.text));
         }
-        for row in &self.changed {
-            out.push_str(&format!("~ {}\n", row.text));
+        for (row, old_index) in self.changed.iter().zip(&self.changed_old_index) {
+            // A changed row whose index changed too: without the note,
+            // `~ [19] push button "Undo"` read as the old [19] (Open Menu)
+            // turning into Undo, when Undo had just gained an index.
+            let note = match (*old_index, row.index) {
+                (old, new) if old == new => String::new(),
+                (Some(old), _) => format!(" (was [{old}])"),
+                (None, _) => " (had no [N] before)".to_owned(),
+            };
+            out.push_str(&format!("~ {}{note}\n", row.text));
         }
         for row in &self.removed {
             out.push_str(&format!("- {}\n", row.text));
@@ -1917,6 +1946,59 @@ mod tests {
         let text = report.render("s1", Some("s2"), None);
         assert!(
             text.contains("reindexed: [1] push button \"Open Menu\" -> [2]"),
+            "{text}"
+        );
+    }
+
+    // Round 2 of the first-call test, KWrite after typing: `~ [19] push
+    // button "Undo"` read as the old [19] (Open Menu) turning into Undo, and
+    // "4 changed" counted the frame row, which has no [N].
+    #[test]
+    fn a_changed_row_says_when_its_index_changed_and_counts_say_which_have_none() {
+        let old = "- frame = \"notes.txt - KWrite\"\n  - [0] text \"notes.txt\" value=\"a\"\n  - [1] push button \"1:1\" [actions=[Press]]\n  - push button = \"Undo\" (disabled)\n  - [2] push button \"Open Menu\" [actions=[]]";
+        let new = "- frame = \"notes.txt * - KWrite\"\n  - [0] text \"notes.txt\" value=\"ab\"\n  - [1] push button \"1:2\" [actions=[Press]]\n  - [2] push button \"Undo\" [actions=[Press]]\n  - [3] push button \"Open Menu\" [actions=[]]";
+        let report = diff_markdown(old, new, false, false).unwrap();
+        let text = report.render("s1", Some("s2"), None);
+        assert!(
+            text.starts_with("since s1: 0 added, 4 changed (1 without [N]), 0 removed."),
+            "{text}"
+        );
+        assert!(
+            text.contains("\n~ [2] push button \"Undo\" [actions=[Press]] (had no [N] before)\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("\n~ [0] text \"notes.txt\" value=\"ab\"\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("\n~ frame = \"notes.txt * - KWrite\"\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("reindexed: [2] push button \"Open Menu\" -> [3]"),
+            "{text}"
+        );
+
+        // The other way: a control that loses its index, and one whose
+        // index moves while its row changes.
+        let report = diff_markdown(new, old, false, false).unwrap();
+        let text = report.render("s2", Some("s3"), None);
+        assert!(
+            text.contains("\n~ push button = \"Undo\" (disabled) (was [2])\n"),
+            "{text}"
+        );
+        let moved_old = "- [0] W\n  - [1] check box \"Grid\" (unchecked)";
+        let moved_new =
+            "- [0] W\n  - [1] push button \"New\"\n  - [2] check box \"Grid\" (checked)";
+        let report = diff_markdown(moved_old, moved_new, false, false).unwrap();
+        let text = report.render("s4", Some("s5"), None);
+        assert!(
+            text.starts_with("since s4: 1 added, 1 changed, 0 removed."),
+            "{text}"
+        );
+        assert!(
+            text.contains("\n~ [2] check box \"Grid\" (checked) (was [1])"),
             "{text}"
         );
     }

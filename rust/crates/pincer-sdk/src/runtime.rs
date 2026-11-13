@@ -733,15 +733,6 @@ mod tests {
         let registry = build_registry(&RuntimeOptions::embedded(false));
         // These schemas declare `additionalProperties: true`.
         let open = [
-            "get_browser_state",
-            "browser_prepare",
-            "browser_navigate",
-            "browser_click",
-            "browser_type",
-            "browser_dialog",
-            "browser_set_input_files",
-            "browser_download",
-            "browser_pointer",
             "start_session",
             "get_session",
             "list_sessions",

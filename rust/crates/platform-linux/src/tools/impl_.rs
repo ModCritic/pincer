@@ -267,37 +267,98 @@ fn screenshot_scale(
 pub struct ListAppsTool;
 static LIST_APPS_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
+const LIST_APPS_APP_FILTER_DESCRIPTION: &str = "Only apps whose name contains this text \
+    (case-insensitive), or whose bundle_id equals it. Without it every running process and \
+    installed app is listed.";
+
+/// Keep the list_apps records `app` selects, with list_windows' rule
+/// (`app_filter_matches`): a case-insensitive substring of the record's
+/// `name`, or its exact `bundle_id`. No filter keeps every record.
+fn retain_apps_matching(apps: &mut Vec<Value>, filter: Option<&str>) {
+    let Some(filter) = filter else {
+        return;
+    };
+    apps.retain(|app| {
+        pincer_core::tool_args::app_filter_matches(
+            filter,
+            app["name"].as_str().unwrap_or_default(),
+            app["bundle_id"].as_str(),
+        )
+    });
+}
+
+#[cfg(test)]
+mod list_apps_filter_tests {
+    use super::*;
+
+    fn names(apps: &[Value]) -> Vec<&str> {
+        apps.iter()
+            .map(|app| app["name"].as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn app_keeps_name_substrings_and_exact_bundle_ids() {
+        let all = vec![
+            json!({"name": "Pincer Test Pad", "bundle_id": "pincer-test-pad", "running": true}),
+            json!({"name": "KWrite", "bundle_id": "org.kde.kwrite", "running": true}),
+            json!({"name": "dbus-broker", "bundle_id": null, "running": true}),
+            json!({"name": "Dolphin", "bundle_id": "org.kde.dolphin", "running": false}),
+        ];
+        let filtered = |filter: Option<&str>| {
+            let mut apps = all.clone();
+            retain_apps_matching(&mut apps, filter);
+            names(&apps)
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(filtered(None).len(), 4);
+        assert_eq!(filtered(Some("test pad")), ["Pincer Test Pad"]);
+        assert_eq!(filtered(Some("KWRITE")), ["KWrite"]);
+        assert_eq!(filtered(Some("org.kde.dolphin")), ["Dolphin"]);
+        // A bundle id matches whole, not as a substring of the name.
+        assert!(filtered(Some("org.kde")).is_empty());
+        assert!(filtered(Some("firefox")).is_empty());
+    }
+
+    #[test]
+    fn list_apps_advertises_the_app_filter() {
+        let def = ListAppsTool.def();
+        assert_eq!(
+            def.input_schema["properties"]["app"]["type"],
+            json!("string")
+        );
+        assert!(def.description.contains("`app`"), "{}", def.description);
+        assert!(!def.description.contains('\u{2014}'), "{}", def.description);
+    }
+}
+
 #[async_trait]
 impl Tool for ListAppsTool {
     fn def(&self) -> &ToolDef {
         LIST_APPS_DEF.get_or_init(|| ToolDef {
             name: "list_apps".into(),
-            description:
-                "List Linux apps — both currently running and installed-but-not-running — \
-                with per-app state flags:\n\n\
-                - running: is a process for this app live? (pid is 0 when false)\n\
-                - active: reserved (Linux X11/Wayland focus model differs from frontmost-app); \
-                always false.\n\
-                - kind: `\"desktop\"` for XDG `.desktop` launcher entries.\n\
-                - launch_path: the launcher command from `Exec=` (field codes stripped). \
-                Pass to `launch_app(launch_path=...)`.\n\
-                - bundle_id: the XDG \"desktop file id\" — the `.desktop` file's path \
-                relative to its XDG `applications/` root with the `.desktop` suffix \
-                stripped and path separators replaced with `-` \
-                (e.g. `kde4/konqbrowser.desktop` → `kde4-konqbrowser`).\n\
+            description: "List apps, running and installed: every running process (from /proc, \
+                daemons included) and every XDG `.desktop` entry without `NoDisplay` or \
+                `Hidden`. An entry whose launcher matches a running process by basename, or \
+                whose WM_CLASS one of its windows carries, is merged into one record with \
+                `running: true`. Narrow the list with `app`. Each record:\n\
+                - running: a process is live (pid is 0 when false).\n\
+                - active: always false on Linux.\n\
+                - kind: `desktop` for a `.desktop` entry.\n\
+                - launch_path: the `Exec=` command without field codes; pass it to \
+                `launch_app(launch_path=...)`.\n\
+                - bundle_id: the XDG desktop file id (`kde4/konqbrowser.desktop` is \
+                `kde4-konqbrowser`).\n\
                 - last_used: RFC3339 mtime of the `.desktop` file, when readable.\n\
-                - windows: the app's current top-level windows (same records as list_windows); \
-                empty for a process without one.\n\n\
-                Running apps come from `/proc`. Installed apps come from XDG Desktop Entry \
-                files in $XDG_DATA_HOME/applications and each $XDG_DATA_DIRS entry's \
-                applications/ subdir. Entries with `NoDisplay=true` or `Hidden=true` are \
-                filtered. A `.desktop` file whose launcher matches a running process \
-                (by basename), or whose WM_CLASS a top-level window carries, is merged \
-                into a single entry with `running: true`.\n\n\
-                Use this for \"is X installed?\" as well as \"is X running?\". For per-window \
-                state — visibility, geometry, titles — call list_windows instead."
-                    .into(),
-            input_schema: json!({"type":"object","properties":{},"additionalProperties":false}),
+                - windows: the app's top-level windows, as list_windows lists them.\n\n\
+                Use it for \"is X installed?\" and \"is X running?\"; for window titles and \
+                geometry call list_windows."
+                .into(),
+            input_schema: json!({"type":"object","properties":{
+                "app":{"type":"string","description":LIST_APPS_APP_FILTER_DESCRIPTION}
+            },"additionalProperties":false}),
             read_only: true,
             destructive: false,
             idempotent: true,
@@ -305,8 +366,8 @@ impl Tool for ListAppsTool {
         })
     }
 
-    async fn invoke(&self, _args: Value) -> ToolResult {
-        let apps = tokio::task::spawn_blocking(|| -> Vec<serde_json::Value> {
+    async fn invoke(&self, args: Value) -> ToolResult {
+        let mut apps = tokio::task::spawn_blocking(|| -> Vec<serde_json::Value> {
             let procs = crate::proc_fs::list_processes();
             let installed = crate::installed_apps::list_installed_apps();
             let windows = crate::wayland::list_windows_dispatch(None);
@@ -441,6 +502,12 @@ impl Tool for ListAppsTool {
         })
         .await
         .unwrap_or_default();
+        let filter = args
+            .get("app")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|filter| !filter.is_empty());
+        retain_apps_matching(&mut apps, filter);
 
         let running_count = apps
             .iter()
@@ -448,8 +515,11 @@ impl Tool for ListAppsTool {
             .count();
         let total = apps.len();
         let installed_only = total - running_count;
+        let matching = filter
+            .map(|filter| format!(" matching app \"{filter}\""))
+            .unwrap_or_default();
         let mut header = format!(
-            "✅ Found {total} app(s): {running_count} running, {installed_only} installed-not-running."
+            "✅ Found {total} app(s){matching}: {running_count} running, {installed_only} installed-not-running."
         );
         if apps.iter().any(|app| app["kind"] == "desktop") {
             header.push_str(" Entries with a bundle_id come from .desktop files (kind=desktop).");
@@ -1643,17 +1713,23 @@ impl Tool for GetWindowStateTool {
         let state = self.state.clone();
         let state_for_capture = state.clone();
         let query_for_walk = query.clone();
+        // full_output returns values whole, so it reads a text field's whole
+        // content instead of its first 4096 characters.
+        let text_read_chars = view
+            .full_output
+            .then_some(crate::atspi::native::FULL_TEXT_READ_CHARS);
 
         let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
             // Skip the AT-SPI walk on the capture-only path
             // (include_accessibility_tree:false).
             let tree_result = if want_tree {
-                Some(crate::atspi::walk_tree_bounded_within(
+                Some(crate::atspi::walk_tree_bounded_reading(
                     pid,
                     xid,
                     query_for_walk.as_deref(),
                     max_elements,
                     max_depth,
+                    text_read_chars,
                     walk_timeout,
                 ))
             } else {
@@ -2311,10 +2387,90 @@ fn spawn_launch_command(
     if let Some(dir) = &run_dir {
         launch.env("TMPDIR", dir.path());
     }
+    if let Some(id) = background_startup_id() {
+        launch.env("DESKTOP_STARTUP_ID", id);
+    }
     let mut child = launch_child::spawn_watched(launch, run_dir)?;
     child.extract_and_run = extract_and_run;
     Ok(child)
 }
+
+/// A startup-notification id (`<unique>_TIME<timestamp>`) that asks the
+/// window manager to leave a launched window inactive, or `None` outside a
+/// plain X11 session or when the X server's clock cannot be read.
+///
+/// EWMH focus-stealing prevention activates a new window only when its
+/// `_NET_WM_USER_TIME` is newer than the user's last input in the active
+/// window. Assumption, checked in a KWin X11 slot at bfc42c0: GTK3 copies the
+/// `_TIME` suffix into `_NET_WM_USER_TIME` (the Test Pad got 3331800000 and
+/// stayed inactive and below, where the same launch without the variable
+/// was activated and raised), while Qt 6.12 ignores it and stamps a fresh
+/// server time of its own (KWrite was activated with the variable set), so
+/// this keeps only some apps in the background. Not tried on Wayland or
+/// XWayland, so not sent there.
+fn background_startup_id() -> Option<String> {
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() || crate::x11::server_is_xwayland() {
+        return None;
+    }
+    use x11rb::connection::Connection as _;
+    let (conn, screen) = x11rb::rust_connection::RustConnection::connect(None).ok()?;
+    let root = conn.setup().roots.get(screen)?.root;
+    let now = crate::input::server_time(&conn, root)?;
+    static LAUNCHES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let launch = LAUNCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Some(format!(
+        "pincer-launch-{}-{launch}_TIME{}",
+        std::process::id(),
+        background_user_time(now)
+    ))
+}
+
+/// A user time older than any input in the last 2^30 ms (12.4 days) before
+/// `now`. The X clock is 32-bit and window managers compare its times
+/// modulo 2^32 (older when `a - b` wraps past 2^31), so this stays "in the
+/// past" however long the server has run, where a fixed `_TIME1` turns into
+/// "newer" after 24.8 days of server uptime. 0 is avoided: GTK reads it as
+/// no time at all.
+fn background_user_time(now: u32) -> u32 {
+    now.wrapping_sub(1 << 30).max(1)
+}
+
+/// Re-read the launched windows (`list` lists every window) until their
+/// titles have not changed for `quiet`, at most `limit`. An app often maps
+/// its window with a default title and retitles it right after: KWrite
+/// showed "KWrite", then the file name before "KWrite" 15 ms later, and the
+/// launch result at bfc42c0 could carry the first. Windows that close meanwhile
+/// are dropped; ones that open are not added.
+fn settle_window_titles(
+    mut windows: Vec<crate::x11::WindowInfo>,
+    mut list: impl FnMut() -> Vec<crate::x11::WindowInfo>,
+    quiet: std::time::Duration,
+    limit: std::time::Duration,
+) -> Vec<crate::x11::WindowInfo> {
+    let started = std::time::Instant::now();
+    let mut unchanged_since = started;
+    while !windows.is_empty() && unchanged_since.elapsed() < quiet && started.elapsed() < limit {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let all = list();
+        let fresh: Vec<_> = windows
+            .iter()
+            .filter_map(|old| all.iter().find(|new| new.xid == old.xid).cloned())
+            .collect();
+        let titles = |list: &[crate::x11::WindowInfo]| -> Vec<(u64, String)> {
+            list.iter().map(|w| (w.xid, w.title.clone())).collect()
+        };
+        if titles(&fresh) != titles(&windows) {
+            unchanged_since = std::time::Instant::now();
+        }
+        windows = fresh;
+    }
+    windows
+}
+
+/// How long launched windows' titles must stay the same, and the most
+/// [`settle_window_titles`] waits for that.
+const LAUNCH_TITLE_QUIET: std::time::Duration = std::time::Duration::from_millis(200);
+const LAUNCH_TITLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// The note a launch that unpacked an AppImage carries: why, where the copy
 /// goes and what it costs. In a driver-owned folder the copy is deleted
@@ -2472,14 +2628,17 @@ impl Tool for LaunchAppTool {
     fn def(&self) -> &ToolDef {
         LAUNCH_DEF.get_or_init(|| ToolDef {
             name: "launch_app".into(),
-            description: "Launch a Linux app in the background and return its pid and \
-                windows. Name the app with launch_path (preferred: round-trip it from \
-                list_apps) or name; launch_path wins when both are given. To open files or URLs \
-                in that app, pass them in `urls` (or `additional_arguments`): they are appended \
-                to its command line, for example {name:\"KWrite\", urls:[\"/path/notes.txt\"]}. \
-                `urls` without launch_path or name go to xdg-open, which opens each in its \
-                default app and returns no pid. bundle_id is ignored on Linux. Refused when \
-                the name matches nothing launchable."
+            // Activation and title behavior measured in a KWin X11 slot at
+            // bfc42c0; see background_startup_id and settle_window_titles.
+            description: "Start a Linux app and return its pid and windows, titles read once \
+                they stop changing (up to 1 s). The window manager may activate and raise the \
+                new window (KWin does for Qt and KDE apps such as KWrite and Dolphin; GTK apps \
+                stay behind); `active` says whether it did. Name the app with launch_path or \
+                name. To open files or URLs in that app, pass them in `urls` (or \
+                `additional_arguments`): they are appended to its command line, for example \
+                {name:\"KWrite\", urls:[\"/path/notes.txt\"]}. `urls` without launch_path or \
+                name go to xdg-open, which opens each in its default app and returns no pid. \
+                Refused when the name matches nothing launchable."
                 .into(),
             input_schema: json!({"type":"object","properties":{
                 "launch_path":{"type":"string","description":"Round-trip the `launch_path` returned by `list_apps`: the Exec= command from the .desktop file with XDG field codes already stripped. Highest precedence on Linux; split on spaces and run directly, without a shell."},
@@ -2561,10 +2720,7 @@ impl Tool for LaunchAppTool {
                     match spawn_launch_command(cmd, &app_arguments) {
                         Ok(child) => {
                             return Ok((
-                                format!(
-                                    "✅ Launched {cmd} (pid {}) in background.{opened_note}",
-                                    child.pid
-                                ),
+                                format!("✅ Launched {cmd} (pid {}).{opened_note}", child.pid),
                                 Some(child),
                                 cmd.to_owned(),
                             ));
@@ -2586,8 +2742,8 @@ impl Tool for LaunchAppTool {
                                     })?;
                                 return Ok((
                                     format!(
-                                        "✅ Launched {} (`{}`, pid {}) in background — \
-                                         resolved '{cmd}' via its desktop entry.{opened_note}",
+                                        "✅ Launched {} (`{}`, pid {}), resolved from \
+                                         '{cmd}' by its desktop entry.{opened_note}",
                                         app.name, app.launch_path, child.pid
                                     ),
                                     Some(child),
@@ -2643,11 +2799,24 @@ impl Tool for LaunchAppTool {
                     let name = name.split('\u{0}').next().unwrap_or("").to_owned();
                     let watched = child.clone();
                     let program_w = program.clone();
-                    let resolved = tokio::task::spawn_blocking(move || {
-                        resolve_launched_windows(&watched, &query, &program_w, &windows_before)
+                    let (resolved, active) = tokio::task::spawn_blocking(move || {
+                        let mut resolved =
+                            resolve_launched_windows(&watched, &query, &program_w, &windows_before);
+                        resolved.windows = settle_window_titles(
+                            std::mem::take(&mut resolved.windows),
+                            || crate::wayland::list_windows_dispatch(None),
+                            LAUNCH_TITLE_QUIET,
+                            LAUNCH_TITLE_LIMIT,
+                        );
+                        // `_NET_ACTIVE_WINDOW` names X11 windows only.
+                        let active = !crate::wayland::is_wayland()
+                            && crate::x11::active_window().is_some_and(|active| {
+                                resolved.windows.iter().any(|w| w.xid == active)
+                            });
+                        (resolved, active)
                     })
                     .await
-                    .unwrap_or_else(|_| LaunchedWindows::default());
+                    .unwrap_or_else(|_| (LaunchedWindows::default(), false));
                     let windows: Vec<Value> =
                         resolved.windows.iter().map(window_record_json).collect();
                     let mut text = message;
@@ -2656,7 +2825,7 @@ impl Tool for LaunchAppTool {
                         "bundle_id": Value::Null,
                         "name": name,
                         "running": resolved.pid.is_some(),
-                        "active": false,
+                        "active": active,
                         "windows": windows,
                         "launcher_pid": launcher_pid,
                     });
@@ -2710,6 +2879,9 @@ impl Tool for LaunchAppTool {
                                 return with_appimage_note(result, child.extract_and_run.as_ref());
                             }
                         }
+                    }
+                    if active {
+                        text.push_str(" The window manager made its window the active one.");
                     }
                     with_appimage_note(
                         ToolResult::text(text).with_structured(structured),
@@ -3568,8 +3740,14 @@ impl PopupClickOutcome {
     }
 }
 
+/// How to check a pointer action whose effect Pincer could not confirm. A
+/// `since` re-read lists only what changed; a screenshot covers surfaces that
+/// are missing from the tree.
+const POINTER_CHECK: &str =
+    "read what changed with get_window_state since:\"latest\", or take a screenshot";
+
 /// Text tail for a foreground pixel click: the confirming window change when
-/// there is one, else the usual request to confirm with a screenshot.
+/// there is one, else how to check it.
 fn foreground_click_suffix(path: &str, report: &crate::input::ForegroundReport) -> String {
     let popup = report
         .popup_target
@@ -3585,8 +3763,8 @@ fn foreground_click_suffix(path: &str, report: &crate::input::ForegroundReport) 
             report.focus_after.as_str()
         ),
         None => format!(
-            "(delivery_mode=foreground, path={path}{popup}, focus_after={}); not verified — \
-             confirm with a screenshot.",
+            "(delivery_mode=foreground, path={path}{popup}, focus_after={}); not verified: \
+             {POINTER_CHECK}.",
             report.focus_after.as_str()
         ),
     }
@@ -4119,9 +4297,10 @@ fn synthetic_pointer_is_dropped(pid: u32) -> bool {
 /// Toolkits that ignore a synthetic (`send_event`) X11 button press: GTK3/4
 /// and LibreOffice VCL. Qt5/6 handle a core press as a "legacy" mouse event:
 /// a synthetic right-click opens Kate's context menu and a synthetic press
-/// moves KWrite's caret (checked 2026-11-03). Qt does drop core wheel
-/// buttons, and synthetic drags are unproven there, so those routes keep
-/// [`maps_indicate_synthetic_pointer_dropped`].
+/// moves KWrite's caret (checked 2026-11-03). Synthetic press, motion and
+/// release drags select text in KWrite (Qt 6) and in a Qt 5.15 text edit,
+/// with another window active (checked 2026-11-11). Qt does drop core wheel
+/// buttons, so scroll keeps [`maps_indicate_synthetic_pointer_dropped`].
 fn maps_indicate_synthetic_press_dropped(maps: &str) -> bool {
     maps_indicate_gtk(maps) || maps.contains("libvcl") || maps.contains("libmergedlo")
 }
@@ -4547,13 +4726,15 @@ fn key_route_result(action: &str, route: KeyRoute, mode_label: &str) -> ToolResu
                      did not confirm the last key; the keys may not have landed.",
                 );
             } else {
-                text.push_str("; not verified: confirm with a screenshot.");
+                text.push_str(&format!("; {KEY_EFFECT_UNVERIFIED}."));
             }
             text.push_str(&report.delivery_notes());
             ToolResult::text(text).with_structured(structured)
         }
-        KeyRoute::Synthetic => ToolResult::text(format!("{action} (delivery_mode={mode_label})."))
-            .with_structured(json!({ "verified": false, "delivery_mode": mode_label })),
+        KeyRoute::Synthetic => ToolResult::text(format!(
+            "{action} (delivery_mode={mode_label}); {KEY_EFFECT_UNVERIFIED}."
+        ))
+        .with_structured(json!({ "verified": false, "delivery_mode": mode_label })),
         KeyRoute::SyntheticToInactive(window) => ToolResult::text(format!(
             "{action} as synthetic X key events (delivery_mode={mode_label}) to window {window}, \
              which is not the active window. Qt apps ignore these keys while their window is \
@@ -4569,6 +4750,13 @@ fn key_route_result(action: &str, route: KeyRoute, mode_label: &str) -> ToolResu
             .with_structured(json!({ "verified": false, "delivery_mode": mode_label })),
     }
 }
+
+/// What a key result tells the caller to check when nothing confirmed the
+/// key. A `since` re-read lists only what changed (text, caret, title), the
+/// cheap check round 2 of the first-call test used instead of a screenshot.
+const KEY_EFFECT_UNVERIFIED: &str =
+    "not verified: read what changed with get_window_state since:\"latest\", or check it \
+     with verify_state";
 
 /// Text tail for a foreground key delivery, in step with the effect
 /// [`apply_foreground_report`] decides: the window change that confirms it,
@@ -4588,10 +4776,7 @@ fn foreground_key_tail(report: &crate::input::ForegroundReport) -> String {
              process before the check, so the input may have reached another window: check \
              with a screenshot."
         ),
-        None => format!(
-            "(delivery_mode=foreground, focus_after={focus}); not verified: confirm with a \
-             screenshot."
-        ),
+        None => format!("(delivery_mode=foreground, focus_after={focus}); {KEY_EFFECT_UNVERIFIED}."),
     }
 }
 
@@ -4599,13 +4784,20 @@ fn unavailable_gtk_pointer_background(
     pid: u32,
     delivery: crate::input::delivery::DeliveryMode,
 ) -> Option<ToolResult> {
+    use crate::input::delivery::BackgroundUnavailable;
     (!delivery.is_foreground()
         && is_gtk_process(pid)
         && !crate::wayland::is_inject_mode()
         && !crate::input::real_pointer_input_available())
     .then(|| {
+        // On X11 the only route left is synthetic XSendEvent, which GTK
+        // drops; Wayland input reaches only the focused window.
         crate::input::delivery::background_unavailable_error(
-            crate::input::delivery::BackgroundUnavailable::FocusedInputOnly,
+            if crate::wayland::wayland_input_enabled() {
+                BackgroundUnavailable::FocusedInputOnly
+            } else {
+                BackgroundUnavailable::SyntheticPointerDropped
+            },
         )
     })
 }
@@ -4992,19 +5184,19 @@ impl PointerRoute {
                 "(delivery_mode={mode_label}, path=x11_atspi); {}{}",
                 hit.describe(),
                 if hit.selection_verified {
-                    " — the item is selected."
+                    "; the item is selected.".to_owned()
                 } else {
-                    "; confirm with a screenshot."
+                    format!("; the selection is not verified: {POINTER_CHECK}.")
                 }
             ),
             Self::Atspi(hit) => format!(
                 "(delivery_mode={mode_label}, path=x11_atspi); {}; the AT-SPI action was \
-                 dispatched, not verified — confirm with a screenshot.",
+                 dispatched; not verified: {POINTER_CHECK}.",
                 hit.describe()
             ),
             Self::Mpx(effect) if effect.landed() => format!(
                 "(delivery_mode={mode_label}, path={}, focus {}); {}the screen around the \
-                 point changed ({:.1}% of the region) — the action landed.",
+                 point changed ({:.1}% of the region), so the action landed.",
                 crate::input::MPX_POINTER_PATH,
                 if effect.focus_unchanged {
                     "untouched"
@@ -5021,7 +5213,7 @@ impl PointerRoute {
             Self::Mpx(effect) => format!(
                 "(delivery_mode={mode_label}, path={}, focus {}); real button events were \
                  delivered but the screen around the point did not visibly change \
-                 ({}) — confirm with a screenshot.",
+                 ({}); not verified: {POINTER_CHECK}.",
                 crate::input::MPX_POINTER_PATH,
                 if effect.focus_unchanged {
                     "untouched"
@@ -5038,7 +5230,7 @@ impl PointerRoute {
                 format!("(delivery_mode={mode_label}, path=x11_xtest_fg);")
             }
             _ => format!(
-                "(delivery_mode={mode_label}{}); not verified — confirm with a screenshot.",
+                "(delivery_mode={mode_label}{}); not verified: {POINTER_CHECK}.",
                 self.path()
                     .map(|p| format!(", path={p}"))
                     .unwrap_or_default()
@@ -7717,7 +7909,7 @@ impl ClickTool {
                             if confirmed {
                                 format!("; {}.", report.window_change.as_deref().unwrap_or(""))
                             } else {
-                                "; not verified — confirm with a screenshot.".to_owned()
+                                format!("; not verified: {POINTER_CHECK}.")
                             },
                             redirect_note
                                 .as_deref()
@@ -7817,7 +8009,7 @@ impl ClickTool {
                             report.focus_after.as_str(),
                             match &report.window_change {
                                 Some(change) => format!(" {change}."),
-                                None => " Not verified — confirm with a screenshot.".to_owned(),
+                                None => format!(" Not verified: {POINTER_CHECK}."),
                             }
                         ))
                         .with_structured(foreground_structured("ax_fg", report, extra))
@@ -7961,13 +8153,14 @@ impl Tool for ClickTool {
                 window_point (real window pixels, scaled back from the screenshot) and \
                 screen_point. In background, a pixel click first fires the accessible action \
                 under the point (result `hit: <role> \"<name>\" action=...`, or `selected: ...` \
-                for a list or file item), else presses the virtual pointer there. Toolkits \
-                that drop synthetic pointer events (Qt on X11, for example) refuse a pixel \
-                click with no accessible control under it (background_unavailable). If `hit:` \
-                names an element you did not aim at, that element's action ran. The tree can \
-                hold items that are not visible, such as entries of closed menus, so on a \
-                surface with no action of its own (a text area) prefer delivery_mode \
-                foreground. When a token \
+                for a list or file item), else presses the virtual pointer there, or with no \
+                virtual pointer sends a synthetic X press (path x11_xsendevent). Qt takes \
+                synthetic presses whether or not its window is active; GTK3/4 and LibreOffice \
+                drop them, so there a pixel click with no accessible control under it is \
+                refused (background_unavailable). If `hit:` names an element you did not aim \
+                at, that element's action ran. The tree can hold invisible items (entries of \
+                closed menus), so on a surface with no action of its own (a text area) prefer \
+                delivery_mode foreground. When a token \
                 or pixel click opens a popup menu Pincer can identify, the result includes \
                 `popup: {window_id, bounds}`; pass that window_id to get_window_state to index \
                 its items. Without `popup` (the result may instead say a popup holds the \
@@ -8900,12 +9093,12 @@ impl Tool for ClickTool {
             }
             Ok(Ok(("background_unavailable_pointer", _, _, _))) => {
                 let mut refusal = crate::input::delivery::background_unavailable_error(
-                    crate::input::delivery::BackgroundUnavailable::FocusedInputOnly,
+                    crate::input::delivery::BackgroundUnavailable::SyntheticPointerDropped,
                 );
-                let hint = "No accessible control covers this point and the toolkit drops \
-                     synthetic pointer events, so a background pixel click here would \
-                     change nothing. Use get_window_state and click by element_token \
-                     (AT-SPI action), or retry with delivery_mode='foreground'.";
+                let hint = "No accessible control covers this point either, so a background \
+                     pixel click here would change nothing. Click by element_token from \
+                     get_window_state (AT-SPI action), or retry with \
+                     delivery_mode='foreground'.";
                 refusal
                     .content
                     .push(pincer_core::protocol::Content::text(hint));
@@ -8959,7 +9152,7 @@ impl Tool for ClickTool {
                 if let Some(outcome) = popup_outcome {
                     if outcome.closed {
                         // The closed popup is the verification.
-                        suffix = suffix.replace("; not verified — confirm with a screenshot.", ".");
+                        suffix = suffix.replace(&format!("; not verified: {POINTER_CHECK}."), ".");
                     }
                     suffix.push_str(&outcome.apply(&mut structured));
                 }
@@ -9949,7 +10142,7 @@ fn type_text_mpx_result(
         report.route_phrase()
     );
     if report.virtual_focus_held && report.delivery_confirmed {
-        text.push_str("; not verified: confirm with a screenshot.");
+        text.push_str(&format!("; {KEY_EFFECT_UNVERIFIED}."));
     } else {
         text.push('.');
     }
@@ -11853,8 +12046,9 @@ impl Tool for ScrollTool {
             name: "scroll".into(),
             description: "Scroll a window without stealing focus: real wheel steps from the \
                 session's virtual pointer over the element_token or x,y point, else the window's \
-                center. direction required; by defaults to line, amount defaults to 3 (on X11 a \
-                page is 3 wheel steps). On X11 the result compares the window's scroll bars from \
+                center. direction required; amount (default 3) counts wheel steps, or with \
+                by:\"page\" pages of 3 wheel steps each, not screenfuls; the app decides how far a \
+                step moves. On X11 the result compares the window's scroll bars from \
                 the last get_window_state: an error with code no_change when nothing moved (Qt \
                 ignores background wheel events; use set_value on the scroll bar row instead), \
                 unverifiable when no scroll bar is known. Where no focus-free pointer route \
@@ -11871,8 +12065,8 @@ impl Tool for ScrollTool {
                     "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
                     "pid":{"type":"integer","description":"Process id. Required unless scope is \"desktop\" or element_token is given (the token carries it)."},
                     "direction":{"type":"string","enum":["up","down","left","right"],"description":"Scroll direction."},
-                    "by":{"type":"string","enum":["line","page"],"description":"Scroll granularity. Default: line."},
-                    "amount":{"type":"integer","minimum":1,"maximum":50,"description":"Number of scroll steps. Default: 3."},
+                    "by":{"type":"string","enum":["line","page"],"description":"line (default): one wheel step per amount; page: 3 wheel steps per amount."},
+                    "amount":{"type":"integer","minimum":1,"maximum":50,"description":"Wheel steps, or pages with by:\"page\". Default: 3."},
                     "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                     "element_token": pincer_core::tool_schema::element_token_schema(),
                     "x":{"type":"number","description":"Window-local screenshot-pixel X of the scroll target. Pass with y and without element_token."},
@@ -12507,17 +12701,25 @@ fn scroll_outcome_result(
     movement: ScrollMovement,
     synthetic_wheel_ignored: bool,
 ) -> ToolResult {
-    let what = match by {
+    // "3 pages" read as three screenfuls (round 2 of the first-call test:
+    // 9 wheel steps moved KWrite 27 lines, about half its view), so the
+    // result counts wheel steps and says what a page was.
+    let what = format!("{steps} wheel step{}", if steps == 1 { "" } else { "s" });
+    let page_note = match by {
+        pincer_contract::ScrollBy::Page if amount == 1 => {
+            format!(" The page was {WHEEL_STEPS_PER_PAGE} wheel steps, not a screenful.")
+        }
         pincer_contract::ScrollBy::Page => format!(
-            "{amount} page{} ({steps} wheel steps)",
-            if amount == 1 { "" } else { "s" }
+            " Each of the {amount} pages was {WHEEL_STEPS_PER_PAGE} wheel steps, not a \
+             screenful."
         ),
-        _ => format!("{steps} wheel step{}", if steps == 1 { "" } else { "s" }),
+        _ => String::new(),
     };
     let route = format!("delivery_mode={mode_label}, path={path}");
     match movement {
         ScrollMovement::Moved(from, to) => ToolResult::text(format!(
-            "Scrolled {direction} {what} ({route}); the scroll bar moved from {from} to {to}."
+            "Scrolled {direction} {what} ({route}); the scroll bar moved from {from} to \
+             {to}.{page_note}"
         ))
         .with_structured(json!({
             "verified": true,
@@ -12535,7 +12737,7 @@ fn scroll_outcome_result(
             at_end: true,
         } => ToolResult::text(format!(
             "Sent {what} {direction} ({route}), but the view is already at its end: the \
-             scroll bar stays at {value}."
+             scroll bar stays at {value}.{page_note}"
         ))
         .with_structured(json!({
             "verified": true,
@@ -12557,7 +12759,8 @@ fn scroll_outcome_result(
                 "Nothing scrolled: sent {what} {direction} ({route}), but the window's scroll \
                  bar stayed at {value}; {why}. In background, set the scroll position with \
                  set_value on the `scroll bar` row's element_token, or press_key page_down / \
-                 page_up on the window; otherwise retry with delivery_mode:\"foreground\"."
+                 page_up on the window; otherwise retry with delivery_mode:\"foreground\".\
+                 {page_note}"
             ))
             .with_structured(json!({
                 "code": "no_change",
@@ -12571,7 +12774,8 @@ fn scroll_outcome_result(
         ScrollMovement::Unknown => {
             let mut text = format!(
                 "Sent {what} {direction} ({route}); not verified: no scroll bar of this \
-                 window is known (get_window_state indexes them), so check a screenshot."
+                 window is known (get_window_state indexes them), so check a screenshot.\
+                 {page_note}"
             );
             if synthetic_wheel_ignored {
                 text.push_str(
@@ -13852,12 +14056,23 @@ impl Tool for DragTool {
         }
 
         // Legacy target-addressed XSendEvent gesture (headless servers / no
-        // uinput): only core-protocol toolkits accept it.
-        if synthetic_pointer_is_dropped(pid) {
+        // uinput). GTK and LibreOffice drop it; Qt takes it (a synthetic drag
+        // selected text in KWrite and in a Qt 5.15 text edit while another
+        // window was active, 2026-11-11), so Qt is no longer refused here.
+        if synthetic_press_is_dropped(pid) {
             return crate::input::delivery::background_unavailable_error(
-                crate::input::delivery::BackgroundUnavailable::FocusedInputOnly,
+                crate::input::delivery::BackgroundUnavailable::SyntheticPointerDropped,
             );
         }
+        // Qt asks the window manager to activate a window that gets a press
+        // (KWrite became the active window after that drag): snapshot the
+        // focus before the press and restore it after the release, as the
+        // synthetic click does.
+        let focus_snapshot =
+            tokio::task::spawn_blocking(crate::input::focus_guard::FocusSnapshot::capture)
+                .await
+                .ok()
+                .flatten();
         crate::overlay::send_command_for(
             cursor_id.clone(),
             cursor_overlay::OverlayCommand::SetPressed(true),
@@ -13942,6 +14157,14 @@ impl Tool for DragTool {
             cursor_id.clone(),
             cursor_overlay::OverlayCommand::SetPressed(false),
         );
+        let guard = match focus_snapshot {
+            Some(snapshot) => {
+                tokio::task::spawn_blocking(move || snapshot.restore_if_changed(Some(pid)))
+                    .await
+                    .ok()
+            }
+            None => None,
+        };
 
         if result.is_ok() {
             if let Ok(Ok((sx_to, sy_to))) =
@@ -13957,7 +14180,7 @@ impl Tool for DragTool {
             }
         }
 
-        let route = PointerRoute::Synthetic(None);
+        let route = PointerRoute::Synthetic(guard);
         match result {
             Ok(()) => ToolResult::text(format!(
                 "Posted drag ({button_str}) to pid {pid} \
@@ -16183,9 +16406,18 @@ impl Tool for SetAgentCursorEnabledV2Tool {
             cursor_overlay::OverlayCommand::SetEnabled(enabled),
         );
         let (renderer, note) = cursor_renderer_report();
+        // Pointer and keyboard actions turn the cursor back on (see
+        // `overlay_glide_to_target_for`), so the reply says how long a hide
+        // lasts; round 2's Opus tester expected it to last until
+        // `enabled:true`.
         ToolResult::text(format!(
             "Agent cursor for session '{session}' {}.{note}",
-            if enabled { "enabled" } else { "disabled" }
+            if enabled {
+                "enabled"
+            } else {
+                "disabled until the session's next desktop pointer or keyboard action, which \
+                 shows it again"
+            }
         ))
         .with_structured(json!({"session":session,"enabled":enabled,"renderer":renderer}))
     }
@@ -16368,18 +16600,23 @@ impl Tool for GetAgentCursorStateV2Tool {
             ),
             None => "not drawn yet (position null)".to_owned(),
         };
+        // The effects line says which effects are pinned even when none is:
+        // the text renderer leaves an empty `motion.pinned_effects` out.
         let text = format!(
             "Agent cursor state for session '{session}'.{note}\n\
              enabled={enabled}: {}; get_session's cursor_visible says whether it is drawn right \
              now (it hides after motion.idle_hide_ms idle).\n\
              Position: {drawn_at}.\n\
-             Installed themes (ids for set_agent_cursor_theme): {}.",
+             Installed themes (ids for set_agent_cursor_theme): {}.\n\
+             {}",
             if enabled {
                 "it may be drawn"
             } else {
-                "hidden by set_agent_cursor_enabled"
+                "hidden by set_agent_cursor_enabled until the session's next desktop pointer or \
+                 keyboard action"
             },
             installed_themes.join(", "),
+            motion.effects_summary(&motion),
         );
         ToolResult::text(text).with_structured(json!({
             "session":session,
@@ -16522,10 +16759,14 @@ impl Tool for GetConfigTool {
     fn def(&self) -> &ToolDef {
         GCFG_DEF.get_or_init(|| ToolDef {
             name: "get_config".into(),
+            // The text result marks each setting `(saved)` or `(built-in
+            // default)`, so the text renderer drops the structured
+            // `saved_keys` list as already said (it prints it only when an
+            // effect is saved); naming it here sent both round-2 testers
+            // looking for it.
             description: "Return the current pincer configuration: each setting's value and \
                 whether it is saved in ~/.pincer/config.json (by set_config) or a built-in \
-                default. `saved_keys` lists the saved ones. Cursor effects not saved follow \
-                the motion style."
+                default. Cursor effects not saved follow the motion style."
                 .into(),
             input_schema: json!({"type":"object","properties":{},"additionalProperties":false}),
             read_only: true,
@@ -16591,7 +16832,8 @@ impl Tool for GetConfigTool {
         } else {
             let pinned: Vec<String> = saved_effects
                 .iter()
-                .map(|(name, value)| format!("{name}={value}"))
+                // set_config's vocabulary (on/off), so a model can copy it back.
+                .map(|(name, value)| format!("{name}={}", if *value { "on" } else { "off" }))
                 .collect();
             format!("{} (saved), the rest follow the style", pinned.join(", "))
         };
@@ -16769,10 +17011,12 @@ impl Tool for GetAccessibilityTreeTool {
     fn def(&self) -> &ToolDef {
         GAX_DEF.get_or_init(|| ToolDef {
             name: "get_accessibility_tree".into(),
-            description: "Return a lightweight snapshot of the desktop: running processes and \
-                on-screen visible X11 windows with their bounds and owner pid.\n\n\
-                For the full AT-SPI subtree of a single window (with interactive element indices \
-                you can click by), use get_window_state instead — this is a fast discovery read."
+            // The name is kept for the contract; round 2's Sonnet tester took
+            // it for a window's element tree, so the first sentence says
+            // what comes back and the second where the elements are.
+            description: "List the running processes (name, pid) and the visible X11 windows \
+                (pid, window_id, title, bounds) in one call; despite the name, no element \
+                tree. For a window's elements, call get_window_state(pid, window_id)."
                 .into(),
             input_schema: json!({"type":"object","properties":{},"additionalProperties":false}),
             read_only: true,
@@ -17598,10 +17842,12 @@ fn normalized_menu_path(path: Vec<String>) -> Result<Vec<String>, String> {
 
 /// The invoke_menu success result: what ran, then what became of the menu
 /// Pincer opened to reach the item (closed, or still open with how to close
-/// it).
+/// it), and whether the app answered the final action
+/// ([`crate::atspi::native::MenuInvoked::unacknowledged`]).
 fn invoke_menu_result(
     route: &str,
     cleanup: &crate::atspi::native::MenuCleanup,
+    unacknowledged: bool,
     pid: u32,
     window_id: u64,
     delivery_mode: &str,
@@ -17642,13 +17888,34 @@ fn invoke_menu_result(
             }
         }
     }
+    if unacknowledged {
+        text.push_str(&format!(
+            ". The app did not answer the final action within {} s, as when the item opens a \
+             modal dialog: check list_windows before calling again",
+            crate::atspi::native::CALL_TIMEOUT.as_secs()
+        ));
+        structured["acknowledged"] = json!(false);
+    }
     text.push_str("; verify the command's semantic effect from fresh state.");
     ToolResult::text(text).with_structured(structured)
 }
 
+/// The action record's evidence for a menu path that resolved.
+fn menu_evidence(unacknowledged: bool) -> &'static str {
+    if unacknowledged {
+        "Every menu hop resolved uniquely; the final action was sent but not answered in time"
+    } else {
+        "Every menu hop resolved uniquely and AT-SPI accepted the final action"
+    }
+}
+
+/// A refused invoke_menu call. The top-level `code` lets the text result
+/// print the refusal once with `[code: ...]`, instead of the message a
+/// second time inside `refusal` (a long label list would show twice).
 fn menu_refusal(message: String) -> ToolResult {
     ToolResult::error(message.clone()).with_structured(json!({
         "status": "refused",
+        "code": "menu_path_unavailable",
         "refusal": { "code": "menu_path_unavailable", "message": message }
     }))
 }
@@ -17712,10 +17979,11 @@ impl Tool for InvokeMenuTool {
             })
             .await;
             return match outcome {
-                Ok(Ok((cleanup, guard))) => attach_focus_guard_opts(
+                Ok(Ok((invoked, guard))) => attach_focus_guard_opts(
                     invoke_menu_result(
                         "delivery_mode=background, focus untouched",
-                        &cleanup,
+                        &invoked.cleanup,
+                        invoked.unacknowledged,
                         pid,
                         window_id,
                         "background",
@@ -17729,15 +17997,17 @@ impl Tool for InvokeMenuTool {
                         .actual_delivery(ActualDelivery::Background)
                         .evidence(ActionEvidence {
                             kind: EvidenceKind::NativeApiResult,
-                            detail: "Every menu hop resolved uniquely and AT-SPI accepted the final action"
-                                .into(),
+                            detail: menu_evidence(invoked.unacknowledged).into(),
                         })
                         .build()
                         .expect("invoke_menu record is valid"),
                     ),
                     guard.as_ref(),
                     // A menu left open is named by the cleanup sentence.
-                    !matches!(cleanup, crate::atspi::native::MenuCleanup::StillOpen { .. }),
+                    !matches!(
+                        invoked.cleanup,
+                        crate::atspi::native::MenuCleanup::StillOpen { .. }
+                    ),
                 ),
                 Ok(Err(error)) => menu_refusal(format!("invoke_menu: {error}")),
                 Err(error) => menu_refusal(format!("invoke_menu: blocking task failed: {error}")),
@@ -17788,9 +18058,10 @@ impl Tool for InvokeMenuTool {
         .await;
 
         match outcome {
-            Ok(Ok(cleanup)) => invoke_menu_result(
+            Ok(Ok(invoked)) => invoke_menu_result(
                 "delivery_mode=foreground",
-                &cleanup,
+                &invoked.cleanup,
+                invoked.unacknowledged,
                 pid,
                 window_id,
                 "foreground",
@@ -17804,8 +18075,7 @@ impl Tool for InvokeMenuTool {
                 .actual_delivery(ActualDelivery::Foreground)
                 .evidence(ActionEvidence {
                     kind: EvidenceKind::NativeApiResult,
-                    detail: "Every menu hop resolved uniquely and AT-SPI accepted the final action"
-                        .into(),
+                    detail: menu_evidence(invoked.unacknowledged).into(),
                 })
                 .build()
                 .expect("invoke_menu record is valid"),
@@ -17836,7 +18106,7 @@ impl Tool for SetWindowFrameTool {
                 description: format!(
                     "{} On Linux the frame is the client area, as in list_windows bounds: \
                      the window manager's title bar and borders lie outside it, so the title \
-                     bar sits above y.",
+                     bar sits above y. The result gives the frame read back as WxH+X+Y.",
                     contract.description
                 ),
                 input_schema: contract.input_schema,
@@ -17952,14 +18222,34 @@ impl Tool for SetWindowFrameTool {
                 },
             });
         }
-        ToolResult::text(if confirmed {
-            "Set and verified the requested window frame."
-        } else if observed.is_none() {
-            "The native window mutation was attempted, but its resulting frame could not be read back."
-        } else {
-            "The window frame did not settle at the requested geometry."
-        })
-        .with_action_record(record.build().expect("set_window_frame record is valid"))
+        ToolResult::text(set_window_frame_text(requested, observed, confirmed))
+            .with_action_record(record.build().expect("set_window_frame record is valid"))
+    }
+}
+
+/// set_window_frame's text, with the frame read back in list_windows' own
+/// `WxH+X+Y` form so the caller needs no list_windows call to see it (round
+/// 2 of the first-call test).
+fn set_window_frame_text(
+    requested: (i32, i32, u32, u32),
+    observed: Option<(i32, i32, u32, u32)>,
+    confirmed: bool,
+) -> String {
+    let frame = |(x, y, width, height): (i32, i32, u32, u32)| format!("{width}x{height}+{x}+{y}");
+    match observed {
+        Some(observed) if confirmed => format!(
+            "Set and verified the window frame: it reads back as {}.",
+            frame(observed)
+        ),
+        Some(observed) => format!(
+            "The window frame did not settle at the requested geometry: asked for {}, it \
+             reads back as {}.",
+            frame(requested),
+            frame(observed)
+        ),
+        None => "The native window mutation was attempted, but its resulting frame could not \
+                 be read back."
+            .to_owned(),
     }
 }
 
@@ -17975,19 +18265,27 @@ impl Tool for BringToFrontTool {
         BTF_DEF.get_or_init(|| ToolDef {
             name: "bring_to_front".into(),
             description:
+                // Screenshot advice checked on KWin X11, 2026-11-11: with
+                // compositing on, a covered window's capture showed only its
+                // own pixels; with compositing blocked
+                // (_KDE_NET_WM_BLOCK_COMPOSITING) it showed the window over
+                // it, and a minimized window's capture failed (BadMatch)
+                // until bring_to_front restored it.
                 "Activate a window and raise it above the others, and leave it that way, \
-                 so later input lands on it. On X11 this is an EWMH _NET_ACTIVE_WINDOW \
-                 request (the `wmctrl -a` equivalent), which window managers such as KWin \
-                 answer by raising the window too; the result reads the stacking order \
-                 back and says whether the window is now active and on top, and names any \
-                 window still stacked above it that overlaps it (a keep-above window, for \
-                 example). This deliberately breaks the no-foreground contract and is not \
-                 part of the normal input ladder. For an ordinary `background_unavailable` \
+                 so later input lands on it. On X11 this sends _NET_ACTIVE_WINDOW, which \
+                 window managers such as KWin answer by raising the window (and restoring \
+                 a minimized one); the result reads the stacking order back: whether the \
+                 window is now active and on top, and any overlapping window still above \
+                 it (a keep-above window, for example). \
+                 This deliberately breaks the no-foreground contract and is not part of \
+                 the normal input ladder. For an ordinary `background_unavailable` \
                  response, retry only the refused action with \
                  `delivery_mode:\"foreground\"`; the input tool activates the window \
                  itself. Use `bring_to_front` for a surface that must stay in front \
-                 across several calls, such as a remote desktop session, or to uncover a \
-                 window before reading its screenshot. Wayland: activates through a \
+                 across several calls, such as a remote desktop session, or before \
+                 reading the screenshot of a minimized window (its capture fails) or, \
+                 with no compositing window manager running, of a covered one (its \
+                 capture shows the window over it). Wayland: activates through a \
                  target-addressable compositor adapter (wlroots foreign-toplevel or the \
                  GNOME Shell helper) and refuses when the compositor offers no safe \
                  adapter."

@@ -30,6 +30,14 @@ use super::types::BindingQuality;
 /// Register the complete browser surface against one shared engine. Platform
 /// crates call this from their `register_all` after constructing the
 /// engine with their adapter.
+///
+/// Every browser tool's input schema is closed (`additionalProperties:
+/// false`), so dispatch refuses an unknown or misspelled argument the way it
+/// does for desktop tools; at bfc42c0 `"snapshot-format"` or
+/// `"delivery-mode"` was dropped and the call ran with the default. Nothing
+/// passes extra public fields to these tools: run_steps and run_script cannot
+/// call them, and the fields transports add start with `_`, which dispatch
+/// strips before the check.
 pub fn register_browser_tools(engine: &Arc<BrowserEngine>, registry: &mut ToolRegistry) {
     registry.register(Box::new(GetBrowserStateTool::new(engine.clone())));
     registry.register(Box::new(BrowserPrepareTool::new(engine.clone())));
@@ -325,7 +333,7 @@ impl GetBrowserStateTool {
                         "description": "Capture the exact tab viewport as PNG through CDP without selecting the tab or foregrounding its native window. The request refuses if capture cannot be completed."
                     },
                 },
-                "additionalProperties": true
+                "additionalProperties": false
             }),
             read_only: true,
             destructive: false,
@@ -701,7 +709,7 @@ impl BrowserPrepareTool {
                 // anyOf/oneOf/allOf at this level, so the conditional pid/profile
                 // contract is described above and enforced by invoke instead.
                 "required": [],
-                "additionalProperties": true
+                "additionalProperties": false
             }),
             read_only: false,
             destructive: true,
@@ -879,7 +887,7 @@ impl BrowserNavigateTool {
                     "session": schema_session(),
                 },
                 "required": ["target_id", "tab_id", "url"],
-                "additionalProperties": true
+                "additionalProperties": false
             }),
             read_only: false,
             destructive: false,
@@ -1039,7 +1047,7 @@ impl BrowserClickTool {
                     },
                 },
                 "required": ["target_id", "tab_id"],
-                "additionalProperties": true
+                "additionalProperties": false
             }),
             read_only: false,
             destructive: false,
@@ -1816,7 +1824,7 @@ impl BrowserTypeTool {
                     },
                 },
                 "required": ["target_id", "tab_id", "ref", "text"],
-                "additionalProperties": true
+                "additionalProperties": false
             }),
             read_only: false,
             destructive: false,
@@ -2385,7 +2393,7 @@ impl BrowserDialogTool {
                         }
                     },
                     "required": ["target_id", "tab_id", "action"],
-                    "additionalProperties": true
+                    "additionalProperties": false
                 }),
                 read_only: false,
                 destructive: false,
@@ -2602,7 +2610,7 @@ impl BrowserSetInputFilesTool {
                         }
                     },
                     "required": ["target_id", "tab_id", "ref", "files"],
-                    "additionalProperties": true
+                    "additionalProperties": false
                 }),
                 read_only: false,
                 destructive: false,
@@ -3142,6 +3150,51 @@ mod tests {
                 "browser_download",
                 "browser_pointer"
             ]
+        );
+        // Closed like the desktop tools, `session` and every required field advertised.
+        assert_eq!(
+            registry.input_conformance_violations(&[]),
+            Vec::<String>::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_refuses_unknown_browser_arguments_like_desktop_tools() {
+        // At bfc42c0 get_browser_state took `"snapshot-format"` and answered
+        // in the default dom_refs_v1 format with status ok.
+        use crate::authorization::PermissionMode;
+        use crate::session_authorization::{SessionAuthorizationRegistry, SessionModeCeiling};
+        let mut registry = ToolRegistry::new();
+        register_browser_tools(&engine(), &mut registry);
+        let ceiling = SessionModeCeiling::for_trusted_sessions(
+            [PermissionMode::Unrestricted],
+            true,
+            std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(30),
+        )
+        .unwrap();
+        let context = SessionAuthorizationRegistry::with_ceiling(ceiling)
+            .compatibility_context(PermissionMode::Unrestricted, None)
+            .unwrap();
+        let result = registry
+            .invoke_with_context(
+                "get_browser_state",
+                json!({
+                    "target_id": "bt-1", "tab_id": "tab-1", "session": "s",
+                    "snapshot-format": "semantic_v2",
+                }),
+                context,
+            )
+            .await;
+        assert_eq!(result.is_error, Some(true));
+        let text = format!("{:?}", result.content);
+        assert!(
+            text.contains(
+                "get_browser_state: unknown argument snapshot-format; accepted: continuation, \
+                 include_screenshot, pid, query, scope_ref, session, snapshot_format, tab_id, \
+                 target_id, window_id"
+            ),
+            "{text}"
         );
     }
 

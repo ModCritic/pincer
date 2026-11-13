@@ -215,7 +215,7 @@ fn move_cursor() -> ToolContract {
 fn set_window_frame() -> ToolContract {
     contract::<SetWindowFrameInput, ActionResult>(
         "set_window_frame",
-        "Set one top-level window's frame (x, y, width, height) in list_windows desktop coordinates, then verify it by reading the geometry back. The window manager can refuse the change, for example for a maximized, fullscreen or tiled window; the result then says the frame did not settle (effect suspected_noop) and the window is unchanged. Check with list_windows.",
+        "Set one top-level window's frame (x, y, width, height) in list_windows desktop coordinates, then verify it by reading the geometry back. The window manager can refuse the change, for example for a maximized, fullscreen or tiled window; the result then says the frame did not settle (effect suspected_noop) and the window is unchanged.",
         &["window.frame.set"],
         ToolAnnotations {
             read_only: false,
@@ -230,7 +230,7 @@ fn set_window_frame() -> ToolContract {
 fn invoke_menu() -> ToolContract {
     contract::<InvokeMenuInput, ActionResult>(
         "invoke_menu",
-        "Run an application menu command by its exact path of item labels, e.g. [\"Edit\",\"Undo\"]. Each level is resolved in the live menu through the accessibility API and the final item fires there; this tool never clicks pixels. A missing, ambiguous, disabled or mismatched segment is refused (menu_path_unavailable). The menu opened to reach the item is closed again after it fires; when one stays open, the result names it and how to close it. The command's own effect is not verified: read it back from fresh state.",
+        "Run an application menu command by its exact path of item labels, e.g. [\"Edit\",\"Undo\"]; three periods match the ellipsis character (\"Find...\" finds \"Find…\"). Each level is resolved and fired through the accessibility API, never by pixels. A missing, ambiguous or disabled segment is refused (menu_path_unavailable); for a missing one the refusal lists the labels at that level, so a guessed label costs at most one retry. The menu opened to reach the item is closed again; when one stays open, the result names it and how to close it. The command's own effect is not verified: read it back from fresh state.",
         &["menu.path.invoke", "accessibility.menu.native"],
         ToolAnnotations {
             read_only: false,

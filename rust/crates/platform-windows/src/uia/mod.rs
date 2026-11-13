@@ -109,41 +109,89 @@ fn is_menu_control(control_type: &str) -> bool {
     matches!(control_type, "Menu" | "MenuBar" | "MenuItem")
 }
 
-fn exact_menu_path_matches(nodes: &[UiaNode], path: &[String]) -> Vec<usize> {
-    let by_element_index: std::collections::HashMap<usize, usize> = nodes
+/// The labels of the menu nodes from `node_index` up to the root, root
+/// first, as [`pincer_core::menu_label::menu_label_key`] reads them, with
+/// unlabelled menus skipped and repeats next to each other collapsed.
+fn menu_lineage(
+    nodes: &[UiaNode],
+    by_element_index: &std::collections::HashMap<usize, usize>,
+    node_index: usize,
+) -> Vec<String> {
+    let mut lineage = Vec::new();
+    let mut cursor = Some(node_index);
+    while let Some(current) = cursor {
+        let ancestor = &nodes[current];
+        if is_menu_control(&ancestor.control_type) {
+            if let Some(name) = ancestor
+                .name
+                .as_deref()
+                .map(pincer_core::menu_label::menu_label_key)
+            {
+                if !name.is_empty() {
+                    lineage.push(name);
+                }
+            }
+        }
+        cursor = ancestor
+            .parent_element_index
+            .and_then(|index| by_element_index.get(&index).copied());
+    }
+    lineage.reverse();
+    lineage.dedup();
+    lineage
+}
+
+fn nodes_by_element_index(nodes: &[UiaNode]) -> std::collections::HashMap<usize, usize> {
+    nodes
         .iter()
         .enumerate()
         .filter_map(|(node_index, node)| node.element_index.map(|index| (index, node_index)))
-        .collect();
+        .collect()
+}
 
+/// Labels compare as [`pincer_core::menu_label::menu_label_key`] reads them,
+/// so "Save As..." finds "Save As…" here as on every platform.
+fn exact_menu_path_matches(nodes: &[UiaNode], path: &[String]) -> Vec<usize> {
+    use pincer_core::menu_label::menu_label_key;
+    let path: Vec<String> = path.iter().map(|segment| menu_label_key(segment)).collect();
+    let by_element_index = nodes_by_element_index(nodes);
     nodes
         .iter()
         .enumerate()
         .filter_map(|(node_index, node)| {
             if !is_menu_control(&node.control_type)
                 || node.enabled == Some(false)
-                || node.name.as_deref().map(str::trim) != path.last().map(String::as_str)
+                || node.name.as_deref().map(menu_label_key).as_ref() != path.last()
             {
                 return None;
             }
-            let mut lineage = Vec::new();
-            let mut cursor = Some(node_index);
-            while let Some(current) = cursor {
-                let ancestor = &nodes[current];
-                if is_menu_control(&ancestor.control_type) {
-                    if let Some(name) = ancestor.name.as_deref().map(str::trim) {
-                        if !name.is_empty() {
-                            lineage.push(name);
-                        }
-                    }
-                }
-                cursor = ancestor
-                    .parent_element_index
-                    .and_then(|index| by_element_index.get(&index).copied());
-            }
-            lineage.reverse();
-            lineage.dedup();
-            (lineage == path.iter().map(String::as_str).collect::<Vec<_>>()).then_some(node_index)
+            (menu_lineage(nodes, &by_element_index, node_index) == path).then_some(node_index)
+        })
+        .collect()
+}
+
+/// The labels of the menu entries at path level `prefix.len()` (the ones a
+/// segment there is compared with), in walk order, for the refusal of a
+/// segment that is not found. The previous hop expanded that menu, so its
+/// entries are in the same fresh walk the match looked in.
+fn menu_level_labels(nodes: &[UiaNode], prefix: &[String]) -> Vec<String> {
+    use pincer_core::menu_label::menu_label_key;
+    let prefix: Vec<String> = prefix
+        .iter()
+        .map(|segment| menu_label_key(segment))
+        .collect();
+    let by_element_index = nodes_by_element_index(nodes);
+    nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| is_menu_control(&node.control_type))
+        .filter_map(|(node_index, node)| {
+            let label = node.name.as_deref()?.trim();
+            let lineage = menu_lineage(nodes, &by_element_index, node_index);
+            (!label.is_empty()
+                && lineage.len() == prefix.len() + 1
+                && lineage[..prefix.len()] == prefix[..])
+                .then(|| label.to_owned())
         })
         .collect()
 }
@@ -202,8 +250,11 @@ pub fn invoke_menu_path(hwnd: u64, path: &[String]) -> Result<(), String> {
         let target_index = match matches.as_slice() {
             [index] => *index,
             [] => {
+                let labels = menu_level_labels(&result.nodes, &path[..depth]);
                 unsafe { release_walk_nodes(result.nodes) };
-                return Err(format!("menu path segment {depth} was not found"));
+                return Err(pincer_core::menu_label::missing_segment_message(
+                    depth, path, &labels,
+                ));
             }
             _ => {
                 unsafe { release_walk_nodes(result.nodes) };

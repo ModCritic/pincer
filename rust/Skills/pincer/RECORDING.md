@@ -121,7 +121,10 @@ for the recording it ended.
 ## Replay is a new action sequence
 
 `replay_trajectory` invokes recorded arguments in turn order; it is not a
-semantic task planner. It accepts `dir`, `delay_ms`, and `stop_on_error`.
+semantic task planner. It accepts `dir`, `delay_ms`, `stop_on_error`, and
+`include_failed_turns`. Turns whose `action.json` has `result_error: true`
+(for example a refused call followed by its retry) are skipped unless
+`include_failed_turns` is true, and counted in `skipped`.
 Read its live schema before use, and obtain authorization for the actions
 being replayed.
 

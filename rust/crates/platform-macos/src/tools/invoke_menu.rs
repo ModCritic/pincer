@@ -86,10 +86,10 @@ unsafe fn semantic_children(parent: AXUIElementRef) -> Vec<AXUIElementRef> {
 }
 
 /// A menu title as paths compare it: trimmed, with three periods read as
-/// the ellipsis character macOS menu titles use ("Save As..." finds
-/// "Save As…").
+/// the ellipsis character ("Save As..." finds "Save As…"), the same rule on
+/// every platform.
 fn menu_title_key(title: &str) -> String {
-    title.trim().replace("...", "\u{2026}")
+    pincer_core::menu_label::menu_label_key(title)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -126,44 +126,12 @@ fn pick_title(titles: &[String], segment: &str) -> TitleMatch {
     }
 }
 
-/// Most items a missed segment lists, so a long menu cannot flood the reply.
-const MAX_LISTED_TITLES: usize = 40;
-
 /// A missed segment names what was asked for, where, and the items that are
-/// there, so the next call can use the real title instead of a full tree
-/// read (LibreOffice calls it "To Next Sheet", not "Next Sheet").
+/// there (the message every platform's invoke_menu gives).
 fn missing_segment_error(depth: usize, prefix: &[String], titles: &[String]) -> String {
-    let wanted = &prefix[depth];
-    let location = if depth == 0 {
-        "in the menu bar".to_owned()
-    } else {
-        format!("under \"{}\"", prefix[..depth].join(" > "))
-    };
-    let mut items: Vec<&str> = titles
-        .iter()
-        .map(|title| title.trim())
-        .filter(|title| !title.is_empty())
-        .collect();
-    items.dedup();
-    if items.is_empty() {
-        return format!(
-            "invoke_menu: path segment {depth} \"{wanted}\" was not found {location}, which lists no titled items (the app may fill this menu only while it is open)"
-        );
-    }
-    let more = items.len().saturating_sub(MAX_LISTED_TITLES);
-    let listed = items
-        .iter()
-        .take(MAX_LISTED_TITLES)
-        .map(|title| format!("\"{title}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let more = if more > 0 {
-        format!(" and {more} more")
-    } else {
-        String::new()
-    };
     format!(
-        "invoke_menu: path segment {depth} \"{wanted}\" was not found {location}. Items there: {listed}{more}"
+        "invoke_menu: {}",
+        pincer_core::menu_label::missing_segment_message(depth, prefix, titles)
     )
 }
 

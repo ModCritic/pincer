@@ -3329,7 +3329,7 @@ impl SyntheticClock {
 
 /// The X server's current time: the timestamp of a `PropertyNotify` on a
 /// throwaway input-only window, bounded at 200 ms.
-fn server_time(conn: &RustConnection, root: Window) -> Option<u32> {
+pub(crate) fn server_time(conn: &RustConnection, root: Window) -> Option<u32> {
     let probe = conn.generate_id().ok()?;
     let aux = CreateWindowAux::new().event_mask(EventMask::PROPERTY_CHANGE);
     conn.create_window(

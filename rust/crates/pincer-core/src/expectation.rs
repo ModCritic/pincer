@@ -764,10 +764,25 @@ fn project_element(element: &Value) -> Value {
         "frame",
     ] {
         if let Some(value) = element.get(key) {
-            projection.insert(key.to_owned(), value.clone());
+            projection.insert(key.to_owned(), preview(value));
         }
     }
     Value::Object(projection)
+}
+
+/// A long string cut the way get_window_state cuts a row's value
+/// (`<first 200>... (N chars)`), so a document's text cannot fill
+/// `observed_json` and push it past [`bounded_json`]'s limit, where the cut
+/// JSON no longer parses and the text result has to show it escaped.
+fn preview(value: &Value) -> Value {
+    use crate::window_state_view::VALUE_PREVIEW_CHARS;
+    match value {
+        Value::String(text) if text.chars().count() > VALUE_PREVIEW_CHARS => {
+            let kept: String = text.chars().take(VALUE_PREVIEW_CHARS).collect();
+            Value::String(format!("{kept}... ({} chars)", text.chars().count()))
+        }
+        other => other.clone(),
+    }
 }
 
 fn bounded_json(value: &Value) -> String {
@@ -1441,5 +1456,27 @@ mod tests {
         let encoded = bounded_json(&json!({"label": "é".repeat(2_000)}));
         assert!(encoded.len() <= 2_000);
         assert!(encoded.ends_with("..."));
+    }
+
+    // KWrite's document (24,498 characters) filled observed_json past 2,000
+    // bytes, so it was cut mid-string and no longer parsed (slot test,
+    // 2026-11-11).
+    #[test]
+    fn a_long_value_is_previewed_so_observed_json_stays_valid() {
+        let document = "line of text\n".repeat(2_000);
+        let outcomes = evaluate_predicates(
+            &[labelled("notes.txt", None)],
+            &observed(vec![json!({
+                "element_index": 0,
+                "role": "text",
+                "label": "notes.txt",
+                "value": document,
+            })]),
+        );
+        let observed = outcomes[0].observed_json.as_deref().unwrap();
+        let parsed: Value = serde_json::from_str(observed).expect("valid JSON");
+        let value = parsed["value"].as_str().unwrap();
+        assert!(value.ends_with("... (26000 chars)"), "{value}");
+        assert_eq!(value.chars().count(), 200 + "... (26000 chars)".len());
     }
 }

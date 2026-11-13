@@ -22,6 +22,7 @@ use atspi::proxy::accessible::AccessibleProxy;
 use atspi::proxy::proxy_ext::ProxyExt;
 use atspi::{CoordType, Interface, State, StateSet};
 use atspi_connection::AccessibilityConnection;
+use pincer_core::menu_label::{menu_label_key, menu_label_matches};
 
 use super::{AtspiIdentity, AtspiNode};
 
@@ -30,7 +31,7 @@ pub(crate) mod hit_test;
 
 /// Per-call D-Bus timeout: a single unresponsive accessible (common in large,
 /// lazily-built trees like Chromium's) must not stall the whole walk.
-const CALL_TIMEOUT: Duration = Duration::from_secs(3);
+pub(crate) const CALL_TIMEOUT: Duration = Duration::from_secs(3);
 /// Overall budget for one tree walk / operation.
 const OP_TIMEOUT: Duration = Duration::from_secs(25);
 /// Startup may run before `serve` binds its socket or MCP reads stdin. A
@@ -1762,6 +1763,10 @@ struct WalkOptions<'s> {
     /// Search these roles below the caller's top-level through AT-SPI
     /// Collection instead of walking it, where the toolkit supports it.
     role_search: Option<&'s RoleSearch>,
+    /// Characters of a text field's content to read; `None` reads
+    /// [`TEXT_READ_CHARS`]. `full_output` reads asks for
+    /// [`FULL_TEXT_READ_CHARS`].
+    text_read_chars: Option<usize>,
 }
 
 /// [`collect_visited_bounded`] with explicit [`WalkOptions`].
@@ -2166,7 +2171,8 @@ async fn collect_visited_bounded_opts<'a>(
                         .and_then(|r| r.ok())
                         .unwrap_or(0);
                     if count > 0 {
-                        let end = count.min(TEXT_READ_CHARS as i32);
+                        let limit = options.text_read_chars.unwrap_or(TEXT_READ_CHARS);
+                        let end = count.min(i32::try_from(limit).unwrap_or(i32::MAX));
                         if let Some(Ok(t)) = call(tp.get_text(0, end)).await {
                             text_content = t;
                         }
@@ -2933,18 +2939,21 @@ pub fn walk_tree_bounded(
     max_elements: Option<usize>,
     max_depth: Option<usize>,
 ) -> Result<Option<WalkedTree>> {
-    walk_tree_bounded_with_timeout(pid, xid, max_elements, max_depth, None, OP_TIMEOUT)
+    walk_tree_bounded_with_timeout(pid, xid, max_elements, max_depth, None, None, OP_TIMEOUT)
 }
 
 /// [`walk_tree_bounded`] within `timeout`. With `role_search`, a window whose
 /// toolkit supports it is searched for those roles instead of walked
 /// (`WalkedTree::searched_roles` says whether that happened).
+/// `text_read_chars` is how much of a text field's content to read (`None`:
+/// the usual [`TEXT_READ_CHARS`]).
 pub(super) fn walk_tree_bounded_with_timeout(
     pid: u32,
     xid: u64,
     max_elements: Option<usize>,
     max_depth: Option<usize>,
     role_search: Option<&RoleSearch>,
+    text_read_chars: Option<usize>,
     timeout: Duration,
 ) -> Result<Option<WalkedTree>> {
     runtime().block_on(async {
@@ -2963,6 +2972,7 @@ pub(super) fn walk_tree_bounded_with_timeout(
             let conn = shared_connection().await?;
             let options = WalkOptions {
                 role_search,
+                text_read_chars,
                 ..WalkOptions::default()
             };
             collect_visited_bounded_opts(conn, pid, xid, max_elements, max_depth, options).await
@@ -3912,6 +3922,14 @@ impl AtPointHit {
 /// reads only this much of it.
 const TEXT_READ_CHARS: usize = 4096;
 
+/// Characters of a text field a `full_output` read takes, which returns
+/// values whole. AT-SPI's `GetText(0, CharacterCount)` returned all 24,492
+/// characters of KWrite's notes.txt in one call in under a millisecond
+/// (slot test, KWrite on KDE Frameworks 6, 2026-11-11), so the limit only
+/// keeps a document of megabytes out of one reply; a row past it still
+/// says `(N chars, the first M read)`.
+pub const FULL_TEXT_READ_CHARS: usize = 250_000;
+
 /// The ` value="..."` part of a row. Its character count is written here
 /// whenever the shown text is not the whole value or the count of the shown
 /// text would be wrong: a field longer than [`TEXT_READ_CHARS`] (` value=
@@ -3963,7 +3981,9 @@ fn counts_in_menu_lineage(role: &str, name: &str) -> bool {
 /// Find one exact visible menu lineage in a flattened pre-order AT-SPI walk.
 /// Unlabelled menu containers are transparent; all labelled menu ancestors
 /// must match the requested prefix, so duplicate labels elsewhere fail closed.
+/// Labels compare as [`menu_label_key`] reads them ("Find..." is "Find…").
 fn exact_menu_path_matches(visited: &[Visited<'_>], path: &[String]) -> Vec<usize> {
+    let path: Vec<String> = path.iter().map(|segment| menu_label_key(segment)).collect();
     let mut parent_at_depth: Vec<Option<usize>> = Vec::new();
     let mut parents = vec![None; visited.len()];
     for (index, node) in visited.iter().enumerate() {
@@ -3987,7 +4007,7 @@ fn exact_menu_path_matches(visited: &[Visited<'_>], path: &[String]) -> Vec<usiz
         .filter_map(|(index, node)| {
             if !is_menu_role(&node.role)
                 || node.enabled == Some(false)
-                || node.name.trim() != path.last().map(String::as_str).unwrap_or("")
+                || Some(&menu_label_key(&node.name)) != path.last()
             {
                 return None;
             }
@@ -3996,13 +4016,13 @@ fn exact_menu_path_matches(visited: &[Visited<'_>], path: &[String]) -> Vec<usiz
             while let Some(current) = cursor {
                 let ancestor = &visited[current];
                 if counts_in_menu_lineage(&ancestor.role, &ancestor.name) {
-                    lineage.push(ancestor.name.trim());
+                    lineage.push(menu_label_key(&ancestor.name));
                 }
                 cursor = parents[current];
             }
             lineage.reverse();
             lineage.dedup();
-            (lineage == path.iter().map(String::as_str).collect::<Vec<_>>()).then_some(index)
+            (lineage == path).then_some(index)
         })
         .collect()
 }
@@ -4020,67 +4040,148 @@ fn exact_menu_path_matches(visited: &[Visited<'_>], path: &[String]) -> Vec<usiz
 /// application), the hop under `xid`'s frame wins instead of the path being
 /// ambiguous.
 ///
-/// Once the final item has fired, the menu the first hop opened is closed
-/// when the toolkit left it open (see [`close_opened_menu`]).
-pub fn invoke_menu_path_in(pid: u32, xid: u64, path: &[String]) -> Result<MenuCleanup> {
+/// Once the final item has fired, or a later segment is refused, the menu
+/// the first hop opened is closed when the toolkit left it open (see
+/// [`close_opened_menu`]). A segment that is not found is refused with the
+/// labels at its level ([`menu_level_labels`]), read before that menu closes.
+pub fn invoke_menu_path_in(pid: u32, xid: u64, path: &[String]) -> Result<MenuInvoked> {
     bounded(
         async {
             let conn = shared_connection().await?;
-            // The entry the previous hop activated: the next segment is
-            // looked for inside it first.
-            let mut anchor: Option<RawObjectRef> = None;
             // The first hop (the menu-bar entry), its action proxy and the
             // action index that opened its menu.
-            let mut opener: Option<(RawObjectRef, atspi::proxy::action::ActionProxy<'_>, i32)> =
-                None;
-            for depth in 0..path.len() {
-                let previous = depth.checked_sub(1).map(|index| path[index].as_str());
-                let targeted =
-                    targeted_menu_hop(conn, pid, xid, anchor.as_ref(), &path[depth], previous)
-                        .await;
-                let hop = match targeted {
-                    Some(hop) => hop,
-                    None => {
-                        dlog!("invoke_menu: segment {depth} walks the application");
-                        walked_menu_hop(conn, pid, xid, &path[..=depth]).await?
-                    }
-                };
-                let chosen = activation_index(&hop.role, &hop.actions).ok_or_else(|| {
-                    anyhow!("menu path segment {depth} has no safe activation action")
-                })?;
-                let proxies = hop
-                    .acc
-                    .proxies()
-                    .await
-                    .map_err(|error| anyhow!("interface proxies unavailable: {error}"))?;
-                let action = proxies
-                    .action()
-                    .await
-                    .map_err(|error| anyhow!("Action unavailable: {error}"))?;
-                let accepted = action
-                    .do_action(chosen as i32)
-                    .await
-                    .map_err(|error| anyhow!("doAction failed: {error}"))?;
-                if !accepted {
-                    anyhow::bail!("menu path segment {depth} rejected its native action");
-                }
-                if depth == 0 && path.len() > 1 {
-                    opener = Some((hop.oref.clone(), action, chosen as i32));
-                }
-                anchor = Some(hop.oref);
-                if depth + 1 != path.len() {
-                    tokio::time::sleep(Duration::from_millis(80)).await;
-                }
-            }
-            Ok(match opener {
+            let mut opener: Option<MenuOpener<'_>> = None;
+            let walked = invoke_menu_hops(conn, pid, xid, path, &mut opener).await;
+            let cleanup = match opener {
                 Some((entry, action, index)) => {
                     close_opened_menu(conn, pid, &entry, &action, index, &path[0]).await
                 }
                 None => MenuCleanup::NoneOpen,
-            })
+            };
+            match (walked, cleanup) {
+                (Ok(acknowledged), cleanup) => Ok(MenuInvoked {
+                    cleanup,
+                    unacknowledged: !acknowledged,
+                }),
+                (Err(error), MenuCleanup::StillOpen { menu }) => Err(anyhow!(
+                    "{error}. The {menu} menu Pincer opened is still open, so pid {pid} holds a \
+                     keyboard grab until it closes: press_key escape on window {xid} closes it \
+                     (with delivery_mode foreground if a background press is refused)"
+                )),
+                (Err(error), _) => Err(error),
+            }
         },
         || Err(anyhow!("invoke_menu timed out for pid {pid}")),
     )
+}
+
+/// What invoke_menu did once every segment resolved and the final item's
+/// action was sent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuInvoked {
+    /// What became of the menu the first hop opened.
+    pub cleanup: MenuCleanup,
+    /// The final item's action got no reply within the per-call timeout.
+    /// Qt runs the action inside the D-Bus call, so an item that opens a
+    /// modal dialog answers only once the dialog closes: KWrite's
+    /// File > Save As… held the call until the 25 s operation timeout and
+    /// was refused as timed out while its dialog was on screen (slot test,
+    /// 2026-11-11).
+    pub unacknowledged: bool,
+}
+
+/// The menu-bar entry whose action opened the menu, its Action proxy and
+/// that action's index.
+type MenuOpener<'a> = (RawObjectRef, atspi::proxy::action::ActionProxy<'a>, i32);
+
+/// Resolve and fire each segment of `path` in turn (see
+/// [`invoke_menu_path_in`]). `opener` is set once the first hop has opened a
+/// menu, so the caller closes it whether or not a later hop succeeds.
+/// `Ok(false)`: the final item's action was sent but not answered in time
+/// (see [`MenuInvoked::unacknowledged`]).
+async fn invoke_menu_hops<'a>(
+    conn: &'a AccessibilityConnection,
+    pid: u32,
+    xid: u64,
+    path: &[String],
+    opener: &mut Option<MenuOpener<'a>>,
+) -> Result<bool> {
+    // The entry the previous hop activated: the next segment is looked for
+    // inside it first.
+    let mut anchor: Option<RawObjectRef> = None;
+    for depth in 0..path.len() {
+        let previous = depth.checked_sub(1).map(|index| path[index].as_str());
+        let targeted =
+            targeted_menu_hop(conn, pid, xid, anchor.as_ref(), &path[depth], previous).await;
+        let hop = match targeted {
+            Some(hop) => hop,
+            None => {
+                dlog!("invoke_menu: segment {depth} walks the application");
+                match walked_menu_hop(conn, pid, xid, &path[..=depth]).await? {
+                    Some(hop) => hop,
+                    None => {
+                        let entries = menu_level_labels(conn, pid, xid, anchor.as_ref(), previous)
+                            .await
+                            .unwrap_or_default();
+                        // The walk leaves disabled entries out of its matches.
+                        if entries.iter().any(|(label, enabled)| {
+                            !enabled && menu_label_matches(label, &path[depth])
+                        }) {
+                            anyhow::bail!(
+                                "menu path segment {depth} \"{}\" is disabled",
+                                path[depth]
+                            );
+                        }
+                        let labels: Vec<String> =
+                            entries.into_iter().map(|(label, _)| label).collect();
+                        anyhow::bail!(
+                            "{}",
+                            pincer_core::menu_label::missing_segment_message(depth, path, &labels)
+                        );
+                    }
+                }
+            }
+        };
+        let chosen = activation_index(&hop.role, &hop.actions)
+            .ok_or_else(|| anyhow!("menu path segment {depth} has no safe activation action"))?;
+        let proxies = hop
+            .acc
+            .proxies()
+            .await
+            .map_err(|error| anyhow!("interface proxies unavailable: {error}"))?;
+        let action = proxies
+            .action()
+            .await
+            .map_err(|error| anyhow!("Action unavailable: {error}"))?;
+        let last = depth + 1 == path.len();
+        // The final item's action may run a modal dialog before it answers
+        // (see `MenuInvoked::unacknowledged`), so its wait is the per-call
+        // timeout; the hops before it only open menus and keep the
+        // operation's.
+        let reply = if last {
+            call(action.do_action(chosen as i32)).await
+        } else {
+            Some(action.do_action(chosen as i32).await)
+        };
+        let accepted = match reply {
+            Some(answer) => answer.map_err(|error| anyhow!("doAction failed: {error}"))?,
+            None => {
+                dlog!("invoke_menu: final doAction sent but not acknowledged in time");
+                return Ok(false);
+            }
+        };
+        if !accepted {
+            anyhow::bail!("menu path segment {depth} rejected its native action");
+        }
+        if depth == 0 && !last {
+            *opener = Some((hop.oref.clone(), action, chosen as i32));
+        }
+        anchor = Some(hop.oref);
+        if !last {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+        }
+    }
+    Ok(true)
 }
 
 /// What became of the menu `invoke_menu` opened on its way to the final item.
@@ -4190,20 +4291,21 @@ struct MenuHop<'a> {
 
 /// Resolve the last segment of `path` from a walk of the whole application,
 /// closed menus included: every match of the exact path, narrowed to the
-/// caller's frame and deduplicated, must leave one enabled entry.
+/// caller's frame and deduplicated, must leave one enabled entry. `None`
+/// when nothing matches.
 async fn walked_menu_hop<'a>(
     conn: &'a AccessibilityConnection,
     pid: u32,
     xid: u64,
     path: &[String],
-) -> Result<MenuHop<'a>> {
+) -> Result<Option<MenuHop<'a>>> {
     let depth = path.len() - 1;
     // The whole application: a GTK menu opens as a top-level of its own,
     // outside the caller's window.
     let options = WalkOptions {
         walk_closed_menus: true,
         other_windows: true,
-        role_search: None,
+        ..WalkOptions::default()
     };
     let collected = collect_visited_bounded_opts(conn, pid, xid, None, None, options)
         .await?
@@ -4227,14 +4329,14 @@ async fn walked_menu_hop<'a>(
     }
     let target_index = match matches.as_slice() {
         [index] => *index,
-        [] => anyhow::bail!("menu path segment {depth} was not found"),
+        [] => return Ok(None),
         _ => anyhow::bail!("menu path segment {depth} is ambiguous"),
     };
     let target = &visited[target_index];
     if target.enabled == Some(false) {
         anyhow::bail!("menu path segment {depth} is disabled");
     }
-    Ok(MenuHop {
+    Ok(Some(MenuHop {
         acc: target.acc.clone(),
         oref: RawObjectRef {
             name: target.object_ref.bus.clone(),
@@ -4242,7 +4344,67 @@ async fn walked_menu_hop<'a>(
         },
         role: target.role.clone(),
         actions: target.actions.clone(),
-    })
+    }))
+}
+
+/// The entries at one menu level, in menu order, as (label, enabled): below
+/// the caller's window's menu bars when `anchor` is `None`, else below
+/// `anchor`, the entry the previous hop opened. The level is read the way
+/// [`menu_entries_named`] reads it for a segment (through transparent
+/// containers, a repeat of `previous` included), so these are the labels a
+/// segment at that level is compared with. `None` when a read fails. Qt
+/// fills a menu's entries only once it is open, so this runs before the
+/// menu the walk opened is closed.
+async fn menu_level_labels(
+    conn: &AccessibilityConnection,
+    pid: u32,
+    xid: u64,
+    anchor: Option<&RawObjectRef>,
+    previous: Option<&str>,
+) -> Option<Vec<(String, bool)>> {
+    let roots = match anchor {
+        Some(anchor) => vec![anchor.clone()],
+        None => window_menu_bars(conn, pid, xid).await?,
+    };
+    let zconn = conn.connection();
+    let mut queue = std::collections::VecDeque::new();
+    for root in &roots {
+        let children = call(raw_children(zconn, root)).await?.ok()?;
+        queue.extend(children.into_iter().map(|child| (child, 1usize)));
+    }
+    let mut labels = Vec::new();
+    let mut read = 0usize;
+    while let Some((oref, depth)) = queue.pop_front() {
+        read += 1;
+        if read > MENU_LOOKUP_NODES {
+            break;
+        }
+        let Some(Ok(acc)) = call(accessible_for(conn, &oref)).await else {
+            continue;
+        };
+        let (role, name) = tokio::join!(call(acc.get_role_name()), call(acc.name()));
+        let (Some(Ok(role)), Some(Ok(name))) = (role, name) else {
+            continue;
+        };
+        // An empty segment never matches, so every entry of this level
+        // comes back as `Skip`.
+        match menu_step(&role, &name, "", previous) {
+            MenuStep::Skip | MenuStep::Match => {
+                let enabled = !matches!(
+                    call(acc.get_state()).await,
+                    Some(Ok(state)) if !is_enabled_state(&state)
+                );
+                labels.push((name.trim().to_owned(), enabled));
+            }
+            MenuStep::LookInside if depth < MENU_LOOKUP_DEPTH => {
+                if let Some(Ok(children)) = call(raw_children(zconn, &oref)).await {
+                    queue.extend(children.into_iter().map(|child| (child, depth + 1)));
+                }
+            }
+            MenuStep::LookInside => {}
+        }
+    }
+    Some(labels)
 }
 
 /// How deep below a menu (or menu bar) the targeted lookup looks for the
@@ -4328,13 +4490,12 @@ enum MenuStep {
 /// element whose label does not count is transparent, and so is a repeat of
 /// the previous segment's label (the walk collapses repeated labels).
 fn menu_step(role: &str, name: &str, segment: &str, previous: Option<&str>) -> MenuStep {
-    let label = name.trim();
     if !counts_in_menu_lineage(role, name) {
         return MenuStep::LookInside;
     }
-    if label == segment {
+    if menu_label_matches(name, segment) {
         MenuStep::Match
-    } else if previous == Some(label) {
+    } else if previous.is_some_and(|previous| menu_label_matches(name, previous)) {
         MenuStep::LookInside
     } else {
         MenuStep::Skip

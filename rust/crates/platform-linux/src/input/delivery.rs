@@ -65,6 +65,12 @@ pub enum BackgroundUnavailable {
     ChromiumInput,
     /// The remaining backend can only inject into the globally focused widget.
     FocusedInputOnly,
+    /// X11 with no virtual pointer: the only background pointer route left is
+    /// synthetic `XSendEvent`, which the target's toolkit ignores. Unlike
+    /// [`Self::FocusedInputOnly`] it does not depend on which window has the
+    /// focus (round 2 of the first-call test: a drag refusal named "the
+    /// globally focused widget" while the target already held the focus).
+    SyntheticPointerDropped,
     /// WebKitGTK rejects synthetic XSendEvent input and no real target-addressed
     /// pointer backend is available in this session.
     WebKitSyntheticInput,
@@ -76,6 +82,7 @@ impl BackgroundUnavailable {
             Self::NoLibeiBackend => "background_unavailable",
             Self::ChromiumInput => "background_unavailable",
             Self::FocusedInputOnly => "background_unavailable",
+            Self::SyntheticPointerDropped => "background_unavailable",
             Self::WebKitSyntheticInput => "background_unavailable",
         }
     }
@@ -93,6 +100,10 @@ impl BackgroundUnavailable {
             }
             Self::FocusedInputOnly => {
                 "the requested target has no focus-free input backend; the remaining input route can only deliver to the globally focused widget"
+            }
+            Self::SyntheticPointerDropped => {
+                "this app ignores synthetic X pointer events, the only background pointer \
+                 route in this session (it has no virtual pointer)"
             }
             Self::WebKitSyntheticInput => {
                 "WebKitGTK rejects synthetic XSendEvent input and this session has no real target-addressed pointer backend"
@@ -152,6 +163,20 @@ mod tests {
         assert!(!text.contains("XTest"));
         assert!(!text.contains("X11"));
         assert!(text.contains("delivery_mode:\"foreground\""));
+    }
+
+    #[test]
+    fn synthetic_pointer_refusal_names_the_app_not_the_focus() {
+        let result = background_unavailable_error(BackgroundUnavailable::SyntheticPointerDropped);
+        let structured = result.structured_content.as_ref().unwrap();
+        assert_eq!(structured["code"], "background_unavailable");
+        assert_eq!(structured["escalation"]["recommended"], "foreground");
+        let detail = structured["detail"].as_str().unwrap();
+        assert!(
+            detail.contains("ignores synthetic X pointer events"),
+            "{detail}"
+        );
+        assert!(!detail.contains("focused"), "{detail}");
     }
 
     #[test]

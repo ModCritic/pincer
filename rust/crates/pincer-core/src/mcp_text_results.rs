@@ -169,6 +169,10 @@ fn render_text_with(
         (Some(code), _) => {
             push_body(&mut lines, text);
             lines.push(format!("[code: {code}]"));
+            // The code line counts as shown, so a `refusal: {code, message}`
+            // copy of the code and the text is not printed again.
+            let said = lines.join("\n");
+            let shown = Shown::new(&said, scans_before_index);
             push_fields(&mut lines, fields, &shown, &["code"]);
         }
         (None, Some(effect)) if action => {
@@ -320,12 +324,19 @@ impl<'a> Shown<'a> {
     }
 
     /// Lines where the text states the flag `key` as `key=value` or
-    /// `key: value`.
+    /// `key: value`, with `value` spelled true/false or on/off (set_config's
+    /// vocabulary, which get_config's text uses).
     fn flag_lines(&self, key: &str, value: bool) -> Vec<usize> {
         self.memoized(format!("{key}\u{0}{value}"), || {
+            let word = if value { "on" } else { "off" };
             let mut lines = self.lines_of(
-                [format!("{key}={value}"), format!("{key}: {value}")]
-                    .iter()
+                [
+                    format!("{key}={value}"),
+                    format!("{key}: {value}"),
+                    format!("{key}={word}"),
+                    format!("{key}: {word}"),
+                ]
+                .iter()
                     .flat_map(|needle| assignments(needle, self.raw)),
             );
             lines.sort_unstable();
@@ -546,9 +557,29 @@ fn push_fields(
                 );
             }
             Value::String(value) if value.contains('\n') => push_multiline(lines, key, value),
-            _ => lines.push(format!("{key}: {}", render_value(value, false, shown))),
+            _ => {
+                let parsed = embedded_json(key, value);
+                let value = parsed.as_ref().unwrap_or(value);
+                lines.push(format!("{key}: {}", render_value(value, false, shown)))
+            }
         }
     }
+}
+
+/// A `*_json` string that holds a JSON object or array (verify_state's
+/// `observed_json`), parsed, so the text shows it as a value instead of a
+/// string of escaped quotes (round 2 of the first-call test). `None` for
+/// anything else, a string cut short and no longer valid JSON included.
+fn embedded_json(key: &str, value: &Value) -> Option<Value> {
+    let Value::String(text) = value else {
+        return None;
+    };
+    if !key.ends_with("_json") {
+        return None;
+    }
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .filter(|parsed| parsed.is_object() || parsed.is_array())
 }
 
 /// `key: first line`, then each further line indented, with no escaping.
@@ -779,7 +810,11 @@ fn render_value(value: &Value, nested: bool, shown: &Shown) -> String {
                 .filter(|(key, value)| {
                     !empty_or_noise(key, value) && !duplicate_geometry(key, value, fields)
                 })
-                .map(|(key, value)| format!("{key}: {}", render_value(value, true, shown)))
+                .map(|(key, value)| {
+                    let parsed = embedded_json(key, value);
+                    let value = parsed.as_ref().unwrap_or(value);
+                    format!("{key}: {}", render_value(value, true, shown))
+                })
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -981,6 +1016,53 @@ mod tests {
         );
     }
 
+    // invoke_menu's refusal printed its message twice, the second time
+    // inside `refusal` with every quote escaped (round 3 of the first-call
+    // test, a 17-label list).
+    #[test]
+    fn a_refusal_object_that_repeats_the_code_and_text_is_dropped() {
+        let message = "invoke_menu: path segment 1 \"Findd\" was not found under \"Edit\". Items there: \"Undo\", \"Find…\"";
+        let result = rendered(json!({
+            "content": [{"type": "text", "text": message}],
+            "isError": true,
+            "structuredContent": {
+                "status": "refused",
+                "code": "menu_path_unavailable",
+                "refusal": {"code": "menu_path_unavailable", "message": message},
+            },
+        }));
+        assert_eq!(
+            text_of(&result),
+            format!("{message}\n[code: menu_path_unavailable]\nstatus: refused")
+        );
+    }
+
+    #[test]
+    fn a_json_string_field_is_shown_as_its_value() {
+        let observed = json!({"bounds": {"x": 960, "y": 494}, "exists": true}).to_string();
+        let result = rendered(json!({
+            "content": [{"type": "text", "text": "verify_state: satisfied after 2 sample(s) in 2103 ms"}],
+            "structuredContent": {
+                "status": "satisfied",
+                "predicates": [{"index": 0, "status": "satisfied", "observed_json": observed}],
+                "observed_json": observed,
+                "cut_json": "{\"bounds\":{\"x\":9...",
+            },
+        }));
+        let text = text_of(&result);
+        assert!(
+            text.lines().any(|line| line.starts_with("- {index: 0, ")
+                && line.contains("observed_json: {bounds: {x: 960, y: 494}, exists: true}")),
+            "{text}"
+        );
+        assert!(
+            text.contains("\nobserved_json: {bounds: {x: 960, y: 494}, exists: true}"),
+            "{text}"
+        );
+        // A string that no longer parses stays a string.
+        assert!(text.contains("cut_json: \"{\\\"bounds\\\""), "{text}");
+    }
+
     #[test]
     fn a_window_state_keeps_its_image_after_the_text_and_drops_restated_metadata() {
         let header =
@@ -1035,6 +1117,22 @@ mod tests {
 
     /// list_windows prints each window on a text line, so the structured
     /// copy of the same window adds nothing.
+    #[test]
+    fn a_flag_the_text_says_as_on_or_off_is_dropped() {
+        let text = "- cursor.motion.style=signature_arc (saved), cursor.motion.effects: \
+                    trail=on, glow=off (saved)";
+        let structured = json!({"cursor": {"motion": {
+            "style": "signature_arc",
+            "effects": {"trail": true, "glow": false},
+        }}});
+        assert_eq!(render_text(text, &structured, false), text);
+        let flipped = json!({"cursor": {"motion": {
+            "style": "signature_arc",
+            "effects": {"trail": false, "glow": false},
+        }}});
+        assert!(render_text(text, &flipped, false).contains("cursor:"));
+    }
+
     #[test]
     fn a_window_the_text_already_lists_is_dropped() {
         let text = "Found 1 window(s):\n  window_id=94371847 pid=90758 \"kate-scratch.txt  — Kate\" 2560x1354+0+22 z=5 app=kate";

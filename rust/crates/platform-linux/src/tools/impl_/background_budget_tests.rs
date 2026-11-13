@@ -29,7 +29,9 @@ fn synthetic_pointer_drop_detection_covers_gtk_vcl_and_qt() {
 fn synthetic_presses_reach_qt_but_not_gtk_or_vcl() {
     // Kate and KWrite took a synthetic press (caret moved) and a synthetic
     // right-click (context menu opened) on 2026-11-03; the left click was
-    // refused before only because Qt was on the wheel/drag list.
+    // refused before only because Qt was on the wheel/drag list. Drag uses
+    // this list too: a synthetic drag selected text in KWrite (Qt 6) and in
+    // a Qt 5.15 text edit on 2026-11-11.
     assert!(!maps_indicate_synthetic_press_dropped(
         "7f /usr/lib/libQt6Gui.so.6\n"
     ));

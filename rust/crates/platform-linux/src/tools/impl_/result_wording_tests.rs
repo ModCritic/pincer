@@ -57,11 +57,12 @@ fn a_foreground_key_result_never_says_not_verified_next_to_confirmed() {
         unchanged.structured_content.clone().unwrap()["effect"],
         "unverifiable"
     );
-    assert!(
-        text(&unchanged).contains("not verified"),
-        "{}",
-        text(&unchanged)
-    );
+    let said = text(&unchanged);
+    assert!(said.contains("not verified"), "{said}");
+    // A since re-read is the cheap check (round 2), not a screenshot.
+    assert!(said.contains("get_window_state since:\"latest\""), "{said}");
+    assert!(said.contains("verify_state"), "{said}");
+    assert!(!said.contains("screenshot"), "{said}");
 
     let elsewhere = key_route_result(
         "Pressed key 'end'",
@@ -75,6 +76,29 @@ fn a_foreground_key_result_never_says_not_verified_next_to_confirmed() {
     let said = text(&elsewhere);
     assert!(said.contains("left the target process"), "{said}");
     assert!(!said.contains('\u{2014}'), "{said}");
+}
+
+#[test]
+fn background_key_results_name_the_cheap_check() {
+    let synthetic = key_route_result("Pressed key 'return'", KeyRoute::Synthetic, "background");
+    let said = text(&synthetic);
+    assert_eq!(
+        said,
+        "Pressed key 'return' (delivery_mode=background); not verified: read what changed \
+         with get_window_state since:\"latest\", or check it with verify_state."
+    );
+}
+
+#[test]
+fn set_window_frame_echoes_the_frame_it_read_back() {
+    assert_eq!(
+        set_window_frame_text((40, 60, 1100, 900), Some((40, 60, 1100, 900)), true),
+        "Set and verified the window frame: it reads back as 1100x900+40+60."
+    );
+    let refused = set_window_frame_text((40, 60, 1100, 900), Some((0, 0, 2560, 1440)), false);
+    assert!(refused.contains("asked for 1100x900+40+60"), "{refused}");
+    assert!(refused.contains("reads back as 2560x1440+0+0"), "{refused}");
+    assert!(set_window_frame_text((1, 2, 3, 4), None, false).contains("could not be read back"));
 }
 
 #[test]
@@ -102,6 +126,7 @@ fn invoke_menu_says_what_became_of_the_menu_it_opened() {
         &MenuCleanup::Closed {
             menu: "Edit".into(),
         },
+        false,
         1,
         2,
         "background",
@@ -118,6 +143,7 @@ fn invoke_menu_says_what_became_of_the_menu_it_opened() {
         &MenuCleanup::StillOpen {
             menu: "Edit".into(),
         },
+        false,
         1,
         2,
         "background",
@@ -130,12 +156,41 @@ fn invoke_menu_says_what_became_of_the_menu_it_opened() {
     assert!(said.contains("press_key escape on window 2"), "{said}");
     assert_eq!(open.structured_content.unwrap()["menu_left_open"], "Edit");
 
-    let none = invoke_menu_result("r", &MenuCleanup::NoneOpen, 1, 2, "background");
+    let none = invoke_menu_result("r", &MenuCleanup::NoneOpen, false, 1, 2, "background");
     assert_eq!(
         text(&none),
         "Resolved the live native menu path and dispatched its final accessibility action \
          (r); verify the command's semantic effect from fresh state."
     );
+}
+
+// KWrite File > Save As… (slot test, 2026-11-11): Qt answers the action
+// only once the modal dialog it opened closes. The call used to wait out
+// the 25 s operation timeout and be refused as timed out with the dialog
+// on screen, which invites a second call and a second dialog.
+#[test]
+fn invoke_menu_says_when_the_app_did_not_answer_the_final_action() {
+    use crate::atspi::native::MenuCleanup;
+    let result = invoke_menu_result(
+        "delivery_mode=background, focus untouched",
+        &MenuCleanup::Closed {
+            menu: "File".into(),
+        },
+        true,
+        1,
+        2,
+        "background",
+    );
+    let said = text(&result);
+    assert!(
+        said.contains(
+            "then closed the File menu it had opened to reach the item. The app did not answer \
+             the final action within 3 s, as when the item opens a modal dialog: check \
+             list_windows before calling again; verify"
+        ),
+        "{said}"
+    );
+    assert_eq!(result.structured_content.unwrap()["acknowledged"], false);
 }
 
 #[test]
@@ -195,8 +250,15 @@ fn a_moved_scroll_bar_confirms_with_evidence_and_pages_name_their_steps() {
     assert_eq!(structured["effect"], "confirmed");
     assert_eq!(structured["evidence"][0]["kind"], "accessibility_readback");
     let text = text(&result);
-    assert!(text.contains("2 pages (6 wheel steps)"), "{text}");
+    // "2 pages" read as screenfuls (round 2): count wheel steps, say what a
+    // page was.
+    assert!(text.starts_with("Scrolled down 6 wheel steps ("), "{text}");
     assert!(text.contains("from 0 to 18"), "{text}");
+    assert!(
+        text.ends_with("Each of the 2 pages was 3 wheel steps, not a screenful."),
+        "{text}"
+    );
+    assert!(!text.contains("2 pages ("), "{text}");
 }
 
 #[test]

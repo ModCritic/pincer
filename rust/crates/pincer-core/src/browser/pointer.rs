@@ -320,7 +320,7 @@ impl BrowserPointerTool {
                         "delta_y": { "type": "number", "description": "Vertical scroll delta in CSS pixels." }
                     },
                     "required": ["target_id", "tab_id", "session", "action"],
-                    "additionalProperties": true
+                    "additionalProperties": false
                 }),
                 read_only: false,
                 destructive: false,

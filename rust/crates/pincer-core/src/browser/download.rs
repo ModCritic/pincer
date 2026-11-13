@@ -75,7 +75,7 @@ impl BrowserDownloadTool {
                         }
                     },
                     "required": ["session", "target_id", "tab_id", "ref", "destination_root"],
-                    "additionalProperties": true
+                    "additionalProperties": false
                 }),
                 read_only: false,
                 destructive: true,

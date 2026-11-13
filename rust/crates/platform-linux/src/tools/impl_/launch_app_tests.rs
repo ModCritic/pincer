@@ -146,3 +146,76 @@ async fn urls_are_checked_for_remote_debugging_flags() {
         .await;
     assert_eq!(refused.is_error, Some(true));
 }
+
+#[test]
+fn background_user_time_is_older_than_recent_input_at_any_uptime() {
+    // KWin and Mutter call `a` older than `b` when `a - b` wraps past 2^31.
+    let older = |a: u32, b: u32| a.wrapping_sub(b) > 0x7fff_ffff;
+    for now in [5_000, 110_000_000, 0x8000_0010, u32::MAX - 3] {
+        let stamp = background_user_time(now);
+        assert_ne!(stamp, 0, "0 reads as no time");
+        for input in [
+            now,
+            now.wrapping_sub(60_000),
+            now.wrapping_sub(11 * 86_400_000),
+        ] {
+            assert!(
+                older(stamp, input),
+                "now {now}, input {input}, stamp {stamp}"
+            );
+        }
+    }
+    assert_eq!(background_user_time(1 << 30), 1);
+}
+
+#[test]
+fn launched_window_titles_are_read_once_they_stop_changing() {
+    let window = |xid: u64, title: &str| crate::x11::WindowInfo {
+        xid,
+        pid: Some(7),
+        app_name: "kwrite".into(),
+        title: title.into(),
+        is_on_screen: true,
+        z_index: Some(1),
+        x: 0,
+        y: 0,
+        width: 640,
+        height: 480,
+    };
+    let mut reads = 0;
+    let settled = settle_window_titles(
+        vec![window(1, "KWrite")],
+        || {
+            reads += 1;
+            let title = if reads < 2 {
+                "KWrite"
+            } else {
+                "notes.txt - KWrite"
+            };
+            vec![window(9, "other"), window(1, title)]
+        },
+        std::time::Duration::from_millis(120),
+        std::time::Duration::from_secs(2),
+    );
+    assert_eq!(settled.len(), 1);
+    assert_eq!(settled[0].title, "notes.txt - KWrite");
+    assert!(
+        reads >= 4,
+        "the new title was watched for the quiet period: {reads}"
+    );
+
+    // A title that keeps changing returns at the limit with the latest one.
+    let mut reads = 0;
+    let started = std::time::Instant::now();
+    let settled = settle_window_titles(
+        vec![window(1, "0")],
+        || {
+            reads += 1;
+            vec![window(1, &reads.to_string())]
+        },
+        std::time::Duration::from_millis(120),
+        std::time::Duration::from_millis(300),
+    );
+    assert!(started.elapsed() < std::time::Duration::from_millis(600));
+    assert_eq!(settled[0].title, reads.to_string());
+}

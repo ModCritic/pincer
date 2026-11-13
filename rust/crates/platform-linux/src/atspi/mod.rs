@@ -153,7 +153,7 @@ pub(crate) fn walk_tree_for_recording(
     timeout: std::time::Duration,
 ) -> AtspiTreeResult {
     if let Ok(Some(walked)) =
-        native::walk_tree_bounded_with_timeout(pid, xid, None, None, None, timeout)
+        native::walk_tree_bounded_with_timeout(pid, xid, None, None, None, None, timeout)
     {
         if !walked.markdown.is_empty() {
             return AtspiTreeResult::from_walked(walked, None);
@@ -195,6 +195,21 @@ pub fn walk_tree_bounded_within(
     max_depth: Option<usize>,
     timeout: std::time::Duration,
 ) -> AtspiTreeResult {
+    walk_tree_bounded_reading(pid, xid, query, max_elements, max_depth, None, timeout)
+}
+
+/// [`walk_tree_bounded_within`], reading up to `text_read_chars` characters
+/// of each text field's content (`None`: the walk's usual 4096; a
+/// `full_output` read passes [`native::FULL_TEXT_READ_CHARS`]).
+pub fn walk_tree_bounded_reading(
+    pid: u32,
+    xid: u64,
+    query: Option<&str>,
+    max_elements: Option<usize>,
+    max_depth: Option<usize>,
+    text_read_chars: Option<usize>,
+    timeout: std::time::Duration,
+) -> AtspiTreeResult {
     // Native AT-SPI (most complete). On a COLD launch the Qt6 (and some GTK)
     // AT-SPI bridge registers lazily — the first walk against a freshly
     // launched app can come back with just the root window (element_count=1,
@@ -225,6 +240,7 @@ pub fn walk_tree_bounded_within(
             max_elements,
             max_depth,
             role_search.as_ref(),
+            text_read_chars,
             remaining,
         ) {
             Ok(Some(walked)) if walked.searched_roles => {

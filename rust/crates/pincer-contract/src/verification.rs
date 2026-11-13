@@ -90,6 +90,7 @@ pub struct BoundsExpectation {
     pub width: f64,
     #[schemars(schema_with = "number_schema")]
     pub height: f64,
+    /// Allowed difference in each number. Default 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "tolerance_schema")]
     pub tolerance_px: Option<f64>,
@@ -98,9 +99,13 @@ pub struct BoundsExpectation {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, uniffi::Record)]
 #[serde(deny_unknown_fields)]
 pub struct ElementSelector {
+    /// As get_window_state prints it (`push button`, `check box`); case,
+    /// spaces and an `AX` prefix are ignored, `button` matches `push button`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "nonempty_string_schema")]
     pub role: Option<String>,
+    /// Case-insensitive substring of the quoted name in the element's
+    /// get_window_state row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "nonempty_string_schema")]
     pub label_contains: Option<String>,
@@ -111,6 +116,7 @@ pub struct ElementSelector {
 pub struct WindowPredicate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exists: Option<bool>,
+    /// As list_windows reports them (Linux: desktop pixels of the client area).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<BoundsExpectation>,
 }
@@ -118,12 +124,10 @@ pub struct WindowPredicate {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, uniffi::Record)]
 #[serde(deny_unknown_fields)]
 pub struct ElementPredicate {
+    /// Searches the rows get_window_state tags `[N]` (macOS: display-only
+    /// rows too), so a disabled Qt button, which has no `[N]`, is not found.
     pub selector: ElementSelector,
-    /// Assert that at least one trusted element matches the selector.
-    ///
-    /// Element walks are not yet exhaustive on every platform, so absence
-    /// cannot be proven. `false` is rejected instead of returning an
-    /// indefinitely-unknown predicate.
+    /// True: an element matches. `false` is refused: absence cannot be proven.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "boolean_schema")]
     pub exists: Option<bool>,
@@ -169,8 +173,7 @@ pub struct VerifyStateInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "stable_samples_schema")]
     pub stable_samples: Option<u64>,
-    /// Return the final window screenshot as image content for a multimodal
-    /// caller. The driver does not interpret that image.
+    /// Also return the final window screenshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include_screenshot: Option<bool>,
 }
@@ -224,12 +227,11 @@ impl ToolOutput for VerifyStateOutput {}
 pub fn contracts() -> Vec<ToolContract> {
     vec![ToolContract {
         name: VerifyStateInput::TOOL_NAME.into(),
-        description: "Deterministically verify bounded predicates against one exact window. \
-            The driver evaluates structured window/accessibility state and may return the final \
-            screenshot as uninterpreted visual evidence for a multimodal caller. Predicate \
-            results are satisfied, unsatisfied, or unknown; unknown never implies success. \
-            Accessibility projections are conservative: absence remains unknown unless the \
-            observed search domain is proven exhaustive."
+        description: "Check predicates about one window: its existence and bounds, or an \
+            element's existence, value, enabled or selected state. Reads until all hold for \
+            `stable_samples` reads in a row or `timeout_ms` ends. Each predicate is satisfied, \
+            unsatisfied or unknown, and unknown never means success; `observed_json` shows what \
+            was read."
             .into(),
         platforms: ALL_PLATFORMS.to_vec(),
         aliases: Vec::new(),

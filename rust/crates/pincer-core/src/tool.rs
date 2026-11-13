@@ -4057,6 +4057,59 @@ mod runtime_isolation_tests {
     }
 
     #[tokio::test]
+    async fn replay_skips_turns_recorded_as_failed_unless_asked() {
+        // A refused call followed by its retry: replaying the refusal would
+        // stop the run (stop_on_error) before the retry that worked.
+        let hits = Arc::new(AtomicUsize::new(0));
+        let registry = replay_registry(hits.clone());
+        let trajectory = tempfile::tempdir().unwrap();
+        for (turn, action) in [
+            (
+                "turn-00001",
+                serde_json::json!({"tool": "probe", "arguments": {}, "result_error": false}),
+            ),
+            (
+                "turn-00002",
+                serde_json::json!({"tool": "probe", "arguments": {}, "result_error": true}),
+            ),
+            (
+                "turn-00003",
+                serde_json::json!({"tool": "probe", "arguments": {}}),
+            ),
+        ] {
+            let dir = trajectory.path().join(turn);
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::write(dir.join("action.json"), action.to_string()).unwrap();
+        }
+
+        let replay = |extra: serde_json::Value| {
+            let mut args = serde_json::json!({"dir": trajectory.path(), "delay_ms": 0});
+            args.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            registry.invoke_with_context("replay_trajectory", args, unrestricted_context())
+        };
+
+        let result = replay(serde_json::json!({})).await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        let structured = result.structured_content.as_ref().unwrap();
+        assert_eq!(structured["attempted"], 2);
+        assert_eq!(structured["succeeded"], 2);
+        assert_eq!(structured["skipped"], 1);
+        assert_eq!(structured["turns"][1]["skipped"], "recorded as failed");
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        let text = format!("{:?}", result.content);
+        assert!(text.contains("skipped=1"), "{text}");
+        assert!(text.contains("recorded as failed: turn-00002."), "{text}");
+
+        let result = replay(serde_json::json!({"include_failed_turns": true})).await;
+        let structured = result.structured_content.as_ref().unwrap();
+        assert_eq!(structured["attempted"], 3);
+        assert_eq!(structured["skipped"], 0);
+        assert_eq!(hits.load(Ordering::SeqCst), 5);
+    }
+
+    #[tokio::test]
     async fn standard_observation_runs_without_a_protected_host() {
         let hits = Arc::new(AtomicUsize::new(0));
         let registry = observation_registry(None, hits.clone());

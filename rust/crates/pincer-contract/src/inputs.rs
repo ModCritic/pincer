@@ -597,11 +597,8 @@ impl ToolInput for SetWindowFrameInput {
     const TOOL_NAME: &'static str = "set_window_frame";
 }
 
-/// Exact, immediate-child application menu path to resolve and invoke through
-/// the operating system's accessibility API. Path labels are matched after
-/// trimming surrounding whitespace and otherwise remain case-sensitive. On
-/// macOS, three periods in a label also match the ellipsis character that
-/// native menu titles use (`Save As...` finds `Save As…`).
+/// Application menu path. Labels are matched after trimming surrounding
+/// whitespace, case-sensitively; three periods match the ellipsis character.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, uniffi::Record)]
 #[serde(deny_unknown_fields)]
 pub struct InvokeMenuInput {

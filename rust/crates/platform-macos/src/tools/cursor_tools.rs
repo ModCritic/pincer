@@ -187,8 +187,11 @@ impl Tool for SetAgentCursorMotionTool {
             session.clone(),
             cursor_overlay::OverlayCommand::SetMotion(motion.clone()),
         );
+        // The effects line names the pinned effects even when none is: the
+        // text renderer leaves an empty `motion.pinned_effects` out.
         ToolResult::text(format!(
-            "Agent cursor motion updated for session '{session}'."
+            "Agent cursor motion updated for session '{session}'.\n{}",
+            motion.effects_summary(&current)
         ))
         .with_structured(serde_json::json!({
             "session": session,
@@ -350,30 +353,32 @@ impl Tool for GetAgentCursorStateTool {
         .into_iter()
         .flatten()
         .collect();
-        ToolResult::text(format!("Agent cursor state for session '{session}'.")).with_structured(
-            serde_json::json!({
-                "session": session,
-                "enabled": enabled,
-                "position": position,
-                "installed_themes": installed_cursor_themes(),
-                "theme": {
-                    "id": theme_id,
-                    "version": version,
-                    "profile": profile,
-                    "reduced_motion": visual.reduced_motion,
-                    "fallback": fallback
-                },
-                "visual_state": {
-                    "requested_action": visual.requested_action,
-                    "resolved_action": visual.resolved_action,
-                    "modifiers": modifiers,
-                    "phase": visual.phase(),
-                    "frame": visual.frame(),
-                    "preempted_count": visual.preempted_count
-                },
-                "motion": motion.output_json()
-            }),
-        )
+        ToolResult::text(format!(
+            "Agent cursor state for session '{session}'.\n{}",
+            motion.effects_summary(&motion)
+        ))
+        .with_structured(serde_json::json!({
+            "session": session,
+            "enabled": enabled,
+            "position": position,
+            "installed_themes": installed_cursor_themes(),
+            "theme": {
+                "id": theme_id,
+                "version": version,
+                "profile": profile,
+                "reduced_motion": visual.reduced_motion,
+                "fallback": fallback
+            },
+            "visual_state": {
+                "requested_action": visual.requested_action,
+                "resolved_action": visual.resolved_action,
+                "modifiers": modifiers,
+                "phase": visual.phase(),
+                "frame": visual.frame(),
+                "preempted_count": visual.preempted_count
+            },
+            "motion": motion.output_json()
+        }))
     }
 }
 

@@ -12,15 +12,22 @@ const ALL_PLATFORMS: [Platform; 3] = [Platform::Macos, Platform::Windows, Platfo
 
 pub fn contracts() -> Vec<ToolContract> {
     vec![
+        // The Linux sentence describes a deliberate rule, not a bug: the
+        // Linux pointer and keyboard paths re-enable the session cursor
+        // (`overlay_glide_to_target_for` and
+        // `reveal_pointer_action_target_for` in platform-linux), "a hidden
+        // cursor must not make pointer or keyboard control invisible". The
+        // macOS and Windows action paths send no SetEnabled(true), so there a
+        // hide lasts until `enabled:true` (read in source, not run).
         contract::<SetAgentCursorEnabledInput, SetAgentCursorEnabledOutput>(
             "set_agent_cursor_enabled",
-            "Show or hide the agent cursor owned by a session.",
+            "Show or hide the agent cursor owned by a session. On Linux, `false` lasts until the session's next desktop pointer or keyboard action, which shows the cursor again.",
             &["agent_cursor.set_enabled"],
             false,
         ),
         contract::<SetAgentCursorMotionInput, SetAgentCursorMotionOutput>(
             "set_agent_cursor_motion",
-            "Configure the movement style, timing, effects and visibility timing for a session cursor. Fields left out keep their value. An effect at `default` (where every effect starts) follows the style, so changing `style` can turn it on or off; `on` or `off` pins it. The result's `motion.effects` are the effects in use and `motion.pinned_effects` the pinned ones.",
+            "Configure the movement style, timing, effects and visibility timing for a session cursor. Fields left out keep their value. An effect at `default` (where every effect starts) follows the style, so changing `style` can turn it on or off; `on` or `off` pins it. The result says which effects are in use and which are pinned.",
             &["agent_cursor.set_motion"],
             false,
         ),
@@ -32,7 +39,7 @@ pub fn contracts() -> Vec<ToolContract> {
         ),
         contract::<GetAgentCursorStateInput, GetAgentCursorStateOutput>(
             "get_agent_cursor_state",
-            "Return the session cursor's state. `enabled`: whether set_agent_cursor_enabled lets it be drawn; an enabled cursor still hides after `motion.idle_hide_ms` without activity (15000 ms by default), and get_session's `cursor_visible` says whether it is drawn right now. `position`: where it was last drawn, in screen coordinates (desktop pixels; points on macOS), null until it first moves. `installed_themes`: the ids set_agent_cursor_theme accepts. `visual_state`: the animation playing, for the kind of tool call in `requested_action` and `resolved_action`, with `modifiers` naming its delivery (`background`, `foreground`) and how the call named its target (`ax` element token, `pixel` x/y, `browser`, else `desktop`), its `phase` and `frame`, and `preempted_count`, the animations a newer call cut short. `motion`: `effects` in use and `pinned_effects`, the ones set on or off; the others follow the style.",
+            "Return the session cursor's state. `enabled`: whether set_agent_cursor_enabled lets it be drawn; an enabled cursor still hides after `motion.idle_hide_ms` without activity (15000 ms by default), and get_session's `cursor_visible` says whether it is drawn right now. `position`: where it was last drawn, in screen coordinates (desktop pixels; points on macOS), null until it first moves. `installed_themes`: the ids set_agent_cursor_theme accepts. `visual_state`: the animation playing, for the kind of tool call in `requested_action` and `resolved_action`, with `modifiers` naming its delivery (`background`, `foreground`) and how the call named its target (`ax` element token, `pixel` x/y, `browser`, else `desktop`), its `phase` and `frame`, and `preempted_count`, the animations a newer call cut short. `motion`: the motion settings and the effects in use; the result also says which effects are pinned (set on or off), while the others follow the style.",
             &["agent_cursor.state"],
             true,
         ),

@@ -725,7 +725,7 @@
     },
     {
       "name": "get_agent_cursor_state",
-      "description": "Return the session cursor's state. `enabled`: whether set_agent_cursor_enabled lets it be drawn; an enabled cursor still hides after `motion.idle_hide_ms` without activity (15000 ms by default), and get_session's `cursor_visible` says whether it is drawn right now. `position`: where it was last drawn, in screen coordinates (desktop pixels; points on macOS), null until it first moves. `installed_themes`: the ids set_agent_cursor_theme accepts. `visual_state`: the animation playing, for the kind of tool call in `requested_action` and `resolved_action`, with `modifiers` naming its delivery (`background`, `foreground`) and how the call named its target (`ax` element token, `pixel` x/y, `browser`, else `desktop`), its `phase` and `frame`, and `preempted_count`, the animations a newer call cut short. `motion`: `effects` in use and `pinned_effects`, the ones set on or off; the others follow the style.",
+      "description": "Return the session cursor's state. `enabled`: whether set_agent_cursor_enabled lets it be drawn; an enabled cursor still hides after `motion.idle_hide_ms` without activity (15000 ms by default), and get_session's `cursor_visible` says whether it is drawn right now. `position`: where it was last drawn, in screen coordinates (desktop pixels; points on macOS), null until it first moves. `installed_themes`: the ids set_agent_cursor_theme accepts. `visual_state`: the animation playing, for the kind of tool call in `requested_action` and `resolved_action`, with `modifiers` naming its delivery (`background`, `foreground`) and how the call named its target (`ax` element token, `pixel` x/y, `browser`, else `desktop`), its `phase` and `frame`, and `preempted_count`, the animations a newer call cut short. `motion`: the motion settings and the effects in use; the result also says which effects are pinned (set on or off), while the others follow the style.",
       "platforms": [
         "macos",
         "windows",
@@ -1383,7 +1383,7 @@
         "additionalProperties": false,
         "properties": {
           "full_output": {
-            "description": "Restore the previous full response (both representations, all\nmetadata, platform walk limits).",
+            "description": "Restore the previous full response (both representations, whole\nvalues, all metadata, platform walk limits).",
             "type": "boolean"
           },
           "include_accessibility_tree": {
@@ -2000,7 +2000,7 @@
     },
     {
       "name": "invoke_menu",
-      "description": "Run an application menu command by its exact path of item labels, e.g. [\"Edit\",\"Undo\"]. Each level is resolved in the live menu through the accessibility API and the final item fires there; this tool never clicks pixels. A missing, ambiguous, disabled or mismatched segment is refused (menu_path_unavailable). The menu opened to reach the item is closed again after it fires; when one stays open, the result names it and how to close it. The command's own effect is not verified: read it back from fresh state.",
+      "description": "Run an application menu command by its exact path of item labels, e.g. [\"Edit\",\"Undo\"]; three periods match the ellipsis character (\"Find...\" finds \"Find…\"). Each level is resolved and fired through the accessibility API, never by pixels. A missing, ambiguous or disabled segment is refused (menu_path_unavailable); for a missing one the refusal lists the labels at that level, so a guessed label costs at most one retry. The menu opened to reach the item is closed again; when one stays open, the result names it and how to close it. The command's own effect is not verified: read it back from fresh state.",
       "platforms": [
         "macos",
         "windows",
@@ -2022,7 +2022,7 @@
       },
       "input_schema": {
         "additionalProperties": false,
-        "description": "Exact, immediate-child application menu path to resolve and invoke through\nthe operating system's accessibility API. Path labels are matched after\ntrimming surrounding whitespace and otherwise remain case-sensitive. On\nmacOS, three periods in a label also match the ellipsis character that\nnative menu titles use (`Save As...` finds `Save As…`).",
+        "description": "Application menu path. Labels are matched after trimming surrounding\nwhitespace, case-sensitively; three periods match the ellipsis character.",
         "properties": {
           "path": {
             "description": "Menu labels from the top-level menu to the item, e.g. `[\"File\", \"Save As...\"]`\n(1 to 16 labels).",
@@ -3291,7 +3291,7 @@
     },
     {
       "name": "set_agent_cursor_enabled",
-      "description": "Show or hide the agent cursor owned by a session.",
+      "description": "Show or hide the agent cursor owned by a session. On Linux, `false` lasts until the session's next desktop pointer or keyboard action, which shows the cursor again.",
       "platforms": [
         "macos",
         "windows",
@@ -3344,7 +3344,7 @@
     },
     {
       "name": "set_agent_cursor_motion",
-      "description": "Configure the movement style, timing, effects and visibility timing for a session cursor. Fields left out keep their value. An effect at `default` (where every effect starts) follows the style, so changing `style` can turn it on or off; `on` or `off` pins it. The result's `motion.effects` are the effects in use and `motion.pinned_effects` the pinned ones.",
+      "description": "Configure the movement style, timing, effects and visibility timing for a session cursor. Fields left out keep their value. An effect at `default` (where every effect starts) follows the style, so changing `style` can turn it on or off; `on` or `off` pins it. The result says which effects are in use and which are pinned.",
       "platforms": [
         "macos",
         "windows",
@@ -3709,7 +3709,7 @@
     },
     {
       "name": "set_window_frame",
-      "description": "Set one top-level window's frame (x, y, width, height) in list_windows desktop coordinates, then verify it by reading the geometry back. The window manager can refuse the change, for example for a maximized, fullscreen or tiled window; the result then says the frame did not settle (effect suspected_noop) and the window is unchanged. Check with list_windows.",
+      "description": "Set one top-level window's frame (x, y, width, height) in list_windows desktop coordinates, then verify it by reading the geometry back. The window manager can refuse the change, for example for a maximized, fullscreen or tiled window; the result then says the frame did not settle (effect suspected_noop) and the window is unchanged.",
       "platforms": [
         "macos",
         "windows",
@@ -4480,7 +4480,7 @@
     },
     {
       "name": "verify_state",
-      "description": "Deterministically verify bounded predicates against one exact window. The driver evaluates structured window/accessibility state and may return the final screenshot as uninterpreted visual evidence for a multimodal caller. Predicate results are satisfied, unsatisfied, or unknown; unknown never implies success. Accessibility projections are conservative: absence remains unknown unless the observed search domain is proven exhaustive.",
+      "description": "Check predicates about one window: its existence and bounds, or an element's existence, value, enabled or selected state. Reads until all hold for `stable_samples` reads in a row or `timeout_ms` ends. Each predicate is satisfied, unsatisfied or unknown, and unknown never means success; `observed_json` shows what was read.",
       "platforms": [
         "macos",
         "windows",
@@ -4514,7 +4514,7 @@
                       "type": "boolean"
                     },
                     "exists": {
-                      "description": "Assert that at least one trusted element matches the selector.\n\nElement walks are not yet exhaustive on every platform, so absence\ncannot be proven. `false` is rejected instead of returning an\nindefinitely-unknown predicate.",
+                      "description": "True: an element matches. `false` is refused: absence cannot be proven.",
                       "type": "boolean"
                     },
                     "selected": {
@@ -4522,12 +4522,15 @@
                     },
                     "selector": {
                       "additionalProperties": false,
+                      "description": "Searches the rows get_window_state tags `[N]` (macOS: display-only\nrows too), so a disabled Qt button, which has no `[N]`, is not found.",
                       "properties": {
                         "label_contains": {
+                          "description": "Case-insensitive substring of the quoted name in the element's\nget_window_state row.",
                           "minLength": 1,
                           "type": "string"
                         },
                         "role": {
+                          "description": "As get_window_state prints it (`push button`, `check box`); case,\nspaces and an `AX` prefix are ignored, `button` matches `push button`.",
                           "minLength": 1,
                           "type": "string"
                         }
@@ -4549,11 +4552,13 @@
                   "properties": {
                     "bounds": {
                       "additionalProperties": false,
+                      "description": "As list_windows reports them (Linux: desktop pixels of the client area).",
                       "properties": {
                         "height": {
                           "type": "number"
                         },
                         "tolerance_px": {
+                          "description": "Allowed difference in each number. Default 1.",
                           "maximum": 100,
                           "minimum": 0,
                           "type": "number"
@@ -4592,7 +4597,7 @@
             "type": "array"
           },
           "include_screenshot": {
-            "description": "Return the final window screenshot as image content for a multimodal\ncaller. The driver does not interpret that image.",
+            "description": "Also return the final window screenshot.",
             "type": "boolean"
           },
           "pid": {

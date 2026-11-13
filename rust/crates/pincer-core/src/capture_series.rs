@@ -902,6 +902,9 @@ fn success(
         ));
     }
     lines.extend(records.iter().map(FrameRecord::line));
+    if let Some(hint) = changed_frames_hint(request, &records) {
+        lines.push(hint);
+    }
     let mut content = vec![Content::text(lines.join("\n"))];
     for (_, bytes) in inline {
         let data = B64.encode(bytes);
@@ -916,6 +919,29 @@ fn success(
         structured_content: Some(structured(request, source, &records, stop_reason)),
         action_record: None,
     }
+}
+
+/// With `return_frames` all, most frames can repeat the one before them (a
+/// still window returned three identical images in round 2 of the
+/// first-call test); name the option that keeps only the frames that differ.
+fn changed_frames_hint(request: &SeriesRequest, records: &[FrameRecord]) -> Option<String> {
+    if request.return_frames != ReturnFrames::All {
+        return None;
+    }
+    let compared = records
+        .iter()
+        .filter(|record| record.diff_fraction.is_some())
+        .count();
+    let same = records
+        .iter()
+        .filter(|record| record.diff_fraction.is_some() && !record.changed)
+        .count();
+    (compared > 0 && same * 2 > compared).then(|| {
+        format!(
+            "{same} of {compared} frames matched the frame before them; return_frames \
+             \"changed\" keeps only the frames that differ."
+        )
+    })
 }
 
 fn failure(
@@ -1481,6 +1507,33 @@ mod tests {
         assert_eq!(image_count(&result), 3);
         assert_eq!(frames_of(&result)[1]["diff_fraction"], 0.0);
         assert_eq!(frames_of(&result)[2]["diff_fraction"], 1.0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mostly_repeated_frames_point_at_return_frames_changed() {
+        let still = FakeSource::new(vec![solid(1), solid(1), solid(1)], Duration::ZERO);
+        let request = SeriesRequest::parse(&json!({"count": 3, "interval_ms": 0})).unwrap();
+        let result = run(request, still).await;
+        let text = text_of(&result);
+        assert!(
+            text.ends_with(
+                "2 of 2 frames matched the frame before them; return_frames \"changed\" keeps \
+                 only the frames that differ."
+            ),
+            "{text}"
+        );
+
+        // Frames that keep changing, and a series already asking for changed
+        // frames, need no hint.
+        let moving = FakeSource::new((0..3).map(solid).collect(), Duration::ZERO);
+        let request = SeriesRequest::parse(&json!({"count": 3, "interval_ms": 0})).unwrap();
+        assert!(!text_of(&run(request, moving).await).contains("return_frames \"changed\""));
+        let still = FakeSource::new(vec![solid(1), solid(1), solid(1)], Duration::ZERO);
+        let request = SeriesRequest::parse(
+            &json!({"count": 3, "interval_ms": 0, "return_frames": "changed"}),
+        )
+        .unwrap();
+        assert!(!text_of(&run(request, still).await).contains("keeps only"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

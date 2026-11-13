@@ -325,11 +325,16 @@ impl Tool for ReplayTrajectoryTool {
             // in a new session refused every pixel click until
             // get_window_state had read that window, and a relaunched app
             // (new pid) failed every turn.
+            // Turns recorded as failed are skipped by default: at bfc42c0 a
+            // recording of a refused background click followed by its
+            // foreground retry stopped the replay at the refusal, so the
+            // retry that had worked never ran.
             description: "Replay a recording: call the tool in each `turn-NNNNN/action.json` \
-                with its recorded `arguments`, in folder order, through the normal dispatch \
-                path. Returns attempted, succeeded and failed counts, each turn's result, and \
-                the first failure. Stops at the first failure unless `stop_on_error` is \
-                false.\n\n\
+                with its recorded `arguments`, in folder order. Turns recorded as failed \
+                (`result_error: true`, such as a refusal before its retry) are skipped unless \
+                `include_failed_turns` is true. Returns attempted, succeeded, failed and \
+                skipped counts, each turn's result, and the first failure. Stops at the first \
+                failure unless `stop_on_error` is false.\n\n\
                 Turns replay against the recorded pid and window_id:\n\
                 - If the app was relaunched (new pid), every turn fails. Edit `pid` and \
                 `window_id` in each action.json's `arguments` to the new values, or reset the \
@@ -349,7 +354,8 @@ impl Tool for ReplayTrajectoryTool {
                 "properties": {
                     "dir":           { "type": "string",  "description": "Trajectory directory previously written by `start_recording`. Absolute or ~-rooted." },
                     "delay_ms":      { "type": "integer", "minimum": 0, "maximum": 10000, "description": "Milliseconds to sleep between turns, for human-observable pacing. Default 500." },
-                    "stop_on_error": { "type": "boolean", "description": "Stop replay on the first tool-call error. Default true — set false to best-effort through the full trajectory." }
+                    "stop_on_error": { "type": "boolean", "description": "Default true: stop at the first turn that fails now. False replays every turn." },
+                    "include_failed_turns": { "type": "boolean", "description": "Default false. True also replays turns recorded with `result_error: true`." }
                 },
                 "additionalProperties": false
             }),
@@ -369,6 +375,7 @@ impl Tool for ReplayTrajectoryTool {
         use crate::tool_args::ArgsExt;
         let delay_ms = args.u64_or("delay_ms", 500).min(10_000);
         let stop_on_error = args.bool_or("stop_on_error", true);
+        let include_failed_turns = args.bool_or("include_failed_turns", false);
 
         // Expand ~/
         let dir = {
@@ -427,6 +434,7 @@ impl Tool for ReplayTrajectoryTool {
         let mut failed = 0u32;
         let mut turns_json = Vec::new();
         let mut first_failure: Option<(String, String, String)> = None;
+        let mut skipped_turns: Vec<String> = Vec::new();
 
         for turn_dir in &turn_dirs {
             let turn_name = turn_dir
@@ -436,7 +444,7 @@ impl Tool for ReplayTrajectoryTool {
                 .to_owned();
 
             let action_path = turn_dir.join("action.json");
-            let (tool_name, tool_args) = match parse_action_json(&action_path) {
+            let (tool_name, tool_args, recorded_error) = match parse_action_json(&action_path) {
                 Ok(v) => v,
                 Err(e) => {
                     failed += 1;
@@ -455,6 +463,16 @@ impl Tool for ReplayTrajectoryTool {
                     continue;
                 }
             };
+
+            if recorded_error && !include_failed_turns {
+                turns_json.push(json!({
+                    "turn": turn_name,
+                    "tool": &tool_name,
+                    "skipped": "recorded as failed",
+                }));
+                skipped_turns.push(turn_name);
+                continue;
+            }
 
             attempted += 1;
             let result = registry.invoke(&tool_name, tool_args).await;
@@ -497,11 +515,19 @@ impl Tool for ReplayTrajectoryTool {
         }
 
         let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+        let skipped = skipped_turns.len();
         let mut summary_text = format!(
-            "replay {dir_name}: attempted={attempted} succeeded={succeeded} failed={failed}"
+            "replay {dir_name}: attempted={attempted} succeeded={succeeded} failed={failed} \
+             skipped={skipped}"
         );
         if let Some((ref turn, ref tool, _)) = first_failure {
             summary_text.push_str(&format!(" first_failure={turn}:{tool}"));
+        }
+        if skipped > 0 {
+            summary_text.push_str(&format!(
+                "\nSkipped turns recorded as failed: {}. include_failed_turns:true replays them.",
+                skipped_turns.join(", ")
+            ));
         }
 
         let mut structured = json!({
@@ -509,6 +535,7 @@ impl Tool for ReplayTrajectoryTool {
             "attempted": attempted,
             "succeeded": succeeded,
             "failed": failed,
+            "skipped": skipped,
             "stop_on_error": stop_on_error,
             "turns": turns_json,
         });
@@ -540,7 +567,10 @@ fn recording_state_json(state: &RecordingState) -> Value {
     })
 }
 
-fn parse_action_json(path: &std::path::Path) -> anyhow::Result<(String, Value)> {
+/// The tool, its recorded arguments, and whether the call failed when it was
+/// recorded. A missing `result_error` (older or hand-written turns) counts as
+/// not failed, so such turns still replay.
+fn parse_action_json(path: &std::path::Path) -> anyhow::Result<(String, Value, bool)> {
     if !path.exists() {
         anyhow::bail!("Missing action.json");
     }
@@ -555,7 +585,11 @@ fn parse_action_json(path: &std::path::Path) -> anyhow::Result<(String, Value)> 
         .get("arguments")
         .cloned()
         .unwrap_or(Value::Object(Default::default()));
-    Ok((tool, tool_args))
+    let recorded_error = obj
+        .get("result_error")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Ok((tool, tool_args, recorded_error))
 }
 
 // ── install_ffmpeg ────────────────────────────────────────────────────────────
