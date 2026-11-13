@@ -210,10 +210,10 @@ fn probe_install_layout() -> Probe {
     }
 }
 
-/// Probe: package-home directory (`~/.pincer`) — counts cached
-/// release dirs so the user can sanity-check
-/// `PINCER_KEEP_VERSIONS` is doing the right thing. Upstream renamed it from
-/// `.cua-driver-rs/` in v0.2.16 to match the install-path rename (PR #1644).
+/// Probe: package-home directory (`~/.pincer`). Reports whether it exists
+/// and how many release dirs sit under `packages/releases`. Upstream renamed
+/// it from `.cua-driver-rs/` in v0.2.16 to match the install-path rename
+/// (PR #1644).
 fn probe_home_dir(home: Option<&Path>) -> Probe {
     let Some(home) = home else {
         return Probe::warn("home dir", "neither HOME nor USERPROFILE set");
@@ -284,7 +284,7 @@ fn append_platform_probes(report: &mut Report) {
             report.push(
                 Probe::warn(
                     "interactive session",
-                    "running in Session 0 (services); window-driving tools (list_windows, click, type_text, screenshot, get_window_state) will return empty results — these APIs need an attached interactive desktop.",
+                    "running in Session 0 (services); window-driving tools (list_windows, click, type_text, get_window_state) will return empty results; these APIs need an attached interactive desktop.",
                 )
                 .with_detail(
                     "re-run pincer from an interactive logon (RDP, console, or a scheduled task in the user's session) for the GUI tools to function.",
@@ -477,7 +477,7 @@ fn append_platform_probes(report: &mut Report) {
                 format!("Wayland only (WAYLAND_DISPLAY={w}, DISPLAY unset)"),
             )
             .with_detail(
-                "X11 tools (list_windows, screenshot) need XWayland — start your session with XWayland enabled.",
+                "X11 tools (list_windows, get_window_state) need XWayland; start your session with XWayland enabled.",
             ),
         ),
         (Some(d), Some(w)) => report.push(Probe::ok(

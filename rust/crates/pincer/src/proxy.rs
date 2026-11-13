@@ -188,6 +188,15 @@ pub(crate) fn apply_direct_session_identity(request: &mut Request, transport_ses
     );
 }
 
+/// The command that starts a daemon on this platform, for error hints.
+fn daemon_start_hint() -> String {
+    if cfg!(target_os = "macos") {
+        format!("open -n -g -a {} --args serve", crate::bundle::app_name())
+    } else {
+        format!("{} serve", crate::bundle::cli_name())
+    }
+}
+
 /// Run the MCP stdio proxy. Reads JSON-RPC lines from stdin, forwards
 /// the body of each `tools/list` / `tools/call` to the daemon at
 /// `socket_path`, and writes the daemon's response back as a proper
@@ -204,8 +213,8 @@ pub async fn run_proxy(socket_path: String) -> anyhow::Result<()> {
     validate_configured_policy()?;
     if !is_daemon_listening(&socket_path) {
         anyhow::bail!(
-            "pincer daemon not reachable on {socket_path}. Start it \
-             with `open -n -g -a Pincer --args serve` and retry."
+            "pincer daemon not reachable on {socket_path}. Start it with `{}` and retry.",
+            daemon_start_hint()
         );
     }
     // A selected service may outlive the CLI package that launched this

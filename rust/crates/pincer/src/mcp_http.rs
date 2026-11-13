@@ -8,7 +8,7 @@
 //! while distinct connections run truly in parallel. That parallelism is sound
 //! because the per-`(pid, window_id)` element cache + per-session cursor make
 //! concurrent cross-connection actions non-colliding (see the session-identity
-//! work in this PR).
+//! work in trycua/cua#1799).
 //!
 //! Minimal hand-rolled HTTP/1.1 — no new dependency, mirroring how the daemon
 //! already hand-rolls its UDS line protocol. `POST` with a JSON-RPC body → the

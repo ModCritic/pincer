@@ -35,7 +35,7 @@
 //!
 //! ## Agent detection
 //!
-//! Same agent dirs as upstream's Swift cua-driver installer detects:
+//! Agent dirs it detects:
 //!
 //! - Claude Code: `~/.claude/skills/`
 //! - Codex:       `~/.agents/skills/`

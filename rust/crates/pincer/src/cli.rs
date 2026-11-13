@@ -159,7 +159,8 @@ pub enum Command {
     /// `pincer skills {install|update|uninstall|status|path}` —
     /// agent skill-pack management. The verb is the ONLY way a user
     /// installs or updates the pincer skill pack into their agent
-    /// dirs (Claude Code / Codex / Prime Agent / OpenClaw / OpenCode); the install
+    /// dirs (Claude Code / Codex / Pi / Prime Agent / OpenClaw / OpenCode /
+    /// Antigravity / Hermes); the install
     /// scripts never touch ~/.claude/skills/ etc. directly. `install`
     /// writes the skill pack built into this binary to
     /// `<HomeDir>/skills/pincer/` and symlinks it into each detected
@@ -327,8 +328,9 @@ pub fn parse_command() -> Command {
         println!();
         println!("skills options (agent skill-pack management, opt-in):");
         println!("  pincer skills install       Write the skill pack built into this binary and symlink it");
-        println!("                                  into each detected agent's skills/ dir (Claude Code, Codex, Prime Agent,");
-        println!("                                  OpenClaw, OpenCode). Idempotent. Never overwrites existing user links.");
+        println!("                                  into each detected agent's skills/ dir (Claude Code, Codex, Pi, Prime Agent,");
+        println!("                                  OpenClaw, OpenCode, Antigravity, Hermes). Idempotent. Never overwrites");
+        println!("                                  existing user links.");
         println!("                                  Works offline; nothing is downloaded.");
         println!("  pincer skills update        Rewrite the local copy from this binary, refreshing it + links.");
         println!("  pincer skills uninstall     Remove the agent symlinks. Add --all to also delete the local copy.");
@@ -379,21 +381,11 @@ pub fn parse_command() -> Command {
         );
         println!("  --socket <path>         Select an explicit daemon socket/pipe endpoint.");
         println!("  --claude-code-computer-use-compat");
-        println!("                          Select the Claude Code computer-use compat surface.");
+        println!("                          Has no effect. The compat screenshot tool it enabled");
         println!(
-            "                          Now forwarded to the proxy-launched daemon (was a no-op"
+            "                          was removed; the flag is still accepted so older setup"
         );
-        println!(
-            "                          on the proxy path — the path you actually run — because"
-        );
-        println!("                          the daemon hardcoded compat=false). Note: the compat");
-        println!(
-            "                          screenshot tool itself was removed in #1692, so the flag"
-        );
-        println!(
-            "                          has no tool-surface effect today; the wiring is in place"
-        );
-        println!("                          for any future compat-gated tool.");
+        println!("                          commands keep working.");
         println!();
         println!("agent cursor overlay (serve only — needs the daemon UI runloop):");
         println!("  The overlay is ON by default: every MCP session automatically gets its own");
@@ -428,7 +420,11 @@ pub fn parse_command() -> Command {
         println!("                           [--effects trail=on,glow=off,...] [--glide-ms <ms>]");
         println!("    --style     signature_arc (default), spring_settle, magnetic, comet_swoop,");
         println!("                adaptive, or classic (the previous Dubins glide).");
-        println!("    --timing    native (the style's own), fitts (distance and target size), or");
+        println!("    --timing    steady (default: the style's timing, 600 ms minimum), relaxed");
+        println!(
+            "                (450 ms minimum), calm (750 ms minimum), native (the style's own),"
+        );
+        println!("                fitts (distance and target size), deliberate (slower fitts), or");
         println!("                fixed (--glide-ms, 1430 ms when 0).");
         println!("    --effects   trail, glow, magnet, ripple, squish set to on, off, or default.");
         println!();
@@ -1828,9 +1824,9 @@ pub fn build_manifest() -> serde_json::Value {
                   { "name": "subcommand", "type": "positional-string", "description": "motion" },
                   { "name": "--session", "type": "string", "description": "Public label of the session that owns the cursor (required)." },
                   { "name": "--style", "type": "string", "description": "signature_arc | spring_settle | magnetic | comet_swoop | adaptive | classic" },
-                  { "name": "--timing", "type": "string", "description": "native | fitts | fixed" },
+                  { "name": "--timing", "type": "string", "description": "steady | relaxed | calm | native | fitts | deliberate | fixed" },
                   { "name": "--effects", "type": "string", "description": "Comma-separated name=on|off|default for trail, glow, magnet, ripple, squish." },
-                  { "name": "--glide-ms", "type": "string", "description": "Move duration in milliseconds for fixed timing." },
+                  { "name": "--glide-ms", "type": "string", "description": "Move duration in milliseconds for fixed timing (1430 when 0); a nonzero value also fixes native and steady moves." },
                   { "name": "--socket", "type": "string", "description": "Override the daemon socket path." }
               ] },
             { "name": "autostart",
@@ -3861,7 +3857,7 @@ fn cli_docs_literal() -> serde_json::Value {
                 "subcommands": [
                     {"name":"show","abstract":"Print the full config.","discussion":"","arguments":[],"options":[],"flags":[],"subcommands":[]},
                     {"name":"get","abstract":"Print one config key.","discussion":"","arguments":[{"name":"key","help":"Config key to read.","type":"String","is_optional":false}],"options":[],"flags":[],"subcommands":[]},
-                    {"name":"set","abstract":"Set one config key.","discussion":"Cursor motion defaults are saved keys that apply to sessions started afterwards: cursor.motion.style (signature_arc, spring_settle, magnetic, comet_swoop, adaptive, classic), cursor.motion.timing (native, fitts, fixed) and cursor.motion.effects.<trail|glow|magnet|ripple|squish> (on, off, default). Use default for a key to clear it, or cursor.motion default to clear all. A start_session cursor_motion or a set_agent_cursor_motion call overrides the saved default. cursor.badges (minimal, verbose, off) sets the agent cursor badge for every cursor at once; minimal is the default.","arguments":[{"name":"key","help":"Config key to write.","type":"String","is_optional":false},{"name":"value","help":"Value to store.","type":"String","is_optional":false}],"options":[],"flags":[],"subcommands":[]},
+                    {"name":"set","abstract":"Set one config key.","discussion":"Cursor motion defaults are saved keys that apply to sessions started afterwards: cursor.motion.style (signature_arc, spring_settle, magnetic, comet_swoop, adaptive, classic), cursor.motion.timing (steady, relaxed, calm, native, fitts, deliberate, fixed) and cursor.motion.effects.<trail|glow|magnet|ripple|squish> (on, off, default). Use default for a key to clear it, or cursor.motion default to clear all. A start_session cursor_motion or a set_agent_cursor_motion call overrides the saved default. cursor.badges (minimal, verbose, off) sets the agent cursor badge for every cursor at once; minimal is the default.","arguments":[{"name":"key","help":"Config key to write.","type":"String","is_optional":false},{"name":"value","help":"Value to store.","type":"String","is_optional":false}],"options":[],"flags":[],"subcommands":[]},
                     {"name":"reset","abstract":"Reset config to defaults.","discussion":"","arguments":[],"options":[],"flags":[],"subcommands":[]}
                 ]
             },
@@ -3961,7 +3957,7 @@ fn cli_docs_literal() -> serde_json::Value {
                 "options": no_options,
                 "flags": no_flags,
                 "subcommands": [
-                    {"name":"motion","abstract":"Set the cursor's motion style, timing and effects.","discussion":"Effects take on, off, or default (the style's own choice).","arguments":[],"options":[{"name":"session","short_name":null,"help":"Public label of the session that owns the cursor.","type":"String","default_value":null,"is_optional":false},{"name":"style","short_name":null,"help":"signature_arc, spring_settle, magnetic, comet_swoop, adaptive, or classic.","type":"String","default_value":null,"is_optional":true},{"name":"timing","short_name":null,"help":"native, fitts, or fixed.","type":"String","default_value":null,"is_optional":true},{"name":"effects","short_name":null,"help":"Comma-separated name=on|off|default for trail, glow, magnet, ripple, squish.","type":"String","default_value":null,"is_optional":true},{"name":"glide-ms","short_name":null,"help":"Move duration in milliseconds for fixed timing (1430 when 0).","type":"Number","default_value":null,"is_optional":true},{"name":"socket","short_name":null,"help":"Override the daemon socket path.","type":"Path","default_value":null,"is_optional":true}],"flags":[],"subcommands":[]}
+                    {"name":"motion","abstract":"Set the cursor's motion style, timing and effects.","discussion":"Effects take on, off, or default (the style's own choice).","arguments":[],"options":[{"name":"session","short_name":null,"help":"Public label of the session that owns the cursor.","type":"String","default_value":null,"is_optional":false},{"name":"style","short_name":null,"help":"signature_arc, spring_settle, magnetic, comet_swoop, adaptive, or classic.","type":"String","default_value":null,"is_optional":true},{"name":"timing","short_name":null,"help":"steady (default), relaxed, calm, native, fitts, deliberate, or fixed.","type":"String","default_value":null,"is_optional":true},{"name":"effects","short_name":null,"help":"Comma-separated name=on|off|default for trail, glow, magnet, ripple, squish.","type":"String","default_value":null,"is_optional":true},{"name":"glide-ms","short_name":null,"help":"Move duration in milliseconds for fixed timing (1430 when 0); a nonzero value also fixes native and steady moves.","type":"Number","default_value":null,"is_optional":true},{"name":"socket","short_name":null,"help":"Override the daemon socket path.","type":"Path","default_value":null,"is_optional":true}],"flags":[],"subcommands":[]}
                 ]
             },
             {

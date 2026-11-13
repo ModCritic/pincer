@@ -3,7 +3,10 @@
 //! Protocol: line-delimited JSON over a Unix domain socket or Windows named
 //! pipe.
 //!
-//! Request shapes:
+//! Main request shapes (the dispatch also handles `metadata`,
+//! `shutdown_if_pid`, `session_begin`/`session_end`, `sessions_list`, the
+//! `trusted_session_*` methods, `authorization_status`, `revoke_authorization`,
+//! `history_control` and `history_relaunch_state`):
 //!   {"method":"call","name":"<tool>","args":{...}}
 //!   {"method":"list"}
 //!   {"method":"describe","name":"<tool>"}
