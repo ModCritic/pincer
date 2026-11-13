@@ -101,7 +101,7 @@ python3 hyprland-plugin/proofs/production_cancel_proof.py \
   --plan <reviewed-plan.json> --evidence <new-evidence-directory>
 ```
 
-Build the production v3 plugin with `CUA_HYPRLAND_INPUT_TRACE=ON` for this gate.
+Build the production v3 plugin with `PINCER_HYPRLAND_INPUT_TRACE=ON` for this gate.
 An uninstrumented package smoke cannot substitute for cancellation evidence.
 
 ## Optional fresh-runtime recovery

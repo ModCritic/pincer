@@ -226,7 +226,7 @@ python3 hyprland-plugin/proofs/production_realapp_proof.py \
   --plan <reviewed-plan.json> --evidence <new-evidence-directory> --record-video
 ```
 
-For instrumented certification, build v3 with `CUA_HYPRLAND_INPUT_TRACE=ON`
+For instrumented certification, build v3 with `PINCER_HYPRLAND_INPUT_TRACE=ON`
 and add `--trace-socket <runtime>/cua-input-v3.sock`. The runner reuses
 `primary_trace.py` and the independent foreground hold. Trace hooks must be
 complete, ordered, and free of overflow/timeouts. A refusal must contain the

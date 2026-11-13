@@ -82,13 +82,13 @@ cmake --build build
 ```
 
 To compile the production-protocol candidate in a disposable test environment,
-add `-DCUA_HYPRLAND_INPUT=ON`. This is separate from
+add `-DPINCER_HYPRLAND_INPUT=ON`. This is separate from
 `PINCER_HYPRLAND_TEST_INPUT`; selecting both refuses. Detailed event measurement
-also requires `-DCUA_HYPRLAND_INPUT_TRACE=ON`. Do not ship that instrumentation
+also requires `-DPINCER_HYPRLAND_INPUT_TRACE=ON`. Do not ship that instrumentation
 in the production package. Neither build option loads or enables the plugin.
 
 For a pinned acceptance build, also set
-`-DCUA_HYPRLAND_EXPECTED_VERSION=0.56.2` (or the exact intended pkg-config
+`-DPINCER_HYPRLAND_EXPECTED_VERSION=0.56.2` (or the exact intended pkg-config
 version). The build refuses a different header version. The status-command
 adapter supports both Hyprland `0.56.2`'s `SHyprCtlCommand` API and the newer
 Socket1 API. CMake compile-checks the installed `PluginAPI.hpp` and selects a
@@ -102,7 +102,7 @@ On a non-Linux review host, build only the portable protocol, transport shim,
 and mocked plugin-API tests:
 
 ```bash
-cmake -S . -B build -DCUA_HYPRLAND_BUILD_PLUGIN=OFF -DBUILD_TESTING=ON
+cmake -S . -B build -DPINCER_HYPRLAND_BUILD_PLUGIN=OFF -DBUILD_TESTING=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```

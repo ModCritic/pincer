@@ -97,7 +97,7 @@ class ReleaseTest(unittest.TestCase):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(HERE.parent.parent / relative, destination)
         build = self.root / "portable-build"
-        configure = ["cmake", "-S", str(source), "-B", str(build), "-DCUA_HYPRLAND_BUILD_PLUGIN=OFF"]
+        configure = ["cmake", "-S", str(source), "-B", str(build), "-DPINCER_HYPRLAND_BUILD_PLUGIN=OFF"]
         compiler = os.environ.get("CXX") or shutil.which("clang++-18")
         if compiler:
             configure.append("-DCMAKE_CXX_COMPILER=" + compiler)

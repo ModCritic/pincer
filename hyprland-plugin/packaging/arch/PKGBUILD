@@ -49,7 +49,7 @@ build() {
     -B "$srcdir/build" \
     -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCUA_HYPRLAND_EXPECTED_VERSION="$_hyprland_header_version"
+    -DPINCER_HYPRLAND_EXPECTED_VERSION="$_hyprland_header_version"
   cmake --build "$srcdir/build"
 }
 

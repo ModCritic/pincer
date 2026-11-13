@@ -20,7 +20,7 @@ compromised compositor, root, or an unrestricted hostile desktop user.
 
 ## Transport under test
 
-Two additional sockets, `cua-input-test.sock` and `cua-input-test-2.sock`, in
+Two additional sockets, `pincer-input-test.sock` and `pincer-input-test-2.sock`, in
 the private compositor instance directory use same-UID `SOCK_SEQPACKET`, bounded packets, nonblocking I/O, and
 event-loop dispatch. It does not change discovery protocol v2. Requests are
 ASCII fields separated by single spaces; responses are bounded JSON packets.
@@ -75,7 +75,7 @@ final newline. Hex fields use lowercase. The signature is Ed25519 over these
 bytes, represented as 128 hexadecimal digits.
 
 ```text
-CUA_TEST_LEASE_1
+PINCER_TEST_LEASE_1
 <epoch>
 <challenge>
 <target>
@@ -91,11 +91,11 @@ shutdown cancels delivery. Primary input aimed at the same target refuses.
 
 ## Build and lifecycle limits
 
-Build with `CUA_HYPRLAND_TEST_INPUT=ON` and
-`CUA_HYPRLAND_TEST_OPERATOR_KEY=<64 lowercase hex characters>`, against
+Build with `PINCER_HYPRLAND_TEST_INPUT=ON` and
+`PINCER_HYPRLAND_TEST_OPERATOR_KEY=<64 lowercase hex characters>`, against
 Hyprland 0.56.2 and its matching compiler/runtime. Driver additionally requires
-`CUA_DRIVER_EXPERIMENTAL_HYPRLAND_INPUT=1`. The ordinary build and installer do
-not enable input. This experiment adds `Cua-Test-Agent` and `Cua-Test-Agent-2`;
+`PINCER_EXPERIMENTAL_HYPRLAND_INPUT=1`. The ordinary build and installer do
+not enable input. This experiment adds `Pincer-Test-Agent` and `Pincer-Test-Agent-2`;
 Driver excludes both from foreground virtual-pointer/keyboard routes.
 
 Disabling input revokes leases and closes input connections, but keeps both

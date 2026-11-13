@@ -29,7 +29,7 @@ The portable protocol tests run on any host with C++26 support. The Unix transpo
 uses `SOCK_STREAM` only on non-Linux developer hosts that lack AF_UNIX
 `SOCK_SEQPACKET`; release evidence must run the same test on Linux, where the
 production `SOCK_SEQPACKET` and `SO_PEERCRED` paths are compiled and exercised.
-Use `-DCUA_HYPRLAND_BUILD_PLUGIN=OFF` when configuring those tests on a
+Use `-DPINCER_HYPRLAND_BUILD_PLUGIN=OFF` when configuring those tests on a
 non-Linux host. Passing the shim is not Linux transport evidence.
 
 1. Build the module with warnings treated as errors where the toolchain allows.
