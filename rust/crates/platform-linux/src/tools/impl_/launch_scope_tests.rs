@@ -129,10 +129,14 @@ async fn a_name_resolves_only_through_installed_desktop_entries() {
     let refusal = scope(args.clone()).await.unwrap_err();
     assert!(refusal.contains("launch_path"), "{refusal}");
 
-    let result = LaunchAppTool.invoke(args).await;
+    // An attested launch (standard or bounded mode) carries the scope the
+    // registry admitted; with one, a name never runs from PATH.
+    let mut attested = args;
+    attested["_protected_launch_scope"] = json!({"kind": "program_launch"});
+    let result = LaunchAppTool.invoke(attested).await;
     assert_eq!(result.is_error, Some(true), "{result:?}");
     std::thread::sleep(std::time::Duration::from_millis(300));
-    assert!(!marker.exists(), "a name must never run a program from PATH");
+    assert!(!marker.exists(), "an attested name must never run a program from PATH");
 }
 
 #[tokio::test]
@@ -328,4 +332,32 @@ async fn urls_alone_open_through_xdg_open_with_private_stdio() {
         scope(json!({"name": "https://example.com/a"})).await,
         Ok(Some(expected(&fake, None, true, false, 1)))
     );
+}
+
+/// Unrestricted mode without a manifest skips launch attestation, so the
+/// tool gets no `_protected_launch_scope`. There a `name` that is no
+/// installed app runs from PATH, as it did before the process_launch
+/// adapter. Attestation (standard and bounded mode) still refuses it.
+#[tokio::test]
+async fn an_unattested_launch_runs_a_name_from_path_and_attestation_still_refuses_it() {
+    let _apps = installed(Vec::new());
+    let directory = tempfile::tempdir().unwrap();
+    let marker = directory.path().join("ran");
+    let args = json!({
+        "name": "sh",
+        "additional_arguments": ["-c", format!("touch '{}'", marker.display())],
+    });
+    assert!(
+        LaunchAppTool
+            .protected_resource_scope("process_launch", &args)
+            .await
+            .is_err(),
+        "attestation must still refuse a name that is not an installed app"
+    );
+    let _ = LaunchAppTool.invoke(args).await;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !marker.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(marker.exists(), "an unattested launch should run `sh` from PATH");
 }

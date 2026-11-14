@@ -2444,26 +2444,40 @@ fn launch_installed_fixture() -> Option<Vec<crate::installed_apps::InstalledApp>
     }
 }
 
+/// Whether a `name` that is no installed app may run a program from PATH.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NameLookup {
+    /// Attestation and attested launches (standard and bounded mode).
+    InstalledOnly,
+    /// A launch that was not attested: the registry skips launch
+    /// attestation only in unrestricted mode without a manifest, where any
+    /// program may run anyway, so `name` keeps its PATH fallback there.
+    InstalledThenPath,
+}
+
 /// [`plan_launch`] against the fixture, or the installed .desktop entries.
 fn plan_launch_with(
     args: &Value,
     fixture: Option<Vec<crate::installed_apps::InstalledApp>>,
+    lookup: NameLookup,
 ) -> Result<LaunchPlan, String> {
     let installed = fixture.unwrap_or_else(crate::installed_apps::list_installed_apps);
-    plan_launch(args, &installed)
+    plan_launch(args, &installed, lookup)
 }
 
 /// Resolve a launch_app call to the exact program it starts.
 ///
 /// `launch_path` (highest precedence) runs as written, split on spaces; it
 /// counts as an installed app only when its words are exactly an entry's
-/// list_apps launch_path. `bundle_id` and `name` resolve only through
-/// installed .desktop entries and never run a program from PATH by name. A
+/// list_apps launch_path. `bundle_id` resolves only through installed
+/// .desktop entries, and so does `name` unless `lookup` is
+/// [`NameLookup::InstalledThenPath`], which also runs a name from PATH. A
 /// `name` that is a URL or an existing path, or `urls` alone, open with
 /// xdg-open.
 fn plan_launch(
     args: &Value,
     installed: &[crate::installed_apps::InstalledApp],
+    lookup: NameLookup,
 ) -> Result<LaunchPlan, String> {
     use pincer_core::tool_args::ArgsExt;
     let present = |key: &str| args.opt_str(key).filter(|value| !value.trim().is_empty());
@@ -2518,9 +2532,13 @@ fn plan_launch(
             targets.extend(urls);
             return open_plan(targets, Some(name));
         }
+        if lookup == NameLookup::InstalledThenPath {
+            return program_plan(words(&name), None, additional, urls, name);
+        }
         return Err(format!(
             "'{name}' matches no installed .desktop application (by display name, desktop-file \
-             id or Exec name), and launch_app never runs a name from PATH. Call list_apps and \
+             id or Exec name), and outside unrestricted mode launch_app does not run a name from \
+             PATH. Call list_apps and \
              pass an installed app's name, bundle_id or launch_path. To run another program, \
              pass its path as launch_path; standard mode refuses programs that are not \
              installed apps"
@@ -3022,7 +3040,7 @@ impl Tool for LaunchAppTool {
         let args = args.clone();
         let fixture = launch_installed_fixture();
         tokio::task::spawn_blocking(move || {
-            plan_launch_with(&args, fixture).map(|plan| Some(plan.scope()))
+            plan_launch_with(&args, fixture, NameLookup::InstalledOnly).map(|plan| Some(plan.scope()))
         })
         .await
         .map_err(|error| format!("launch resolution failed: {error}"))?
@@ -3061,8 +3079,17 @@ impl Tool for LaunchAppTool {
             .cloned();
         let fixture = launch_installed_fixture();
         let plan_args = args.clone();
-        let plan = match tokio::task::spawn_blocking(move || plan_launch_with(&plan_args, fixture))
-            .await
+        // No approved scope means the registry skipped attestation, which it
+        // does only in unrestricted mode without a manifest.
+        let lookup = if approved.is_some() {
+            NameLookup::InstalledOnly
+        } else {
+            NameLookup::InstalledThenPath
+        };
+        let plan = match tokio::task::spawn_blocking(move || {
+            plan_launch_with(&plan_args, fixture, lookup)
+        })
+        .await
         {
             Ok(Ok(plan)) => plan,
             Ok(Err(message)) => return ToolResult::error(format!("Failed to launch: {message}")),
