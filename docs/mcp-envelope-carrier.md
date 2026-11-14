@@ -91,7 +91,7 @@ Run the focused deterministic tests from `rust/`:
 
 ```sh
 cargo test -p pincer --bin pincer mcp_envelope --locked
-cargo test -p pincer --bin pincer driver_service_http --locked
+cargo test -p pincer --bin pincer envelope_service --locked
 cargo test -p pincer --bin pincer proxy --locked
 ```
 

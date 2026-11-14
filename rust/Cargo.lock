@@ -3058,7 +3058,6 @@ dependencies = [
  "base64",
  "cursor-overlay",
  "embed-resource",
- "httparse",
  "image",
  "jsonschema",
  "libc",

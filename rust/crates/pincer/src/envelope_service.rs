@@ -1,13 +1,19 @@
-//! Private unary carrier, disabled unless PINCER_ENVELOPE_HTTP_PORT is set.
+//! Connection service for typed Driver envelopes, used by the opt-in MCP
+//! envelope carrier (`mcp_envelope`, `PINCER_MCP_ENVELOPES=1`), which runs
+//! over the daemon's authenticated local socket or named pipe.
 //!
-//! This loopback endpoint is NOT an authentication boundary. A trusted upstream
-//! service must authorize and forward requests inside the guest before any later
-//! Fleet exposure; packaging and exposure require a separate explicit change.
-//! Connection IDs and generations are routing/lifecycle markers, not credentials.
-//! Each connection already has a host-bound root session; independent bound
-//! sessions are unsupported. No request supplies permission options or paths.
-//! Standard is the default. Unrestricted sessions require a separate trusted
-//! launcher opt-in and an already acknowledged unrestricted runtime.
+//! This fork removed the private envelope HTTP carrier that used to serve
+//! the same routes on a loopback TCP port (`PINCER_ENVELOPE_HTTP_PORT`). It
+//! authenticated no caller, so any local account, or a sandboxed app sharing
+//! the host network, could create a session and drive the desktop. Startup
+//! now refuses that variable instead of ignoring it.
+//!
+//! Connection IDs and generations are routing and lifecycle markers, not
+//! credentials. Each connection already has a host-bound root session;
+//! independent bound sessions are unsupported. No request supplies
+//! permission options or paths. Standard is the default. Unrestricted
+//! sessions require a separate trusted launcher opt-in and an already
+//! acknowledged unrestricted runtime.
 
 use pincer_sdk::remote::DriverRequestEnvelope;
 use pincer_sdk::remote_receiver::DriverEnvelopeReceiver;
@@ -16,16 +22,11 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
 
-const MAX_HEADERS: usize = 16 * 1024;
-const MAX_BODY: usize = 1024 * 1024;
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const MAX_CONNECTIONS: usize = 64;
 const MAX_EXCHANGES: usize = 32;
 const IDLE: Duration = Duration::from_secs(300);
-const IO_TIMEOUT: Duration = Duration::from_secs(10);
 type Factory = dyn Fn() -> Result<(Arc<DriverEnvelopeReceiver>, String), String> + Send + Sync;
 type HttpResult<T> = Result<T, (u16, &'static str)>;
 
@@ -245,130 +246,24 @@ pub(crate) struct Request {
     pub(crate) body: Vec<u8>,
 }
 
-fn parse_headers(bytes: &[u8]) -> HttpResult<(Request, usize)> {
-    let mut headers = [httparse::EMPTY_HEADER; 64];
-    let mut parsed = httparse::Request::new(&mut headers);
-    if !parsed
-        .parse(bytes)
-        .map_err(|_| (400, "invalid_http"))?
-        .is_complete()
-    {
-        return Err((400, "incomplete_headers"));
-    }
-    if parsed.version != Some(1) {
-        return Err((400, "http_1_1_required"));
-    }
-    let method = parsed.method.ok_or((400, "method_required"))?;
-    if !matches!(method, "POST" | "DELETE") {
-        return Err((405, "unsupported_method"));
-    }
-    let path = parsed.path.ok_or((400, "path_required"))?;
-    if path.contains(['?', '#', '%']) || !path.starts_with('/') {
-        return Err((400, "invalid_path"));
-    }
-    let mut length = None;
-    let mut generation = None;
-    for header in parsed.headers.iter() {
-        if header.name.eq_ignore_ascii_case("origin") {
-            return Err((403, "browser_origin_forbidden"));
-        }
-        if header.name.eq_ignore_ascii_case("transfer-encoding") {
-            return Err((400, "transfer_encoding_forbidden"));
-        }
-        if header.name.eq_ignore_ascii_case("content-length") {
-            if length.is_some()
-                || header.value.is_empty()
-                || !header.value.iter().all(u8::is_ascii_digit)
-            {
-                return Err((400, "invalid_content_length"));
-            }
-            let value =
-                std::str::from_utf8(header.value).map_err(|_| (400, "invalid_content_length"))?;
-            length = Some(
-                value
-                    .parse::<usize>()
-                    .map_err(|_| (413, "body_too_large"))?,
-            );
-        }
-        if header.name.eq_ignore_ascii_case("x-pincer-generation") {
-            if generation.is_some() || header.value.is_empty() || header.value.len() > 128 {
-                return Err((400, "invalid_generation"));
-            }
-            generation = Some(
-                std::str::from_utf8(header.value)
-                    .map_err(|_| (400, "invalid_generation"))?
-                    .to_owned(),
-            );
-        }
-    }
-    let length = match length {
-        Some(n) => n,
-        None if method == "DELETE" => 0,
-        None => return Err((411, "content_length_required")),
-    };
-    if length > MAX_BODY {
-        return Err((413, "body_too_large"));
-    }
-    Ok((
-        Request {
-            method: method.into(),
-            path: path.into(),
-            generation,
-            body: Vec::new(),
-        },
-        length,
-    ))
+/// The variable that used to turn on the removed envelope HTTP carrier.
+pub const REMOVED_HTTP_PORT_VAR: &str = "PINCER_ENVELOPE_HTTP_PORT";
+
+/// Refuse to start when a launcher still asks for the removed envelope HTTP
+/// carrier, so it learns the endpoint is gone instead of waiting on a port
+/// that never opens.
+pub fn refuse_removed_http_carrier() -> anyhow::Result<()> {
+    removed_http_carrier(std::env::var_os(REMOVED_HTTP_PORT_VAR).as_deref())
 }
 
-async fn read_request(reader: &mut (impl AsyncRead + Unpin)) -> HttpResult<Request> {
-    let mut bytes = Vec::new();
-    let header_end = loop {
-        if let Some(index) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
-            break index + 4;
-        }
-        if bytes.len() >= MAX_HEADERS {
-            return Err((431, "headers_too_large"));
-        }
-        let mut chunk = [0; 1024];
-        let remaining = (MAX_HEADERS - bytes.len()).min(chunk.len());
-        let n = reader
-            .read(&mut chunk[..remaining])
-            .await
-            .map_err(|_| (400, "read_failed"))?;
-        if n == 0 {
-            return Err((400, "incomplete_headers"));
-        }
-        bytes.extend_from_slice(&chunk[..n]);
-    };
-    let (mut request, length) = parse_headers(&bytes[..header_end])?;
-    request
-        .body
-        .extend_from_slice(&bytes[header_end..bytes.len().min(header_end + length)]);
-    let received = request.body.len();
-    request.body.resize(length, 0);
-    reader
-        .read_exact(&mut request.body[received..])
-        .await
-        .map_err(|_| (400, "incomplete_body"))?;
-    Ok(request)
-}
-
-pub fn configured_port() -> anyhow::Result<Option<u16>> {
-    match std::env::var("PINCER_ENVELOPE_HTTP_PORT") {
-        Err(std::env::VarError::NotPresent) => Ok(None),
-        Ok(value) => {
-            let port = value.parse::<u16>()?;
-            anyhow::ensure!(port != 0, "PINCER_ENVELOPE_HTTP_PORT must be nonzero");
-            Ok(Some(port))
-        }
-        Err(error) => Err(error.into()),
-    }
-}
-
-pub struct Server(tokio::task::JoinHandle<()>);
-impl Drop for Server {
-    fn drop(&mut self) {
-        self.0.abort();
+fn removed_http_carrier(value: Option<&std::ffi::OsStr>) -> anyhow::Result<()> {
+    match value {
+        None => Ok(()),
+        Some(_) => anyhow::bail!(
+            "{REMOVED_HTTP_PORT_VAR} is set, but this build has no envelope HTTP carrier: it \
+             was removed because it authenticated no caller. Unset the variable; typed \
+             envelopes run over MCP with PINCER_MCP_ENVELOPES=1"
+        ),
     }
 }
 
@@ -413,44 +308,19 @@ fn configured_session_mode() -> anyhow::Result<pincer_sdk::SessionPermissionMode
     select_session_mode(requested.as_deref(), host, has_manifest)
 }
 
-pub async fn start(sdk: Arc<crate::sdk_adapter::SdkAdapter>, port: u16) -> anyhow::Result<Server> {
-    let service = Service::for_sdk(sdk)?;
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
-    let task = tokio::spawn(async move {
-        let permits = Arc::new(tokio::sync::Semaphore::new(64));
-        let mut tasks = tokio::task::JoinSet::new();
-        let mut reaper = tokio::time::interval(Duration::from_secs(30));
-        loop {
-            tokio::select! {
-                accepted = listener.accept() => {
-                    let Ok((mut stream, _)) = accepted else { break };
-                    let Ok(permit) = permits.clone().try_acquire_owned() else { continue };
-                    let service = service.clone();
-                    tasks.spawn(async move {
-                        let _permit = permit;
-                        let result = match tokio::time::timeout(IO_TIMEOUT, read_request(&mut stream)).await {
-                            Ok(Ok(request)) => service.route(request).await,
-                            Ok(Err(error)) => Err(error),
-                            Err(_) => Err((408, "read_timeout")),
-                        };
-                        let (status, body) = match result { Ok(body) => (200, body), Err((status, error)) => (status, json!({"error": error})) };
-                        let body = body.to_string();
-                        let response = format!("HTTP/1.1 {status} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
-                        let _ = tokio::time::timeout(IO_TIMEOUT, stream.write_all(response.as_bytes())).await;
-                    });
-                }
-                _ = reaper.tick() => service.reap(),
-                _ = tasks.join_next(), if !tasks.is_empty() => {}
-            }
-        }
-    });
-    eprintln!("Private Driver envelope HTTP listening on 127.0.0.1:{port}");
-    Ok(Server(task))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_removed_http_carrier_variable_stops_startup() {
+        assert!(removed_http_carrier(None).is_ok());
+        let error = removed_http_carrier(Some(std::ffi::OsStr::new("8765")))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(REMOVED_HTTP_PORT_VAR), "{error}");
+        assert!(error.contains("removed"), "{error}");
+    }
     use pincer_sdk::{remote_receiver::DriverEnvelopeExecutor, DriverError};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -548,7 +418,7 @@ mod tests {
             command
                 .args([
                     "--exact",
-                    "driver_service_http::tests::envelope_startup_mode_requires_explicit_acknowledgement",
+                    "envelope_service::tests::envelope_startup_mode_requires_explicit_acknowledgement",
                     "--nocapture",
                 ])
                 .env(CHILD, expected)
@@ -769,56 +639,6 @@ mod tests {
         assert_eq!(response["error_code"], "connection_closed");
         assert!(response_fits(&"x".repeat(MAX_RESPONSE - 2)));
         assert!(!response_fits(&"x".repeat(MAX_RESPONSE - 1)));
-    }
-
-    #[test]
-    fn strict_headers() {
-        for header in [
-            "Origin: null\r\n",
-            "Transfer-Encoding: chunked\r\n",
-            "Content-Length: 0\r\n",
-            "X-Pincer-Generation: a\r\nX-Pincer-Generation: b\r\n",
-        ] {
-            let bytes =
-                format!("POST /v1/connections HTTP/1.1\r\nContent-Length: 2\r\n{header}\r\n");
-            assert!(parse_headers(bytes.as_bytes()).is_err(), "{header}");
-        }
-        for line in [
-            "GET /v1/connections HTTP/1.1",
-            "POST /v1/connections?x HTTP/1.1",
-            "POST /v1/connections HTTP/1.0",
-        ] {
-            assert!(
-                parse_headers(format!("{line}\r\nContent-Length: 2\r\n\r\n").as_bytes()).is_err()
-            );
-        }
-        for length in ["-1", "+1", "1,1", "1048577", "999999999999999999999999"] {
-            assert!(parse_headers(
-                format!("POST /v1/connections HTTP/1.1\r\nContent-Length: {length}\r\n\r\n")
-                    .as_bytes()
-            )
-            .is_err());
-        }
-    }
-
-    #[tokio::test]
-    async fn bounded_read_and_unary_pipelining() {
-        let data = b"POST /v1/connections HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}POST /ignored HTTP/1.1\r\n\r\n";
-        let result = read_request(&mut &data[..]).await.unwrap();
-        assert_eq!(result.body, b"{}");
-        assert_eq!(result.path, "/v1/connections");
-        assert_eq!(
-            read_request(&mut &vec![b'x'; MAX_HEADERS + 1][..])
-                .await
-                .unwrap_err()
-                .0,
-            431
-        );
-        assert!(read_request(
-            &mut &b"POST /v1/connections HTTP/1.1\r\nContent-Length: 2\r\n\r\n{"[..]
-        )
-        .await
-        .is_err());
     }
 
     #[tokio::test]

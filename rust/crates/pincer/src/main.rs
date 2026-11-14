@@ -22,7 +22,7 @@ mod broken_pipe;
 mod bundle;
 mod cli;
 mod doctor;
-mod driver_service_http;
+mod envelope_service;
 mod history_runtime;
 mod mcp_envelope;
 mod mcp_http;

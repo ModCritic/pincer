@@ -1125,10 +1125,7 @@ pub async fn run_serve(
         Some(port) => Some(crate::mcp_http::spawn(sdk.clone(), port)?),
         None => None,
     };
-    let envelope_http = match crate::driver_service_http::configured_port()? {
-        Some(port) => Some(crate::driver_service_http::start(sdk.clone(), port).await?),
-        None => None,
-    };
+    crate::envelope_service::refuse_removed_http_carrier()?;
 
     let listener = UnixListener::bind(socket_path).map_err(|e| {
         anyhow::anyhow!(
@@ -1569,7 +1566,6 @@ pub async fn run_serve(
     // Accepted connections may still own SDK/session state after the listener
     // stops. Abort and join them before tearing down the SDK runtime.
     drop(mcp_http);
-    drop(envelope_http);
     connection_tasks.shutdown().await;
     release_active_proxy_sessions();
 
@@ -1892,10 +1888,7 @@ pub async fn run_serve(
         None => None,
     };
 
-    let _envelope_http = match crate::driver_service_http::configured_port()? {
-        Some(port) => Some(crate::driver_service_http::start(sdk.clone(), port).await?),
-        None => None,
-    };
+    crate::envelope_service::refuse_removed_http_carrier()?;
 
     // A failure to create or connect a later pipe instance must not end the
     // daemon: connections already being served keep their instances, and the

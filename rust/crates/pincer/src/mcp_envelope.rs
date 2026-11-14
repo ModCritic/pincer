@@ -4,7 +4,7 @@
 //! owns generations, request ledgers, cancellation, permissions and session close.
 //! No listener, credential issuer, action replay or runtime fallback is added.
 
-use crate::driver_service_http::{Request as ServiceRequest, Service};
+use crate::envelope_service::{Request as ServiceRequest, Service};
 use pincer_core::protocol::{initialize_result, Request, Response};
 use pincer_core::server::{
     observe_proxy_session_started, observe_proxy_tool_completed, tool_observation_timer,
