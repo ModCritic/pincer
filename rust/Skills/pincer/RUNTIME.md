@@ -89,6 +89,27 @@ Capability manifest v3 omits file-level `mode` and `ask.tools`. Its
 The older `--session-policy` names remain compatibility aliases and must not be
 used in new configurations.
 
+On Linux, `launch_app` is checked by mode:
+
+- `standard` starts installed desktop apps (by `name`, `bundle_id`, or the
+  exact `launch_path` that `list_apps` reports) with file or URL targets. It
+  refuses other programs and options: any argument or url starting with `-`,
+  any argument to a terminal emulator, and a url that is a `.desktop` file or
+  an executable.
+- `bounded` starts only apps the manifest declares under `resources.apps`
+  with `launch: true`, matched by `bundle_id` or canonical `executable`.
+  Options also need `launch_options: true` on that entry, for example:
+
+  ```yaml
+  resources:
+    apps:
+      - executable: /usr/bin/kate
+        launch: true
+        launch_options: true
+  ```
+- `unrestricted` without a manifest runs any program through `launch_path`,
+  and a `name` that is no installed app falls back to a program on PATH.
+
 Starting, ending, naming, reconnecting, or omitting a session never changes
 permission authority. A public session label is lifecycle metadata, never a
 grant, caller identity, or bearer credential.
