@@ -73,9 +73,14 @@ characters inside structured strings are not escaped in that mode.
 | `7ee5516` | AT-SPI hit-test owner text | LXNATIVE-1 (hit_test.rs) |
 | `91d7dfa` | launch_app authorization (core) | LXTOOLS-1, AUTH-1, AUTH-2, AUTH-3, AUTH-6, TOOL-7, LXTOOLS-6 |
 | `6355164` | launch_app attestation (Linux) | LXTOOLS-1, -7, -9, -11, -12 |
+| `8037de0` | this report | |
+| `9b650f5` | launch_app `name` from PATH in unrestricted mode | user decision 1 |
+| `217cf4b` | secret uploads and screenshot overwrites | TOOL-8, CDP-8 |
+| `45b8f78` | envelope HTTP carrier removed | DAEMON-1 |
+| `ba27447` | RUNTIME.md launch checks and manifest keys | user decision 2 |
 
-Suites on this branch at `6355164`, each compiled from this tree: pincer-core 1126 passed, 0 failed,
-1 ignored; platform-linux 884 passed, 0 failed, 12 ignored; pincer 169 passed, 0 failed. The macOS
+Suites at `ba27447`, each compiled from this tree: pincer-core 1128 passed, 0 failed, 1 ignored;
+platform-linux 885 passed, 0 failed, 12 ignored; pincer 168 passed, 0 failed. The macOS
 and Windows crates were not built (no toolchain for them here); none of their files changed, but
 they call pincer-core and were not compiled against these changes.
 
@@ -110,7 +115,7 @@ real. Test names are the ones that failed first and pass now.
 | TOOL-5 | low | fixed | `a_resolved_window_note_quotes_an_untrusted_title`, `a_resolved_window_note_clips_a_long_title_and_says_how_long_it_was`, `ambiguity_text_quotes_and_clips_untrusted_titles` |
 | TOOL-6 | low | fixed | `element_labels_and_values_are_escaped_inside_their_quotes`, `window_titles_and_app_names_are_quoted_and_escaped`, `a_row_shown_in_a_miss_is_quoted_and_escaped` |
 | TOOL-7 | low | fixed | `normalizes_dashes_and_values_and_covers_other_debugger_switches`; the guard matters less now that standard mode refuses options |
-| TOOL-8 | medium | open | standard mode uploads any readable file to a page and overwrites any file with a screenshot without a prompt. A policy decision: a sensitive-path deny list or a per-session output folder |
+| TOOL-8 | medium | fixed | standard mode refuses uploads from key, keyring, credential, browser-profile and Pincer state folders (`.pub` files in `.ssh` stay allowed): `standard_upload_refuses_secret_locations_but_allows_public_keys`. Any mode that resolves output paths refuses to overwrite a non-empty file that is not PNG or JPEG data: `proposed_output_never_overwrites_an_existing_file_that_is_not_an_image`. Bounded mode keeps its manifest as the upload gate |
 | TOOL-9 | low | open | verify_state `label_contains` accepts native labels such as a browser tab named by the page |
 | TOOL-10 | info | open | recordings and the PiP label keep typed text; redaction changes replay |
 | TOOL-11 | info | partly fixed | miss lists capped at 10 with "and N more" (`miss_lists_of_apps_and_titles_are_capped_quoted_and_escaped`); actions and end reads still run outside the 60 s budget |
@@ -136,13 +141,13 @@ real. Test names are the ones that failed first and pass now.
 | ID | Sev | Status | Evidence or reason |
 |---|---|---|---|
 | CDP-1 | medium | open | the consent automation can click Allow on another local client's remote-debugging prompt. Needs the prompt bound to Pincer's own connection |
-| CDP-2 | medium | open | the isolated browser listens on an unauthenticated loopback port (`--remote-debugging-port=0`). Fix: `--remote-debugging-pipe` and a pipe transport |
+| CDP-2 | medium | open, contained here | the isolated browser listens on an unauthenticated loopback port (`--remote-debugging-port=0`). On this machine every `pincer mcp` runs under the `unshare -rn` wrapper in its own network namespace (checked 2026-11-13: five running servers, five namespaces, none the host's, no separate daemon), so only Pincer and the apps it launched can reach the port. Without the wrapper the risk stands. Full fix: `--remote-debugging-pipe` and a pipe transport |
 | CDP-3 | low | fixed | `userinfo_and_portless_urls_are_rejected`, `the_dialer_reads_the_host_after_the_userinfo` (a guard test) |
 | CDP-4 | low | open | a download keeps the page's file name and extension in any approved directory |
 | CDP-5 | low | open | the browser-wide download window lets other tabs drop files |
 | CDP-6 | low | open | the setup-page proof does not exclude web content |
 | CDP-7 | low | fixed | with BROWSE-2; `cut_dialog_text_states_its_original_length` |
-| CDP-8 | low | open | same as TOOL-8 for browser_set_input_files |
+| CDP-8 | low | fixed | with TOOL-8 |
 | CDP-9 | low | open | the restart-required path leaves remote debugging on in the real profile |
 | CDP-10 to CDP-12 | info | open | nested-reply stalls, the root-owned check skipped with a pid, a stale DevToolsActivePort |
 
@@ -185,7 +190,7 @@ real. Test names are the ones that failed first and pass now.
 
 | ID | Sev | Status | Evidence or reason |
 |---|---|---|---|
-| DAEMON-1 | high when enabled | open | the envelope HTTP carrier has no authentication; `docs/private-envelope-http.md` says it adds no bearer token by design and relies on Fleet's route. Off unless `PINCER_ENVELOPE_HTTP_PORT` is set |
+| DAEMON-1 | high when enabled | fixed (removed) | the envelope HTTP carrier authenticated no caller by design (it relied on upstream's Fleet route). This fork removed it; startup now fails while `PINCER_ENVELOPE_HTTP_PORT` is set (`the_removed_http_carrier_variable_stops_startup`, a guard test). The MCP envelope carrier over the authenticated socket stays |
 | DAEMON-2 | medium | fixed | `unauthenticated_requests_are_refused_before_the_body_is_read`, `stalled_request_heads_are_closed`, `mcp_http_connections_over_the_cap_are_refused`, `accept_errors_do_not_stop_the_daemon`; open: the Windows pipe and the envelope carrier's accept loop |
 | DAEMON-3 | medium | fixed | `mcp_http_bind_failure_fails_startup` |
 | DAEMON-4 | low | fixed | `mcp_http_token_leaves_the_environment_once_read` |
@@ -261,22 +266,26 @@ This is the one fix that changes what works by default, so it is its own pair of
   program, any argument or url starting with `-`, any argument at all to a terminal emulator (kitty
   and foot run positional arguments as commands), and a url that is a `.desktop` file or an
   executable.
-- `name` no longer runs a program from PATH in any mode, unrestricted included; a raw program needs
-  `launch_path`, which runs only in unrestricted mode or under a manifest that declares it.
+- `name` resolves only through installed apps in standard and bounded mode. In unrestricted mode
+  without a manifest (the only case where the registry skips launch attestation), a `name` that is no
+  installed app falls back to a program on PATH, as before (`9b650f5`,
+  `an_unattested_launch_runs_a_name_from_path_and_attestation_still_refuses_it`).
 - Bounded mode needs the app declared with `launch: true`, and a new manifest key
   `launch_options: true` before a launch may pass options.
 - The launch runs exactly the attested executable (argv[0] kept) and refuses with
   `launch_target_changed` if the plan changed after approval.
 
-Effect on the tool-test harness: it runs `pincer mcp` in standard mode, so a model that launches a
-dev build or a test app by `launch_path` there will now be refused unless the path is an installed
-desktop entry's Exec. Installed apps by name are unaffected.
+Effect on the tool-test harness: it runs `pincer mcp` in standard mode, and its briefs launch
+KWrite, Dolphin and Pincer Test Pad by `name`. All three have desktop entries in a slot (`slot.sh`
+copies `testpad.desktop` in), so they should keep working; not yet run against this build. A dev
+build launched by a raw `launch_path` in standard mode is refused.
 
-## Decisions for the user
+## Decisions made by the user (2026-11-13)
 
-- Keep the launch_app change as is, or move the tool-test harness to unrestricted mode or a manifest.
-- The new manifest key `launch_options: true`, added by the fix.
-- TOOL-8 and CDP-8: whether standard mode should prompt before uploading sensitive files or
-  overwriting existing files.
-- DAEMON-1: whether the envelope carrier should require a token despite its documented design.
-- CDP-2: switching the isolated browser to a pipe transport is a larger engine change.
+1. launch_app: keep the standard-mode change; restore the PATH fallback for `name` in unrestricted
+   mode only (`9b650f5`).
+2. `launch_options: true`: keep it and document it (`ba27447`, RUNTIME.md).
+3. Uploads and overwrites: refuse secret locations in standard mode and refuse overwriting non-image
+   files (`217cf4b`).
+4. Envelope HTTP carrier: remove it (`45b8f78`).
+5. Isolated browser port: leave it; the `unshare -rn` wrapper contains it on this machine.
