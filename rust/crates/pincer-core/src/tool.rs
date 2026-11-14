@@ -2818,6 +2818,17 @@ impl ToolRegistry {
         let (resource, summary) = match tool_name {
             "browser_set_input_files" => {
                 let files = canonical_upload_files(args)?;
+                if context.mode() == crate::authorization::PermissionMode::Standard {
+                    if let Some(secret) = files.iter().find(|file| secret_upload(Path::new(file))) {
+                        return Err(protected_scope_refusal(&format!(
+                            "standard mode does not upload files from key, keyring, \
+                             credential, browser-profile or Pincer state folders, and \
+                             {} is in one. If the user wants it uploaded, ask them to \
+                             choose it in the page themselves",
+                            crate::untrusted_text::quoted(secret)
+                        )));
+                    }
+                }
                 let count = files.len();
                 args["files"] = serde_json::json!(files);
                 (
@@ -3281,6 +3292,73 @@ fn canonical_upload_files(args: &Value) -> Result<Vec<String>, ToolResult> {
         .collect()
 }
 
+/// Folders whose files are secrets: SSH and GnuPG keys, certificate and
+/// password stores, desktop keyrings, cloud and container credentials,
+/// browser and mail profiles (cookies, saved passwords), and Pincer's own
+/// state. Matched as consecutive path components anywhere in the canonical
+/// path, so the check does not depend on HOME.
+const SECRET_FOLDERS: &[&[&str]] = &[
+    &[".ssh"],
+    &[".gnupg"],
+    &[".pki"],
+    &[".password-store"],
+    &[".aws"],
+    &[".azure"],
+    &[".kube"],
+    &[".docker"],
+    &[".mozilla"],
+    &[".thunderbird"],
+    &[".pincer"],
+    &[".local", "share", "keyrings"],
+    &[".local", "state", "pincer"],
+    &[".config", "gcloud"],
+    &[".config", "gh"],
+    &[".config", "google-chrome"],
+    &[".config", "chromium"],
+    &[".config", "BraveSoftware"],
+    &[".config", "microsoft-edge"],
+    &[".config", "vivaldi"],
+    &[".config", "pincer"],
+];
+
+/// Credential files that live directly in a home folder.
+const SECRET_FILES: &[&str] = &[".netrc", ".git-credentials", ".pgpass"];
+
+/// Whether standard mode refuses to upload `path` (a canonical path): it is
+/// a credential file or sits in one of [`SECRET_FOLDERS`]. A `.pub` file in
+/// `.ssh` is a public key, made to be shared, and stays uploadable.
+fn secret_upload(path: &Path) -> bool {
+    let parts: Vec<&str> = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => part.to_str(),
+            _ => None,
+        })
+        .collect();
+    let name = parts.last().copied().unwrap_or_default();
+    if SECRET_FILES.contains(&name) {
+        return true;
+    }
+    let folders: Vec<&[&str]> = SECRET_FOLDERS
+        .iter()
+        .copied()
+        .filter(|folder| parts.windows(folder.len()).any(|window| window == *folder))
+        .collect();
+    let public_key = name.ends_with(".pub") && folders.iter().all(|folder| folder == &[".ssh"].as_slice());
+    !folders.is_empty() && !public_key
+}
+
+/// Whether a file starts with a PNG or JPEG signature, as an earlier
+/// screenshot does.
+fn starts_like_an_image(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 8];
+    let read = std::fs::File::open(path)
+        .and_then(|mut file| file.read(&mut head))
+        .unwrap_or(0);
+    head[..read].starts_with(b"\x89PNG\r\n\x1a\n") || head[..read].starts_with(&[0xFF, 0xD8, 0xFF])
+}
+
 fn canonical_existing_file(raw: &str) -> Result<String, ToolResult> {
     let path = Path::new(raw);
     if !path.is_absolute() {
@@ -3314,6 +3392,16 @@ fn canonical_existing_file(raw: &str) -> Result<String, ToolResult> {
 fn canonical_proposed_path(raw: &str) -> Result<String, ToolResult> {
     let path = expanded_path(raw)?;
     if path.exists() {
+        // Writing a screenshot replaces the file. An empty file or an earlier
+        // PNG or JPEG may go; anything else (~/.bashrc, a document) stays.
+        if std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+            && !starts_like_an_image(&path)
+        {
+            return Err(protected_scope_refusal(
+                "the output path is an existing file that is not a PNG or JPEG image, and \
+                 Pincer does not overwrite it; pick a new path",
+            ));
+        }
         return std::fs::canonicalize(path)
             .map(|path| path.to_string_lossy().into_owned())
             .map_err(|_| protected_scope_refusal("the exact path could not be canonicalized"));
@@ -5305,6 +5393,80 @@ resources:
             last_args.lock().unwrap().as_ref().unwrap()["files"][0],
             expected
         );
+    }
+
+    /// A page can talk the model into uploading a private key. Standard mode
+    /// refuses files in key, keyring, credential, browser-profile and Pincer
+    /// state folders, but a public key in ~/.ssh stays uploadable, and
+    /// unrestricted mode (a trusted operator) is unchanged (TOOL-8, CDP-8).
+    #[tokio::test]
+    async fn standard_upload_refuses_secret_locations_but_allows_public_keys() {
+        let home = tempfile::tempdir().unwrap();
+        let ssh = home.path().join(".ssh");
+        std::fs::create_dir(&ssh).unwrap();
+        let private = ssh.join("id_ed25519");
+        let public = ssh.join("id_ed25519.pub");
+        std::fs::write(&private, b"PRIVATE KEY").unwrap();
+        std::fs::write(&public, b"ssh-ed25519 AAAA user@host").unwrap();
+        let keyrings = home.path().join(".local/share/keyrings");
+        std::fs::create_dir_all(&keyrings).unwrap();
+        let keyring = keyrings.join("login.keyring");
+        std::fs::write(&keyring, b"KEYRING").unwrap();
+        let netrc = home.path().join(".netrc");
+        std::fs::write(&netrc, b"machine example.com password hunter2").unwrap();
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let registry = file_registry(None, hits.clone(), Arc::new(Mutex::new(None)));
+        let upload = |path: &std::path::Path, context| {
+            registry.invoke_with_context(
+                "browser_set_input_files",
+                serde_json::json!({
+                    "target_id": "browser",
+                    "tab_id": "tab",
+                    "ref": "p1:0",
+                    "session": "secrets",
+                    "files": [path],
+                }),
+                context,
+            )
+        };
+        for secret in [&private, &keyring, &netrc] {
+            let refused = upload(secret, standard_context()).await;
+            assert_eq!(refused.is_error, Some(true), "{secret:?}: {refused:?}");
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 0, "no secret upload may run");
+
+        let shared = upload(&public, standard_context()).await;
+        assert_ne!(shared.is_error, Some(true), "{shared:?}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+        let trusted = upload(&private, unrestricted_context()).await;
+        assert_ne!(trusted.is_error, Some(true), "{trusted:?}");
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+    }
+
+    /// A screenshot path that names an existing file would replace it with
+    /// image bytes (~/.bashrc, a document). Only an empty file or an earlier
+    /// PNG or JPEG may be overwritten; a directory still resolves (TOOL-8).
+    #[test]
+    fn proposed_output_never_overwrites_an_existing_file_that_is_not_an_image() {
+        let root = tempfile::tempdir().unwrap();
+        let rc = root.path().join(".bashrc");
+        std::fs::write(&rc, b"export PATH=$HOME/bin:$PATH\n").unwrap();
+        let refusal = canonical_proposed_path(rc.to_str().unwrap()).unwrap_err();
+        let text = serde_json::to_string(&refusal).unwrap();
+        assert!(text.contains("not a PNG or JPEG"), "{text}");
+
+        let png = root.path().join("old.png");
+        std::fs::write(&png, b"\x89PNG\r\n\x1a\nrest").unwrap();
+        assert!(canonical_proposed_path(png.to_str().unwrap()).is_ok());
+        let jpeg = root.path().join("old.jpg");
+        std::fs::write(&jpeg, [0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10]).unwrap();
+        assert!(canonical_proposed_path(jpeg.to_str().unwrap()).is_ok());
+        let empty = root.path().join("empty.png");
+        std::fs::write(&empty, b"").unwrap();
+        assert!(canonical_proposed_path(empty.to_str().unwrap()).is_ok());
+        assert!(canonical_proposed_path(root.path().to_str().unwrap()).is_ok());
     }
 
     #[tokio::test]
