@@ -4,6 +4,10 @@
   <p>A computer-use MCP server for Linux, optimized for Claude models.</p>
 </div>
 
+<p align="center">
+  <img src="docs/showcase.webp" alt="Pincer starts a Claude Code session in Claude Desktop and types Do everything. Then three Pincer sessions work at once: one draws a pelican on a bicycle in Inkscape, one browses eBay for PC parts in Firefox, and one animates an ASCII wave in Kate." width="100%">
+</p>
+
 ## About this fork
 
 Pincer is a computer-use MCP server. It lets an AI agent read and operate the
