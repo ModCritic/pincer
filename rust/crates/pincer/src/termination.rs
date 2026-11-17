@@ -51,8 +51,9 @@ impl TerminationSignals {
     }
 
     /// Listeners that never fire, for callers that leave signal handling to
-    /// whoever runs them.
+    /// whoever runs them (today only `run_serve`, which only tests call).
     #[cfg(unix)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn none() -> Self {
         Self {
             listeners: Vec::new(),

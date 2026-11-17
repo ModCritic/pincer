@@ -1092,7 +1092,9 @@ mod peer_authentication_tests {
 /// This is `async` and must be called from a tokio runtime. It leaves signal
 /// handling to its caller, so tests that run it inside the test harness keep
 /// the default SIGINT; `pincer serve` goes through [`run_serve_with_signals`].
+/// Only the in-crate tests call it (the crate has no library target).
 #[cfg(unix)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn run_serve(
     sdk: std::sync::Arc<crate::sdk_adapter::SdkAdapter>,
     socket_path: &str,
