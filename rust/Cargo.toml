@@ -53,3 +53,30 @@ time = { version = "0.3", features = ["formatting", "parsing"] }
 getrandom = "0.4"
 fs2 = "0.4"
 hmac = "0.12"
+
+# Release: strip the symbol and string tables (13.5 MB of the 54.9 MB binary
+# was .strtab plus .symtab), thin LTO, one codegen unit. Panics stay `unwind`:
+# catch_unwind contains them at the X11 input boundary (platform-linux
+# input/mod.rs), in session-end hooks (pincer-core session.rs) and across the
+# C ABI (pincer-sdk abi.rs); `abort` would end the process instead. Stripped
+# binaries print panic backtraces without function names.
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
+
+# UniFFI 0.31 reads the UNIFFI_META_* items from the library's .symtab
+# (uniffi_bindgen macro_metadata/extract.rs), not from .dynsym, so the SDK
+# cdylib that scripts/generate-uniffi-bindings.mjs reads must keep it.
+[profile.release.package.pincer-sdk]
+strip = "none"
+
+# Dev and test builds: line tables are enough for backtraces with file and
+# line, the split debug info stays out of the link, and dependencies carry
+# no debug info at all.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = false
