@@ -1,0 +1,130 @@
+# Headless checks for the Rust workspace in rust/. Nothing here needs a
+# display: tests that drive a desktop are #[ignore]d and stay off. Every
+# command was run locally before it went in.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # Every workspace crate that builds on Linux. platform-windows and
+  # platform-macos are type-checked for their targets below; pincer-uia
+  # (Windows only) is not checked yet.
+  LINUX_CRATES: >-
+    -p pincer -p platform-linux -p pincer-core -p pincer-sdk -p pincer-contract
+    -p pincer-bindgen -p pincer-testkit -p pincer-e2e -p cursor-overlay
+    -p pincer-cursor-motion -p cursor-theme-cli -p pip-preview
+  # zig compiles the C dependencies for the macOS type-check.
+  ZIG_VERSION: 0.17.1
+  ZIG_SHA256: 3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # x11 (xlib, xinput, xtest) links libX11, libXi and libXtst through
+      # pkg-config; libxcb comes with libx11-dev. zbus, x11rb and wayland are
+      # pure Rust. mingw-w64 is the C compiler for the Windows check.
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libx11-dev libxi-dev libxtst-dev mingw-w64
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --no-self-update \
+            --component rustfmt,clippy \
+            --target x86_64-pc-windows-gnu,aarch64-apple-darwin
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust -> target
+
+      - name: Fetch crates
+        run: cargo fetch --locked
+
+      - name: atspi-connection p2p feature stays off
+        run: |
+          tree=$(cargo tree --locked -e features -i atspi-connection)
+          if grep -F 'feature "p2p"' <<<"$tree"; then
+            echo "::error::atspi-connection's p2p feature is enabled; see the atspi-connection comment in crates/platform-linux/Cargo.toml"
+            echo "$tree"
+            exit 1
+          fi
+
+      - name: Third-party license list is current
+        run: python3 scripts/third_party_licenses.py --check
+
+      - name: Contract manifest is current
+        run: cargo run --locked -p pincer-contract --bin pincer-contract-gen -- all --check
+
+      - name: C ABI header is current
+        run: cargo run --locked -p pincer-bindgen --bin pincer-abi-header -- --check
+
+      - name: C ABI smoke test compiles against the header
+        run: cc -std=c11 -Wall -Wextra -Werror -fsyntax-only -I include tests/c_abi_smoke.c
+
+      - name: cargo check (pincer, platform-linux)
+        run: cargo check --locked -p pincer -p platform-linux --all-targets
+
+      # Warnings are reported but do not fail the job yet: there were 10 when
+      # this lane was added (2026-11-17). `cargo fmt --all -- --check` is left
+      # out until the tree is formatted (128 hunks in 41 files that day).
+      - name: clippy (Linux crates)
+        run: cargo clippy --locked $LINUX_CRATES --all-targets
+
+      - name: Tests (headless)
+        run: |
+          cargo test --locked -p pincer-core
+          cargo test --locked -p platform-linux --lib
+          cargo test --locked -p pincer --bin pincer
+          cargo test --locked -p pincer-cursor-motion
+          cargo test --locked -p cursor-overlay
+
+      - name: cargo check for Windows (x86_64-pc-windows-gnu)
+        run: cargo check --locked --target x86_64-pc-windows-gnu -p pincer
+
+      - name: Cache zig
+        id: zig-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/zig
+          key: zig-${{ env.ZIG_VERSION }}-x86_64-linux
+
+      - name: Install zig
+        if: steps.zig-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o zig.tar.xz \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+          echo "${ZIG_SHA256}  zig.tar.xz" | sha256sum -c -
+          mkdir zig
+          tar -xJf zig.tar.xz -C zig --strip-components=1
+          rm zig.tar.xz
+
+      - name: cargo check for macOS (aarch64-apple-darwin)
+        run: ZIG="$RUNNER_TEMP/zig/zig" scripts/check-macos.sh --locked
