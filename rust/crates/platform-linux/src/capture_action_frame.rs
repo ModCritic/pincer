@@ -200,7 +200,6 @@ fn admit_with_live_dimensions(
     Ok((admission.action_x, admission.action_y))
 }
 
-#[cfg(target_os = "linux")]
 fn live_action_dimensions(target: &CaptureTarget) -> anyhow::Result<NativeActionDimensions> {
     let dimensions = match target {
         CaptureTarget::Window { pid, window_id } => {
@@ -223,12 +222,6 @@ fn live_action_dimensions(target: &CaptureTarget) -> anyhow::Result<NativeAction
     Ok(NativeActionDimensions::new(dimensions.0, dimensions.1)?)
 }
 
-#[cfg(not(target_os = "linux"))]
-fn live_action_dimensions(_target: &CaptureTarget) -> anyhow::Result<NativeActionDimensions> {
-    anyhow::bail!("live Linux capture validation is unavailable on this platform")
-}
-
-#[cfg(target_os = "linux")]
 pub(crate) fn desktop_action_dimensions(native: (u32, u32)) -> anyhow::Result<(u32, u32)> {
     let logical = if crate::wayland::is_wayland() {
         crate::wayland::compositor_logical_frame().transpose()?

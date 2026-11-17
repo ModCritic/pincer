@@ -10,116 +10,58 @@
 //! Wayland: falls back to xdg-output and virtual-keyboard protocols when
 //! running under a Wayland compositor with XWayland support.
 
-// Off Linux the crate still builds (so workspace-wide checks compile on every
-// host) but its native backends are cfg'd out, which strands the shared
-// helpers they call. They are live on Linux, where dead_code stays enforced.
-#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+// Linux only. Every dependent (pincer, pincer-sdk, pincer-e2e) pulls this
+// crate in under `cfg(target_os = "linux")`; built for any other target it is
+// empty, so workspace-wide checks on macOS or Windows hosts still compile.
+#![cfg(target_os = "linux")]
 // Tool helpers return `Result<_, ToolResult>`: the error arm is the finished
 // tool reply (see the note in pincer-core), not a propagated error.
 #![allow(clippy::result_large_err)]
 
 use pincer_core::tool::ToolRegistry;
 
+pub mod a11y;
+mod at_point_policy;
+pub mod atspi;
+mod browser_consent_ui;
+pub mod browser_platform;
+mod browser_setup_ui;
+pub mod capture;
+mod capture_action_frame;
+mod clipboard;
 pub mod health_report;
+pub mod history;
+pub mod input;
+pub mod installed_apps;
 pub mod overlay;
 pub mod overlay_capture;
 pub mod pip;
-pub mod tools;
-
-#[cfg(target_os = "linux")]
-pub mod x11;
-
-#[cfg(any(target_os = "linux", test))]
-mod x11_client_pid;
-
-#[cfg(target_os = "linux")]
-pub mod input;
-
-#[cfg(target_os = "linux")]
-pub mod tty;
-
-#[cfg(target_os = "linux")]
-pub mod proc_fs;
-
-#[cfg(target_os = "linux")]
-pub mod history;
-
-#[cfg(target_os = "linux")]
-pub mod browser_platform;
-
-#[cfg(target_os = "linux")]
-mod browser_setup_ui;
-
-#[cfg(target_os = "linux")]
-mod browser_consent_ui;
-
-#[cfg(target_os = "linux")]
-pub mod installed_apps;
-
-#[cfg(target_os = "linux")]
-pub mod capture;
-mod capture_action_frame;
-#[cfg(target_os = "linux")]
-mod clipboard;
-
-#[cfg(target_os = "linux")]
-pub mod atspi;
-
-#[cfg(any(target_os = "linux", test))]
-mod snapshot_queries;
-
-#[cfg(target_os = "linux")]
-pub mod a11y;
-
-#[cfg(target_os = "linux")]
-pub mod recording_hooks;
-
-#[cfg(target_os = "linux")]
-pub mod video_wayland;
-
-#[cfg(target_os = "linux")]
-pub mod wayland;
-
-// Pure AT-SPI role / X cursor name tables for presence cursor shapes; tested
-// on every host.
-pub mod pointer_shape_map;
-
-#[cfg(target_os = "linux")]
 pub mod pointer_shape;
-
-/// Install the Linux [`pincer_core::pointer_shape::PointerShapeBackend`]
-/// (and the X11 real-cursor probe for `cursor_shape`). False off Linux, when
-/// no display is reachable, or when a backend is already installed.
-pub fn install_pointer_shape_backend() -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        pointer_shape::install()
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        false
-    }
-}
-
-// `terminal` is OS-independent (pure string matching + a thin x11 hook).
-// Keeping it un-gated lets the unit tests run on any host.
+pub mod pointer_shape_map;
+pub mod proc_fs;
+pub mod recording_hooks;
+pub mod session_bus;
+mod snapshot_queries;
 pub mod terminal;
-
-// Pure background pixel-click routing facts; un-gated so their unit tests run
-// on every host.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-mod at_point_policy;
-
-#[cfg(target_os = "linux")]
+pub mod tools;
+pub mod tty;
+pub mod video_wayland;
+pub mod wayland;
+pub mod x11;
+mod x11_client_pid;
 pub mod xauth;
 
-#[cfg(target_os = "linux")]
-pub mod session_bus;
+/// Install the Linux [`pincer_core::pointer_shape::PointerShapeBackend`]
+/// (and the X11 real-cursor probe for `cursor_shape`). False when no display
+/// is reachable, or when a backend is already installed.
+pub fn install_pointer_shape_backend() -> bool {
+    pointer_shape::install()
+}
 
 /// Process-environment overrides for unit tests. Every lib test that changes
 /// display variables must go through [`test_env::unreachable_x11_display`] so
 /// writers are serialized and the prior values are restored even on panic.
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 pub(crate) mod test_env {
     use std::ffi::OsString;
     use std::sync::{Mutex, MutexGuard};
@@ -234,7 +176,6 @@ pub fn no_display_hint() -> String {
 }
 
 pub fn register_tools() -> ToolRegistry {
-    #[cfg(target_os = "linux")]
     wayland::ensure_nested_session();
     tools::build_registry(false)
 }
@@ -251,9 +192,7 @@ pub fn register_tools_with_cursor_and_provider(
     cfg: cursor_overlay::CursorConfig,
     compat: bool,
 ) -> ToolRegistry {
-    #[cfg(target_os = "linux")]
     wayland::ensure_nested_session();
-    #[cfg(target_os = "linux")]
     wayland::overlay::set_config(cfg.clone());
     if cfg.enabled {
         overlay::init(cfg.clone());
@@ -264,7 +203,6 @@ pub fn register_tools_with_cursor_and_provider(
 
 /// Standalone daemon startup recovery. Keep this out of registry construction:
 /// read-only commands such as describe/list-tools must not mutate X11 devices.
-#[cfg(target_os = "linux")]
 pub fn recover_orphaned_mpx_devices() {
     input::reap_orphaned_master_pointers();
 }

@@ -430,14 +430,8 @@ fn classify_wayland_backend(
 
 // ── Probes ───────────────────────────────────────────────────────────────────
 
-#[cfg(target_os = "linux")]
 fn probe_x11_connect() -> bool {
     x11rb::rust_connection::RustConnection::connect(None).is_ok()
-}
-
-#[cfg(not(target_os = "linux"))]
-fn probe_x11_connect() -> bool {
-    false
 }
 
 pub(crate) const START_ATSPI_BUS_HINT: &str = "Start the AT-SPI bus \
@@ -447,7 +441,6 @@ pub(crate) const START_ATSPI_BUS_HINT: &str = "Start the AT-SPI bus \
 /// canonical AT-SPI prerequisite on Wayland, where there is no X server to
 /// stand in. Returns false on any error (no session bus, no a11y service,
 /// timeout, etc.) so the doctor message stays simple.
-#[cfg(target_os = "linux")]
 pub(crate) fn probe_a11y_bus() -> bool {
     use atspi::zbus;
     let rt = match tokio::runtime::Builder::new_current_thread()
@@ -477,11 +470,6 @@ pub(crate) fn probe_a11y_bus() -> bool {
     })
 }
 
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn probe_a11y_bus() -> bool {
-    false
-}
-
 /// How long [`probe_atspi_registry`] waits for the registry.
 const REGISTRY_PROBE_BUDGET: std::time::Duration = std::time::Duration::from_millis(2500);
 
@@ -492,7 +480,6 @@ const REGISTRY_PROBE_BUDGET: std::time::Duration = std::time::Duration::from_mil
 /// at-spi2-registryd could not open the display, while both diagnostics
 /// passed). On a desktop the accessibility bus starts the registry for this
 /// call when it is not running yet.
-#[cfg(target_os = "linux")]
 pub(crate) fn probe_atspi_registry() -> Result<usize, String> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -523,11 +510,6 @@ pub(crate) fn probe_atspi_registry() -> Result<usize, String> {
     })
 }
 
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn probe_atspi_registry() -> Result<usize, String> {
-    Err("AT-SPI is Linux-only".to_owned())
-}
-
 /// The ax_capability failure for a reachable accessibility bus whose
 /// registry does not answer.
 fn registry_failure(reachable: &str, why: &str) -> CheckEntry {
@@ -546,86 +528,40 @@ const REGISTRY_HINT: &str = "Start the registry on the accessibility bus \
     it needs DISPLAY or WAYLAND_DISPLAY set), or restart the session's accessibility bus.";
 
 /// True when the Wayland backend is opted in and a Wayland session is
-/// active. Wrapper around `wayland::is_wayland()` so non-Linux builds of
-/// this file compile (the `wayland` module is gated on `target_os = linux`).
-#[cfg(target_os = "linux")]
+/// active.
 fn is_wayland_session() -> bool {
     crate::wayland::is_wayland()
 }
 
-#[cfg(not(target_os = "linux"))]
-fn is_wayland_session() -> bool {
-    false
-}
-
-#[cfg(target_os = "linux")]
 fn wayland_opt_in_enabled() -> bool {
     crate::wayland::wayland_enabled()
 }
 
-#[cfg(not(target_os = "linux"))]
-fn wayland_opt_in_enabled() -> bool {
-    false
-}
-
-#[cfg(target_os = "linux")]
 fn wayland_env_name() -> &'static str {
     crate::wayland::ENABLE_WAYLAND_ENV
 }
 
-#[cfg(not(target_os = "linux"))]
-fn wayland_env_name() -> &'static str {
-    "PINCER_ENABLE_WAYLAND"
-}
-
-#[cfg(target_os = "linux")]
 fn portal_input_enabled() -> bool {
     crate::wayland::PORTAL_INPUT_ENABLED
 }
 
-#[cfg(not(target_os = "linux"))]
-fn portal_input_enabled() -> bool {
-    false
-}
-
-#[cfg(target_os = "linux")]
 fn target_activation_available() -> bool {
     crate::wayland::kwin_helper::available()
         || crate::wayland::shell_helper::list_windows(None).is_some()
 }
 
-#[cfg(not(target_os = "linux"))]
-fn target_activation_available() -> bool {
-    false
-}
-
-#[cfg(target_os = "linux")]
 type WaylandManagers = crate::wayland::WaylandManagers;
 
-/// Snapshot of wlroots manager globals. The non-Linux stub returns an empty
-/// snapshot so off-platform builds stay green; doctor short-circuits before
-/// reaching it via [`is_wayland_session`].
-#[cfg(target_os = "linux")]
+/// Snapshot of wlroots manager globals. Doctor short-circuits before reaching
+/// it via [`is_wayland_session`].
 fn probe_wayland_managers() -> anyhow::Result<WaylandManagers> {
     crate::wayland::probe_managers()
 }
 
-#[cfg(not(target_os = "linux"))]
-fn probe_wayland_managers() -> anyhow::Result<WaylandManagers> {
-    Ok(WaylandManagers::default())
-}
-
-#[cfg(target_os = "linux")]
 fn probe_portal_screenshot() -> anyhow::Result<bool> {
     crate::wayland::portal_screenshot::probe_portal()
 }
 
-#[cfg(not(target_os = "linux"))]
-fn probe_portal_screenshot() -> anyhow::Result<bool> {
-    Ok(false)
-}
-
-#[cfg(target_os = "linux")]
 fn probe_portal_remote_desktop() -> anyhow::Result<bool> {
     #[cfg(feature = "portal-input")]
     {
@@ -668,24 +604,6 @@ fn probe_portal_remote_desktop() -> anyhow::Result<bool> {
     {
         Ok(false)
     }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn probe_portal_remote_desktop() -> anyhow::Result<bool> {
-    Ok(false)
-}
-
-/// Stub of `wayland::WaylandManagers` so off-Linux builds compile. Always
-/// reports nothing advertised — non-Linux code paths never call this.
-#[cfg(not(target_os = "linux"))]
-#[derive(Default, Clone, Debug)]
-struct WaylandManagers {
-    foreign_toplevel: bool,
-    screencopy: bool,
-    ext_image_copy_capture: bool,
-    ext_output_image_capture_source: bool,
-    virtual_pointer: bool,
-    wl_shm: bool,
 }
 
 /// `PRETTY_NAME=` out of `/etc/os-release`. Fails to "Linux" so the

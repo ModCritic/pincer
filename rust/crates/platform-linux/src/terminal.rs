@@ -69,20 +69,11 @@ pub fn wm_class_matches_terminal(instance: &str, class: &str) -> bool {
 /// both fields so the substring match still works for terminals like
 /// Ghostty / kitty / alacritty. Returns `false` when no connection is
 /// available or the property is unset.
-#[cfg(target_os = "linux")]
 pub fn is_terminal_window(xid: u64) -> bool {
     match crate::wayland::wm_class_dispatch(xid) {
         Some((instance, class)) => wm_class_matches_terminal(&instance, &class),
         None => false,
     }
-}
-
-/// Non-Linux build: the WM_CLASS-based detector is a no-op (there are
-/// no X11 windows). Lets the function be referenced unconditionally
-/// without per-call `#[cfg]` guards at the call site.
-#[cfg(not(target_os = "linux"))]
-pub fn is_terminal_window(_xid: u64) -> bool {
-    false
 }
 
 #[cfg(test)]

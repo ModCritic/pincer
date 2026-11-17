@@ -40,23 +40,18 @@
 //! override-redirect visual, ShapeInput passthrough, and the XPutImage paint.
 
 use std::collections::HashMap;
-#[cfg(target_os = "linux")]
 use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};
-#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 use cursor_overlay::CursorAction;
-#[cfg(target_os = "linux")]
 const X11_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// How often the `_NET_WM_CM_S{n}` owner is re-sampled. A compositing manager
 /// starting or stopping emits no event we subscribe to, and it decides whether
 /// the server blends our alpha, so the sample cannot be startup-only.
-#[cfg(target_os = "linux")]
 const X11_COMPOSITOR_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
-#[cfg(target_os = "linux")]
 use cursor_overlay::ZOrderEnforcer;
 use cursor_overlay::{
     CursorConfig, CursorKey, KeyedOverlayCommand, MsgOutcome, OverlayCommand, OverlayMsg,
@@ -70,7 +65,7 @@ static CMD_RX_CELL: Mutex<Option<std::sync::mpsc::Receiver<OverlayMsg>>> = Mutex
 static RENDER: Mutex<Option<RenderMap>> = Mutex::new(None);
 static ARRIVAL_TX: Mutex<Option<HashMap<CursorKey, tokio::sync::oneshot::Sender<()>>>> =
     Mutex::new(None);
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 static X11_RANDR_REPAIR_COUNT: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
@@ -95,14 +90,12 @@ fn arrival_fire(key: &CursorKey) {
 
 /// Arrival hook for the native Wayland renderer (`wayland::overlay`), which
 /// fires once the frame at the glide target is committed.
-#[cfg(target_os = "linux")]
 pub(crate) fn fire_arrival(key: &CursorKey) {
     arrival_fire(key);
 }
 
 /// Unblock every waiting pointer action; the renderer that would have fired
 /// their arrivals is gone.
-#[cfg(target_os = "linux")]
 pub(crate) fn release_arrivals() {
     release_all_arrivals();
 }
@@ -138,10 +131,7 @@ fn try_send_x11_message(
 /// overlay thread's start depends on it.
 fn x11_overlay_allowed() -> bool {
     static ALLOWED: OnceLock<bool> = OnceLock::new();
-    #[cfg(target_os = "linux")]
     let native_wayland = crate::wayland::is_wayland();
-    #[cfg(not(target_os = "linux"))]
-    let native_wayland = false;
     *ALLOWED.get_or_init(|| {
         should_start_x11_overlay(
             std::env::var_os("WAYLAND_DISPLAY").is_some(),
@@ -171,7 +161,6 @@ fn should_start_x11_overlay(
 /// Whether the X11 window manager on `DISPLAY` is KWin. KWin names its EWMH
 /// check window "KWin" on its own XWayland, so under Wayland this says KWin is
 /// the compositor.
-#[cfg(target_os = "linux")]
 fn xwayland_wm_is_kwin() -> bool {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as XprotoConnectionExt, Window};
@@ -216,22 +205,14 @@ fn xwayland_wm_is_kwin() -> bool {
         .is_some_and(|reply| reply.value == b"KWin")
 }
 
-#[cfg(not(target_os = "linux"))]
-fn xwayland_wm_is_kwin() -> bool {
-    false
-}
-
 /// The renderer that draws this process's agent cursors, or `None` when no
 /// cursor reaches the screen. Ask after sending a command: the native Wayland
 /// backend is picked on first use.
 pub(crate) fn active_renderer() -> Option<&'static str> {
-    #[cfg(target_os = "linux")]
     let (native_wayland, wayland_backend) = (
         crate::wayland::is_wayland(),
         WAYLAND_OVERLAY_BACKEND.get().copied(),
     );
-    #[cfg(not(target_os = "linux"))]
-    let (native_wayland, wayland_backend) = (false, None);
     renderer_for(
         native_wayland,
         wayland_backend,
@@ -259,10 +240,7 @@ fn renderer_for(
 
 /// Why [`active_renderer`] is `None`, worded for a tool reply.
 pub(crate) fn missing_renderer_reason() -> &'static str {
-    #[cfg(target_os = "linux")]
     let native_wayland = crate::wayland::is_wayland();
-    #[cfg(not(target_os = "linux"))]
-    let native_wayland = false;
     if !native_wayland && std::env::var_os("WAYLAND_DISPLAY").is_some() && !x11_overlay_allowed() {
         "no agent cursor is drawn in XWayland mode outside KWin: the X11 overlay \
          only runs on KWin's XWayland, and the native Wayland overlay needs \
@@ -291,26 +269,19 @@ pub(crate) fn wake_x11_overlay() {
 /// whose agent cursor is drawn by the compositor (layer-shell surface or
 /// GNOME Shell helper). `None` when no Wayland overlay is active.
 pub(crate) fn wayland_capture_limitation() -> Option<String> {
-    #[cfg(target_os = "linux")]
-    {
-        if !crate::wayland::is_wayland() {
-            return None;
-        }
-        let backend = match WAYLAND_OVERLAY_BACKEND.get() {
-            Some(WaylandOverlayBackend::LayerShell) => "layer-shell surface",
-            Some(WaylandOverlayBackend::SemanticShellHelper)
-            | Some(WaylandOverlayBackend::LegacyShellHelper) => "GNOME Shell helper",
-            Some(WaylandOverlayBackend::None) | None => return None,
-        };
-        Some(format!(
-            "on Wayland the agent cursor is drawn by the compositor ({backend}) into the same \
-             output the desktop capture reads, and the Driver cannot leave it out"
-        ))
+    if !crate::wayland::is_wayland() {
+        return None;
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        None
-    }
+    let backend = match WAYLAND_OVERLAY_BACKEND.get() {
+        Some(WaylandOverlayBackend::LayerShell) => "layer-shell surface",
+        Some(WaylandOverlayBackend::SemanticShellHelper)
+        | Some(WaylandOverlayBackend::LegacyShellHelper) => "GNOME Shell helper",
+        Some(WaylandOverlayBackend::None) | None => return None,
+    };
+    Some(format!(
+        "on Wayland the agent cursor is drawn by the compositor ({backend}) into the same \
+         output the desktop capture reads, and the Driver cannot leave it out"
+    ))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -321,7 +292,6 @@ enum WaylandOverlayBackend {
     None,
 }
 
-#[cfg(target_os = "linux")]
 static WAYLAND_OVERLAY_BACKEND: OnceLock<WaylandOverlayBackend> = OnceLock::new();
 
 fn select_wayland_overlay_backend(
@@ -340,7 +310,6 @@ fn select_wayland_overlay_backend(
     }
 }
 
-#[cfg(target_os = "linux")]
 fn wayland_overlay_backend() -> WaylandOverlayBackend {
     *WAYLAND_OVERLAY_BACKEND.get_or_init(|| {
         select_wayland_overlay_backend(
@@ -351,13 +320,11 @@ fn wayland_overlay_backend() -> WaylandOverlayBackend {
     })
 }
 
-#[cfg(target_os = "linux")]
 struct X11OverlayThreadCleanup {
     receiver: Option<std::sync::mpsc::Receiver<OverlayMsg>>,
     disable_render_state: bool,
 }
 
-#[cfg(target_os = "linux")]
 impl X11OverlayThreadCleanup {
     fn receiver(&self) -> &std::sync::mpsc::Receiver<OverlayMsg> {
         self.receiver
@@ -387,7 +354,6 @@ impl X11OverlayThreadCleanup {
     }
 }
 
-#[cfg(target_os = "linux")]
 impl Drop for X11OverlayThreadCleanup {
     fn drop(&mut self) {
         // Disconnect first so an animator racing teardown cannot enqueue after
@@ -400,7 +366,6 @@ impl Drop for X11OverlayThreadCleanup {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn disable_render_map(render: &mut Option<RenderMap>) {
     *render = None;
 }
@@ -512,7 +477,6 @@ fn try_send_command_for(key: CursorKey, cmd: OverlayCommand) -> bool {
         key: key.clone(),
         cmd: cmd.clone(),
     });
-    #[cfg(target_os = "linux")]
     let native_wayland = crate::wayland::is_wayland();
     let x11_overlay_allowed = x11_overlay_allowed();
     let x11_queued = x11_overlay_allowed && try_send_x11_message(CMD_TX.get(), msg.clone());
@@ -523,11 +487,8 @@ fn try_send_command_for(key: CursorKey, cmd: OverlayCommand) -> bool {
             "overlay: X11 channel rejected command (no sender or queue full)"
         );
     }
-    #[cfg(target_os = "linux")]
     let layer_shell_queued = native_wayland
         && dispatch_wayland_overlay_message(&msg) == WaylandOverlayBackend::LayerShell;
-    #[cfg(not(target_os = "linux"))]
-    let layer_shell_queued = false;
     x11_queued || layer_shell_queued
 }
 
@@ -535,7 +496,6 @@ fn try_send_command_for(key: CursorKey, cmd: OverlayCommand) -> bool {
 /// before acting anyway. The layer-shell renderer connects lazily and paints
 /// in software, so its first glide can lag the planned duration; a renderer
 /// that failed mid-glide must not stall input.
-#[cfg(target_os = "linux")]
 fn wayland_arrival_budget(glide_duration_ms: f64) -> Duration {
     let glide = if glide_duration_ms.is_finite() {
         glide_duration_ms.clamp(0.0, 5_000.0)
@@ -549,15 +509,12 @@ fn wayland_arrival_budget(glide_duration_ms: f64) -> Duration {
 /// single-surface rules decide what reaches it: the session that drew last
 /// owns it, only that session's end hides it, and it hides after the shared
 /// agent idle timeout (the helper has no idle fade of its own).
-#[cfg(target_os = "linux")]
 static SHELL_HELPER_SURFACE: Mutex<Option<pincer_core::agent_cursor::SharedCursorSurface>> =
     Mutex::new(None);
-#[cfg(target_os = "linux")]
 static SHELL_HELPER_IDLE: std::sync::Condvar = std::sync::Condvar::new();
 
 /// Apply one overlay message to the shell-helper surface. Returns whether it
 /// reaches the helper: `true` draws a command, or hides for `Remove`.
-#[cfg(target_os = "linux")]
 fn shell_helper_surface_event(msg: &OverlayMsg, now: Instant) -> bool {
     use pincer_core::agent_cursor::{SharedCursorSurface, SharedSurfaceAction};
     let mut guard = SHELL_HELPER_SURFACE.lock().unwrap();
@@ -584,7 +541,6 @@ fn shell_helper_surface_event(msg: &OverlayMsg, now: Instant) -> bool {
 
 /// Hide the shell-helper cursor once its owner has been idle for the shared
 /// agent idle timeout. One parked thread, started on the first draw.
-#[cfg(target_os = "linux")]
 fn start_shell_helper_idle_watch() {
     static STARTED: OnceLock<()> = OnceLock::new();
     STARTED.get_or_init(|| {
@@ -621,7 +577,6 @@ fn start_shell_helper_idle_watch() {
     });
 }
 
-#[cfg(target_os = "linux")]
 fn dispatch_wayland_overlay_message(msg: &OverlayMsg) -> WaylandOverlayBackend {
     let backend = wayland_overlay_backend();
     match backend {
@@ -643,7 +598,6 @@ fn dispatch_wayland_overlay_message(msg: &OverlayMsg) -> WaylandOverlayBackend {
     backend
 }
 
-#[cfg(target_os = "linux")]
 fn dispatch_shell_helper_command(key: &str, cmd: &OverlayCommand, semantic: bool) {
     if semantic {
         crate::wayland::shell_helper::set_cursor_color(&cursor_overlay::session_fill_hex(key));
@@ -705,7 +659,6 @@ fn dispatch_shell_helper_command(key: &str, cmd: &OverlayCommand, semantic: bool
 }
 
 /// One badge call to the semantic GNOME helper.
-#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ShellHelperBadgeCall {
     /// `SetCursorState(action, delivery, target, active)`.
@@ -734,7 +687,6 @@ enum ShellHelperBadgeCall {
 /// for a foreground moment, and a key combo as keycaps (joining that chip
 /// when both happen). Minimal, older helper: the foreground chip while the
 /// action runs and no key combo, as before.
-#[cfg(target_os = "linux")]
 fn shell_helper_badge_calls(
     cmd: &OverlayCommand,
     mode: cursor_overlay::BadgeMode,
@@ -932,7 +884,6 @@ pub async fn animate_cursor_to_target_for(
         return;
     }
 
-    #[cfg(target_os = "linux")]
     if crate::wayland::is_wayland() {
         let budget = wayland_arrival_budget(current_motion_for(&key).glide_duration_ms);
         if tokio::time::timeout(budget, rx).await.is_err() {
@@ -982,7 +933,6 @@ pub fn remove_cursor(key: CursorKey) {
     if let Some(tx) = CMD_TX.get() {
         let _ = tx.try_send(msg.clone());
     }
-    #[cfg(target_os = "linux")]
     if crate::wayland::is_wayland() {
         // The Wayland renderer drops the cursor without an arrival.
         arrival_cancel(&key);
@@ -999,7 +949,6 @@ pub fn revive_cursor(key: CursorKey) {
     if let Some(tx) = CMD_TX.get() {
         let _ = tx.try_send(msg.clone());
     }
-    #[cfg(target_os = "linux")]
     if crate::wayland::is_wayland() {
         dispatch_wayland_overlay_message(&msg);
     }
@@ -1096,19 +1045,16 @@ impl RenderEntry for RenderState {
 /// root read of every effect rect each frame, so they are disabled there.
 /// `software_only` windows are 24-bit for the session, so a compositor that
 /// appears later still cannot show translucency through them.
-#[cfg(target_os = "linux")]
 fn set_x11_effects_capable(map: &mut RenderMap, capable: bool) {
     for rs in map.cursors.values_mut() {
         rs.core.effects_capable = capable;
     }
 }
 
-#[cfg(target_os = "linux")]
 fn render_map_needs_z_order_tick(map: &RenderMap) -> bool {
     map.cursors.values().any(|rs| rs.core.is_revealed())
 }
 
-#[cfg(target_os = "linux")]
 fn apply_messages_after_wake(
     map: &mut RenderMap,
     first_msg: Option<OverlayMsg>,
@@ -1133,7 +1079,6 @@ fn apply_messages_after_wake(
     (arrived, had_msg)
 }
 
-#[cfg(target_os = "linux")]
 fn process_render_wake(
     map: &mut RenderMap,
     first_msg: Option<OverlayMsg>,
@@ -1156,7 +1101,6 @@ fn process_render_wake(
     (arrived, had_msg)
 }
 
-#[cfg(target_os = "linux")]
 fn next_maintenance_deadline(
     last_tick: Instant,
     last_z_order_tick: Instant,
@@ -1175,7 +1119,6 @@ fn next_maintenance_deadline(
     deadline
 }
 
-#[cfg(target_os = "linux")]
 fn z_order_reassertion_needed(
     had_msg: bool,
     screen_changed: bool,
@@ -1186,7 +1129,6 @@ fn z_order_reassertion_needed(
     had_msg || screen_changed || pin_changed || (periodic_tick_needed && periodic_tick_due)
 }
 
-#[cfg(target_os = "linux")]
 enum OverlayWake {
     Frame,
     Message(OverlayMsg),
@@ -1194,7 +1136,6 @@ enum OverlayWake {
     Disconnected,
 }
 
-#[cfg(target_os = "linux")]
 fn wait_for_overlay_work(
     rx: &std::sync::mpsc::Receiver<OverlayMsg>,
     frame_tick_needed: bool,
@@ -1212,7 +1153,6 @@ fn wait_for_overlay_work(
     }
 }
 
-#[cfg(target_os = "linux")]
 fn recoverable_x11_z_order_error(error: &x11rb::x11_utils::X11Error, overlay_win: u32) -> bool {
     // BadWindow: the sibling died between the liveness probe and the server
     // processing the restack. BadMatch: the sibling is not a sibling — a
@@ -1228,7 +1168,6 @@ fn recoverable_x11_z_order_error(error: &x11rb::x11_utils::X11Error, overlay_win
         && error.bad_value != overlay_win
 }
 
-#[cfg(target_os = "linux")]
 /// Return `Ok(true)` for display changes, `Ok(false)` for unrelated or safely
 /// recoverable events, and `Err` for protocol failures that disable the overlay.
 fn classify_x11_overlay_event(
@@ -1262,13 +1201,11 @@ fn classify_x11_overlay_event(
     }
 }
 
-#[cfg(target_os = "linux")]
 fn update_render_map_geometry(map: &mut RenderMap, width: u16, height: u16) {
     map.platform.scr_w = u32::from(width);
     map.platform.scr_h = u32::from(height);
 }
 
-#[cfg(target_os = "linux")]
 fn drain_x11_overlay_events(
     conn: &impl x11rb::connection::Connection,
     overlay_win: u32,
@@ -1280,7 +1217,6 @@ fn drain_x11_overlay_events(
     Ok(display_changed)
 }
 
-#[cfg(target_os = "linux")]
 fn subscribe_x11_display_changes(
     conn: &impl x11rb::connection::Connection,
     root: u32,
@@ -1294,7 +1230,6 @@ fn subscribe_x11_display_changes(
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
 fn current_x11_root_geometry(
     conn: &impl x11rb::connection::Connection,
     root: u32,
@@ -1311,7 +1246,6 @@ fn current_x11_root_geometry(
     Ok((geometry.width, geometry.height))
 }
 
-#[cfg(target_os = "linux")]
 fn prepare_x11_overlay_geometry(
     conn: &impl x11rb::connection::Connection,
     win: u32,
@@ -1351,7 +1285,6 @@ fn prepare_x11_overlay_geometry(
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
 fn clear_x11_overlay_input_shape(
     conn: &impl x11rb::connection::Connection,
     win: u32,
@@ -1364,7 +1297,6 @@ fn clear_x11_overlay_input_shape(
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
 fn prepare_x11_overlay_with_empty_input(
     conn: &impl x11rb::connection::Connection,
     win: u32,
@@ -1392,7 +1324,6 @@ fn prepare_x11_overlay_with_empty_input(
 
 // ── X11 thread ────────────────────────────────────────────────────────────
 
-#[cfg(target_os = "linux")]
 fn run_overlay_thread(cfg: CursorConfig, rx: std::sync::mpsc::Receiver<OverlayMsg>) {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::ConnectionExt as XprotoConnectionExt;
@@ -1919,10 +1850,8 @@ fn run_overlay_thread(cfg: CursorConfig, rx: std::sync::mpsc::Receiver<OverlayMs
 /// Publishes [`X11_OVERLAY_LIVE`] for the render loop's lifetime, however the
 /// loop ends, and releases a capture waiting on a hold that will never be
 /// answered.
-#[cfg(target_os = "linux")]
 struct X11OverlayLiveGuard;
 
-#[cfg(target_os = "linux")]
 impl X11OverlayLiveGuard {
     fn start() -> Self {
         X11_OVERLAY_LIVE.store(true, std::sync::atomic::Ordering::Release);
@@ -1930,7 +1859,6 @@ impl X11OverlayLiveGuard {
     }
 }
 
-#[cfg(target_os = "linux")]
 impl Drop for X11OverlayLiveGuard {
     fn drop(&mut self) {
         X11_OVERLAY_LIVE.store(false, std::sync::atomic::Ordering::Release);
@@ -1944,7 +1872,6 @@ impl Drop for X11OverlayLiveGuard {
 /// Borrows the X11 connection and overlay window id; lives only inside
 /// `run_overlay_thread` (the X11 connection is not `'static`). Reasserted after
 /// commands, target/display changes, and at most every 80 ms while visible.
-#[cfg(target_os = "linux")]
 struct X11ZOrderEnforcer<'a, C: x11rb::connection::Connection> {
     conn: &'a C,
     win: u32,
@@ -1962,7 +1889,6 @@ struct X11ZOrderEnforcer<'a, C: x11rb::connection::Connection> {
 /// window that actually occupies a stacking slot, so it is the correct
 /// sibling. Returns `None` for a dead window or a chain that never reaches
 /// the root (also proving liveness, replacing a separate attribute probe).
-#[cfg(target_os = "linux")]
 fn resolve_x11_root_child(
     conn: &impl x11rb::connection::Connection,
     root: u32,
@@ -1984,7 +1910,6 @@ fn resolve_x11_root_child(
     None
 }
 
-#[cfg(target_os = "linux")]
 impl<'a, C: x11rb::connection::Connection> ZOrderEnforcer for X11ZOrderEnforcer<'a, C> {
     fn reassert(&self, target: Option<u64>) {
         use x11rb::protocol::xproto::{
@@ -2019,7 +1944,6 @@ impl<'a, C: x11rb::connection::Connection> ZOrderEnforcer for X11ZOrderEnforcer<
     }
 }
 
-#[cfg(target_os = "linux")]
 fn find_argb_visual(
     _conn: &impl x11rb::connection::Connection,
     screen: &x11rb::protocol::xproto::Screen,
@@ -2039,7 +1963,6 @@ fn find_argb_visual(
     None
 }
 
-#[cfg(target_os = "linux")]
 fn x11_compositor_present(conn: &impl x11rb::connection::Connection, screen_num: usize) -> bool {
     use x11rb::protocol::xproto::ConnectionExt as XprotoConnectionExt;
 
@@ -2063,13 +1986,10 @@ fn x11_compositor_present(conn: &impl x11rb::connection::Connection, screen_num:
 /// bloom/click effects peak below 40 px from the anchor and built-in/custom
 /// silhouettes render at 26 px. Keep generous headroom so active work stays
 /// independent of the root-window area without clipping antialiasing.
-#[cfg(target_os = "linux")]
 const X11_CURSOR_TILE_MARGIN: f64 = 64.0;
-#[cfg(target_os = "linux")]
 const X11_BADGED_CURSOR_HORIZONTAL_MARGIN: f64 =
     cursor_overlay::session_badge_extents().horizontal as f64 + 2.0;
 
-#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct X11TileBounds {
     x: i16,
@@ -2078,7 +1998,6 @@ struct X11TileBounds {
     height: u16,
 }
 
-#[cfg(target_os = "linux")]
 struct X11PaintTile {
     bounds: X11TileBounds,
     pixmap: tiny_skia::Pixmap,
@@ -2087,7 +2006,6 @@ struct X11PaintTile {
 /// Owner-thread X11 handles and mapping state. Bundled so the per-frame
 /// paint entry point keeps a reviewable argument list as the compositing
 /// inputs grow.
-#[cfg(target_os = "linux")]
 struct X11PaintTarget {
     win: u32,
     root: u32,
@@ -2105,7 +2023,6 @@ struct X11PaintTarget {
 /// rect is still our own paint when it equals `uploaded`, in which case the
 /// true backdrop is `under`; once it differs, the window that owns those pixels
 /// has serviced its Expose and the live read is the truth again.
-#[cfg(target_os = "linux")]
 struct X11SavedBackdrop {
     bounds: X11TileBounds,
     under: Vec<u8>,
@@ -2114,7 +2031,6 @@ struct X11SavedBackdrop {
 
 /// One painted frame: the root-space rects the overlay actually made visible,
 /// and the save-unders covering them.
-#[cfg(target_os = "linux")]
 struct X11BackdropFrame {
     /// When a later frame superseded this one. `None` while the frame is the
     /// one on screen, which can never be read back as backdrop.
@@ -2123,7 +2039,6 @@ struct X11BackdropFrame {
     saved: Vec<X11SavedBackdrop>,
 }
 
-#[cfg(target_os = "linux")]
 impl X11BackdropFrame {
     /// A vacated frame is dropped once its save-unders are old enough that
     /// serving them would be worse than reading whatever is there now. Nothing
@@ -2143,7 +2058,6 @@ impl X11BackdropFrame {
 /// backdrop ourselves. XGetImage on the root returns our own painted pixels
 /// wherever the overlay is currently shaped in, so those pixels are served from
 /// here instead and everything else keeps the live read.
-#[cfg(target_os = "linux")]
 #[derive(Default)]
 struct X11BackdropCache {
     /// Newest frame at the front.
@@ -2173,42 +2087,34 @@ struct X11BackdropCache {
 /// windows underneath repaint before it reads the root again. Emptying the
 /// bounding shape only queues Expose; the framebuffer still physically holds
 /// our last frame until the owning clients answer it.
-#[cfg(target_os = "linux")]
 const X11_BACKDROP_RESYNC_GRACE: Duration = Duration::from_millis(200);
 /// How long a vacated frame's save-under stays available. Long is safe:
 /// `resolve_backdrop` only uses it for pixels that still hold our own paint.
-#[cfg(target_os = "linux")]
 const X11_BACKDROP_RETENTION: Duration = Duration::from_secs(2);
 /// Memory ceiling on retained frames, ~2.3 MB per cursor at the largest badged
 /// tile. This is what actually bounds the history during continuous motion:
 /// 32 frames is roughly half a second at the 60 Hz frame budget.
-#[cfg(target_os = "linux")]
 const X11_BACKDROP_MAX_FRAMES: usize = 32;
 /// A frame's whole root read (one round trip, all tiles) must fit well inside
 /// the 16 ms frame budget.
-#[cfg(target_os = "linux")]
 const X11_BACKDROP_READ_BUDGET: Duration = Duration::from_millis(8);
 /// Consecutive over-budget frames that latch software compositing off.
-#[cfg(target_os = "linux")]
 const X11_BACKDROP_SLOW_READ_LIMIT: u8 = 3;
 /// Consecutive frames the overlay may hold still waiting for a usable backdrop
 /// before compositing is latched off for the session. Three frames is ~50 ms of
 /// frozen cursor, which is cheaper than either painting a tile we cannot
 /// account for or losing translucency to a single transient X11 error.
-#[cfg(target_os = "linux")]
 const X11_BACKDROP_UNBACKED_FRAME_LIMIT: u8 = 3;
 
 /// Software compositing is compositor-less only, and only until a slow server
 /// latches it off. Split out so the hard constraint — a compositing manager
 /// changes nothing about this path — is locked by a test.
-#[cfg(target_os = "linux")]
 fn backdrop_compositing_enabled(compositor_present: bool, cache: &X11BackdropCache) -> bool {
     !compositor_present && cache.enabled()
 }
 
 /// Intersect a root-space rect with a tile, returning tile-local
 /// `(x0, y0, x1, y1)` half-open bounds, or `None` when they do not overlap.
-#[cfg(target_os = "linux")]
 fn clip_to_tile(
     bounds: X11TileBounds,
     x: i32,
@@ -2234,7 +2140,6 @@ fn clip_to_tile(
 }
 
 /// Tile-local half-open bounding box of a shape, or `None` when it is empty.
-#[cfg(target_os = "linux")]
 fn shape_bounding_box(
     shape: &[x11rb::protocol::xproto::Rectangle],
 ) -> Option<(usize, usize, usize, usize)> {
@@ -2258,7 +2163,6 @@ fn shape_bounding_box(
 /// Copy the `(x0, y0, x1, y1)` sub-rect out of a tile-sized BGRX buffer. Only
 /// the painted bounding box is ever consulted later, so save-unders store that
 /// instead of the whole tile.
-#[cfg(target_os = "linux")]
 fn crop_tile_pixels(
     pixels: &[u8],
     tile_width: usize,
@@ -2272,7 +2176,6 @@ fn crop_tile_pixels(
     out
 }
 
-#[cfg(target_os = "linux")]
 impl X11BackdropCache {
     fn enabled(&self) -> bool {
         !self.disabled
@@ -2561,7 +2464,6 @@ impl X11BackdropCache {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn cursor_tile_bounds(
     core: &RenderStateCore,
     screen_width: u32,
@@ -2576,7 +2478,6 @@ fn cursor_tile_bounds(
 /// pixels need no explicit clear: every paint SETs the bounding shape to the
 /// current frame's visible runs, so whatever an effect covered last frame is
 /// clipped away as soon as it shrinks or ends.
-#[cfg(target_os = "linux")]
 fn cursor_tile_bounds_with_effects(
     core: &RenderStateCore,
     screen_width: u32,
@@ -2637,7 +2538,6 @@ fn cursor_tile_bounds_with_effects(
     })
 }
 
-#[cfg(target_os = "linux")]
 fn render_x11_tiles(map: &RenderMap) -> Vec<X11PaintTile> {
     let mut bounds = Vec::new();
     for rs in map.cursors.values() {
@@ -2676,7 +2576,6 @@ fn render_x11_tiles(map: &RenderMap) -> Vec<X11PaintTile> {
 /// XPutImage (ZPixmap). The pixmaps are premultiplied RGBA; X11 ARGB is
 /// premultiplied BGRA. XShape hides pixels from previous tile positions, so
 /// no full-root clear/upload is required when a cursor moves.
-#[cfg(target_os = "linux")]
 const NONCOMPOSITED_ALPHA_CUTOFF: u8 = 128;
 
 /// Read the true desktop pixels under every tile of one frame.
@@ -2691,7 +2590,6 @@ const NONCOMPOSITED_ALPHA_CUTOFF: u8 = 128;
 /// and not others would upload two different pixel policies into one bounding
 /// shape, so the frame is deferred (or, eventually, compositing is latched off)
 /// as a unit.
-#[cfg(target_os = "linux")]
 fn read_root_backdrops(
     conn: &impl x11rb::connection::Connection,
     root: u32,
@@ -2763,7 +2661,6 @@ fn read_root_backdrops(
 /// map and upload on this connection, so no separate sync is needed. Errors
 /// report as unreliable: a server that cannot service this exchange cannot
 /// service the per-frame paint either.
-#[cfg(target_os = "linux")]
 fn x11_visual_readback_reliable(
     conn: &impl x11rb::connection::Connection,
     root: u32,
@@ -2885,7 +2782,6 @@ fn x11_visual_readback_reliable(
 
 /// A composited tile: its bounds, the opaque pixels to upload, the tile-local
 /// visible shape, and the backdrop they were blended over.
-#[cfg(target_os = "linux")]
 type X11CompositedTile = (
     X11TileBounds,
     Vec<u8>,
@@ -2894,7 +2790,6 @@ type X11CompositedTile = (
 );
 
 /// Compose every tile of a frame, or none of it.
-#[cfg(target_os = "linux")]
 fn composite_x11_tiles(
     now: Instant,
     tiles: &[X11PaintTile],
@@ -2914,7 +2809,6 @@ fn composite_x11_tiles(
 
 /// Hide every overlay pixel. Used while a resync waits for the windows we
 /// uncovered to repaint: the wait is only useful if we are not painting.
-#[cfg(target_os = "linux")]
 fn blank_x11_overlay_shape(
     conn: &impl x11rb::connection::Connection,
     target: &X11PaintTarget,
@@ -2946,14 +2840,12 @@ fn blank_x11_overlay_shape(
 /// overlay deliberately left the previous frame on screen because it could not
 /// account for the pixels this one would cover; the caller must retry on the
 /// next frame tick rather than treating the state as settled.
-#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum X11PaintOutcome {
     Painted,
     Deferred,
 }
 
-#[cfg(target_os = "linux")]
 fn paint_x11_tiles(
     conn: &impl x11rb::connection::Connection,
     target: &X11PaintTarget,
@@ -3148,7 +3040,6 @@ fn paint_x11_tiles(
 /// `backdrop` is a tile-sized row-major BGRX buffer as XGetImage returns it for
 /// the root. Returns `None` when it does not match the tile so callers fail
 /// closed onto the alpha-cutoff path rather than uploading a guess.
-#[cfg(target_os = "linux")]
 fn composited_bgra_and_visible_shape(
     pm: &tiny_skia::Pixmap,
     backdrop: &[u8],
@@ -3224,7 +3115,6 @@ fn composited_bgra_and_visible_shape(
 /// It is cheaper than converting the whole tile: transparent pixels are
 /// skipped four at a time, and only the bounding box is converted and sent
 /// (a quarter to two thirds of the tile in the glides measured).
-#[cfg(target_os = "linux")]
 fn visible_shape_and_pixels(
     pm: &tiny_skia::Pixmap,
     compositor_present: bool,
@@ -3320,7 +3210,7 @@ fn visible_shape_and_pixels(
 
 /// The whole-tile conversion the overlay used to upload, kept as the
 /// reference `visible_shape_and_pixels` must match byte for byte.
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 fn bgra_and_visible_shape(
     pm: &tiny_skia::Pixmap,
     compositor_present: bool,
@@ -3387,7 +3277,7 @@ fn bgra_and_visible_shape(
     (bgra, rectangles)
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -3412,7 +3302,6 @@ mod tests {
         assert!(draws_cursor(human));
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn wayland_arrival_wait_is_bounded_above_the_glide() {
         use super::wayland_arrival_budget;
@@ -5862,10 +5751,7 @@ mod tests {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-fn run_overlay_thread(_cfg: CursorConfig, _rx: std::sync::mpsc::Receiver<OverlayMsg>) {}
-
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod shell_helper_surface_tests {
     use super::*;
 
@@ -5908,7 +5794,7 @@ mod shell_helper_surface_tests {
     }
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod shell_helper_badge_tests {
     use super::*;
     use cursor_overlay::{BadgeMode, DeliveryModifier, TargetModifier};

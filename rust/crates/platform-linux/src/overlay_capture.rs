@@ -298,7 +298,6 @@ fn release_hold() {
 /// Inspect a PNG captured while the overlay was hidden, scrubbing any pixels
 /// the overlay's last frame left behind. Returns the (possibly re-encoded) PNG
 /// and the verdict.
-#[cfg(target_os = "linux")]
 pub fn verify_hidden_capture(
     png: Vec<u8>,
     hidden: Option<&HiddenOverlay>,
@@ -308,7 +307,6 @@ pub fn verify_hidden_capture(
 
 /// [`verify_hidden_capture`] for a capture of part of the screen whose
 /// top-left pixel is at `origin` in root-window coordinates.
-#[cfg(target_os = "linux")]
 pub fn verify_hidden_capture_at(
     png: Vec<u8>,
     hidden: Option<&HiddenOverlay>,
@@ -361,7 +359,6 @@ pub fn verify_hidden_capture_at(
 /// [`verify_hidden_capture_at`] for a capture that may still be pixels: they
 /// are scrubbed in place, which is what decoding, scrubbing and re-encoding
 /// their PNG gives.
-#[cfg(target_os = "linux")]
 pub fn verify_hidden_image_at(
     image: pincer_core::image_utils::CapturedImage,
     hidden: Option<&HiddenOverlay>,
@@ -397,7 +394,6 @@ pub fn verify_hidden_image_at(
 
 /// The hidden overlay's leftover patches, moved into the coordinates of a
 /// capture whose top-left pixel is at `origin`.
-#[cfg(target_os = "linux")]
 fn residual_patches_at(
     hidden: &HiddenOverlay,
     origin: (i32, i32),

@@ -3,7 +3,6 @@
 /// Per-turn application state for trajectory recording, walked under the
 /// shared `get_window_state` budget. The walk reports the shared walk fields so
 /// the turn evidence says when the tree is partial.
-#[cfg(target_os = "linux")]
 pub fn app_state_json_for(
     window_id: Option<u64>,
     pid: Option<i64>,
@@ -18,7 +17,6 @@ pub fn app_state_json_for(
     app_state_json_for_blocking(window_id, pid, budget)
 }
 
-#[cfg(target_os = "linux")]
 fn app_state_json_for_blocking(
     window_id: Option<u64>,
     pid: Option<i64>,
@@ -71,7 +69,6 @@ fn app_state_json_for_blocking(
     serde_json::to_vec_pretty(&payload).ok()
 }
 
-#[cfg(target_os = "linux")]
 pub fn screenshot_for_recording(window_id: Option<u64>, pid: Option<i64>) -> Option<Vec<u8>> {
     if crate::wayland::is_wayland() {
         // Wayland surface ids are connection-scoped, so a later recording hook
@@ -91,7 +88,6 @@ pub fn screenshot_for_recording(window_id: Option<u64>, pid: Option<i64>) -> Opt
     }
 }
 
-#[cfg(target_os = "linux")]
 pub fn element_window_local_xy(
     pid: i64,
     args: &serde_json::Value,
@@ -117,7 +113,6 @@ pub fn element_window_local_xy(
     Some((window_id, point))
 }
 
-#[cfg(target_os = "linux")]
 fn element_window_local_xy_blocking(
     window_id: u64,
     pid: i64,
@@ -142,7 +137,6 @@ fn element_window_local_xy_blocking(
     ))
 }
 
-#[cfg(any(target_os = "linux", test))]
 fn hyprland_recording_point(
     element: (i32, i32, u32, u32),
     window: (i32, i32, u32, u32),
@@ -157,7 +151,6 @@ fn hyprland_recording_point(
     hyprland_output_point((cx, cy), window, display)
 }
 
-#[cfg(any(target_os = "linux", test))]
 fn hyprland_output_point(
     (cx, cy): (f64, f64),
     window: (i32, i32, u32, u32),
@@ -172,7 +165,6 @@ fn hyprland_output_point(
     (in_window && in_display).then_some((cx, cy))
 }
 
-#[cfg(target_os = "linux")]
 pub fn hyprland_pixel_recording_point(
     window_id: Option<u64>,
     pid: Option<i64>,
@@ -202,7 +194,6 @@ pub fn hyprland_pixel_recording_point(
     }
 }
 
-#[cfg(target_os = "linux")]
 fn resolve_window_for_recording(
     pid: u32,
     window_id: Option<u64>,
@@ -225,29 +216,6 @@ fn resolve_window_for_recording(
     } else {
         windows.into_iter().next()
     }
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn app_state_json_for(
-    _window_id: Option<u64>,
-    _pid: Option<i64>,
-    _budget: pincer_core::recording::StateCaptureBudget,
-) -> Option<Vec<u8>> {
-    None
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn screenshot_for_recording(_window_id: Option<u64>, _pid: Option<i64>) -> Option<Vec<u8>> {
-    None
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn element_window_local_xy(
-    _pid: i64,
-    _args: &serde_json::Value,
-    _capture_point: bool,
-) -> Option<(u64, Option<(f64, f64)>)> {
-    None
 }
 
 #[cfg(test)]
