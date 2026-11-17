@@ -3,12 +3,41 @@
 //! pincer-core's shared event-aware `CdpConnection` transport.
 
 use pincer_core::browser::cdp_ws::CdpConnection;
-use pincer_core::cdp::pick_page;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex as AsyncMutex;
+
+/// Pick the unique page whose `url` contains `hint` (case-insensitive), or
+/// the first page when no hint is given.
+///
+/// Explicit hints fail closed when zero or multiple pages match: CDP target
+/// ids carry no relationship to the caller's window, so a browser with more
+/// than one tab open would otherwise be picked non-deterministically.
+///
+/// This lived in pincer-core's `cdp` module until 0678402 removed that module;
+/// macOS is its only remaining caller.
+fn pick_page<'a>(pages: impl IntoIterator<Item = &'a Value>, hint: Option<&str>) -> Option<&'a Value> {
+    let mut pages = pages.into_iter();
+    match hint {
+        None => pages.next(),
+        Some(hint) => {
+            let hint_lower = hint.to_ascii_lowercase();
+            let mut matches = pages.filter(|page| {
+                page.get("url")
+                    .and_then(Value::as_str)
+                    .is_some_and(|url| url.to_ascii_lowercase().contains(&hint_lower))
+            });
+            let page = matches.next()?;
+            if matches.next().is_some() {
+                return None;
+            }
+            Some(page)
+        }
+    }
+}
 
 pub struct CdpClient;
 
@@ -669,6 +698,33 @@ async fn http_get_json(port: u16) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    fn pages() -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({ "url": "app://fixture/#window-a", "webSocketDebuggerUrl": "ws://a" }),
+            serde_json::json!({ "url": "app://fixture/#window-b", "webSocketDebuggerUrl": "ws://b" }),
+        ]
+    }
+
+    #[test]
+    fn targeted_page_selection_is_unique_and_case_insensitive() {
+        let pages = pages();
+        assert_eq!(
+            super::pick_page(&pages, Some("#WINDOW-B")).and_then(|page| page["webSocketDebuggerUrl"].as_str()),
+            Some("ws://b")
+        );
+        assert!(super::pick_page(&pages, Some("#missing")).is_none());
+        assert!(super::pick_page(&pages, Some("app://fixture/")).is_none());
+    }
+
+    #[test]
+    fn omitted_page_hint_preserves_first_page_behavior() {
+        let pages = pages();
+        assert_eq!(
+            super::pick_page(&pages, None).and_then(|page| page["webSocketDebuggerUrl"].as_str()),
+            Some("ws://a")
+        );
+    }
+
     #[test]
     fn node_target_is_picked_from_an_inspector_listing() {
         let listing = serde_json::json!([

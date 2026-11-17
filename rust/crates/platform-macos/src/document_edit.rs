@@ -18,7 +18,8 @@
 use std::time::Duration;
 
 use crate::ax::bindings::{
-    copy_element_attr, copy_string_attr, AXUIElementRef, AXUIElementSetAttributeValue,
+    copy_element_attr, copy_string_attr, AXUIElementRef, AXUIElementSetAttributeValue, AXValueCreate,
+    AXValueType,
 };
 
 /// What the document's edited mark showed after an AX text write.
@@ -60,11 +61,8 @@ impl DocumentEdited {
     }
 }
 
-#[link(name = "ApplicationServices", kind = "framework")]
-extern "C" {
-    fn AXValueCreate(the_type: u32, value_ptr: *const std::ffi::c_void) -> *const std::ffi::c_void;
-}
-const AX_VALUE_CF_RANGE: u32 = 4;
+/// kAXValueCFRangeType.
+const AX_VALUE_CF_RANGE: AXValueType = 4;
 
 #[repr(C)]
 struct CfRange {
