@@ -284,6 +284,20 @@ pub fn is_long_lived_transport_command(args: &[String]) -> bool {
     )
 }
 
+/// What `pincer --version` prints: the crate version, then the commit the
+/// build script recorded (short SHA, `-dirty` when tracked files had
+/// uncommitted changes), so a stale install shows which source it runs, for
+/// example `pincer 0.35.4 (3199625)`. Without git at build time it is the
+/// version alone. MCP `serverInfo.version` stays plain semver for clients
+/// that parse it.
+pub(crate) fn version_line() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    match env!("PINCER_GIT_REVISION") {
+        "" => format!("pincer {version}"),
+        revision => format!("pincer {version} ({revision})"),
+    }
+}
+
 /// Parse the first non-flag positional argument from argv to determine which
 /// subcommand to run.  Cursor-overlay flags are consumed by `CursorConfig`
 /// independently; we only care about the first non-`--` arg here.
@@ -293,7 +307,7 @@ pub fn parse_command() -> Command {
     // Handle --version / -V before any other parsing so they are never
     // silently stripped as "bare flags" and swallowed by MCP mode.
     if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("pincer {}", env!("CARGO_PKG_VERSION"));
+        println!("{}", version_line());
         std::process::exit(0);
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
@@ -4935,6 +4949,28 @@ mod tests {
                 "{finite:?}"
             );
         }
+    }
+
+    #[test]
+    fn version_line_names_the_commit_it_was_built_from() {
+        let line = version_line();
+        let version = env!("CARGO_PKG_VERSION");
+        let revision = env!("PINCER_GIT_REVISION");
+        if revision.is_empty() {
+            assert_eq!(line, format!("pincer {version}"));
+            return;
+        }
+        assert_eq!(line, format!("pincer {version} ({revision})"));
+        let short = revision.strip_suffix("-dirty").unwrap_or(revision);
+        assert!(
+            short.len() >= 7 && short.bytes().all(|b| b.is_ascii_hexdigit()),
+            "{revision}"
+        );
+        assert!(
+            env!("PINCER_GIT_SHA").starts_with(short),
+            "short revision {short} is not the embedded commit {}",
+            env!("PINCER_GIT_SHA")
+        );
     }
 
     #[test]

@@ -30,26 +30,38 @@ fn main() {
 /// handed to `pincer_core::build_info::init`): the `PINCER_GIT_SHA`
 /// build environment wins (release builds in containers without `.git`),
 /// else `git rev-parse HEAD`, else empty. Reruns when HEAD or its ref moves.
+///
+/// Also embeds `PINCER_GIT_REVISION` for `pincer --version`: the short SHA,
+/// with `-dirty` when tracked files differ from that commit (the meaning of
+/// `git describe --dirty`). It is empty when git is unavailable, as in a
+/// build from a source tarball. With the `PINCER_GIT_SHA` override it is that
+/// SHA shortened (empty unless it is hex), since there is no tree to compare.
 fn embed_git_sha() {
     println!("cargo:rerun-if-env-changed=PINCER_GIT_SHA");
     let from_env = std::env::var("PINCER_GIT_SHA").unwrap_or_default();
-    let sha = if !from_env.trim().is_empty() {
-        from_env.trim().to_owned()
+    let from_env = from_env.trim();
+    let (sha, revision) = if !from_env.is_empty() {
+        let short = if from_env.len() >= 7 && from_env.bytes().all(|b| b.is_ascii_hexdigit()) {
+            from_env[..7].to_ascii_lowercase()
+        } else {
+            String::new()
+        };
+        (from_env.to_owned(), short)
     } else {
-        git(&["rev-parse", "HEAD"]).unwrap_or_default()
+        let sha = git(&["rev-parse", "HEAD"]).unwrap_or_default();
+        let revision = match git(&["rev-parse", "--short", "HEAD"]) {
+            Some(short) if worktree_is_dirty() => format!("{short}-dirty"),
+            Some(short) => short,
+            None => String::new(),
+        };
+        (sha, revision)
     };
     // Rebuild when the checkout moves: HEAD itself (worktrees keep it in
     // their own git dir), the branch ref it names, and packed refs.
     if let Some(git_dir) = git(&["rev-parse", "--absolute-git-dir"]) {
         let git_dir = std::path::PathBuf::from(git_dir);
         println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
-        if let Some(common) = git(&["rev-parse", "--git-common-dir"]) {
-            let common = std::path::PathBuf::from(common);
-            let common = if common.is_absolute() {
-                common
-            } else {
-                git_dir.join(common)
-            };
+        if let Some(common) = git_common_dir() {
             println!(
                 "cargo:rerun-if-changed={}",
                 common.join("packed-refs").display()
@@ -61,8 +73,59 @@ fn embed_git_sha() {
                 );
             }
         }
+        // Keep the `-dirty` mark current: rerun when the sources Cargo builds
+        // the binary from change. Assumption: an edit to a tracked file
+        // outside these paths (docs, scripts) only shows up at the next
+        // rerun, which is fine because it cannot change the binary.
+        if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+            let workspace = std::path::Path::new(&manifest_dir).join("../..");
+            let workspace = workspace.canonicalize().unwrap_or(workspace);
+            for path in ["crates", "Skills", "include", "Cargo.toml", "Cargo.lock"] {
+                println!("cargo:rerun-if-changed={}", workspace.join(path).display());
+            }
+        }
     }
     println!("cargo:rustc-env=PINCER_GIT_SHA={sha}");
+    println!("cargo:rustc-env=PINCER_GIT_REVISION={revision}");
+}
+
+/// The common git dir (where branch refs and packed-refs live, shared by
+/// every worktree) as an absolute path. Plain `--git-common-dir` answers
+/// relative to the current directory in a main checkout, for example
+/// `../../../.git`, so resolve it against the directory git ran in.
+fn git_common_dir() -> Option<std::path::PathBuf> {
+    if let Some(common) = git(&["rev-parse", "--path-format=absolute", "--git-common-dir"]) {
+        return Some(common.into());
+    }
+    // git before 2.31 has no --path-format.
+    let common = std::path::PathBuf::from(git(&["rev-parse", "--git-common-dir"])?);
+    if common.is_absolute() {
+        Some(common)
+    } else {
+        Some(std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").ok()?).join(common))
+    }
+}
+
+/// Whether tracked files differ from HEAD, staged or not. Untracked files do
+/// not count. `--no-optional-locks` keeps `git status` from rewriting the
+/// index, so a build never races a `git commit` running in the same tree.
+fn worktree_is_dirty() -> bool {
+    let Ok(dir) = std::env::var("CARGO_MANIFEST_DIR") else {
+        return false;
+    };
+    let output = std::process::Command::new("git")
+        .args([
+            "--no-optional-locks",
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+        ])
+        .current_dir(dir)
+        .output();
+    match output {
+        Ok(output) if output.status.success() => !output.stdout.is_empty(),
+        _ => false,
+    }
 }
 
 fn git(args: &[&str]) -> Option<String> {
