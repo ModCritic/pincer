@@ -33,6 +33,7 @@ mod sdk_adapter;
 mod serve;
 mod skills;
 mod stop;
+mod termination;
 
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -400,10 +401,7 @@ fn run_mcp_direct(compatibility_mode: bool) -> anyhow::Result<()> {
         cursor
     };
     let driver = build_driver(cursor, compatibility_mode, true)?;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(proxy::run_direct(driver))
+    proxy::run_direct_blocking(driver)
 }
 
 fn history_admission_requested(explicit: bool, persisted: bool) -> bool {

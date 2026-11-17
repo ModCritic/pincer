@@ -32,36 +32,64 @@ use crate::serve::{
     is_daemon_listening, send_request, DaemonRequest, DaemonResponse, ToolObservationOrigin,
 };
 
+/// Run [`run_direct`] on its own multi-threaded Tokio runtime, as `pincer mcp`
+/// does when no service endpoint was selected.
+pub fn run_direct_blocking(driver: Arc<pincer_sdk::Pincer>) -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let mut terminated = None;
+    let result = runtime.block_on(run_direct(driver, &mut terminated));
+    if terminated.is_some() {
+        // Tokio reads stdin with a blocking read that cannot be cancelled,
+        // and a client that sent the signal may still hold stdin open.
+        // Dropping the runtime would wait for that read forever; the cleanup
+        // has already run, so leave the read behind.
+        runtime.shutdown_background();
+    }
+    result
+}
+
 /// Run stdio MCP directly over an SDK-owned runtime.
 ///
 /// Windows and Linux use this when no explicit service endpoint was selected.
 /// The runtime lives exactly as long as stdin: EOF ends every observed public
 /// session, drains admitted work through `shutdown`, and releases process
-/// ownership before returning.
-pub async fn run_direct(driver: Arc<pincer_sdk::Pincer>) -> anyhow::Result<()> {
+/// ownership before returning. On Unix, SIGTERM, SIGINT and SIGHUP do the
+/// same without waiting for EOF: reading stops, a request in progress gets
+/// time to finish, and the same cleanup runs within
+/// [`crate::termination::CLEANUP_LIMIT`] per step. The name of the signal
+/// is stored in `terminated`.
+pub(crate) async fn run_direct(
+    driver: Arc<pincer_sdk::Pincer>,
+    terminated: &mut Option<&'static str>,
+) -> anyhow::Result<()> {
     // Direct stdio is an action endpoint just like `serve`; enforce the same
     // admin lock, bounded-manifest approval/expiry, and legacy-approval
     // consistency before the first request can be read.
     pincer_core::authorization::validate_startup_authorization()?;
     validate_configured_policy()?;
     let sdk = crate::sdk_adapter::SdkAdapter::load(driver.clone()).await?;
+    let mut signals = crate::termination::TerminationSignals::install()?;
     if crate::mcp_envelope::configured()? {
-        let result = crate::mcp_envelope::run(
-            sdk.clone(),
-            BufReader::new(tokio::io::stdin()),
-            tokio::io::stdout(),
-        )
-        .await;
-        sdk.shutdown().await.map_err(anyhow::Error::msg)?;
+        // The envelope loop owns its reads and requests, so a signal ends it
+        // where it stands; the shutdown below still runs.
+        let result = tokio::select! {
+            result = crate::mcp_envelope::run(
+                sdk.clone(),
+                BufReader::new(tokio::io::stdin()),
+                tokio::io::stdout(),
+            ) => result,
+            signal = signals.recv() => {
+                *terminated = Some(signal);
+                Ok(())
+            }
+        };
+        crate::termination::finish_step(&mut signals, terminated, "SDK shutdown", sdk.shutdown())
+            .await?
+            .map_err(anyhow::Error::msg)?;
         return result;
     }
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-    let mut reader = BufReader::new(stdin);
-    let mut writer = tokio::io::BufWriter::new(stdout);
-    let mut line = String::new();
-    let mut session_observed = false;
-    let mut protocol_session = ProtocolSession::default();
     let transport_session = format!("mcp-{}", uuid::Uuid::new_v4());
     struct DirectTransportCleanup {
         sdk: Arc<crate::sdk_adapter::SdkAdapter>,
@@ -77,9 +105,47 @@ pub async fn run_direct(driver: Arc<pincer_sdk::Pincer>) -> anyhow::Result<()> {
         transport_session: transport_session.clone(),
     };
 
+    let served = serve_direct_stdio(&sdk, &transport_session, &mut signals, terminated).await;
+    match (served, *terminated) {
+        (Err(error), None) => return Err(error),
+        // After a signal the client may be gone, so a failed last write must
+        // not skip the cleanup.
+        (Err(error), Some(signal)) => {
+            warn!("MCP stdio stopped with an error after {signal}: {error}");
+        }
+        (Ok(()), _) => {}
+    }
+    crate::termination::finish_step(&mut signals, terminated, "SDK shutdown", sdk.shutdown())
+        .await?
+        .map_err(anyhow::Error::msg)
+}
+
+/// Answer MCP requests from stdin until EOF or, on Unix, a termination
+/// signal, whose name goes to `terminated`.
+async fn serve_direct_stdio(
+    sdk: &Arc<crate::sdk_adapter::SdkAdapter>,
+    transport_session: &str,
+    signals: &mut crate::termination::TerminationSignals,
+    terminated: &mut Option<&'static str>,
+) -> anyhow::Result<()> {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+    let mut reader = BufReader::new(stdin);
+    let mut writer = tokio::io::BufWriter::new(stdout);
+    let mut line = String::new();
+    let mut session_observed = false;
+    let mut protocol_session = ProtocolSession::default();
+
     loop {
         line.clear();
-        if reader.read_line(&mut line).await? == 0 {
+        let read = tokio::select! {
+            read = reader.read_line(&mut line) => read?,
+            signal = signals.recv() => {
+                *terminated = Some(signal);
+                break;
+            }
+        };
+        if read == 0 {
             break;
         }
         let trimmed = line.trim();
@@ -112,7 +178,7 @@ pub async fn run_direct(driver: Arc<pincer_sdk::Pincer>) -> anyhow::Result<()> {
                     writer.flush().await?;
                     continue;
                 }
-                apply_direct_session_identity(&mut request, &transport_session);
+                apply_direct_session_identity(&mut request, transport_session);
                 let initialize_metadata = (!session_observed)
                     .then(|| request.initialize_metadata())
                     .flatten();
@@ -131,13 +197,26 @@ pub async fn run_direct(driver: Arc<pincer_sdk::Pincer>) -> anyhow::Result<()> {
                 );
                 let id = request.id.clone().unwrap_or(serde_json::Value::Null);
                 let method = request.method.clone();
-                let response = pincer_core::server::handle_request_with_transport_session(
+                let handled = pincer_core::server::handle_request_with_transport_session(
                     request,
                     id,
                     sdk.as_ref(),
-                    &transport_session,
+                    transport_session,
+                );
+                let finished = crate::termination::finish_step(
+                    signals,
+                    terminated,
+                    "the request in progress",
+                    handled,
                 )
                 .await;
+                let response = match finished {
+                    Ok(response) => response,
+                    Err(error) => {
+                        warn!("{error}");
+                        break;
+                    }
+                };
                 if let Some(metadata) = initialize_metadata {
                     observe_proxy_session_started(metadata);
                     session_observed = true;
@@ -161,9 +240,11 @@ pub async fn run_direct(driver: Arc<pincer_sdk::Pincer>) -> anyhow::Result<()> {
         writer.write_all(serialized.as_bytes()).await?;
         writer.write_all(b"\n").await?;
         writer.flush().await?;
+        if terminated.is_some() {
+            break;
+        }
     }
-
-    sdk.shutdown().await.map_err(anyhow::Error::msg)
+    Ok(())
 }
 
 pub(crate) fn apply_direct_session_identity(request: &mut Request, transport_session: &str) {
@@ -1242,6 +1323,75 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+    }
+
+    /// SIGTERM ends direct `pincer mcp` the way stdin EOF does: the session
+    /// cleanup runs (it releases a held XTest button and stops recordings)
+    /// even though the client still holds stdin open, and the process exits.
+    #[cfg(unix)]
+    #[test]
+    fn sigterm_runs_direct_session_cleanup() {
+        const NAME: &str = "proxy::tests::sigterm_runs_direct_session_cleanup";
+        const ENDED_LOG_ENV: &str = "PINCER_TEST_SESSION_END_LOG";
+        if crate::is_test_child() {
+            let log = std::path::PathBuf::from(std::env::var_os(ENDED_LOG_ENV).unwrap());
+            pincer_core::session::register_session_end_hook(move |session| {
+                use std::io::Write as _;
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log)
+                    .unwrap();
+                writeln!(file, "{session}").unwrap();
+            });
+            run_direct_blocking(crate::termination::test_child::headless_driver())
+                .expect("direct MCP ends cleanly after SIGTERM");
+            return;
+        }
+
+        let state = pincer_testkit::IsolatedStateRoot::new().unwrap();
+        let ended_log = state.path().join("ended-sessions.log");
+        let mut child = crate::termination::test_child::spawn(
+            NAME,
+            &state,
+            &[(ENDED_LOG_ENV, ended_log.as_os_str())],
+        );
+        let requests = [
+            serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "start_session", "arguments": {"session": "sigterm-probe"}}
+            }),
+        ];
+        {
+            use std::io::Write as _;
+            let stdin = child.child.stdin.as_mut().unwrap();
+            for request in &requests {
+                writeln!(stdin, "{request}").unwrap();
+            }
+            stdin.flush().unwrap();
+        }
+        let started = child.wait_for_line(std::time::Duration::from_secs(60), |line| {
+            serde_json::from_str::<serde_json::Value>(line).is_ok_and(|reply| reply["id"] == 2)
+        });
+        let Some(started) = started else {
+            child.fail("direct MCP never answered start_session");
+        };
+        let reply: serde_json::Value = serde_json::from_str(&started).unwrap();
+        if reply.get("error").is_some() || reply["result"]["isError"] == true {
+            child.fail(&format!("start_session failed: {started}"));
+        }
+
+        let outcome = child.signal_and_wait(libc::SIGTERM, std::time::Duration::from_secs(20));
+        assert!(
+            outcome.passed(),
+            "direct MCP did not exit cleanly on SIGTERM: {outcome}"
+        );
+        let ended = std::fs::read_to_string(&ended_log).unwrap_or_default();
+        assert!(
+            ended.contains("sigterm-probe"),
+            "SIGTERM skipped the session cleanup (ended: {ended:?}): {outcome}"
+        );
     }
 
     #[tokio::test]

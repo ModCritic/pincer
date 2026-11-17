@@ -1089,12 +1089,33 @@ mod peer_authentication_tests {
 /// Run the daemon server. Binds `socket_path`, writes `pid_file_path`,
 /// accepts connections, and serves requests until `{"method":"shutdown"}`.
 ///
-/// This is `async` and must be called from a tokio runtime.
+/// This is `async` and must be called from a tokio runtime. It leaves signal
+/// handling to its caller, so tests that run it inside the test harness keep
+/// the default SIGINT; `pincer serve` goes through [`run_serve_with_signals`].
 #[cfg(unix)]
 pub async fn run_serve(
     sdk: std::sync::Arc<crate::sdk_adapter::SdkAdapter>,
     socket_path: &str,
     pid_file_path: Option<&str>,
+) -> anyhow::Result<()> {
+    run_serve_with_signals(
+        sdk,
+        socket_path,
+        pid_file_path,
+        crate::termination::TerminationSignals::none(),
+    )
+    .await
+}
+
+/// [`run_serve`] that also stops at a termination signal from `signals`,
+/// with the same cleanup as `shutdown`: each step that could stall gets
+/// [`crate::termination::CLEANUP_LIMIT`].
+#[cfg(unix)]
+async fn run_serve_with_signals(
+    sdk: std::sync::Arc<crate::sdk_adapter::SdkAdapter>,
+    socket_path: &str,
+    pid_file_path: Option<&str>,
+    mut signals: crate::termination::TerminationSignals,
 ) -> anyhow::Result<()> {
     use tokio::io::{AsyncWriteExt, BufReader};
     use tokio::net::UnixListener;
@@ -1155,6 +1176,7 @@ pub async fn run_serve(
         }
     };
     tokio::pin!(parent_liveness);
+    let mut terminated = None;
 
     loop {
         tokio::select! {
@@ -1560,13 +1582,24 @@ pub async fn run_serve(
                 eprintln!("Pincer embedded host closed its lifetime pipe; shutting down.");
                 break;
             }
+            signal = signals.recv() => {
+                eprintln!("Pincer daemon received {signal}; shutting down.");
+                terminated = Some(signal);
+                break;
+            }
         }
     }
 
     // Accepted connections may still own SDK/session state after the listener
     // stops. Abort and join them before tearing down the SDK runtime.
     drop(mcp_http);
-    connection_tasks.shutdown().await;
+    let connections_closed = crate::termination::finish_step(
+        &mut signals,
+        &mut terminated,
+        "closing client connections",
+        connection_tasks.shutdown(),
+    )
+    .await;
     release_active_proxy_sessions();
 
     // Do not unlink a replacement socket created after this listener was bound.
@@ -1574,11 +1607,11 @@ pub async fn run_serve(
     if let Some(pid_path) = written_pid_file {
         let _ = std::fs::remove_file(pid_path);
     }
-    sdk.shutdown()
-        .await
+    crate::termination::finish_step(&mut signals, &mut terminated, "SDK shutdown", sdk.shutdown())
+        .await?
         .map_err(|error| anyhow::anyhow!("shut down SDK runtime: {error}"))?;
 
-    Ok(())
+    connections_closed
 }
 
 #[cfg(target_os = "windows")]
@@ -2457,6 +2490,13 @@ pub fn run_serve_cmd(
             std::process::exit(1);
         }
     };
+    // SIGTERM, SIGINT and SIGHUP stop the daemon like `pincer stop` does.
+    #[cfg(unix)]
+    let result = rt.block_on(async {
+        let signals = crate::termination::TerminationSignals::install()?;
+        run_serve_with_signals(sdk, &socket_path, pid_file_path.as_deref(), signals).await
+    });
+    #[cfg(not(unix))]
     let result = rt.block_on(run_serve(sdk, &socket_path, pid_file_path.as_deref()));
     rt.shutdown_timeout(std::time::Duration::from_secs(30));
     pincer_core::session_authorization::release_configured_registry_for_shutdown();
@@ -2741,6 +2781,58 @@ mod socket_tests {
 
         assert!(socket.exists());
         drop(first);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod signal_tests {
+    use std::time::{Duration, Instant};
+
+    /// SIGTERM ends `pincer serve` the way a `shutdown` request does: the
+    /// daemon removes its socket and PID file, shuts the SDK runtime down and
+    /// exits with status 0.
+    #[test]
+    fn sigterm_shuts_the_daemon_down_cleanly() {
+        const NAME: &str = "serve::signal_tests::sigterm_shuts_the_daemon_down_cleanly";
+        const SOCKET_ENV: &str = "PINCER_TEST_SIGNAL_SOCKET";
+        const PID_ENV: &str = "PINCER_TEST_SIGNAL_PID_FILE";
+        if crate::is_test_child() {
+            let socket = std::env::var(SOCKET_ENV).unwrap();
+            let pid_file = std::env::var(PID_ENV).unwrap();
+            super::run_serve_cmd(
+                crate::termination::test_child::headless_driver(),
+                &socket,
+                Some(&pid_file),
+            );
+            return;
+        }
+
+        let state = pincer_testkit::IsolatedStateRoot::new().unwrap();
+        let socket = state.path().join("d.sock");
+        let pid_file = state.path().join("d.pid");
+        let child = crate::termination::test_child::spawn(
+            NAME,
+            &state,
+            &[
+                (SOCKET_ENV, socket.as_os_str()),
+                (PID_ENV, pid_file.as_os_str()),
+            ],
+        );
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !(socket.exists() && pid_file.exists()) {
+            if Instant::now() >= deadline {
+                child.fail("daemon never wrote its socket and PID file");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        let outcome = child.signal_and_wait(libc::SIGTERM, Duration::from_secs(20));
+        assert!(
+            outcome.passed(),
+            "daemon did not exit cleanly on SIGTERM: {outcome}"
+        );
+        assert!(!socket.exists(), "SIGTERM left the daemon socket behind");
+        assert!(!pid_file.exists(), "SIGTERM left the PID file behind");
     }
 }
 
