@@ -28,7 +28,7 @@ use crate::tool_args::ArgsExt;
 use super::cdp_ws::CdpConnection;
 use super::engine::BrowserEngine;
 use super::refusal::{BrowserRefusal, BrowserRefusalCode};
-use super::required_session_schema;
+use super::session_schema;
 use super::store::BrowserActionKind;
 
 /// Injected by an MCP host only after its destructive-tool approval flow.
@@ -56,7 +56,7 @@ impl BrowserDownloadTool {
                 input_schema: json!({
                     "type": "object",
                     "properties": {
-                        "session": required_session_schema(),
+                        "session": session_schema(),
                         "target_id": {
                             "type": "string",
                             "description": "Opaque exact browser target id from get_browser_state."
@@ -74,7 +74,7 @@ impl BrowserDownloadTool {
                             "description": "Existing directory that receives the file, as an absolute canonical path (no symlink or .. anywhere in it)."
                         }
                     },
-                    "required": ["session", "target_id", "tab_id", "ref", "destination_root"],
+                    "required": ["target_id", "tab_id", "ref", "destination_root"],
                     "additionalProperties": false
                 }),
                 read_only: false,
@@ -95,8 +95,13 @@ fn consent_required() -> ToolResult {
     .to_tool_result()
 }
 
+/// The caller's session: its `session` label, or the implicit session that
+/// dispatch assigns to a call without one.
 fn explicit_session(args: &Value) -> Result<String, ToolResult> {
-    let session = args.require_str("session")?;
+    let session = args
+        .opt_str("session")
+        .or_else(|| args.opt_str("_session_id"))
+        .unwrap_or_default();
     if session.trim().is_empty() || session == "default" {
         return Err(ToolResult::error(
             "browser_download requires an explicit non-default session",

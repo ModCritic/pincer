@@ -300,29 +300,64 @@ impl BrowserStore {
         self.next()
     }
 
-    /// Look up a target capability. Unknown ids — including ids minted
-    /// by a *different* session — refuse with `browser_binding_stale`:
-    /// the capability is simply not valid here.
+    /// Look up a target capability. Unknown ids, including ids minted by a
+    /// *different* session, refuse with `browser_binding_stale`: the
+    /// capability is not valid here. When another live session holds the
+    /// id, the refusal names that session (or says it was unnamed), since
+    /// re-running get_browser_state in the wrong session only mints another
+    /// target there.
     pub fn get_target(
         &self,
         session: &str,
         target_id: &str,
     ) -> Result<TargetRecord, BrowserRefusal> {
-        self.inner
-            .lock()
-            .unwrap()
-            .get(session)
-            .and_then(|s| s.targets.get(target_id))
-            .cloned()
-            .ok_or_else(|| {
-                BrowserRefusal::new(
-                    BrowserRefusalCode::BrowserBindingStale,
-                    format!(
-                        "target {target_id} is not a live binding in this session — \
-                         re-run get_browser_state with pid + window_id"
-                    ),
+        let inner = self.inner.lock().unwrap();
+        if let Some(record) = inner.get(session).and_then(|s| s.targets.get(target_id)) {
+            return Ok(record.clone());
+        }
+        // Dispatch keys every session as `__pincer_runtime_<scope>:<label>`
+        // and strips the caller's own prefix from results. A key from another
+        // runtime scope would keep its prefix, so it is not named.
+        let runtime_prefix = |key: &str| {
+            key.strip_prefix("__pincer_runtime_")
+                .and_then(|rest| rest.split_once(':'))
+                .map(|(scope, _)| scope.to_owned())
+        };
+        let caller_prefix = runtime_prefix(session);
+        let owner = inner.iter().find_map(|(owner, targets)| {
+            targets
+                .targets
+                .get(target_id)
+                .filter(|_| runtime_prefix(owner) == caller_prefix)
+                .map(|record| (owner.as_str(), record))
+        });
+        let message = match owner {
+            // An unnamed call's session key is its private transport key,
+            // which results must not show. The record keeps the minting
+            // transport, and only an unnamed call mints under that key.
+            Some((owner, record)) if record.transport_session.as_deref() == Some(owner) => {
+                format!(
+                    "target {target_id} was minted by a call without a session; omit session \
+                     on this call too (targets, tabs and page refs work only in the session \
+                     that minted them)"
                 )
-            })
+            }
+            // Dispatch strips the runtime prefix from the key on the way
+            // out, so the caller sees its own public label.
+            Some((owner, _)) => format!(
+                "target {target_id} was minted in session \"{owner}\"; pass session \
+                 \"{owner}\" on this call (targets, tabs and page refs work only in the \
+                 session that minted them)"
+            ),
+            None => format!(
+                "target {target_id} is not a live binding: its session ended, the browser \
+                 restarted or the id is wrong; re-run get_browser_state with pid + window_id"
+            ),
+        };
+        Err(BrowserRefusal::new(
+            BrowserRefusalCode::BrowserBindingStale,
+            message,
+        ))
     }
 
     /// Mutate a stored target in place. No-op if it disappeared.
@@ -586,6 +621,45 @@ mod tests {
         assert_eq!(err.code, BrowserRefusalCode::BrowserBindingStale);
         let err = store.get_target("sess-b", &tid).unwrap_err();
         assert_eq!(err.code, BrowserRefusalCode::BrowserBindingStale);
+    }
+
+    #[test]
+    fn a_target_from_another_session_names_the_session_that_minted_it() {
+        // The refusal used to say "re-run get_browser_state with pid +
+        // window_id", which mints the new target in the same wrong session.
+        let (store, tid, _, _) = store_with_ref();
+        let err = store.get_target("sess-b", &tid).unwrap_err();
+        assert_eq!(err.code, BrowserRefusalCode::BrowserBindingStale);
+        assert!(
+            err.message.contains("session \"sess-a\""),
+            "{}",
+            err.message
+        );
+        assert!(!err.message.contains("sess-b"), "{}", err.message);
+    }
+
+    #[test]
+    fn a_target_from_an_unnamed_session_says_so_without_its_private_key() {
+        let store = BrowserStore::new();
+        let mut unnamed = record();
+        unnamed.transport_session = Some("mcp-private-transport".into());
+        let tid = store.mint_target("mcp-private-transport", unnamed);
+        let err = store.get_target("sess-b", &tid).unwrap_err();
+        assert_eq!(err.code, BrowserRefusalCode::BrowserBindingStale);
+        assert!(err.message.contains("without a session"), "{}", err.message);
+        assert!(
+            !err.message.contains("mcp-private-transport"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn an_unknown_target_still_points_back_to_get_browser_state() {
+        let store = BrowserStore::new();
+        let err = store.get_target("sess-b", "bt-missing").unwrap_err();
+        assert_eq!(err.code, BrowserRefusalCode::BrowserBindingStale);
+        assert!(err.message.contains("get_browser_state"), "{}", err.message);
     }
 
     #[test]

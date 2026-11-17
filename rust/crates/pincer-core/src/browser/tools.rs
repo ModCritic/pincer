@@ -3189,6 +3189,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn no_browser_tool_requires_a_session_label() {
+        // Unnamed MCP calls get an implicit session at dispatch, and the
+        // server instructions call `session` optional. browser_pointer and
+        // browser_download listed it as required, so a client that checks
+        // the schema refused the unnamed call before it reached Pincer.
+        let mut registry = ToolRegistry::new();
+        register_browser_tools(&engine(), &mut registry);
+        let list = registry.tools_list();
+        for tool in list["tools"].as_array().expect("tools array") {
+            let name = tool["name"].as_str().unwrap_or_default();
+            let schema = &tool["inputSchema"];
+            assert!(
+                schema.pointer("/properties/session").is_some(),
+                "{name} must still accept session"
+            );
+            let required = schema["required"].as_array().cloned().unwrap_or_default();
+            assert!(
+                !required.contains(&json!("session")),
+                "{name} requires session: {required:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn browser_download_accepts_the_implicit_session() {
+        // Dispatch fills `_session_id` for a call without `session`; the
+        // tool read only `session` and refused with a missing-field error.
+        let root = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(root.path()).unwrap();
+        let result = BrowserDownloadTool::new(engine())
+            .invoke(json!({
+                "_session_id": "implicit-transport",
+                "target_id": "bt-1",
+                "tab_id": "tab-1",
+                "ref": "p1:0",
+                "destination_root": root.to_string_lossy(),
+            }))
+            .await;
+        let structured = result.structured_content.expect("refusal");
+        assert_eq!(
+            structured["refusal"]["code"], "browser_consent_required",
+            "{structured}"
+        );
+    }
+
     #[tokio::test]
     async fn dispatch_refuses_unknown_browser_arguments_like_desktop_tools() {
         // At bfc42c0 get_browser_state took `"snapshot-format"` and answered

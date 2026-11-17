@@ -20,7 +20,7 @@ use super::cdp_ws::CdpConnection;
 use super::engine::{BrowserEngine, ValidatedTab};
 use super::platform::BrowserVisualActionKind;
 use super::refusal::{BrowserRefusal, BrowserRefusalCode};
-use super::required_session_schema;
+use super::session_schema;
 use super::store::{BrowserActionKind, FrameKind, FrameRef};
 use super::tools::{browser_protected_resource_scope, browser_resource_ownership};
 
@@ -306,7 +306,7 @@ impl BrowserPointerTool {
                     "properties": {
                         "target_id": { "type": "string", "description": "Opaque target id minted by get_browser_state." },
                         "tab_id": { "type": "string", "description": "Opaque tab id minted by get_browser_state." },
-                        "session": required_session_schema(),
+                        "session": session_schema(),
                         "action": { "type": "string", "enum": ["hover", "right_click", "double_click", "scroll", "drag"], "description": "Pointer gesture. scroll needs delta_x or delta_y; drag needs destination_ref or to_x/to_y." },
                         "input_route": { "type": "string", "enum": ["trusted", "dom_event"], "default": "trusted", "description": "trusted sends CDP Input events; dom_event synthesizes DOM events in the page and requires ref." },
                         "delivery_mode": { "type": "string", "enum": ["background", "foreground"], "default": "background", "description": "background (default) refuses trusted input where it would activate the browser window, including Linux Chromium and macOS Chromium configurations whose trusted route cannot stay in the background. foreground accepts that activation, for a browser whose window nobody else is using (for example inside a sandbox)." },
@@ -319,7 +319,7 @@ impl BrowserPointerTool {
                         "delta_x": { "type": "number", "description": "Horizontal scroll delta in CSS pixels." },
                         "delta_y": { "type": "number", "description": "Vertical scroll delta in CSS pixels." }
                     },
-                    "required": ["target_id", "tab_id", "session", "action"],
+                    "required": ["target_id", "tab_id", "action"],
                     "additionalProperties": false
                 }),
                 read_only: false,

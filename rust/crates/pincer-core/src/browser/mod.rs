@@ -85,13 +85,6 @@ pub(crate) fn session_schema() -> serde_json::Value {
     })
 }
 
-pub(crate) fn required_session_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "string",
-        "description": "Session label that owns the browser target, tab, and refs; this tool requires the label. Repeat it on every call."
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,17 +98,5 @@ mod tests {
         assert!(description.contains("session label for multi-call work"));
         assert!(description.contains("repeat it on every call"));
         assert!(description.contains("Browser targets, tabs, and refs"));
-    }
-
-    #[test]
-    fn required_browser_session_schema_does_not_suggest_omission() {
-        let schema = required_session_schema();
-        let description = schema["description"]
-            .as_str()
-            .expect("required browser session description");
-        assert!(description.contains("Session label"));
-        assert!(description.contains("Repeat it on every call"));
-        assert!(description.contains("requires the label"));
-        assert!(!description.contains("Omit it"));
     }
 }
