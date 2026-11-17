@@ -65,9 +65,6 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1,
 };
 
-/// Linux evdev BTN_LEFT — the button code the virtual-pointer protocol expects.
-const BTN_LEFT: u32 = 0x110;
-
 use crate::x11::WindowInfo;
 
 thread_local! {
@@ -1100,12 +1097,8 @@ pub fn screenshot_dispatch(xid: u64) -> anyhow::Result<Vec<u8>> {
     screenshot_dispatch_for_pid(xid, None)
 }
 
-pub fn screenshot_dispatch_with_pid(xid: u64, pid: u32) -> anyhow::Result<Vec<u8>> {
-    screenshot_dispatch_for_pid(xid, Some(pid))
-}
-
-/// [`screenshot_dispatch_with_pid`], with the pixels instead of a PNG when
-/// the X11 capture read them itself.
+/// [`screenshot_dispatch`] for a window of `pid`, with the pixels instead of
+/// a PNG when the X11 capture read them itself.
 pub fn screenshot_image_dispatch_with_pid(
     xid: u64,
     pid: u32,
@@ -1113,8 +1106,8 @@ pub fn screenshot_image_dispatch_with_pid(
     screenshot_image_dispatch_for_pid(xid, Some(pid))
 }
 
-/// [`screenshot_window_dispatch`], with the pixels instead of a PNG when the
-/// X11 capture read them itself.
+/// [`screenshot_dispatch`], with the pixels instead of a PNG when the X11
+/// capture read them itself.
 pub fn screenshot_window_image_dispatch(
     xid: u64,
 ) -> anyhow::Result<pincer_core::image_utils::CapturedImage> {
@@ -1306,13 +1299,6 @@ fn checked_shell_helper_capture(
 ) -> Option<anyhow::Result<Vec<u8>>> {
     available
         .then(|| capture().ok_or_else(|| anyhow::anyhow!("GNOME compositor helper capture failed")))
-}
-
-/// Per-window capture dispatcher. Kept as the explicit window-capture entry
-/// point for callers outside `get_window_state`; it shares the same fail-closed
-/// Wayland contract as [`screenshot_dispatch`].
-pub fn screenshot_window_dispatch(xid: u64) -> anyhow::Result<Vec<u8>> {
-    screenshot_dispatch(xid)
 }
 
 // ── Input session helper ─────────────────────────────────────────────────────
@@ -2078,11 +2064,11 @@ fn scroll_vptr(
     Ok(())
 }
 
-/// Last cursor position the agent warped to via `move_cursor_absolute`.
+/// Last cursor position the agent warped to via `move_cursor_desktop`.
 /// Wayland exposes no protocol for clients to read the real global cursor
 /// position; a Wayland-conformant `get_cursor_position` can therefore only
 /// report what THIS process synthesized. Updated every `motion_absolute`
-/// emitted from `move_cursor_absolute` / `click` / `drag`.
+/// emitted from `move_cursor_desktop` / `click` / `drag`.
 static SYNTH_CURSOR_POS: std::sync::OnceLock<std::sync::Mutex<Option<(i32, i32)>>> =
     std::sync::OnceLock::new();
 
@@ -2107,18 +2093,6 @@ pub fn last_synth_cursor_pos() -> Option<(i32, i32)> {
         .and_then(|g| *g)
 }
 
-/// Warp the cursor to absolute output coordinates `(x, y)` using
-/// `zwlr_virtual_pointer_v1::motion_absolute`. Clamps to the output bounds
-/// reported by `open_vptr_session`. Emits a motion + frame and roundtrips so
-/// the compositor commits the warp before returning. Records the position in
-/// the synthetic-cursor registry so `last_synth_cursor_pos` can report it.
-pub fn move_cursor_absolute(window_id: Option<u64>, x: i32, y: i32) -> anyhow::Result<()> {
-    with_libei_fallback(
-        || move_cursor_absolute_vptr(window_id, x, y, None),
-        || libei_move_absolute(x, y),
-    )
-}
-
 /// Warp the cursor to a desktop-frame point (the `get_desktop_state` frame).
 pub fn move_cursor_desktop(space: &DesktopInputSpace, x: i32, y: i32) -> anyhow::Result<()> {
     let (x, y) = space.input_layout(x, y)?;
@@ -2128,7 +2102,11 @@ pub fn move_cursor_desktop(space: &DesktopInputSpace, x: i32, y: i32) -> anyhow:
     )
 }
 
-/// wlroots virtual-pointer implementation of [`move_cursor_absolute`].
+/// Warp the cursor to absolute output coordinates `(x, y)` using
+/// `zwlr_virtual_pointer_v1::motion_absolute`. Clamps to the output bounds
+/// reported by `open_vptr_session`. Emits a motion + frame and roundtrips so
+/// the compositor commits the warp before returning. Records the position in
+/// the synthetic-cursor registry so `last_synth_cursor_pos` can report it.
 fn move_cursor_absolute_vptr(
     window_id: Option<u64>,
     x: i32,
@@ -2477,44 +2455,6 @@ fn libei_pointer_path(
     unreachable!("libei fallback compiled out (no portal-input feature)")
 }
 
-/// Type Unicode text into the focused Wayland surface via `wtype` (the
-/// virtual-keyboard tool — `zwp_virtual_keyboard_v1` under the hood; it builds
-/// the xkb keymap and resolves shift levels for us). This mirrors the X11
-/// backend's XSendEvent typing and the capture slice's shell-out to `grim`.
-/// foreign-toplevel exposes no pid and Wayland delivers keys to the *focused*
-/// surface, so this is window_id-free; pair it with `click`/`activate` to put
-/// the intended window in focus first.
-pub fn type_text(window_id: u64, text: &str) -> anyhow::Result<()> {
-    if text.is_empty() {
-        return Ok(());
-    }
-    activate_window_for_input(window_id)?;
-    // Lead with a no-op Shift_L tap: on a freshly-focused window under a headless
-    // seat (notably sway), the compositor needs the first virtual-keyboard event
-    // to wire up keyboard routing, and that first key is dropped. Sacrificing a
-    // modifier tap (no character) absorbs the drop so the real text lands intact;
-    // it's harmless where routing is already live (labwc).
-    let result = std::process::Command::new("wtype")
-        .args(["-k", "Shift_L", "--"])
-        .arg(text)
-        .output();
-    match result {
-        Ok(out) if out.status.success() => Ok(()),
-        // `wtype` relies on `zwp_virtual_keyboard_v1`, which KWin/Plasma and
-        // Mutter/GNOME don't implement (and the binary may be missing wtype
-        // entirely). On a portal-input build, route typing through libei's
-        // `ei_text` interface instead. See #1982.
-        other => with_wtype_libei_fallback(
-            || {
-                libei_wait_keyboard_ready()?;
-                activate_window_for_input(window_id)?;
-                libei_type_text(text)
-            },
-            other.map(|o| String::from_utf8_lossy(&o.stderr).into_owned()),
-        ),
-    }
-}
-
 /// Type into a surface whose exact Sway container is already held focused by
 /// the caller. This avoids re-resolving a title that can change mid-sequence
 /// (for example after opening a Chromium tab).
@@ -2534,53 +2474,6 @@ pub fn type_text_focused(text: &str) -> anyhow::Result<()> {
                 libei_type_text(text)
             },
             other.map(|out| String::from_utf8_lossy(&out.stderr).into_owned()),
-        ),
-    }
-}
-
-/// Type text and press one key while an outer exact-container focus guard is
-/// active. Keeping both operations in one virtual-keyboard lifetime avoids a
-/// headless wlroots seat dropping the first event from a second `wtype`
-/// process after the text has landed.
-pub fn type_text_then_key_focused(text: &str, key: &str) -> anyhow::Result<()> {
-    let keysym = key_to_keysym(key);
-    let result = std::process::Command::new("wtype")
-        .args(["-k", "Shift_L", "-s", "30"])
-        .arg(text)
-        .args(["-s", "50", "-k", &keysym])
-        .output();
-    match result {
-        Ok(out) if out.status.success() => Ok(()),
-        other => with_wtype_libei_fallback(
-            || {
-                libei_wait_keyboard_ready()?;
-                libei_type_text(text)?;
-                libei_press_key(key)
-            },
-            other.map(|out| String::from_utf8_lossy(&out.stderr).into_owned()),
-        ),
-    }
-}
-
-/// Press a single named key into the focused Wayland surface via `wtype -k`.
-pub fn press_key(window_id: u64, key: &str) -> anyhow::Result<()> {
-    activate_window_for_input(window_id)?;
-    let keysym = key_to_keysym(key);
-    // Keep the sacrificial modifier and requested key in one virtual-keyboard
-    // lifetime. Starting a second wtype process creates a fresh protocol object,
-    // causing headless seats to drop the requested key as their first event.
-    let result = std::process::Command::new("wtype")
-        .args(["-k", "Shift_L", "-k", &keysym])
-        .output();
-    match result {
-        Ok(out) if out.status.success() => Ok(()),
-        other => with_wtype_libei_fallback(
-            || {
-                libei_wait_keyboard_ready()?;
-                activate_window_for_input(window_id)?;
-                libei_press_key(key)
-            },
-            other.map(|o| String::from_utf8_lossy(&o.stderr).into_owned()),
         ),
     }
 }
@@ -4029,11 +3922,6 @@ impl Dispatch<wl_registry::WlRegistry, ()> for ExtProbeState {
         }
     }
 }
-
-// Suppress dead-code warning for the unused BTN_LEFT alias kept for backward
-// compatibility with earlier slice constants.
-#[allow(dead_code)]
-const _BTN_LEFT_ALIAS: u32 = BTN_LEFT;
 
 #[cfg(test)]
 mod output_transform_tests {

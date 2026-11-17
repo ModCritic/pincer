@@ -36,8 +36,3 @@ pub fn build_registry_with_provider(
         stubs::build_registry()
     }
 }
-
-// Keep register_all as alias for backwards compat.
-pub fn register_all() -> ToolRegistry {
-    build_registry(false)
-}

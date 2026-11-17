@@ -793,10 +793,6 @@ fn shell_helper_badge_calls(
     }
 }
 
-pub fn is_enabled() -> bool {
-    is_enabled_for("default")
-}
-
 /// Whether this process started an agent cursor renderer (`--no-overlay`
 /// starts none), so a caller can skip streaming positions nothing draws.
 pub fn renderer_configured() -> bool {
@@ -886,10 +882,6 @@ fn seed_start_if_sentinel(key: &CursorKey, target_x: f64, target_y: f64) -> bool
         f64::from(map.platform.scr_h),
     );
     map.seed_start_if_sentinel(key, target_x, target_y, Some(frame))
-}
-
-pub async fn animate_cursor_to(x: f64, y: f64) {
-    animate_cursor_to_for("default".to_owned(), x, y).await;
 }
 
 pub async fn animate_cursor_to_for(key: CursorKey, x: f64, y: f64) {

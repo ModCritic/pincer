@@ -58,12 +58,6 @@ enum Cmd {
         button: u8,
         reply: Sender<anyhow::Result<()>>,
     },
-    /// Drop the entry for a cursor_id without sending wire events — used to
-    /// recover when the compositor disconnected mid-life.
-    Forget {
-        cursor_id: String,
-        reply: Sender<anyhow::Result<()>>,
-    },
 }
 
 /// State held inside the owner thread for one cursor_id.
@@ -126,12 +120,6 @@ fn owner_thread(rx: Receiver<Cmd>) {
             } => {
                 let r = handle_release(&mut active, &cursor_id, button);
                 let _ = reply.send(r);
-            }
-            Cmd::Forget { cursor_id, reply } => {
-                if let Some(p) = active.remove(&cursor_id) {
-                    p.vptr.destroy();
-                }
-                let _ = reply.send(Ok(()));
             }
         }
     }
@@ -323,21 +311,6 @@ pub fn release(cursor_id: &str, button: u8) -> anyhow::Result<()> {
     tx().send(Cmd::Release {
         cursor_id: cursor_id.to_string(),
         button,
-        reply: tx_r,
-    })
-    .map_err(|e| anyhow::anyhow!("pincer-persistent-vptr thread is dead: {e}"))?;
-    rx_r.recv()
-        .map_err(|e| anyhow::anyhow!("reply channel closed: {e}"))?
-}
-
-/// Drop the entry for `cursor_id` without emitting any Wayland events.
-/// Useful for recovery — if the agent thinks a button is held but the
-/// compositor disagrees, this clears the local state without trying to
-/// send a release that would error.
-pub fn forget(cursor_id: &str) -> anyhow::Result<()> {
-    let (tx_r, rx_r) = bounded(1);
-    tx().send(Cmd::Forget {
-        cursor_id: cursor_id.to_string(),
         reply: tx_r,
     })
     .map_err(|e| anyhow::anyhow!("pincer-persistent-vptr thread is dead: {e}"))?;

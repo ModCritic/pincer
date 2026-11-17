@@ -6,10 +6,10 @@
 //! small shared Tokio runtime via `block_on` (callers already invoke these
 //! from `tokio::task::spawn_blocking`, so blocking here is safe).
 //!
-//! Element indices match the markdown produced by [`walk_tree_bounded`] for
+//! Element indices match the markdown produced by [`walk_tree_bounded_with_timeout`] for
 //! one window: a depth-first, pre-order traversal of that window, numbering
 //! the nodes accepted by the shared [`is_indexable`] capability predicate.
-//! `perform_action`, `set_value`, `scroll_element`, `focus_element` and
+//! `set_value`, `scroll_element`, `focus_element` and
 //! `get_element_bounds_for_window` index into that same ordered set, so they
 //! always take the window an index belongs to.
 
@@ -2732,7 +2732,7 @@ fn sibling_ordinal(visited: &[Visited<'_>], _parents: &[Option<usize>], pos: usi
 /// `only_frame` restricts what is *emitted* to one application top-level while
 /// leaving the index space application-wide. Element indices are the contract
 /// between a snapshot and every actuator that later takes one
-/// (`perform_action`, `focus_element`, `set_value`, …), and those resolve an
+/// (`focus_element`, `set_value`, …), and those resolve an
 /// index against the whole application. Renumbering per window would make a
 /// window-scoped snapshot's indices name different elements at actuation time.
 ///
@@ -3162,7 +3162,7 @@ fn is_enabled_state(state: &StateSet) -> bool {
 ///
 /// This predicate is the single source of truth for the element-index space and
 /// MUST be applied identically in `render` and in every `action_nodes` filter
-/// (`perform_action`, `set_value`, `get_element_bounds_for_window`, snapshot bounds);
+/// (`set_value`, `get_element_bounds_for_window`, snapshot bounds);
 /// any divergence would desync indices between the snapshot and the operations.
 fn is_indexable(v: &Visited) -> bool {
     v.showing
@@ -3233,19 +3233,9 @@ pub struct WalkedTree {
     pub elapsed: Duration,
 }
 
-/// Walk the AT-SPI tree with caller-supplied node + depth caps.
-/// `max_elements = None` keeps the historical 5 000-node default; `max_depth
-/// = None` keeps the historical unbounded depth. Issue #22865.
-pub fn walk_tree_bounded(
-    pid: u32,
-    xid: u64,
-    max_elements: Option<usize>,
-    max_depth: Option<usize>,
-) -> Result<Option<WalkedTree>> {
-    walk_tree_bounded_with_timeout(pid, xid, max_elements, max_depth, None, None, OP_TIMEOUT)
-}
-
-/// [`walk_tree_bounded`] within `timeout`. With `role_search`, a window whose
+/// Walk the AT-SPI tree of window `xid` with caller-supplied node + depth caps
+/// (`None` keeps the 5 000-node default and unbounded depth), within
+/// `timeout`. With `role_search`, a window whose
 /// toolkit supports it is searched for those roles instead of walked
 /// (`WalkedTree::searched_roles` says whether that happened).
 /// `text_read_chars` is how much of a text field's content to read (`None`:
@@ -3395,7 +3385,7 @@ pub(super) fn walk_tree_bounded_with_timeout(
 /// apps have no X11 XID and Mutter/KWin expose no foreign-toplevel list, so
 /// `wayland::list_windows` comes back empty there and the whole element flow
 /// (get_window_state -> click by element_index) is unreachable — even though the
-/// AT-SPI tree itself is keyed by PID and works fine (see `walk_tree_bounded`,
+/// AT-SPI tree itself is keyed by PID and works fine (see `walk_tree_bounded_with_timeout`,
 /// whose walk ignores the xid). This bridges that gap: it returns one
 /// [`WindowInfo`] per application top-level frame, with a SYNTHETIC but stable
 /// `xid`. Downstream `get_window_state` / `click` walk the tree by PID and never
@@ -4943,86 +4933,6 @@ fn dedupe_menu_matches(visited: &[Visited<'_>], matches: Vec<usize>) -> Vec<usiz
     candidates
 }
 
-/// Perform the activation action of element `idx` of window `xid`, resolved
-/// against a fresh walk of that window (the index space of its snapshot).
-pub fn perform_action(pid: u32, xid: u64, idx: usize) -> Result<(String, bool, bool)> {
-    bounded_for(
-        INDEX_RESOLVE_BUDGET,
-        async {
-            let conn = shared_connection().await?;
-            let visited = collect_window_visited(conn, pid, xid)
-                .await?
-                .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
-            let action_nodes: Vec<&Visited> = visited.iter().filter(|v| is_indexable(v)).collect();
-            let target = action_nodes.get(idx).ok_or_else(|| {
-                anyhow!("element {idx} not found (total: {})", action_nodes.len())
-            })?;
-
-            // Suspected no-op: actuating `do_action(0)` on a passive display role
-            // (a `label`/`static`/`image` indexed only for its Value interface) or a
-            // node that advertises no action at all is the AT-SPI analogue of macOS'
-            // "element does not advertise this action" — the call returns success but
-            // likely changes nothing. Reuses the same passive-role detector
-            // `select_click_target` leans on for the coordinate paths. The caller
-            // turns this into `effect: "suspected_noop"` + an escalation hint.
-            let suspected_noop = target.actions.is_empty() || is_passive_role(&target.role);
-
-            // Which action to actuate is decided by NAME, not by position. A
-            // GTK4 text view advertises `buffer.delete-line` first, so firing
-            // "action 0" there deletes a line of the user's document while
-            // reporting an ordinary click. An element that advertises no
-            // activation at all is a no-op the caller must escalate past —
-            // not an invitation to fire whatever happens to be first.
-            let chosen = activation_index(&target.role, &target.actions).ok_or_else(|| {
-                anyhow!("element {idx} does not advertise a safe activation action")
-            })?;
-
-            let ap = target
-                .acc
-                .proxies()
-                .await
-                .map_err(|e| anyhow!("interface proxies unavailable: {e}"))?
-                .action()
-                .await
-                .map_err(|e| anyhow!("Action unavailable: {e}"))?;
-            let action = target.actions.get(chosen).cloned().unwrap_or_default();
-            // `doAction` answers a bool: `false` is the toolkit declining the
-            // request (LibreOffice VCL menus answer it for a closed menu), not
-            // a delivered click, so it is reported as a suspected no-op.
-            // `unacknowledged` is distinct from `rejected`: the D-Bus call
-            // never got a reply in time (the toolkit may still be processing
-            // it — e.g. a nested dialog main loop), so we know neither
-            // acceptance nor effect. This must never read as a plain
-            // dispatched/confirmed success; the caller reports it as
-            // `unverifiable` with an explicit "no acknowledgement received"
-            // note, and — unlike a genuine `suspected_noop` — does not by
-            // itself imply the toolkit declined anything.
-            let mut unacknowledged = false;
-            let rejected = match call(ap.do_action(chosen as i32)).await {
-                Some(Ok(accepted)) => !accepted,
-                Some(Err(e)) => return Err(anyhow!("doAction failed: {e}")),
-                None => {
-                    dlog!("doAction dispatched but not acknowledged in time");
-                    unacknowledged = true;
-                    false
-                }
-            };
-            let suspected_noop = suspected_noop || rejected;
-            // AT-SPI's doAction acknowledgement can precede the renderer's
-            // queued DOM mutation. Give WebKit/Chromium one short event-loop
-            // turn before returning success so a caller's immediate external
-            // state read observes the action it was told was delivered.
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            Ok((action, suspected_noop, unacknowledged))
-        },
-        || {
-            Err(anyhow!(
-                "perform_action timed out for pid {pid} (app unresponsive to AT-SPI)"
-            ))
-        },
-    )
-}
-
 // ── Cached-reference fast paths ──────────────────────────────────────────────
 //
 // Every per-index entry point above re-walks the application to turn an
@@ -5126,7 +5036,7 @@ async fn live_accessible<'a>(
     Ok((acc, role))
 }
 
-/// [`perform_action`] on a snapshot-cached element identity. Same contract:
+/// Perform the activation action of a snapshot-cached element identity:
 /// `Ok((action_name, suspected_noop))`. Errors when the object no longer
 /// exists so the caller can fall back to resolving the index afresh.
 pub fn perform_action_ref(object_ref: &ObjectRef) -> Result<(String, bool, bool)> {
@@ -5147,7 +5057,7 @@ pub fn perform_action_ref(object_ref: &ObjectRef) -> Result<(String, bool, bool)
             let suspected_noop = actions.is_empty() || is_passive_role(&role);
             let chosen = activation_index(&role, &actions)
                 .ok_or_else(|| anyhow!("element does not advertise a safe activation action"))?;
-            // See `perform_action`'s `unacknowledged`: an unanswered doAction
+            // `unacknowledged`: an unanswered doAction
             // is unknown, not dispatched-implies-success, and must not be
             // folded into `rejected`/`suspected_noop` (which would claim the
             // toolkit declined it) nor silently reported as a plain success.
@@ -6826,7 +6736,7 @@ pub fn perform_action_at_point(
 /// Vision/pixel click that actually lands — the Wayland answer (and a robust
 /// GTK4 path generally). Maps a *screen* pixel to the smallest `element_index`
 /// whose reconstructed screen frame covers it, then fires that element's
-/// primary action via [`perform_action`].
+/// primary action.
 ///
 /// Why not [`perform_action_at_point`]: that one hit-tests raw
 /// `CoordType::Window` extents over an ad-hoc node set and `do_action`s the node

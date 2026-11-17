@@ -56,9 +56,6 @@ pub fn delivery_mode_schema() -> Value {
 /// Reason a `background` delivery cannot be performed on Wayland.
 #[derive(Copy, Clone, Debug)]
 pub enum BackgroundUnavailable {
-    /// No libei backend (built without `portal-input`, or the portal session
-    /// was denied / unavailable). Input has no actuator at all.
-    NoLibeiBackend,
     /// X11/Chromium does not accept synthetic pointer or keyboard input
     /// addressed to an occluded, unfocused renderer without briefly moving
     /// focus, which background delivery forbids.
@@ -79,7 +76,6 @@ pub enum BackgroundUnavailable {
 impl BackgroundUnavailable {
     fn code(self) -> &'static str {
         match self {
-            Self::NoLibeiBackend => "background_unavailable",
             Self::ChromiumInput => "background_unavailable",
             Self::FocusedInputOnly => "background_unavailable",
             Self::SyntheticPointerDropped => "background_unavailable",
@@ -88,11 +84,6 @@ impl BackgroundUnavailable {
     }
     fn detail(self) -> &'static str {
         match self {
-            Self::NoLibeiBackend => {
-                "no libei input backend on this Wayland compositor (built without \
-                 portal-input, or the xdg-desktop-portal RemoteDesktop session was \
-                 unavailable/denied): synthetic input has no actuator"
-            }
             Self::ChromiumInput => {
                 "Chromium/Electron does not accept pointer or keyboard input \
                  addressed to an occluded, unfocused renderer through X11 \

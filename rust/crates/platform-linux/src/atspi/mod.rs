@@ -329,10 +329,9 @@ fn lists_rows_below_the_window(markdown: &str) -> bool {
     markdown.lines().any(|line| line.starts_with(' '))
 }
 
-/// Perform the activation action of element `idx` of the last
-/// `get_window_state` snapshot of window `xid`: the cached object first (no
-/// re-walk), a fresh walk of that window (the snapshot's index space) when
-/// the cached object is gone.
+/// Perform the activation action of element `idx` of a tree the caller walked
+/// itself ([`walk_tree`]): that walked object, never a `get_window_state` snapshot,
+/// which may be of another window or of this one before it changed.
 /// Returns `Ok((action_name, suspected_noop, unacknowledged))` on success:
 /// `suspected_noop` is true when the actuated node looked like a silent
 /// no-op (a passive display role, or no advertised action), so the caller
@@ -342,21 +341,6 @@ fn lists_rows_below_the_window(markdown: &str) -> bool {
 /// acceptance nor effect is known, and the caller must report this as
 /// `unverifiable` with an explicit note, never as a plain confirmed/dispatched
 /// success.
-pub fn perform_action_in(pid: u32, xid: u64, idx: usize) -> Result<(String, bool, bool)> {
-    if let Some(object_ref) = cached_ref(pid, xid, idx) {
-        match native::perform_action_ref(&object_ref) {
-            Ok(done) => return Ok(done),
-            Err(error) => tracing::debug!(
-                "cached element {idx} (pid {pid}) action failed, re-resolving: {error:#}"
-            ),
-        }
-    }
-    native::perform_action(pid, xid, idx)
-}
-
-/// [`perform_action_in`] on element `idx` of a tree the caller walked itself
-/// ([`walk_tree`]): that walked object, never a `get_window_state` snapshot,
-/// which may be of another window or of this one before it changed.
 pub fn perform_action_walked(nodes: &[AtspiNode], idx: usize) -> Result<(String, bool, bool)> {
     let node = walked_node(nodes, idx)
         .ok_or_else(|| anyhow::anyhow!("element {idx} is not in the walk"))?;
@@ -383,7 +367,7 @@ pub fn walked_bounds(
         .map(|&(_, x, y, width, height)| (x, y, width, height))
 }
 
-/// [`perform_action`] on the exact object a snapshot observed. Never re-walks
+/// [`perform_action_walked`] on the exact object a snapshot observed. Never re-walks
 /// or retargets by index: when the object is gone the error downcasts to
 /// [`native::CachedElementGone`] so the caller can refuse as stale.
 pub fn perform_action_observed(element: &cache::CachedElement) -> Result<(String, bool, bool)> {

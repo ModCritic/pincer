@@ -19,7 +19,6 @@
 //! `shm_detach(seg)` on replacement/drop.
 
 use anyhow::{anyhow, bail, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use pincer_core::image_utils::CapturedImage;
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -49,13 +48,6 @@ pub fn screenshot_window_image(xid: u64) -> Result<CapturedImage> {
         capture_via_persistent_xgetimage,
         capture_via_import,
     )
-}
-
-/// Capture a window by X11 XID. Returns (base64_png, width, height).
-pub fn screenshot_window(xid: u64) -> Result<(String, u32, u32)> {
-    let bytes = screenshot_window_bytes(xid)?;
-    let (w, h) = pincer_core::image_utils::png_dimensions(&bytes)?;
-    Ok((BASE64.encode(&bytes), w, h))
 }
 
 /// Ordered window-capture backend cascade.
@@ -482,8 +474,6 @@ struct XShmSession {
     display: String,
     conn: x11rb::rust_connection::RustConnection,
     pixels: PixelCatalog,
-    #[allow(dead_code)]
-    screen_num: usize,
     buffer: Option<ShmBuffer>,
 }
 
@@ -579,7 +569,7 @@ impl XShmSession {
     fn connect(display: String) -> Result<Self> {
         use x11rb::protocol::shm::ConnectionExt as _;
 
-        let (conn, screen_num) = x11rb::rust_connection::RustConnection::connect(Some(&display))
+        let (conn, _) = x11rb::rust_connection::RustConnection::connect(Some(&display))
             .map_err(|e| anyhow!("X11 connect for SHM: {e}"))?;
         let pixels = PixelCatalog::from_setup(conn.setup());
 
@@ -603,7 +593,6 @@ impl XShmSession {
             display,
             conn,
             pixels,
-            screen_num,
             buffer: None,
         })
     }
@@ -1004,11 +993,6 @@ impl XGetImageSession {
     }
 }
 
-/// Public version of png_dimensions for use in tool code.
-pub fn png_dimensions_pub(data: &[u8]) -> Result<(u32, u32)> {
-    pincer_core::image_utils::png_dimensions(data)
-}
-
 // NOTE: the PNG helpers that used to live here moved to
 // `pincer_core::image_utils` in the 2026-05 dedup audit so all three
 // platforms call the same code. RGBA-encoding callers below go through
@@ -1152,29 +1136,9 @@ pub fn screenshot_root_region_rgba(
     root_bgrx_to_rgba(&img.data, w, h)
 }
 
-/// Capture the primary display, returning (base64_png, width, height).
-pub fn screenshot_display() -> Result<(String, u32, u32)> {
-    let png_bytes = screenshot_display_bytes()?;
-    let (w, h) = pincer_core::image_utils::png_dimensions(&png_bytes)?;
-    Ok((BASE64.encode(&png_bytes), w, h))
-}
-
-// PNG/JPEG/resize/crosshair helpers — re-exports of the shared
-// `pincer_core::image_utils` module. The previous file-local copies were
-// near-identical to the macOS and Windows versions; the dedup-audit
-// (2026-05) moved them all to one place.
-
-/// Convert PNG bytes to JPEG at the given quality (1–95).
-pub fn png_bytes_to_jpeg(png_bytes: &[u8], quality: u8) -> Result<Vec<u8>> {
-    pincer_core::image_utils::png_bytes_to_jpeg(png_bytes, quality)
-}
-
-/// Downscale `png_bytes` so neither dimension exceeds `max_dim`.
-/// If `max_dim == 0` or the image already fits, returns a copy of the
-/// original bytes unchanged.
-pub fn resize_png_if_needed(png_bytes: &[u8], max_dim: u32) -> Result<Vec<u8>> {
-    pincer_core::image_utils::resize_png_if_needed(png_bytes, max_dim)
-}
+// The crosshair helper forwards to the shared `pincer_core::image_utils`
+// module, where the dedup audit (2026-05) moved the PNG helpers of all
+// three platforms.
 
 /// Draw a red crosshair at pixel (cx, cy) on a PNG image and return
 /// modified PNG bytes. Used by recording's click-marker callback to

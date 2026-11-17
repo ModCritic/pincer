@@ -13138,7 +13138,6 @@ impl Tool for ScrollTool {
                         match crate::input::send_virtual_pointer_scroll(
                             &cursor_id_for_task,
                             &crate::input::VirtualPointerScroll {
-                                target_window: xid,
                                 x: cx,
                                 y: cy,
                                 horizontal,
@@ -18241,117 +18240,6 @@ impl Tool for CaptureSeriesTool {
     }
 }
 
-// ── type_text_chars ───────────────────────────────────────────────────────────
-
-pub struct TypeTextCharsTool;
-static TYPE_CHARS_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
-
-#[async_trait]
-impl Tool for TypeTextCharsTool {
-    fn def(&self) -> &ToolDef {
-        TYPE_CHARS_DEF.get_or_init(|| ToolDef {
-            name: "type_text_chars".into(),
-            description: "Type text character-by-character with a configurable inter-character \
-                delay (default 30 ms). Useful for apps that miss keystrokes. \
-                Otherwise identical to type_text (XSendEvent, no focus steal).".into(),
-            input_schema: json!({
-                "type":"object","required":["pid","text"],"properties":{
-                    "pid":{"type":"integer","description":"Target process ID."},
-                    "window_id":{"type":"integer","description":"Window id from list_windows."},
-                    "text":{"type":"string","description":"Text to type, one character at a time."},
-                    "delay_ms":{"type":"integer","description":"Milliseconds between chars (default 30)."}
-                },"additionalProperties":false
-            }),
-            read_only: false, destructive: true, idempotent: false, open_world: true,
-        })
-    }
-
-    async fn invoke(&self, args: Value) -> ToolResult {
-        use pincer_core::tool_args::ArgsExt;
-        #[allow(unused_assignments)]
-        let pid = args.u64_or("pid", 0) as u32;
-        let text_raw = match args.require_str("text") {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        // Same trailing-protocol-tag scrub as TypeTextTool — see
-        // pincer_core::text_sanitize for rationale.
-        let text =
-            pincer_core::text_sanitize::strip_trailing_agent_protocol_tags(&text_raw).into_owned();
-        let delay_ms = args.u64_or("delay_ms", 30);
-        let xid_opt = args.opt_u64("window_id");
-        let xid = match xid_opt {
-            Some(x) => x,
-            None => {
-                let windows = tokio::task::spawn_blocking(move || {
-                    crate::x11::list_windows(if pid == 0 { None } else { Some(pid) })
-                })
-                .await
-                .unwrap_or_default();
-                // pid omitted: the keys go to the active window, like a
-                // physical keyboard would, and the action adopts its pid.
-                let chosen = if pid == 0 {
-                    let active = crate::x11::active_window();
-                    windows
-                        .iter()
-                        .find(|w| Some(w.xid) == active && w.pid.is_some())
-                        .or_else(|| windows.iter().find(|w| w.is_on_screen && w.pid.is_some()))
-                } else {
-                    // The pid's active window, else its largest on-screen
-                    // toplevel: LibreOffice and GIMP own hidden/utility
-                    // toplevels that a plain `first()` could pick, and an
-                    // unmapped window cannot take the virtual keyboard focus.
-                    let active = crate::x11::active_window();
-                    windows
-                        .iter()
-                        .find(|w| Some(w.xid) == active)
-                        .or_else(|| {
-                            windows
-                                .iter()
-                                .filter(|w| w.is_on_screen)
-                                .max_by_key(|w| u64::from(w.width) * u64::from(w.height))
-                        })
-                        .or_else(|| windows.first())
-                };
-                match chosen {
-                    Some(w) => w.xid,
-                    None => {
-                        return ToolResult::error(format!(
-                            "No windows found for pid {pid}. Provide window_id."
-                        ))
-                    }
-                }
-            }
-        };
-        let text_len = text.chars().count();
-        let result = tokio::task::spawn_blocking(move || {
-            if crate::wayland::wayland_input_enabled() {
-                // Per-char `wtype` loop with the requested delay — mirrors the
-                // X11 XSendEvent per-char path. Sleeping here is fine because
-                // we're inside spawn_blocking.
-                let mut buf = [0u8; 4];
-                for ch in text.chars() {
-                    let s = ch.encode_utf8(&mut buf);
-                    crate::wayland::type_text(xid, s)?;
-                    if delay_ms > 0 {
-                        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                    }
-                }
-                return Ok(());
-            }
-            crate::input::send_type_text_with_delay(xid, &text, delay_ms)
-        })
-        .await;
-        match result {
-            Ok(Ok(())) => ToolResult::text(format!(
-                "Typed {text_len} character(s) with {delay_ms}ms delay."
-            )),
-            Ok(Err(e)) => ToolResult::error(e.to_string()),
-            Err(e) => ToolResult::error(format!("Task error: {e}")),
-        }
-    }
-}
-
 // ── kill_app ──────────────────────────────────────────────────────────────────
 
 /// Plain words for a `kill_app` observation a caller could misread: a
@@ -19662,9 +19550,8 @@ pub fn build_registry_with_provider(
         state: state.clone(),
     }));
     r.register(Box::new(CaptureSeriesTool));
-    // `type_text_chars` is a deprecated invoke-time alias for `type_text`.
-    // Keep it out of tools/list, matching the macOS and Windows registries.
-    let _: &TypeTextCharsTool = &TypeTextCharsTool;
+    // `type_text_chars` needs no tool here: pincer-core's registry resolves
+    // it to `type_text` at invoke time and keeps it out of tools/list.
     pincer_core::browser::register_browser_tools(&browser_engine, &mut r);
     r.register_recording_tools();
     r.register_session_tools();

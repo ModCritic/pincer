@@ -340,7 +340,7 @@ fn decode_capture(raw: &str) -> Option<Vec<u8>> {
 
 /// Screen origin of the compositor frame backing `pid`.
 ///
-/// `screenshot_window_dispatch` crops the Shell stage to this same frame
+/// The window capture crops the Shell stage to this same frame
 /// rectangle, and GTK's AT-SPI `CoordType::Window` coordinates are relative to
 /// that frame. Using Mutter's larger surface-buffer rectangle here shifts
 /// elements up and left by the client-side shadow extents whenever the window
