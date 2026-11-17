@@ -24,8 +24,11 @@ mod primary_seat;
 pub mod shell_helper;
 pub mod sway_ipc;
 mod virtual_keyboard;
-// RemoteDesktop/libei input is portable and ships in release binaries.
-// PipeWire ScreenCast capture remains separately gated for modern/Nix builds.
+// Both portal backends are opt-in Cargo features that no build script in the
+// repo enables (scripts/_install-local-rust.sh and python/build_wheel.py
+// build without features): `portal-input` adds GNOME/KDE foreground input
+// through the RemoteDesktop portal and libei, `portal-capture` the PipeWire
+// ScreenCast capture module.
 #[cfg(feature = "portal-input")]
 pub mod libei;
 #[cfg(feature = "portal-capture")]

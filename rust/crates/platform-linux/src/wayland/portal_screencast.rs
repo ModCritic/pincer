@@ -20,6 +20,11 @@
 //! `OnceLock<PortalScreencastSession>` so only the first call across the
 //! process lifetime triggers the consent dialog; later calls reuse the
 //! same PipeWire node id.
+//!
+//! Status: built only with the opt-in `portal-capture` feature, and nothing
+//! in the driver calls [`screenshot_window_via_portal`] or
+//! [`probe_screencast_portal`] yet; window capture uses the other backends
+//! in [`super`].
 
 use std::os::fd::AsRawFd;
 use std::sync::OnceLock;

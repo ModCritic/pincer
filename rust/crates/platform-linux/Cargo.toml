@@ -48,7 +48,8 @@ atspi = { version = "0.30", default-features = false, features = ["proxies", "wr
 # socket reader and the connection never reads another event (#4894).
 # LibreOffice also advertises a private socket its VCL main loop never
 # services. The session a11y bus is what gdbus/pyatspi use and is the only
-# route this crate takes; the CI feature-graph guard keeps `p2p` out.
+# route this crate takes. CI checks that `cargo tree -e features -i
+# atspi-connection` shows no `p2p`.
 atspi-connection = { version = "0.14", default-features = false, features = ["wrappers"] }
 evdev = "0.12"
 # Math-expression evaluator for parallel_mouse_drag `fn` paths (y = f(x)).
@@ -93,7 +94,10 @@ url = "2"
 # frames from the node id returned by `open_pipe_wire_remote`. Pinned to
 # 0.8 (last well-documented release; 0.10 had docs.rs build failures in
 # mid-2026). Needs libpipewire-0.3 headers at build time — gated behind
-# the `portal-capture` feature.
+# the `portal-capture` feature. libspa-sys 0.8 generates its bindings with
+# bindgen 0.69, which under libclang 23 turns the forward-declared
+# `struct spa_pod_builder` into an opaque struct, and libspa 0.8 then fails
+# to compile; with libclang 21 (LIBCLANG_PATH) it builds.
 pipewire = { version = "0.8", optional = true }
 # Companion to pipewire 0.8 — needed to construct the SPA_PARAM_EnumFormat
 # pod (SPA_VIDEO_FORMAT_BGRx at announced width/height) we hand to
@@ -132,10 +136,14 @@ dirs = "5"
 [features]
 default = []
 linux-example = []
-# GNOME/KDE input is pure Rust plus libxkbcommon, which is available in the
-# Debian 11 release container. Ashpd's RemoteDesktop API exposes ScreenCast
-# stream metadata, so its lightweight screencast module is required here too.
-# The PipeWire frame reader remains isolated in portal-capture below.
+# The portal features are opt-in: no build script in the repo enables them
+# (scripts/_install-local-rust.sh and python/build_wheel.py build without
+# features), so the installed driver has neither.
+#
+# GNOME/KDE foreground input through the RemoteDesktop portal and libei
+# (wayland/libei.rs). Pure Rust plus libxkbcommon. Ashpd's RemoteDesktop API
+# exposes ScreenCast stream metadata, so its lightweight screencast module is
+# required here too. The PipeWire frame reader stays in portal-capture below.
 portal-input = [
     "ashpd/remote_desktop",
     "ashpd/screencast",
@@ -144,14 +152,14 @@ portal-input = [
     "dep:enumflags2",
     "dep:xkbcommon",
 ]
-# PipeWire-backed per-window ScreenCast capture keeps its newer system-header
-# requirement and remains enabled by Nix/modern desktop builds.
+# PipeWire-backed per-window ScreenCast capture (wayland/portal_screencast.rs),
+# which needs the libpipewire-0.3 headers. Nothing in the driver calls it yet.
 portal-capture = [
     "ashpd/screencast",
     "dep:pipewire",
     "dep:libspa",
 ]
-# Backward-compatible full desktop feature used by the Nix package.
+# Both portal features under their older combined name.
 portal-libei = ["portal-input", "portal-capture"]
 
 [dev-dependencies]
