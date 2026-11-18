@@ -1038,17 +1038,16 @@ impl BrowserClickTool {
         let def = ToolDef {
             name: "browser_click".into(),
             description: "Click a page element (by ref) or viewport coordinates in an \
-                exactly-bound tab. Default route is trusted hardware-like input \
-                (Input.dispatchMouseEvent), and refuses where that route cannot \
-                preserve standalone-browser background posture unless \
-                delivery_mode=\"foreground\" accepts that the browser window may \
-                activate (including Linux Chromium configurations whose trusted route cannot stay in the background; \
-                for example a browser inside a sandbox). \
+                exactly-bound tab. On Linux the default route refuses in background delivery \
+                for a standalone Chromium: pass input_route \"dom_event\" (with a ref) or \
+                delivery_mode \"foreground\". The default route is trusted hardware-like input \
+                (Input.dispatchMouseEvent); it refuses wherever it cannot keep a standalone \
+                browser in the background, unless delivery_mode=\"foreground\" accepts that \
+                the browser window may activate (for example a browser inside a sandbox). \
                 input_route=\"dom_event\" (synthetic pointer and mouse \
                 down/up/click sequence at the element's center, ref required) is never picked \
-                automatically; request it when the trusted route is refused in background, since \
-                it clicks without activating the window. It proves dispatch, not control \
-                activation, because trust-gated \
+                automatically; it clicks without activating the window, but proves dispatch, \
+                not control activation, because trust-gated \
                 controls may ignore synthetic events. \
                 Refused for heuristic bindings."
                 .into(),
