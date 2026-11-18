@@ -77,7 +77,7 @@ fn a_tree_only_read_keeps_the_frame_until_the_window_is_resized() {
     assert!(screenshot_scale(&state, &args, 42, Some(7)).is_err());
 
     // get_window_state is what records the size; a plain publish would not.
-    let source = concat!(include_str!("window_state.rs"), include_str!("../impl_.rs"));
+    let source = concat!(include_str!("window_state.rs"), include_str!("launch.rs"));
     let invoke = source
         .split_once("impl Tool for GetWindowStateTool {")
         .unwrap()
