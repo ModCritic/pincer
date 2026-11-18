@@ -1671,8 +1671,19 @@ mod tests {
             panic!("restart-test Xvfb did not become ready on {display}");
         }
 
+        /// SIGTERM first, so the server removes its lock file and socket
+        /// (SIGKILL leaves both behind); SIGKILL after 2 s.
         fn stop(&mut self) {
             if let Some(mut child) = self.child.take() {
+                // SAFETY: plain libc call on the pid of a child this test
+                // spawned and has not reaped.
+                unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+                for _ in 0..100 {
+                    if matches!(child.try_wait(), Ok(Some(_))) {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
                 let _ = child.kill();
                 let _ = child.wait();
             }

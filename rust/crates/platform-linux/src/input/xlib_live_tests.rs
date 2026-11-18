@@ -65,11 +65,27 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(child) = self.child.take() {
+            stop_x_server(child);
         }
     }
+}
+
+/// End an X server with SIGTERM, so it removes its `/tmp/.X<n>-lock` and
+/// socket (SIGKILL leaves both, and later runs then skip that display
+/// number), and with SIGKILL only if it is still running after 2 s.
+fn stop_x_server(mut child: Child) {
+    // SAFETY: plain libc call on the pid of a child this test spawned and
+    // has not reaped.
+    unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+    for _ in 0..100 {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn in_child() -> bool {
