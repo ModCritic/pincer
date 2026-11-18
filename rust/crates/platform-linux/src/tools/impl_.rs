@@ -13485,6 +13485,37 @@ fn scroll_outcome_result(
 
 // ── double_click ──────────────────────────────────────────────────────────────
 
+/// `scope:"desktop"` with no pid and no window_id: x,y are get_desktop_state
+/// screen pixels and no window is named (dispatch has already rewritten the
+/// form that names a window into `coordinate_frame:"desktop"`).
+fn windowless_desktop_scope(args: &Value) -> bool {
+    args.get("scope").and_then(Value::as_str) == Some("desktop")
+        && args.get("pid").is_none_or(Value::is_null)
+        && args.get("window_id").is_none_or(Value::is_null)
+}
+
+/// double_click / right_click in the windowless desktop form: click's
+/// screen-absolute branch with this tool's button and count. Dispatch refuses
+/// an explicit background delivery for click's desktop scope; do the same
+/// here, since that check is keyed to the tool name.
+async fn desktop_scope_click(
+    state: &Arc<ToolState>,
+    mut args: Value,
+    button: &str,
+    count: u64,
+) -> ToolResult {
+    if let Err(refusal) = pincer_core::action_target::enforce_delivery_target("click", &args) {
+        return refusal;
+    }
+    args["button"] = json!(button);
+    args["count"] = json!(count);
+    ClickTool {
+        state: state.clone(),
+    }
+    .invoke(args)
+    .await
+}
+
 pub struct DoubleClickTool {
     state: Arc<ToolState>,
 }
@@ -13509,10 +13540,11 @@ impl Tool for DoubleClickTool {
             input_schema: json!({"type":"object","required":[],"properties":{
                 "session": pincer_core::tool_schema::session_schema(),
                 "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
-                "pid":{"type":"integer","description":"Target process ID. Optional with element_token (the token carries the pid)."},
+                "pid":{"type":"integer","description":"Target process ID. Required unless scope is \"desktop\" or element_token is given (the token carries the pid)."},
                 "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                 "x":{"type":"number","description":"Pixel X in the window's get_window_state screenshot (0..screenshot_width). Pass scope:\"desktop\" for get_desktop_state pixels."},
                 "y":{"type":"number","description":"Pixel Y in the window's get_window_state screenshot (0..screenshot_height); see x."},
+                "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"Default \"window\". \"desktop\" with x,y and no pid/window_id double-clicks at get_desktop_state screen coordinates."},
                 "coordinate_frame": coordinate_frame_schema(),
                 "element_token": pincer_core::tool_schema::element_token_schema(),
                 "from_zoom":{"type":"boolean","description":"True when the coordinates come from a zoom image; maps them back to window pixels."},
@@ -13522,6 +13554,9 @@ impl Tool for DoubleClickTool {
         })
     }
     async fn invoke(&self, args: Value) -> ToolResult {
+        if windowless_desktop_scope(&args) {
+            return desktop_scope_click(&self.state, args, "left", 2).await;
+        }
         let cursor_id = resolve_cursor_key(&args);
         let pid = match args.require_u32("pid") {
             Ok(v) => v,
@@ -13864,10 +13899,11 @@ impl Tool for RightClickTool {
             input_schema: json!({"type":"object","required":[],"properties":{
                 "session": pincer_core::tool_schema::session_schema(),
                 "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
-                "pid":{"type":"integer","description":"Target process ID. Optional with element_token (the token carries the pid)."},
+                "pid":{"type":"integer","description":"Target process ID. Required unless scope is \"desktop\" or element_token is given (the token carries the pid)."},
                 "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                 "x":{"type":"number","description":"Pixel X in the window's get_window_state screenshot (0..screenshot_width). Pass scope:\"desktop\" for get_desktop_state pixels."},
                 "y":{"type":"number","description":"Pixel Y in the window's get_window_state screenshot (0..screenshot_height); see x."},
+                "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"Default \"window\". \"desktop\" with x,y and no pid/window_id right-clicks at get_desktop_state screen coordinates."},
                 "coordinate_frame": coordinate_frame_schema(),
                 "element_token": pincer_core::tool_schema::element_token_schema(),
                 "modifier": pincer_core::tool_schema::modifier_schema(),
@@ -13878,6 +13914,9 @@ impl Tool for RightClickTool {
         })
     }
     async fn invoke(&self, args: Value) -> ToolResult {
+        if windowless_desktop_scope(&args) {
+            return desktop_scope_click(&self.state, args, "right", 1).await;
+        }
         let cursor_id = resolve_cursor_key(&args);
         let pid = match args.require_u32("pid") {
             Ok(v) => v,

@@ -55,3 +55,63 @@ fn gtk_process_maps_are_detected_without_matching_unrelated_libraries() {
         "7f00-7f01 r-xp /usr/lib/x86_64-linux-gnu/libgdk_pixbuf-2.0.so"
     ));
 }
+
+/// A property description that tells the caller to pass `scope:"desktop"`
+/// must sit in a schema that accepts `scope`: dispatch refuses unknown
+/// arguments, so the advice would always fail (double_click and right_click
+/// said so with no `scope` field).
+#[test]
+fn schemas_that_advise_desktop_scope_accept_scope() {
+    let registry = super::build_registry_with_provider(false, None);
+    let mut missing = Vec::new();
+    for (name, def) in registry.iter_defs() {
+        let Some(properties) = def.input_schema["properties"].as_object() else {
+            continue;
+        };
+        // "Pass scope:\"desktop\"" advice, and the shared coordinate_frame
+        // text that names this tool's own scope:"desktop".
+        let advises_scope = properties.iter().any(|(field, property)| {
+            property["description"].as_str().is_some_and(|text| {
+                let text = text.to_ascii_lowercase();
+                text.contains("pass scope:\"desktop\"")
+                    || (field == "coordinate_frame" && text.contains("scope:\"desktop\""))
+            })
+        });
+        if advises_scope && !properties.contains_key("scope") {
+            missing.push(name.to_owned());
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "these tools advise scope:\"desktop\" but do not accept scope: {missing:?}"
+    );
+}
+
+#[test]
+fn double_and_right_click_take_click_scope_values() {
+    let registry = super::build_registry_with_provider(false, None);
+    let click = &registry.get_def("click").unwrap().input_schema["properties"]["scope"];
+    for name in ["double_click", "right_click"] {
+        let scope = &registry.get_def(name).unwrap().input_schema["properties"]["scope"];
+        assert_eq!(scope["enum"], click["enum"], "{name}");
+        assert_eq!(scope["default"], click["default"], "{name}");
+    }
+}
+
+#[test]
+fn only_the_windowless_desktop_form_takes_the_screen_branch() {
+    use serde_json::json;
+    assert!(super::windowless_desktop_scope(
+        &json!({"scope": "desktop", "x": 1, "y": 2})
+    ));
+    assert!(super::windowless_desktop_scope(
+        &json!({"scope": "desktop", "x": 1, "y": 2, "pid": null})
+    ));
+    assert!(!super::windowless_desktop_scope(
+        &json!({"scope": "desktop", "pid": 7, "x": 1, "y": 2})
+    ));
+    assert!(!super::windowless_desktop_scope(
+        &json!({"scope": "desktop", "window_id": 9, "x": 1, "y": 2})
+    ));
+    assert!(!super::windowless_desktop_scope(&json!({"x": 1, "y": 2})));
+}
