@@ -25,10 +25,13 @@ route and independently verify the application.
 
 These targets cannot take background input and return `background_unavailable`
 (the refusal's detail says why): Chromium and Electron windows, WebKitGTK, and
-toolkits reachable only through the focused widget. On Wayland, background
-input reaches only the focused window, and on KDE Plasma or GNOME a build
-without the portal input feature has no input route at all: the error says
-"no input backend".
+toolkits reachable only through the focused widget. On native Wayland, raw
+input reaches only the focused window. The default build, and so the
+installed binary, is compiled without the `portal-input` feature, so on KDE
+Plasma and GNOME it has no raw input route at all: window-targeted calls
+refuse with `foreground_unavailable` or fail with "no input backend", and
+desktop-scope pointer calls fail with "no input backend". AT-SPI actions
+(element tokens, `set_value`) still work there.
 
 `delivery_mode:"foreground"` is a user-visible takeover. Never select it automatically.
 Use explicitly authorized `delivery_mode:"foreground"` only after evidence
@@ -405,11 +408,26 @@ driver selects a backend from compositor capabilities:
   defaults to discovery-only; the opt-in input v3 source candidate has the
   qualification and validation limits below. Do not inherit Sway coverage.
 - GNOME/Mutter uses the bundled WinRects Shell helper for target geometry and
-  activation, plus portal/libei for foreground raw input.
-- KDE/KWin uses AT-SPI and portal facilities where available. Target-specific
-  foreground activation remains experimental, so unsafe raw input refuses.
+  activation. Foreground raw input goes through the portal and libei only in
+  a build with the `portal-input` feature; the default build lacks it, so
+  raw input there refuses or fails with "no input backend".
+- KDE/KWin uses AT-SPI for discovery and actions. KWin target activation is
+  always off: KWin offers no foreign-toplevel activation, and the optional
+  KWin helper identifies windows but refuses every input call. So
+  window-targeted raw input never reaches a KWin window, in any build: it
+  refuses with `foreground_unavailable` (or, in the default build, fails
+  with "no input backend"), and `bring_to_front` refuses too. In the default
+  build, desktop-scope pointer input fails with "no input backend" (KWin has
+  no wlroots virtual pointer) and desktop-scope keys fail as well (KWin 6.7
+  offers no virtual keyboard protocol). Without the helper, window
+  screenshots refuse with `surface_identity_unproven`.
 - Upstream's optional `cua-compositor` is a separate nested session enabled
   explicitly for controlled automation. GNOME and KDE never switch into it.
+
+Without `PINCER_ENABLE_WAYLAND=1`, Pincer runs in XWayland mode on a Wayland
+session: it sees and drives X11 (XWayland) clients only. `list_windows` omits
+native Wayland windows and ends with a line that says so. To reach an app in
+this mode, start it as an X11 client (Qt: `QT_QPA_PLATFORM=xcb`).
 
 Sway recording works through the wlroots recorder path and is exercised by the
 canonical harness runner. Portal-backed GNOME recording is still an evidence
@@ -502,7 +520,7 @@ If a tool call surprises you on Linux:
    `DBUS_SESSION_BUS_ADDRESS` or `toolkit-accessibility`.
 2. Check `XDG_SESSION_TYPE`: X11 still has toolkit-specific delivery limits; `wayland`
    needs `PINCER_ENABLE_WAYLAND=1` for the native backend,
-   else XWayland.
+   else XWayland, which lists and drives X11 clients only.
 3. **Empty AT-SPI tree** (`get_window_state` returns `degraded:true`): in
    order of likelihood: (a) the daemon isn't on the desktop session bus
    (headless / container / `runuser` / root-against-user-session; see
@@ -535,8 +553,8 @@ ask the user.
 | X11/Openbox             | AT-SPI trees and actions, foreground pointer and keyboard input, window and desktop capture, and video                         | Raw background delivery remains toolkit-specific; unsupported shapes refuse                                                                                                                                    |
 | Sway/wlroots            | AT-SPI, native discovery, full-display and cropped-window screencopy, foreground input, semantic background actions, and video | Raw background pointer and keyboard input remains focus-bound                                                                                                                                                  |
 | Hyprland/Omarchy        | Experimental source candidate with separate discovery-foundation and bounded two-seat app evidence                             | Default plugin is discovery-only; raw background v3 qualification is limited to the exact native Calc/Inkscape packages and a private agent US keymap; user Caps-to-Ctrl/Super remaps do not alter agent semantics; complete native harness and release acceptance are separate gates |
-| GNOME/Mutter            | AT-SPI, WinRects geometry and activation, capture, and portal/libei foreground input                                           | Requires the helper and portal grant; portal video parity remains open                                                                                                                                         |
-| KDE/KWin                | AT-SPI and generic discovery where exposed                                                                                     | Target-specific activation and behavioral coverage remain experimental                                                                                                                                         |
+| GNOME/Mutter            | AT-SPI, WinRects geometry and activation, capture, and portal/libei foreground input in `portal-input` builds                  | The default build has no `portal-input` and so no raw input; requires the helper and portal grant; portal video parity remains open                                                                            |
+| KDE/KWin                | AT-SPI discovery and actions                                                                                                   | KWin activation is always off, so window-targeted raw input never reaches a window in any build; the default build has no raw input route at all                                                               |
 | Nested `cua-compositor` | Versioned direct per-surface input, native GTK 31/31, capture/scope 5/5, and partial Electron coverage                         | The complete shared matrix remains experimental; do not infer standard-Wayland support                                                                                                                         |
 
 See [WORKFLOW.md](WORKFLOW.md) for exact targeting and verification and `RECORDING.md` for session

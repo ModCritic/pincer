@@ -144,6 +144,40 @@ fn list_lines_leave_no_structured_copy() {
     assert!(render(&unstated, &json!({ "apps": apps })).contains("\napps:\n"));
 }
 
+fn result_text(result: &ToolResult) -> String {
+    result
+        .content
+        .iter()
+        .filter_map(|content| match content {
+            pincer_core::protocol::Content::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// In XWayland mode on a Wayland session the list ends with one line
+/// saying native windows are not listed, kept as a `note` field that the
+/// text renderer does not print twice. Without a note neither appears.
+#[test]
+fn xwayland_mode_note_ends_the_list_once() {
+    let records = vec![window_record_json(&kwrite_window(Some(0), true))];
+    let note = crate::wayland::XWAYLAND_MODE_LIST_NOTE;
+    let noted = list_windows_result(records.clone(), Some(note));
+    let text = result_text(&noted);
+    assert_eq!(text.lines().last(), Some(note), "{text}");
+    assert_eq!(text.matches(note).count(), 1);
+    let structured = noted.structured_content.expect("structured");
+    assert_eq!(structured["note"], note);
+    assert_eq!(
+        pincer_core::mcp_text_results::render_text(&text, &structured, false),
+        text
+    );
+
+    let plain = list_windows_result(records, None);
+    assert!(!result_text(&plain).contains("XWayland"));
+    assert!(plain.structured_content.expect("structured").get("note").is_none());
+}
+
 /// An `Exec=` line keeps its own quotes and backslashes, escaped inside the
 /// quoted value so they cannot end it. Until the text renderer also matches
 /// escaped values, such a record keeps its structured copy.

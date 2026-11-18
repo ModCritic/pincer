@@ -824,14 +824,26 @@ impl Tool for ListWindowsTool {
             crate::wayland::remember_observed_window_origins(&windows);
         }
         let records: Vec<Value> = windows.iter().map(window_record_json).collect();
-        let mut lines = vec![format!("Found {} window(s):", records.len())];
-        lines.extend(
-            records
-                .iter()
-                .map(|record| format!("  {}", window_record_line(record))),
-        );
-        ToolResult::text(lines.join("\n")).with_structured(json!({ "windows": records }))
+        list_windows_result(records, crate::wayland::current_xwayland_mode_list_note())
     }
+}
+
+/// The list_windows result: one line per record, then `note` (XWayland
+/// mode on a Wayland session lists no native window) as the last line and
+/// as a `note` field.
+fn list_windows_result(records: Vec<Value>, note: Option<&str>) -> ToolResult {
+    let mut lines = vec![format!("Found {} window(s):", records.len())];
+    lines.extend(
+        records
+            .iter()
+            .map(|record| format!("  {}", window_record_line(record))),
+    );
+    let mut structured = json!({ "windows": records });
+    if let Some(note) = note {
+        lines.push(note.to_owned());
+        structured["note"] = json!(note);
+    }
+    ToolResult::text(lines.join("\n")).with_structured(structured)
 }
 
 /// One `window_record_json` record on one text line, every field of it:

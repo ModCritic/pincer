@@ -142,6 +142,30 @@ pub fn wayland_input_enabled() -> bool {
     wayland_enabled() && std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
+/// What list_windows adds when Pincer runs in XWayland mode on a Wayland
+/// session: X11 enumeration sees only XWayland clients, so a native Wayland
+/// app would otherwise look as if it had no window.
+pub const XWAYLAND_MODE_LIST_NOTE: &str =
+    "XWayland mode: native Wayland windows are not listed (PINCER_ENABLE_WAYLAND=1 lists them).";
+
+/// The list_windows note for a Wayland session (`wayland_session`) whose
+/// native backend is on or off (`native_enabled`).
+pub fn xwayland_mode_list_note(
+    wayland_session: bool,
+    native_enabled: bool,
+) -> Option<&'static str> {
+    (wayland_session && !native_enabled).then_some(XWAYLAND_MODE_LIST_NOTE)
+}
+
+/// [`xwayland_mode_list_note`] for this process: a Wayland session is one
+/// with `WAYLAND_DISPLAY` set (as `health_report` reads it) or
+/// `XDG_SESSION_TYPE=wayland`.
+pub fn current_xwayland_mode_list_note() -> Option<&'static str> {
+    let wayland_session = std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || std::env::var("XDG_SESSION_TYPE").is_ok_and(|kind| kind.eq_ignore_ascii_case("wayland"));
+    xwayland_mode_list_note(wayland_session, wayland_enabled())
+}
+
 /// Reason string when X11 input injection cannot possibly work, so callers
 /// **fail loudly** instead of falling through to an X11 path that no-ops yet
 /// reports success. Triggers only on a *pure* Wayland session — `WAYLAND_DISPLAY`
@@ -4061,6 +4085,19 @@ mod tests {
         let gesture = item_source(source, "async fn gesture_click(");
         assert!(gesture.contains("click.click(args, kind).await"));
         assert!(!gesture.contains("crate::wayland::click"));
+    }
+
+    /// XWayland mode on a Wayland session lists X11 clients only: the note
+    /// says so and names the switch. Native mode and X11 sessions get none.
+    #[test]
+    fn xwayland_mode_on_a_wayland_session_notes_the_missing_native_windows() {
+        let note = super::xwayland_mode_list_note(true, false).expect("XWayland mode on Wayland");
+        assert_eq!(note, super::XWAYLAND_MODE_LIST_NOTE);
+        assert!(note.contains(super::ENABLE_WAYLAND_ENV));
+        assert!(!note.contains('\n'), "one line");
+        assert_eq!(super::xwayland_mode_list_note(true, true), None);
+        assert_eq!(super::xwayland_mode_list_note(false, false), None);
+        assert_eq!(super::xwayland_mode_list_note(false, true), None);
     }
 
     use super::*;
