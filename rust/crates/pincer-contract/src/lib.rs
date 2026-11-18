@@ -161,14 +161,16 @@ pub struct ToolAnnotations {
     pub open_world: bool,
 }
 
-pub type OutputValidator = fn(Value) -> Result<(), String>;
+pub type OutputValidator = fn(&Value) -> Result<(), String>;
 
 fn default_output_validator() -> OutputValidator {
     |_| Ok(())
 }
 
-pub(crate) fn validate_typed_output<T: ToolOutput>(value: Value) -> Result<(), String> {
-    let output = serde_json::from_value::<T>(value).map_err(|error| error.to_string())?;
+/// Deserialize by reference: the payload is only read, so the caller keeps
+/// it and no copy is made.
+pub(crate) fn validate_typed_output<T: ToolOutput>(value: &Value) -> Result<(), String> {
+    let output = T::deserialize(value).map_err(|error| error.to_string())?;
     output.validate()
 }
 
@@ -335,7 +337,7 @@ pub fn advertises_output_schema(name: &str) -> bool {
 
 /// Validate a successful structured payload against the Rust output type that
 /// also generates its SDK schema. Returns `Ok(false)` for non-SDK tools.
-pub fn validate_success_output(name: &str, value: Value) -> Result<bool, String> {
+pub fn validate_success_output(name: &str, value: &Value) -> Result<bool, String> {
     if is_action_result_tool(name) {
         validate_typed_output::<ActionResult>(value)?;
         return Ok(true);
@@ -473,12 +475,12 @@ mod tests {
 
         for name in ACTION_RESULT_TOOLS {
             assert_eq!(
-                validate_success_output(name, valid.clone()),
+                validate_success_output(name, &valid),
                 Ok(true),
                 "{name} must accept the shared ActionResult"
             );
             assert!(
-                validate_success_output(name, legacy.clone()).is_err(),
+                validate_success_output(name, &legacy).is_err(),
                 "{name} must reject a legacy action payload"
             );
         }
@@ -675,7 +677,7 @@ mod tests {
         assert_eq!(
             validate_success_output(
                 "list_windows",
-                serde_json::json!({
+                &serde_json::json!({
                     "windows": [
                         {"window_id":1,"pid":2,"app_name":"Example","title":"Doc","bounds":{"x":0,"y":0,"width":10,"height":10},"is_on_screen":true,"z_index":null,"platform_field":true}
                     ],
@@ -686,7 +688,7 @@ mod tests {
         );
         assert!(validate_success_output(
             "list_windows",
-            serde_json::json!({"windows": [{"z_index": "unknown"}]}),
+            &serde_json::json!({"windows": [{"z_index": "unknown"}]}),
         )
         .is_err());
     }
@@ -735,7 +737,7 @@ mod tests {
         assert_eq!(
             validate_success_output(
                 "get_screen_size",
-                serde_json::json!({
+                &serde_json::json!({
                     "width": 1512,
                     "height": 982,
                     "scale_factor": 2,
@@ -746,7 +748,7 @@ mod tests {
         );
         assert!(validate_success_output(
             "get_screen_size",
-            serde_json::json!({
+            &serde_json::json!({
                 "width": "1512",
                 "height": 982,
                 "scale_factor": 2
@@ -755,7 +757,7 @@ mod tests {
         .is_err());
         assert!(validate_success_output(
             "end_session",
-            serde_json::json!({"session": "run", "active": true}),
+            &serde_json::json!({"session": "run", "active": true}),
         )
         .is_err());
     }
@@ -765,7 +767,7 @@ mod tests {
         for contract in manifest().tools {
             let invalid = serde_json::json!([]);
             assert!(
-                validate_success_output(&contract.name, invalid).is_err(),
+                validate_success_output(&contract.name, &invalid).is_err(),
                 "{} has no typed output validator",
                 contract.name
             );

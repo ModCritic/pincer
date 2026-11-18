@@ -92,24 +92,31 @@ pub fn render_tool_result(result: &mut Value) {
     let Some(object) = result.as_object_mut() else {
         return;
     };
-    let blocks = match object.get("content") {
-        None => Vec::new(),
-        Some(Value::Array(blocks)) => blocks.clone(),
-        // A malformed content field is left for the client to report.
-        Some(_) => return,
-    };
+    // A malformed content field is left for the client to report.
+    if !matches!(object.get("content"), None | Some(Value::Array(_))) {
+        return;
+    }
     let Some(structured) = object.remove("structuredContent") else {
         return;
     };
     if structured.is_null() {
         return;
     }
+    // The blocks are replaced below, so they are moved out, not copied: an
+    // image block can be megabytes of base64.
+    let blocks = match object.get_mut("content") {
+        Some(Value::Array(blocks)) => std::mem::take(blocks),
+        _ => Vec::new(),
+    };
     let is_error = object.get("isError").and_then(Value::as_bool) == Some(true);
     let mut texts = Vec::new();
     let mut others = Vec::new();
-    for block in blocks {
+    for mut block in blocks {
         if block.get("type").and_then(Value::as_str) == Some("text") {
-            texts.push(block["text"].as_str().unwrap_or_default().to_owned());
+            texts.push(match block.get_mut("text").map(Value::take) {
+                Some(Value::String(text)) => text,
+                _ => String::new(),
+            });
         } else {
             others.push(block);
         }

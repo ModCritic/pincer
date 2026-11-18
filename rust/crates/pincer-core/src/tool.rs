@@ -2422,22 +2422,27 @@ impl ToolRegistry {
                 }));
             }
         }
-        if result.is_error != Some(true) {
-            if let Some(structured) = result.structured_content.clone() {
-                if let Err(error) =
-                    pincer_contract::validate_success_output(resolved_name, structured)
-                {
-                    result = ToolResult::error(format!(
-                        "internal typed output mismatch for {resolved_name}: {error}; the tool may have executed. Verify state before retrying."
-                    ))
-                    .with_structured(serde_json::json!({
-                        "code": "typed_output_mismatch",
-                        "execution_state": "unknown",
-                        "tool": resolved_name,
-                        "detail": error,
-                    }));
-                }
-            }
+        // The typed check reads the payload in place. A transport boundary
+        // in this same task is told it ran, so it does not run it again.
+        let typed_check = match result.structured_content.as_ref() {
+            Some(structured) if result.is_error != Some(true) => Some(
+                pincer_contract::validate_success_output(resolved_name, structured),
+            ),
+            _ => None,
+        };
+        crate::mcp_result::note_dispatch_output_check(
+            matches!(typed_check, Some(Ok(_))).then_some(resolved_name),
+        );
+        if let Some(Err(error)) = typed_check {
+            result = ToolResult::error(format!(
+                "internal typed output mismatch for {resolved_name}: {error}; the tool may have executed. Verify state before retrying."
+            ))
+            .with_structured(serde_json::json!({
+                "code": "typed_output_mismatch",
+                "execution_state": "unknown",
+                "tool": resolved_name,
+                "detail": error,
+            }));
         }
         // Use the original name for downstream code paths below so the
         // exit-code matching and recording paths keep treating the alias
@@ -6477,7 +6482,7 @@ resources:
         assert!(structured.get("y").is_none());
         assert!(structured.get("scope").is_none());
         assert!(structured.get("verified").is_none());
-        pincer_contract::validate_success_output("click", structured)
+        pincer_contract::validate_success_output("click", &structured)
             .expect("the projected action must satisfy the public contract");
         assert_eq!(hits.load(Ordering::SeqCst), 1);
     }

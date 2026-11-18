@@ -944,11 +944,25 @@ async fn dispatch_request(
                 // Both arms answer through the shared boundary, so a tool
                 // payload and an invocation failure are held to the same
                 // advertised `outputSchema`.
-                let result = match provider.invoke_tool(&call.name, call.args).await {
+                // A registry dispatch in this task holds a successful result
+                // to its typed contract and notes it, so the boundary below
+                // does not repeat that check.
+                let (result, dispatch_checked) = crate::mcp_result::noting_dispatch_output_check(
+                    provider.invoke_tool(&call.name, call.args),
+                )
+                .await;
+                let result = match result {
                     Ok(result) => result,
                     Err(error) => tool_error_result(error, serde_json::json!({"exit_code": 1})),
                 };
-                Response::ok(id, conforming_tool_result(&call.name, result))
+                Response::ok(
+                    id,
+                    crate::mcp_result::conforming_dispatched_tool_result(
+                        &call.name,
+                        result,
+                        dispatch_checked.as_deref(),
+                    ),
+                )
             }
         },
 

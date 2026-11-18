@@ -71,7 +71,56 @@ fn validate_wire_output(tool: &str, structured: &Value) -> Result<(), String> {
 /// - A successful result for a tool that advertises no schema is returned
 ///   unchanged: there is nothing for a client to validate it against.
 pub fn conforming_tool_result(tool: &str, result: Value) -> Value {
-    conforming_tool_result_inner(tool, result, advertises_output_schema(tool))
+    conforming_tool_result_inner(tool, result, advertises_output_schema(tool), false)
+}
+
+/// [`conforming_tool_result`] for a result the registry dispatch in this same
+/// request already held to its typed contract: `dispatch_checked` names the
+/// tool that check ran for (see [`noting_dispatch_output_check`]). The typed
+/// check is not run a second time for that tool; every other rule still
+/// applies, the advertised `outputSchema` check included.
+pub fn conforming_dispatched_tool_result(
+    tool: &str,
+    result: Value,
+    dispatch_checked: Option<&str>,
+) -> Value {
+    conforming_tool_result_inner(
+        tool,
+        result,
+        advertises_output_schema(tool),
+        dispatch_checked == Some(tool),
+    )
+}
+
+tokio::task_local! {
+    /// The tool whose successful result the outermost registry dispatch of
+    /// the current request held to its typed contract.
+    static DISPATCH_OUTPUT_CHECK: std::cell::RefCell<Option<String>>;
+}
+
+/// Run one request's tool call and return what it returned together with
+/// the tool whose successful result its registry dispatch held to the typed
+/// contract, if that dispatch ran in this task. A result that came from
+/// another process (a private worker, a daemon) carries no such note, so its
+/// boundary check runs in full.
+pub async fn noting_dispatch_output_check<F: std::future::Future>(
+    future: F,
+) -> (F::Output, Option<String>) {
+    DISPATCH_OUTPUT_CHECK
+        .scope(std::cell::RefCell::new(None), async move {
+            let output = future.await;
+            let checked = DISPATCH_OUTPUT_CHECK.with(|note| note.borrow_mut().take());
+            (output, checked)
+        })
+        .await
+}
+
+/// Called by the registry dispatch after its typed check of a result: `tool`
+/// when the check passed on a successful structured payload, else `None`.
+/// Nested dispatches (run_steps steps, run_script calls) write it too, but the
+/// outermost dispatch finishes last, so its note is the one that stays.
+pub(crate) fn note_dispatch_output_check(tool: Option<&str>) {
+    let _ = DISPATCH_OUTPUT_CHECK.try_with(|note| *note.borrow_mut() = tool.map(str::to_owned));
 }
 
 /// Reject contracts this proxy cannot safely normalize errors against. An older
@@ -95,10 +144,20 @@ pub fn conforming_proxy_tool_result(
     schema: Option<&Value>,
 ) -> Result<Value, String> {
     validate_proxy_output_schema(tool, schema)?;
-    Ok(conforming_tool_result_inner(tool, result, schema.is_some()))
+    Ok(conforming_tool_result_inner(
+        tool,
+        result,
+        schema.is_some(),
+        false,
+    ))
 }
 
-fn conforming_tool_result_inner(tool: &str, result: Value, has_schema: bool) -> Value {
+fn conforming_tool_result_inner(
+    tool: &str,
+    result: Value,
+    has_schema: bool,
+    typed_checked: bool,
+) -> Value {
     let Value::Object(mut result) = result else {
         return internal_error_result(format!(
             "internal result mismatch for {tool}: tool result is not an object"
@@ -132,9 +191,13 @@ fn conforming_tool_result_inner(tool: &str, result: Value, has_schema: bool) -> 
         // typed success validator would reject it, so ask the arm it belongs
         // to rather than replacing a payload a client accepts.
         Some(structured) if is_refusal_envelope(structured) => Value::Object(result),
-        Some(structured) => match validate_wire_output(tool, structured)
-            .and_then(|()| validate_success_output(tool, structured.clone()))
-        {
+        Some(structured) => match validate_wire_output(tool, structured).and_then(|()| {
+            if typed_checked {
+                Ok(true)
+            } else {
+                validate_success_output(tool, structured)
+            }
+        }) {
             Ok(_) => Value::Object(result),
             Err(error) => {
                 warn!(
@@ -336,7 +399,7 @@ mod tests {
         // violation even though serde would read it as `None`.
         let structured = json!({ "sessions": [] });
         let tool = "list_sessions";
-        assert!(validate_success_output(tool, structured.clone()).is_ok());
+        assert!(validate_success_output(tool, &structured).is_ok());
         let result = conforming_tool_result(
             tool,
             json!({
@@ -469,5 +532,77 @@ mod tests {
 
         assert_conforms(ACTION_TOOL, &result);
         assert_eq!(result["isError"], true);
+    }
+
+    struct ScreenSize(Value);
+
+    #[async_trait::async_trait]
+    impl crate::tool::Tool for ScreenSize {
+        fn def(&self) -> &crate::tool::ToolDef {
+            static DEF: std::sync::OnceLock<crate::tool::ToolDef> = std::sync::OnceLock::new();
+            DEF.get_or_init(|| crate::tool::ToolDef {
+                name: "get_screen_size".into(),
+                description: "fake".into(),
+                input_schema: json!({"type": "object"}),
+                read_only: true,
+                destructive: false,
+                idempotent: true,
+                open_world: false,
+            })
+        }
+
+        async fn invoke(&self, _args: Value) -> crate::protocol::ToolResult {
+            crate::protocol::ToolResult::text("size").with_structured(self.0.clone())
+        }
+    }
+
+    /// The registry dispatch holds a result to its typed contract once and
+    /// says so, and the boundary keeps every other rule for that result.
+    #[tokio::test]
+    async fn a_dispatch_notes_its_typed_check_and_the_boundary_keeps_the_rest() {
+        let tool = "get_screen_size";
+        let valid = json!({"width": 1512, "height": 982, "scale_factor": 2});
+        let mut registry = crate::tool::ToolRegistry::new();
+        registry.register(Box::new(ScreenSize(valid.clone())));
+        let (result, checked) =
+            noting_dispatch_output_check(registry.invoke(tool, json!({}))).await;
+        assert_ne!(result.is_error, Some(true));
+        assert_eq!(checked.as_deref(), Some(tool));
+
+        // A payload the typed check refuses is an error, and nothing is
+        // noted for the boundary to skip.
+        let mut registry = crate::tool::ToolRegistry::new();
+        registry.register(Box::new(ScreenSize(
+            json!({"width": "1512", "height": 982, "scale_factor": 2}),
+        )));
+        let (result, checked) =
+            noting_dispatch_output_check(registry.invoke(tool, json!({}))).await;
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(checked, None);
+
+        // A check noted for another tool does not stand in for this one's.
+        let wrong = json!({
+            "content": [{"type": "text", "text": "size"}],
+            "isError": false,
+            "structuredContent": {"width": "1512", "height": 982, "scale_factor": 2},
+        });
+        let result = conforming_dispatched_tool_result(tool, wrong, Some("list_sessions"));
+        assert_eq!(result["isError"], true);
+
+        // The advertised schema is still checked after a typed check:
+        // `next_cursor` is required by the schema though serde reads it as
+        // absent.
+        let schema_only = json!({
+            "content": [{"type": "text", "text": "sessions"}],
+            "isError": false,
+            "structuredContent": {"sessions": []},
+        });
+        let result =
+            conforming_dispatched_tool_result("list_sessions", schema_only, Some("list_sessions"));
+        assert_eq!(result["isError"], true);
+        assert_eq!(
+            result["structuredContent"]["code"],
+            TOOL_OUTPUT_INVALID_CODE
+        );
     }
 }
