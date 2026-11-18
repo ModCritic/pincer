@@ -938,34 +938,15 @@ mod tests {
     }
 
     /// Reuse, events nobody asked for, a server restart on the same display
-    /// and a display change, against a private Xvfb. Run with
-    /// `PINCER_X11_RESTART_DISPLAY=:87 cargo test -- --ignored shared_query`.
+    /// and a display change, against a private Xvfb on a display number the
+    /// test picks itself.
     #[test]
-    #[ignore = "starts and restarts Xvfb on PINCER_X11_RESTART_DISPLAY"]
+    #[ignore = "starts and restarts its own Xvfb; run with rust/scripts/ci-x11-tests.sh"]
     fn shared_query_connection_survives_restart_and_display_change() {
-        use std::process::{Child, Command, Stdio};
-        let display = std::env::var("PINCER_X11_RESTART_DISPLAY").unwrap_or_else(|_| ":87".into());
-        let start = |display: &str| -> Child {
-            let mut child = Command::new("Xvfb")
-                .args([display, "-screen", "0", "640x480x24", "-nolisten", "tcp"])
-                .args(["-noreset"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .expect("start Xvfb");
-            for _ in 0..200 {
-                if RustConnection::connect(Some(display)).is_ok() {
-                    return child;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            let _ = child.kill();
-            panic!("Xvfb did not start on {display}");
-        };
-        let stop = |mut child: Child| {
-            let _ = child.kill();
-            let _ = child.wait();
-        };
+        use crate::throwaway_display::PrivateXvfb;
+        const ARGS: &[&str] = &["-screen", "0", "640x480x24"];
+        let mut server = PrivateXvfb::start(ARGS);
+        let display = server.display.clone();
         let key = |display: &str| (Some(OsString::from(display)), None);
         let connect = |display: &str| {
             let display = display.to_owned();
@@ -973,7 +954,6 @@ mod tests {
         };
         let mut cache = QueryConnection { open: None };
 
-        let server = start(&display);
         let (first, screen) = cache.get(key(&display), connect(&display)).unwrap();
         let (again, _) = cache.get(key(&display), connect(&display)).unwrap();
         assert!(Arc::ptr_eq(&first, &again), "same display: one connection");
@@ -1004,8 +984,8 @@ mod tests {
         assert!(drained.poll_for_event().unwrap().is_none());
 
         // Same display, new server: a new connection that works.
-        stop(server);
-        let server = start(&display);
+        server.stop();
+        let mut server = PrivateXvfb::restart_on(server.number, ARGS);
         let (restarted, screen) = cache.get(key(&display), connect(&display)).unwrap();
         assert!(!Arc::ptr_eq(&first, &restarted), "closed connection reused");
         let root = restarted.setup().roots[screen].root;
@@ -1021,7 +1001,7 @@ mod tests {
         assert!(!Arc::ptr_eq(&restarted, &moved));
         assert!(cache.get(key(":9999999"), connect(":9999999")).is_err());
         assert!(cache.open.is_none());
-        stop(server);
+        server.stop();
     }
 
     #[test]

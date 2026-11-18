@@ -607,8 +607,9 @@ mod tests {
     /// windows of other pids stacked at the same spot. Creates windows on
     /// `DISPLAY`, so run it only inside a sandbox's throwaway X server.
     #[test]
-    #[ignore = "creates windows on DISPLAY; run inside a sandbox"]
+    #[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
     fn x11_point_cover_names_the_window_on_top() {
+        let _display = crate::throwaway_display::throwaway_display();
         use x11rb::connection::Connection as _;
         use x11rb::protocol::xproto::*;
         use x11rb::wrapper::ConnectionExt as _;

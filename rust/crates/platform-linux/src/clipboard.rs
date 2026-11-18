@@ -143,10 +143,11 @@ mod tests {
     /// The live clipboard tests below share the display's one clipboard.
     static LIVE_CLIPBOARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    /// Needs an X server; run it under `xvfb-run`.
+    /// Takes the clipboard of the X server DISPLAY names.
     #[test]
-    #[ignore = "requires an X11 display (run under xvfb-run)"]
+    #[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
     fn native_clipboard_round_trips_text_on_x11() {
+        let _display = crate::throwaway_display::throwaway_display();
         let _clipboard = LIVE_CLIPBOARD.lock().unwrap_or_else(|p| p.into_inner());
         let backend = LinuxClipboard::new();
         backend.write_text("pincer clipboard test".into()).unwrap();
@@ -160,8 +161,9 @@ mod tests {
     /// BadAtom, and one with an owner still reads. Needs an X server, like
     /// the round trip above.
     #[test]
-    #[ignore = "requires an X11 display (run under xvfb-run)"]
+    #[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
     fn an_unowned_x11_clipboard_reads_as_empty() {
+        let _display = crate::throwaway_display::throwaway_display();
         use x11rb::connection::Connection as _;
         use x11rb::protocol::xproto::{CreateWindowAux, WindowClass};
         let _clipboard = LIVE_CLIPBOARD.lock().unwrap_or_else(|p| p.into_inner());

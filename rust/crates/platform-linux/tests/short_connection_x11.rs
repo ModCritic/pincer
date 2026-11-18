@@ -6,6 +6,9 @@
 //!
 //! cargo test -p platform-linux --test short_connection_x11 -- --ignored --test-threads=1
 
+#[path = "../../pincer-testkit/src/throwaway_display.rs"]
+mod throwaway_display;
+
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
@@ -19,37 +22,23 @@ use x11rb::wrapper::ConnectionExt as _;
 /// while the value lives, so the code under test never sees the user's
 /// display.
 struct PrivateDisplay {
-    server: std::process::Child,
-    previous: Option<std::ffi::OsString>,
+    _env: throwaway_display::DisplayEnv,
+    _server: throwaway_display::PrivateXvfb,
 }
 
 impl PrivateDisplay {
     fn start() -> Result<(Self, RustConnection, usize)> {
-        let mut server = std::process::Command::new("Xvfb")
-            .args(["-displayfd", "1", "-nolisten", "tcp"])
-            .stdout(std::process::Stdio::piped())
-            .spawn()?;
-        let mut number = String::new();
-        std::io::BufRead::read_line(
-            &mut std::io::BufReader::new(server.stdout.take().expect("piped stdout")),
-            &mut number,
-        )?;
-        let display = format!(":{}", number.trim());
-        let previous = std::env::var_os("DISPLAY");
-        std::env::set_var("DISPLAY", &display);
-        let (conn, screen) = x11rb::connect(Some(&display))?;
-        Ok((Self { server, previous }, conn, screen))
-    }
-}
-
-impl Drop for PrivateDisplay {
-    fn drop(&mut self) {
-        match self.previous.take() {
-            Some(display) => std::env::set_var("DISPLAY", display),
-            None => std::env::remove_var("DISPLAY"),
-        }
-        let _ = self.server.kill();
-        let _ = self.server.wait();
+        let server = throwaway_display::PrivateXvfb::start(&[]);
+        let env = throwaway_display::point_display_at(&server.display);
+        let (conn, screen) = x11rb::connect(Some(&server.display))?;
+        Ok((
+            Self {
+                _env: env,
+                _server: server,
+            },
+            conn,
+            screen,
+        ))
     }
 }
 
@@ -83,7 +72,7 @@ fn next_close_request(
 /// server could discard the request unprocessed (6 of 8 Alt+F4 presses on
 /// KDE did nothing).
 #[test]
-#[ignore = "requires Xvfb"]
+#[ignore = "starts its own Xvfb; run with rust/scripts/ci-x11-tests.sh"]
 fn every_close_request_reaches_the_window_manager() -> Result<()> {
     let (_display, wm, screen) = PrivateDisplay::start()?;
     let root = wm.setup().roots[screen].root;
@@ -155,7 +144,7 @@ fn every_close_request_reaches_the_window_manager() -> Result<()> {
 /// Synthetic FocusIn / FocusOut (the Qt AT-SPI focus nudge) arrive every
 /// time; they used the same send, flush and drop pattern.
 #[test]
-#[ignore = "requires Xvfb"]
+#[ignore = "starts its own Xvfb; run with rust/scripts/ci-x11-tests.sh"]
 fn every_synthetic_focus_event_arrives() -> Result<()> {
     let (_display, conn, screen) = PrivateDisplay::start()?;
     let root = conn.setup().roots[screen].root;

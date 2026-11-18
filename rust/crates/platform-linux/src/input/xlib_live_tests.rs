@@ -8,85 +8,16 @@
 //! a desktop session.
 
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
-use std::time::Duration;
+use std::process::{Command, Output, Stdio};
 
 /// Set in the child copy of the test binary.
 const CHILD_ENV: &str = "PINCER_XLIB_LIVE_CHILD";
 
-pub(crate) struct Server {
-    child: Option<Child>,
-    pub(crate) display: String,
-}
+/// The private Xvfb each test starts, on a display number nobody else uses.
+pub(crate) use crate::throwaway_display::PrivateXvfb as Server;
 
-impl Server {
-    /// Start `binary` (an Xvfb, possibly under another file name) on the
-    /// first free display number from 140.
-    pub(crate) fn start(binary: &Path) -> Self {
-        let number = (140..200)
-            .find(|n| {
-                !Path::new(&format!("/tmp/.X{n}-lock")).exists()
-                    && !Path::new(&format!("/tmp/.X11-unix/X{n}")).exists()
-            })
-            .expect("a free X display number in 140..200");
-        let display = format!(":{number}");
-        let mut child = Command::new(binary)
-            .args([
-                display.as_str(),
-                "-screen",
-                "0",
-                "640x480x24",
-                "-ac",
-                "-noreset",
-                "-nolisten",
-                "tcp",
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap_or_else(|e| panic!("start {}: {e}", binary.display()));
-        for _ in 0..250 {
-            if x11rb::rust_connection::RustConnection::connect(Some(&display)).is_ok() {
-                return Self {
-                    child: Some(child),
-                    display,
-                };
-            }
-            if let Some(status) = child.try_wait().expect("poll Xvfb") {
-                panic!("{} exited before it was ready: {status}", binary.display());
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        let _ = child.kill();
-        let _ = child.wait();
-        panic!("{} did not become ready on {display}", binary.display());
-    }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        if let Some(child) = self.child.take() {
-            stop_x_server(child);
-        }
-    }
-}
-
-/// End an X server with SIGTERM, so it removes its `/tmp/.X<n>-lock` and
-/// socket (SIGKILL leaves both, and later runs then skip that display
-/// number), and with SIGKILL only if it is still running after 2 s.
-fn stop_x_server(mut child: Child) {
-    // SAFETY: plain libc call on the pid of a child this test spawned and
-    // has not reaped.
-    unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
-    for _ in 0..100 {
-        if matches!(child.try_wait(), Ok(Some(_))) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-}
+/// Arguments for [`Server`]: 640x480, any client may connect.
+pub(crate) const XVFB_ARGS: &[&str] = &["-screen", "0", "640x480x24", "-ac"];
 
 pub(crate) fn in_child() -> bool {
     std::env::var_os(CHILD_ENV).is_some()
@@ -221,7 +152,7 @@ fn an_x_error_does_not_end_the_process() {
         println!("{MARKER}");
         return;
     }
-    let server = Server::start(Path::new("Xvfb"));
+    let server = Server::start(XVFB_ARGS);
     let output = run_child(
         "input::xlib_live_tests::an_x_error_does_not_end_the_process",
         &server.display,
@@ -270,7 +201,7 @@ fn an_early_refusal_closes_its_display() {
     let fake = scratch.0.join("Xtigervnc");
     let xvfb = which("Xvfb").expect("Xvfb on PATH");
     std::fs::copy(&xvfb, &fake).expect("copy Xvfb as Xtigervnc");
-    let server = Server::start(&fake);
+    let server = Server::start_binary(&fake, XVFB_ARGS);
     let output = run_child(
         "input::xlib_live_tests::an_early_refusal_closes_its_display",
         &server.display,
@@ -324,7 +255,7 @@ fn a_broken_connection_releases_held_buttons_before_the_exit() {
         println!("{MARKER}");
         return;
     }
-    let server = Server::start(Path::new("Xvfb"));
+    let server = Server::start(XVFB_ARGS);
     let output = run_child(
         "input::xlib_live_tests::a_broken_connection_releases_held_buttons_before_the_exit",
         &server.display,

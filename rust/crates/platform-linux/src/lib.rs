@@ -59,15 +59,20 @@ pub fn install_pointer_shape_backend() -> bool {
     pointer_shape::install()
 }
 
+/// Where the live X11 tests may run, shared with pincer-testkit (which this
+/// crate does not depend on); see its module documentation.
+#[cfg(test)]
+#[path = "../../pincer-testkit/src/throwaway_display.rs"]
+pub(crate) mod throwaway_display;
+
 /// Process-environment overrides for unit tests. Every lib test that changes
-/// display variables must go through [`test_env::unreachable_x11_display`] so
-/// writers are serialized and the prior values are restored even on panic.
+/// display variables must go through [`test_env::unreachable_x11_display`] or
+/// [`throwaway_display`] so writers are serialized, on one lock, and the
+/// prior values are restored even on panic.
 #[cfg(test)]
 pub(crate) mod test_env {
     use std::ffi::OsString;
-    use std::sync::{Mutex, MutexGuard};
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use std::sync::MutexGuard;
 
     pub(crate) struct DisplayOverride {
         display: Option<OsString>,
@@ -80,9 +85,7 @@ pub(crate) mod test_env {
     /// `WAYLAND_DISPLAY`, so the X11 path is taken and its connect fails
     /// regardless of the host session.
     pub(crate) fn unreachable_x11_display() -> DisplayOverride {
-        let lock = ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let lock = crate::throwaway_display::display_env_lock();
         let guard = DisplayOverride {
             display: std::env::var_os("DISPLAY"),
             wayland_display: std::env::var_os("WAYLAND_DISPLAY"),

@@ -1634,67 +1634,10 @@ mod tests {
         window: u32,
     }
 
-    struct XvfbServer {
-        child: Option<std::process::Child>,
-    }
+    use crate::throwaway_display::{throwaway_display, PrivateXvfb};
 
-    impl XvfbServer {
-        fn start(display: &str) -> Self {
-            let mut child = Command::new("Xvfb")
-                .args([
-                    display,
-                    "-screen",
-                    "0",
-                    "640x480x24",
-                    "-ac",
-                    // The readiness probe drops its connection before the
-                    // fixture connects. Do not reset in that empty-client gap.
-                    "-noreset",
-                    "-nolisten",
-                    "tcp",
-                ])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .expect("start restart-test Xvfb");
-            for _ in 0..100 {
-                if x11rb::rust_connection::RustConnection::connect(Some(display)).is_ok() {
-                    return Self { child: Some(child) };
-                }
-                if let Some(status) = child.try_wait().expect("poll restart-test Xvfb") {
-                    panic!("restart-test Xvfb exited before ready: {status}");
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("restart-test Xvfb did not become ready on {display}");
-        }
-
-        /// SIGTERM first, so the server removes its lock file and socket
-        /// (SIGKILL leaves both behind); SIGKILL after 2 s.
-        fn stop(&mut self) {
-            if let Some(mut child) = self.child.take() {
-                // SAFETY: plain libc call on the pid of a child this test
-                // spawned and has not reaped.
-                unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
-                for _ in 0..100 {
-                    if matches!(child.try_wait(), Ok(Some(_))) {
-                        return;
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
-    }
-
-    impl Drop for XvfbServer {
-        fn drop(&mut self) {
-            self.stop();
-        }
-    }
+    /// The live tests' private servers: 640x480, any client may connect.
+    const XVFB_ARGS: &[&str] = &["-screen", "0", "640x480x24", "-ac"];
 
     /// Set in the child copy of the test binary that a live test runs.
     const CAPTURE_LIVE_CHILD: &str = "PINCER_CAPTURE_LIVE_CHILD";
@@ -1721,14 +1664,8 @@ mod tests {
             println!("{MARKER} in {:?}", started.elapsed());
             return;
         }
-        let number = (140..200)
-            .find(|n| {
-                !std::path::Path::new(&format!("/tmp/.X{n}-lock")).exists()
-                    && !std::path::Path::new(&format!("/tmp/.X11-unix/X{n}")).exists()
-            })
-            .expect("a free X display number in 140..200");
-        let display = format!(":{number}");
-        let _server = XvfbServer::start(&display);
+        let server = PrivateXvfb::start(XVFB_ARGS);
+        let display = server.display.clone();
         let bin = std::env::temp_dir().join(format!("pincer-hung-import-{}", std::process::id()));
         std::fs::create_dir_all(&bin).expect("stand-in folder");
         let import = bin.join("import");
@@ -1862,14 +1799,15 @@ mod tests {
     /// A non-linear map and a map-only update distinguish correct capture from
     /// treating the pixel masks as TrueColor intensities or caching the palette.
     #[test]
-    #[ignore = "requires a live X11 server with DirectColor and MIT-SHM 1.2"]
+    #[ignore = "drives the X server DISPLAY names (DirectColor, MIT-SHM 1.2); run with rust/scripts/ci-x11-tests.sh"]
     fn live_directcolor_capture_tracks_window_colormap() {
         use x11rb::protocol::xproto::{
             ColorFlag, Coloritem, ColormapAlloc, ConnectionExt as _, CreateWindowAux, WindowClass,
         };
         use x11rb::rust_connection::RustConnection;
 
-        let display = std::env::var("DISPLAY").expect("DISPLAY must be set");
+        let throwaway = throwaway_display();
+        let display = throwaway.display.clone();
         let (conn, screen_num) = RustConnection::connect(Some(&display)).expect("connect fixture");
         let screen = &conn.setup().roots[screen_num];
         let visual = screen
@@ -1992,7 +1930,7 @@ mod tests {
     /// it before replacement. CreateSegment is FD-backed MIT-SHM 1.2, so no
     /// SysV `IPC_RMID` lifecycle exists in this implementation.
     #[test]
-    #[ignore = "requires two live X11 servers with MIT-SHM 1.2"]
+    #[ignore = "drives the X server DISPLAY names (MIT-SHM 1.2, ImageMagick import); run with rust/scripts/ci-x11-tests.sh"]
     fn live_xshm_matches_xgetimage_across_resize_reconnect_and_repetition() {
         use x11rb::connection::Connection;
         use x11rb::protocol::shm::ConnectionExt as _;
@@ -2005,11 +1943,14 @@ mod tests {
         const REPEATS: usize = 40;
         const IMPORT_REPEATS: usize = 10;
 
-        let display = std::env::var("DISPLAY").expect("DISPLAY must be set");
-        let second_display = std::env::var("PINCER_X11_SECOND_DISPLAY")
-            .expect("PINCER_X11_SECOND_DISPLAY must be set");
-        let restart_display = std::env::var("PINCER_X11_RESTART_DISPLAY")
-            .expect("PINCER_X11_RESTART_DISPLAY must be set");
+        // DISPLAY is the server ImageMagick's `import` reads; the second
+        // server and the restarted one are this test's own.
+        let throwaway = throwaway_display();
+        let display = throwaway.display.clone();
+        let second_server = PrivateXvfb::start(XVFB_ARGS);
+        let second_display = second_server.display.clone();
+        let mut restart_server = PrivateXvfb::start(XVFB_ARGS);
+        let restart_display = restart_server.display.clone();
         assert_ne!(
             display, second_display,
             "tests require distinct DISPLAY values"
@@ -2170,7 +2111,6 @@ mod tests {
         // Prove that a cached connection failure retries once, returns the
         // state to Uninit when the server remains unavailable, then recovers
         // after a server restart at the exact same DISPLAY value.
-        let mut restart_server = XvfbServer::start(&restart_display);
         let restart_fixture = create_live_fixture(&restart_display, W1, H1);
         let mut restart_state = XShmState::Uninit;
         capture_raw_via_xshm_state(
@@ -2195,7 +2135,7 @@ mod tests {
         assert!(matches!(restart_state, XShmState::Uninit));
         drop(restart_fixture);
 
-        restart_server = XvfbServer::start(&restart_display);
+        restart_server = PrivateXvfb::restart_on(restart_server.number, XVFB_ARGS);
         let restarted_fixture = create_live_fixture(&restart_display, W1, H1);
         let restarted_shm = raw_frame_png(
             capture_raw_via_xshm_state(

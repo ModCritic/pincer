@@ -3509,9 +3509,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires a live X11 server with XTEST, Shape, and RandR (run under xvfb-run or XWayland)"]
+    #[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
     fn x11_overlay_owner_stays_click_through_across_cursor_lifecycle_and_randr(
     ) -> anyhow::Result<()> {
+        let _display = crate::throwaway_display::throwaway_display();
         use x11rb::connection::Connection;
         use x11rb::protocol::randr::ConnectionExt as RandrConnectionExt;
         use x11rb::protocol::shape::{ConnectionExt as ShapeConnectionExt, SK};
@@ -3794,8 +3795,9 @@ mod tests {
     /// rest over a control must not contain them, while the screen (and any
     /// external capture) keeps showing them before and after.
     #[test]
-    #[ignore = "requires a live X11 server (run under xvfb-run)"]
+    #[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
     fn x11_desktop_capture_hides_the_resting_overlay_and_restores_it() -> anyhow::Result<()> {
+        let _display = crate::throwaway_display::throwaway_display();
         use cursor_overlay::capture_exclusion::{
             capture_excluding_overlays, AgentOverlayCaptureStatus,
         };
@@ -3990,9 +3992,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires a live X11 server (run under xvfb-run)"]
+    #[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
     fn x11_overlay_input_shape_stays_empty_and_clicks_pass_through_after_resize(
     ) -> anyhow::Result<()> {
+        let _display = crate::throwaway_display::throwaway_display();
         use x11rb::connection::Connection;
         use x11rb::protocol::shape::{ConnectionExt as ShapeConnectionExt, SK, SO};
         use x11rb::protocol::xproto::{

@@ -1107,6 +1107,12 @@ pub fn write_result_from_env(result: &CaseResult) -> io::Result<()> {
 /// Execute one declared E2E cell, persist its typed result even when the body
 /// panics, and preserve Cargo's failing-test signal.
 pub fn execute_case(case: CaseSpec, test: impl FnOnce(&mut Evidence) -> Observation) -> CaseResult {
+    // In an X11 session a case drives the X server DISPLAY names: refuse
+    // unless that is a throwaway server (see `throwaway_display`).
+    #[cfg(target_os = "linux")]
+    let _display = (std::env::var_os("DISPLAY").is_some()
+        && std::env::var_os("WAYLAND_DISPLAY").is_none())
+    .then(crate::throwaway_display::throwaway_display);
     write_declaration_from_env(&case).expect("write E2E case declaration");
     let started = Instant::now();
     let mut evidence = Evidence::default();

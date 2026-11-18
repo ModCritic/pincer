@@ -53,6 +53,8 @@ mod raw;
 mod reaper;
 mod response;
 pub mod sentinel;
+#[cfg(target_os = "linux")]
+pub mod throwaway_display;
 pub mod vertex;
 mod windows_setup;
 

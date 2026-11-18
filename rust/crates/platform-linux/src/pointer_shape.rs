@@ -481,6 +481,7 @@ mod tests {
         if !live() {
             return;
         }
+        let _display = crate::throwaway_display::throwaway_display();
         let backend = LinuxPointerShape::new(Session::X11);
         assert_eq!(backend.names().system, "xfixes");
         let (ex, ey) = point("PINCER_PS_ENTRY");

@@ -2,6 +2,9 @@
 
 #![cfg(target_os = "linux")]
 
+#[path = "../../pincer-testkit/src/throwaway_display.rs"]
+mod throwaway_display;
+
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
@@ -74,11 +77,12 @@ fn assert_pair(events: &[(bool, ButtonPressEvent, Instant)], target: Window, mod
     assert_eq!(release.state.contains(KeyButMask::CONTROL), modified);
 }
 
-/// These tests need a disposable display because XTest moves the real pointer.
-/// xvfb-run -a cargo test -p platform-linux --test click_input_x11 -- --ignored --test-threads=1
+/// These tests need a disposable display because XTest moves the real pointer:
+/// run them with rust/scripts/ci-x11-tests.sh.
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn desktop_clicks_deliver_a_hold_and_release_modifiers() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = x11rb::connect(None)?;
     let root = conn.setup().roots[screen].root;
     let target = input_window(&conn, root, 0)?;
@@ -112,8 +116,9 @@ fn desktop_clicks_deliver_a_hold_and_release_modifiers() -> Result<()> {
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn background_clicks_deliver_spaced_pairs_without_changing_focus() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = x11rb::connect(None)?;
     let root = conn.setup().roots[screen].root;
     let target = input_window(&conn, root, 0)?;
@@ -152,8 +157,9 @@ fn background_clicks_deliver_spaced_pairs_without_changing_focus() -> Result<()>
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn separate_background_button_calls_deliver_ordered_pairs() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = x11rb::connect(None)?;
     let root = conn.setup().roots[screen].root;
     let target = input_window(&conn, root, 0)?;
@@ -172,8 +178,9 @@ fn separate_background_button_calls_deliver_ordered_pairs() -> Result<()> {
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn rejected_desktop_button_releases_preceding_modifiers() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = x11rb::connect(None)?;
     let root = conn.setup().roots[screen].root;
     let target = input_window(&conn, root, 0)?;

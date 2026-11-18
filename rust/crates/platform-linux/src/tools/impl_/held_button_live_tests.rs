@@ -3,8 +3,7 @@
 //! (see `crate::input::xlib_live_tests`).
 
 use super::*;
-use crate::input::xlib_live_tests::{assert_child_passed, in_child, run_child, Server};
-use std::path::Path;
+use crate::input::xlib_live_tests::{assert_child_passed, in_child, run_child, Server, XVFB_ARGS};
 use x11rb::connection::Connection as _;
 use x11rb::protocol::xproto::{ConnectionExt as _, CreateWindowAux, KeyButMask, WindowClass};
 use x11rb::rust_connection::RustConnection;
@@ -63,7 +62,7 @@ fn a_held_button_is_released_after_its_window_closed() {
         println!("{MARKER}");
         return;
     }
-    let server = Server::start(Path::new("Xvfb"));
+    let server = Server::start(XVFB_ARGS);
     let output = run_child(
         "tools::impl_::held_button_live_tests::a_held_button_is_released_after_its_window_closed",
         &server.display,

@@ -1,5 +1,8 @@
 #![cfg(target_os = "linux")]
 
+#[path = "../../pincer-testkit/src/throwaway_display.rs"]
+mod throwaway_display;
+
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -138,9 +141,10 @@ fn focused_input_window(conn: &RustConnection, screen: usize) -> Result<Window> 
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn background_click_delivers_complete_sequence_to_press_recipient_without_focus_change(
 ) -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (owner, screen) = connect()?;
     let root = owner.setup().roots[screen].root;
     let target = event_window(&owner, root, 0, 0, EventMask::NO_EVENT)?;
@@ -201,8 +205,9 @@ fn background_click_delivers_complete_sequence_to_press_recipient_without_focus_
 /// Run on a disposable display: these tests change keyboard focus.
 /// xvfb-run -a cargo test -p platform-linux --test key_input_x11 -- --ignored --test-threads=1
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_key_taps_have_a_delivered_hold_interval() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let window = input_window(&conn, conn.setup().roots[screen].root, 0, 0)?;
     conn.set_input_focus(InputFocus::PARENT, window, x11rb::CURRENT_TIME)?;
@@ -245,8 +250,9 @@ fn xtest_key_taps_have_a_delivered_hold_interval() -> Result<()> {
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn background_keys_deliver_complete_sequences_without_changing_focus() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let root = conn.setup().roots[screen].root;
     let target = input_window(&conn, root, 0, 0)?;
@@ -305,8 +311,9 @@ fn background_keys_deliver_complete_sequences_without_changing_focus() -> Result
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn text_delivers_distinct_unmapped_keysyms_on_both_paths() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let window = focused_input_window(&conn, screen)?;
     let before = conn.get_keyboard_mapping(8, 248)?.reply()?;
@@ -346,8 +353,9 @@ fn text_delivers_distinct_unmapped_keysyms_on_both_paths() -> Result<()> {
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_text_restores_the_spare_keycodes_it_borrows() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     focused_input_window(&conn, screen)?;
     let before = spare_keycodes(&conn)?;
@@ -363,8 +371,9 @@ fn xtest_text_restores_the_spare_keycodes_it_borrows() -> Result<()> {
 /// With no spare keycode left, a character missing from the keymap cannot be
 /// typed, and type_text must say so instead of reporting success.
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_text_fails_when_no_spare_keycode_is_left() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let window = focused_input_window(&conn, screen)?;
     let spare = spare_keycodes(&conn)?;
@@ -408,8 +417,9 @@ fn xtest_text_fails_when_no_spare_keycode_is_left() -> Result<()> {
 /// Text with more distinct characters missing from the keymap than there are
 /// spare keycodes is typed in batches that reuse the spare keycodes.
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn text_types_more_distinct_unmapped_characters_than_spare_keycodes() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let window = focused_input_window(&conn, screen)?;
     let spare = spare_keycodes(&conn)?;
@@ -446,8 +456,9 @@ fn text_types_more_distinct_unmapped_characters_than_spare_keycodes() -> Result<
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_text_gives_each_missing_character_its_own_keycode() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     focused_input_window(&conn, screen)?;
     let spare = spare_keycodes(&conn)?;
@@ -574,8 +585,9 @@ fn type_with_pings(
 const NI: u32 = 0x0100_4f60;
 
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_text_restores_a_borrowed_keycode_only_after_the_client_answers_a_ping() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let (root, protocols, ping) = ping_window(&conn, screen)?;
     let before = spare_keycodes(&conn)?;
@@ -611,8 +623,9 @@ fn xtest_text_restores_a_borrowed_keycode_only_after_the_client_answers_a_ping()
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_text_ignores_a_late_reply_to_an_earlier_ping() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let (root, protocols, ping) = ping_window(&conn, screen)?;
     let before = spare_keycodes(&conn)?;
@@ -648,8 +661,9 @@ fn xtest_text_ignores_a_late_reply_to_an_earlier_ping() -> Result<()> {
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_text_restores_the_keycode_of_a_client_that_never_answers() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let (root, protocols, ping) = ping_window(&conn, screen)?;
     let before = spare_keycodes(&conn)?;
@@ -679,8 +693,9 @@ fn xtest_text_restores_the_keycode_of_a_client_that_never_answers() -> Result<()
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_text_rebinds_a_spare_keycode_only_after_the_client_confirms() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let (root, protocols, ping) = ping_window(&conn, screen)?;
     let spare = spare_keycodes(&conn)?;
@@ -747,8 +762,9 @@ fn take_ping(conn: &RustConnection, window: Window, protocols: Atom, ping: Atom)
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_text_syncs_with_the_window_that_got_the_keys_after_a_focus_change() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let (root, protocols, ping) = ping_window(&conn, screen)?;
     let first = conn.get_input_focus()?.reply()?.focus;
@@ -782,8 +798,9 @@ fn xtest_text_syncs_with_the_window_that_got_the_keys_after_a_focus_change() -> 
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_text_pings_the_ancestor_of_a_focused_child_window() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let (root, protocols, ping) = ping_window(&conn, screen)?;
     let parent = conn.get_input_focus()?.reply()?.focus;
@@ -813,8 +830,9 @@ fn xtest_text_pings_the_ancestor_of_a_focused_child_window() -> Result<()> {
 }
 
 #[test]
-#[ignore = "requires an isolated X11 display with XTEST"]
+#[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_text_syncs_with_the_window_that_got_the_keys_when_focus_moves_after_them() -> Result<()> {
+    let _display = throwaway_display::throwaway_display();
     let (conn, screen) = connect()?;
     let (root, protocols, ping) = ping_window(&conn, screen)?;
     let first = conn.get_input_focus()?.reply()?.focus;
@@ -841,43 +859,31 @@ fn xtest_text_syncs_with_the_window_that_got_the_keys_when_focus_moves_after_the
     Ok(())
 }
 
+/// A private Xvfb without XTEST that `DISPLAY` points at while the value
+/// lives (the code under test reads `DISPLAY`).
 struct DisplayWithoutXtest {
-    server: std::process::Child,
-    previous: Option<std::ffi::OsString>,
+    _env: throwaway_display::DisplayEnv,
+    _server: throwaway_display::PrivateXvfb,
 }
 
 impl DisplayWithoutXtest {
     fn start() -> Result<(Self, RustConnection, usize)> {
-        let mut server = std::process::Command::new("Xvfb")
-            .args(["-displayfd", "1", "-extension", "XTEST", "-nolisten", "tcp"])
-            .stdout(std::process::Stdio::piped())
-            .spawn()?;
-        let mut number = String::new();
-        std::io::BufRead::read_line(
-            &mut std::io::BufReader::new(server.stdout.take().expect("piped stdout")),
-            &mut number,
-        )?;
-        let display = format!(":{}", number.trim());
-        let previous = std::env::var_os("DISPLAY");
-        std::env::set_var("DISPLAY", &display);
-        let (conn, screen) = x11rb::connect(Some(&display))?;
-        Ok((Self { server, previous }, conn, screen))
-    }
-}
-
-impl Drop for DisplayWithoutXtest {
-    fn drop(&mut self) {
-        match self.previous.take() {
-            Some(display) => std::env::set_var("DISPLAY", display),
-            None => std::env::remove_var("DISPLAY"),
-        }
-        let _ = self.server.kill();
-        let _ = self.server.wait();
+        let server = throwaway_display::PrivateXvfb::start(&["-extension", "XTEST"]);
+        let env = throwaway_display::point_display_at(&server.display);
+        let (conn, screen) = x11rb::connect(Some(&server.display))?;
+        Ok((
+            Self {
+                _env: env,
+                _server: server,
+            },
+            conn,
+            screen,
+        ))
     }
 }
 
 #[test]
-#[ignore = "requires Xvfb"]
+#[ignore = "starts its own Xvfb; run with rust/scripts/ci-x11-tests.sh"]
 fn xtest_text_syncs_before_restoring_when_sending_a_key_fails() -> Result<()> {
     let (_display, conn, screen) = DisplayWithoutXtest::start()?;
     let (root, protocols, ping) = ping_window(&conn, screen)?;
