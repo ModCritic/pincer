@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use pincer_core::mcp_wire::{self, ProtocolSession};
 use pincer_core::policy::{authorize_tool_call, validate_configured_policy};
-use pincer_core::protocol::{initialize_result, Request, Response};
+use pincer_core::protocol::{initialize_result_for, Request, Response};
 use pincer_core::server::{
     observe_proxy_session_started, observe_proxy_tool_completed, tool_observation_timer,
     StdioExecutionPath,
@@ -966,8 +966,9 @@ fn daemon_owns_tool_observation(result: &serde_json::Value) -> bool {
 
 /// JSON-RPC method dispatcher for the proxy. Mirrors
 /// `pincer_core::server::handle_request`:
-/// - `initialize` → static `initialize_result()` (same envelope as the core
-///   protocol server; the daemon's identity is hidden from the MCP client).
+/// - `initialize` → `initialize_result_for()` (same envelope and version
+///   negotiation as the core protocol server; the daemon's identity is hidden
+///   from the MCP client).
 /// - `tools/list` → return the cached daemon tool list.
 /// - `tools/call` → forward to the daemon and reshape the response into MCP's
 ///   `CallTool.Result`.
@@ -1016,7 +1017,7 @@ async fn handle_proxy_tool_request(
         "initialize"
             if mcp_wire::classify_request(&req).ok() == Some(mcp_wire::ProtocolEra::Legacy) =>
         {
-            Response::ok(id, initialize_result())
+            Response::ok(id, initialize_result_for(&req))
         }
 
         "tools/list" => Response::ok(id, (**cached_tools_list).clone()),
@@ -1651,6 +1652,35 @@ mod tests {
             serde_json::from_slice(&writer).expect("response must be JSON");
         assert_eq!(response["id"], 1);
         assert!(response.get("result").is_some());
+    }
+
+    /// The proxy answers `initialize` itself, with the same version
+    /// negotiation as the core server.
+    #[tokio::test]
+    async fn proxy_initialize_negotiates_the_protocol_version() {
+        let cached_tools = Arc::new(serde_json::json!({"tools": []}));
+        for (requested, answered) in [
+            ("2025-03-26", "2025-03-26"),
+            ("2024-11-05", "2024-11-05"),
+            ("2099-01-01", "2025-06-18"),
+        ] {
+            let request: Request = serde_json::from_value(serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {"protocolVersion": requested}
+            }))
+            .unwrap();
+            let response = handle_proxy_tool_request(
+                request,
+                serde_json::json!(1),
+                "unused.sock",
+                &cached_tools,
+                "negotiation-test-session",
+                false,
+            )
+            .await;
+            let response = serde_json::to_value(response).unwrap();
+            assert_eq!(response["result"]["protocolVersion"], answered, "{requested}");
+        }
     }
 
     #[test]

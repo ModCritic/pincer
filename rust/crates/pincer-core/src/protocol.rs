@@ -340,9 +340,55 @@ impl ToolResult {
 
 // ── Initialize result ─────────────────────────────────────────────────────────
 
+/// The MCP protocol versions `initialize` can settle on, newest first; the
+/// newest is the contract's [`pincer_contract::MCP_PROTOCOL_VERSION`]. The
+/// MCP HTTP transport accepts the same versions in its
+/// `MCP-Protocol-Version` header.
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[
+    pincer_contract::MCP_PROTOCOL_VERSION,
+    "2025-03-26",
+    "2024-11-05",
+];
+
+/// Whether `version` is one of [`SUPPORTED_PROTOCOL_VERSIONS`].
+pub fn is_supported_protocol_version(version: &str) -> bool {
+    SUPPORTED_PROTOCOL_VERSIONS.contains(&version)
+}
+
+/// The `protocolVersion` to answer an `initialize` that asked for
+/// `requested`. MCP 2025-06-18, Basic > Lifecycle > Initialization > Version
+/// Negotiation: "If the server supports the requested protocol version, it
+/// MUST respond with the same version. Otherwise, the server MUST respond
+/// with another protocol version it supports. This SHOULD be the latest
+/// version supported by the server."
+pub fn negotiated_protocol_version(requested: Option<&str>) -> &'static str {
+    requested
+        .and_then(|requested| {
+            SUPPORTED_PROTOCOL_VERSIONS
+                .iter()
+                .copied()
+                .find(|version| *version == requested)
+        })
+        .unwrap_or(SUPPORTED_PROTOCOL_VERSIONS[0])
+}
+
+/// The `initialize` result for `request`, with the negotiated version.
+pub fn initialize_result_for(request: &Request) -> Value {
+    let requested = request
+        .params
+        .as_ref()
+        .and_then(|params| params.get("protocolVersion"))
+        .and_then(Value::as_str);
+    let mut result = initialize_result();
+    result["protocolVersion"] = negotiated_protocol_version(requested).into();
+    result
+}
+
+/// The `initialize` result at the newest supported version. Answer an
+/// `initialize` request with [`initialize_result_for`].
 pub fn initialize_result() -> Value {
     serde_json::json!({
-        "protocolVersion": "2025-06-18",
+        "protocolVersion": SUPPORTED_PROTOCOL_VERSIONS[0],
         "capabilities": crate::mcp_wire::server_capabilities(),
         "serverInfo": { "name": "pincer", "version": env!("CARGO_PKG_VERSION") },
         "instructions": agent_instructions()
@@ -576,6 +622,61 @@ mod agent_instruction_tests {
         assert!(!instructions.contains("history_status"));
         assert!(!instructions.contains("history_query"));
         assert!(instructions.split_whitespace().count() <= 205);
+    }
+}
+
+#[cfg(test)]
+mod version_negotiation_tests {
+    //! MCP 2025-06-18, Basic > Lifecycle > Initialization > Version
+    //! Negotiation: "If the server supports the requested protocol version,
+    //! it MUST respond with the same version. Otherwise, the server MUST
+    //! respond with another protocol version it supports. This SHOULD be the
+    //! latest version supported by the server."
+
+    use super::*;
+
+    struct NoTools;
+
+    #[async_trait::async_trait]
+    impl crate::server::ToolProvider for NoTools {
+        fn tools_list(&self) -> Value {
+            serde_json::json!({"tools": []})
+        }
+
+        async fn invoke_tool(&self, _name: &str, _arguments: Value) -> Result<Value, String> {
+            unreachable!("initialize never runs a tool")
+        }
+    }
+
+    async fn answered(params: Value) -> Value {
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": params
+        }))
+        .unwrap();
+        let response = crate::server::handle_request(request, serde_json::json!(1), &NoTools).await;
+        serde_json::to_value(response).unwrap()["result"]["protocolVersion"].clone()
+    }
+
+    #[tokio::test]
+    async fn initialize_answers_a_supported_requested_version_with_that_version() {
+        for version in ["2025-06-18", "2025-03-26", "2024-11-05"] {
+            assert_eq!(
+                answered(serde_json::json!({"protocolVersion": version})).await,
+                version
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn initialize_answers_anything_else_with_the_latest_supported_version() {
+        for params in [
+            serde_json::json!({"protocolVersion": "2025-11-25"}),
+            serde_json::json!({"protocolVersion": "1.0.0"}),
+            serde_json::json!({"protocolVersion": 20250326}),
+            serde_json::json!({}),
+        ] {
+            assert_eq!(answered(params).await, "2025-06-18");
+        }
     }
 }
 

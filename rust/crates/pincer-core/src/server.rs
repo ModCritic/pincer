@@ -6,7 +6,7 @@ use tracing::warn;
 
 use crate::authorization::authorize_tool_call;
 use crate::mcp_result::{conforming_tool_result, tool_error_result};
-use crate::protocol::{initialize_result, InitializeMetadata, Request, Response, ResponseBody};
+use crate::protocol::{initialize_result_for, InitializeMetadata, Request, Response, ResponseBody};
 use crate::tool::ToolRegistry;
 
 /// Runtime contract consumed by protocol adapters such as MCP.
@@ -890,7 +890,7 @@ async fn dispatch_request(
 ) -> Response {
     match req.method.as_str() {
         "initialize" if era == crate::mcp_wire::ProtocolEra::Legacy => {
-            Response::ok(id, initialize_result())
+            Response::ok(id, initialize_result_for(&req))
         }
 
         "tools/list" => Response::ok(id, provider.tools_list()),

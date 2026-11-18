@@ -354,7 +354,7 @@ async fn dispatch(
 }
 
 fn is_legacy_protocol(version: &str) -> bool {
-    matches!(version, "2024-11-05" | "2025-03-26" | "2025-06-18")
+    pincer_core::protocol::is_supported_protocol_version(version)
 }
 
 // HTTP still uses connection-scoped sessions. A legacy error permits dual-era
@@ -382,8 +382,14 @@ fn unsupported_protocol_error(body: &[u8], header: Option<&str>) -> Option<Strin
         "id": body.get("id").cloned().unwrap_or(serde_json::Value::Null),
         "error": {
             "code": -32600,
-            "message": "This HTTP endpoint supports legacy MCP only. Modern MCP is currently available over stdio; use pincer mcp or request HTTP protocol version 2025-06-18.",
-            "data": {"supported": ["2025-06-18"], "requested": requested}
+            "message": format!(
+                "This HTTP endpoint supports legacy MCP only. Modern MCP is currently available over stdio; use pincer mcp or request HTTP protocol version {}.",
+                pincer_core::protocol::SUPPORTED_PROTOCOL_VERSIONS[0]
+            ),
+            "data": {
+                "supported": pincer_core::protocol::SUPPORTED_PROTOCOL_VERSIONS,
+                "requested": requested
+            }
         }
     }).to_string())
 }
@@ -729,7 +735,8 @@ mod tests {
             assert_eq!(
                 response["error"]["data"],
                 json!({
-                    "supported": ["2025-06-18"], "requested": requested
+                    "supported": ["2025-06-18", "2025-03-26", "2024-11-05"],
+                    "requested": requested
                 })
             );
             assert!(response["error"]["message"]
@@ -794,6 +801,17 @@ mod tests {
             assert!(response["result"].get("protocolVersions").is_none());
             assert!(response["result"]["capabilities"].get("apps").is_none());
         }
+        // A supported older version is answered with itself.
+        let body = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-03-26", "capabilities": {},
+                "clientInfo": {"name": "legacy-test", "version": "1"}}
+        });
+        let response = dispatch(body.to_string().as_bytes(), &sdk, "http-test")
+            .await
+            .unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["result"]["protocolVersion"], "2025-03-26");
         sdk.shutdown().await.expect("SDK shutdown");
     }
 

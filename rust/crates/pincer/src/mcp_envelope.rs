@@ -5,7 +5,7 @@
 //! No listener, credential issuer, action replay or runtime fallback is added.
 
 use crate::envelope_service::{Request as ServiceRequest, Service};
-use pincer_core::protocol::{initialize_result, Request, Response};
+use pincer_core::protocol::{initialize_result_for, Request, Response};
 use pincer_core::server::{
     observe_proxy_session_started, observe_proxy_tool_completed, tool_observation_timer,
     StdioExecutionPath,
@@ -221,7 +221,7 @@ where
         // this transport rather than miscorrelating an action or replaying it.
         anyhow::ensure!(!pending.contains(&key), "duplicate active MCP request ID");
         if request.method == "initialize" {
-            let mut result = initialize_result();
+            let mut result = initialize_result_for(&request);
             result["capabilities"]["experimental"][CAPABILITY] = json!({"version": 1});
             if !session_observed {
                 if let Some(metadata) = request.initialize_metadata() {

@@ -177,17 +177,19 @@ fn explicit_direct_mcp_is_read_only_for_permissions_and_refuses_overlay_tools() 
 }
 
 fn assert_mcp_contract(driver: &mut RawDriver, fixture: &Value) {
+    let expected_initialize = &fixture["initialize"];
+    // Version negotiation answers a supported requested version with itself
+    // (MCP Lifecycle > Initialization), so ask for the released one.
     driver.send(&json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "initialize",
         "params": {
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": expected_initialize["protocol_version"],
             "clientInfo": {"name": "compatibility-test", "version": "0"}
         }
     }));
     let initialize = driver.recv();
-    let expected_initialize = &fixture["initialize"];
     assert_eq!(initialize["jsonrpc"], expected_initialize["jsonrpc"]);
     assert_eq!(
         initialize["result"]["protocolVersion"],
