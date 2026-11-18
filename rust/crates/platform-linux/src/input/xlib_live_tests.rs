@@ -14,15 +14,15 @@ use std::time::Duration;
 /// Set in the child copy of the test binary.
 const CHILD_ENV: &str = "PINCER_XLIB_LIVE_CHILD";
 
-struct Server {
+pub(crate) struct Server {
     child: Option<Child>,
-    display: String,
+    pub(crate) display: String,
 }
 
 impl Server {
     /// Start `binary` (an Xvfb, possibly under another file name) on the
     /// first free display number from 140.
-    fn start(binary: &Path) -> Self {
+    pub(crate) fn start(binary: &Path) -> Self {
         let number = (140..200)
             .find(|n| {
                 !Path::new(&format!("/tmp/.X{n}-lock")).exists()
@@ -88,13 +88,13 @@ fn stop_x_server(mut child: Child) {
     let _ = child.wait();
 }
 
-fn in_child() -> bool {
+pub(crate) fn in_child() -> bool {
     std::env::var_os(CHILD_ENV).is_some()
 }
 
 /// Run the ignored test `name` (its path inside this crate) in a child copy
 /// of the test binary on `display`.
-fn run_child(name: &str, display: &str) -> Output {
+pub(crate) fn run_child(name: &str, display: &str) -> Output {
     Command::new(std::env::current_exe().expect("test binary path"))
         .args([
             name,
@@ -105,12 +105,13 @@ fn run_child(name: &str, display: &str) -> Output {
         ])
         .env(CHILD_ENV, "1")
         .env("DISPLAY", display)
+        .env_remove("WAYLAND_DISPLAY")
         .stdin(Stdio::null())
         .output()
         .expect("run the child test")
 }
 
-fn assert_child_passed(output: &Output, marker: &str) {
+pub(crate) fn assert_child_passed(output: &Output, marker: &str) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(

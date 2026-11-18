@@ -4448,6 +4448,9 @@ fn require_point_args(tool: &str, args: &Value) -> Option<ToolResult> {
 #[cfg(test)]
 mod pointer_argument_tests;
 
+#[cfg(test)]
+mod held_button_live_tests;
+
 fn parse_mouse_button(name: &str) -> u8 {
     match name {
         "right" => 3,
@@ -7804,6 +7807,75 @@ async fn mouse_button_up_point(
         if x.is_some() { mapped_x } else { hold.x },
         if y.is_some() { mapped_y } else { hold.y },
     ))
+}
+
+/// Whether the X server says the held window `xid` no longer exists. Always
+/// `false` on native Wayland, whose persistent virtual pointer releases
+/// without a window, and when the server cannot be asked.
+async fn held_window_is_gone(xid: u64) -> bool {
+    if crate::wayland::is_wayland() {
+        return false;
+    }
+    matches!(
+        tokio::task::spawn_blocking(move || crate::x11::window_presence(xid)).await,
+        Ok(Some(crate::x11::WindowPresence::Gone))
+    )
+}
+
+/// mouse_button_up for a hold whose window is gone. The foreground hold is
+/// the core pointer's real XTest button: it is released where the pointer is
+/// now. The background hold's synthetic press went to that window alone, so
+/// no button is down anywhere. Either way the hold is cleared and the result
+/// says the window was gone. (X11 has no MPX route for held buttons, and
+/// native Wayland never comes here.)
+async fn release_hold_of_gone_window(
+    state: &ToolState,
+    cursor_id: &str,
+    hold: &MouseHoldState,
+) -> ToolResult {
+    let (xid, button, foreground) = (hold.xid, hold.button, hold.foreground);
+    let released_at = if foreground {
+        match tokio::task::spawn_blocking(move || {
+            crate::input::release_button_xtest_at_pointer(button)
+        })
+        .await
+        {
+            Ok(Ok(point)) => Some(point),
+            Ok(Err(e)) => return held_input_error(e, cursor_id, Some(hold), foreground),
+            Err(e) => {
+                return ToolResult::error(format!("Task error: {e}"))
+                    .with_structured(mouse_hold_json(cursor_id, Some(hold)))
+            }
+        }
+    } else {
+        None
+    };
+    crate::overlay::send_command_for(
+        cursor_id.to_owned(),
+        cursor_overlay::OverlayCommand::SetPressed(false),
+    );
+    clear_mouse_hold_after_release(state, cursor_id);
+    let mut cleared = mouse_hold_json(cursor_id, None);
+    cleared["delivery_mode"] = json!(held_delivery_mode(foreground));
+    cleared["window_gone"] = json!(true);
+    let name = mouse_button_name(button);
+    let text = match released_at {
+        Some((sx, sy)) => {
+            cleared["released_at_screen"] = json!({ "x": sx, "y": sy });
+            format!(
+                "✅ Cursor '{cursor_id}' released held {name} button where the pointer is \
+                 (screen {sx}, {sy}): window {xid} is gone, so the release could not be aimed \
+                 into it{}.",
+                held_route_note(foreground)
+            )
+        }
+        None => format!(
+            "✅ Cursor '{cursor_id}' cleared its held {name} button: window {xid} is gone, and \
+             the background press went to that window alone, so no button was left down{}.",
+            held_route_note(foreground)
+        ),
+    };
+    with_held_route(ToolResult::text(text).with_structured(cleared), foreground)
 }
 
 fn clear_mouse_hold_after_release(state: &ToolState, cursor_id: &str) {
@@ -15563,8 +15635,18 @@ impl Tool for MouseButtonUpTool {
 
         let xid = hold.xid;
 
+        // A window that closed while its button was held (its app quit or
+        // crashed) must not keep the button down: on the foreground route it
+        // is the core pointer's real button, the user's own.
+        if held_window_is_gone(xid).await {
+            return release_hold_of_gone_window(&self.state, &cursor_id, &hold).await;
+        }
+
         let (x, y) = match mouse_button_up_point(&self.state, &args, &cursor_id, &hold).await {
             Ok(point) => point,
+            Err(_) if held_window_is_gone(xid).await => {
+                return release_hold_of_gone_window(&self.state, &cursor_id, &hold).await;
+            }
             Err(refusal) => return refusal,
         };
 
@@ -15631,6 +15713,10 @@ impl Tool for MouseButtonUpTool {
                     .with_structured(cleared),
                     foreground,
                 )
+            }
+            // The window closed between the check above and the release.
+            Ok(Err(_)) if held_window_is_gone(xid).await => {
+                release_hold_of_gone_window(&self.state, &cursor_id, &hold).await
             }
             Ok(Err(e)) => held_input_error(e, &cursor_id, Some(&hold), foreground),
             Err(e) => ToolResult::error(format!("Task error: {e}"))

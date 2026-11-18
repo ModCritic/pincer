@@ -3943,6 +3943,28 @@ pub fn send_button_xtest_desktop(point: Option<(i32, i32)>, button: u8, press: b
     Ok(())
 }
 
+/// Release XTest `button` where the core pointer is now, without moving it,
+/// and return that screen point. For a held button whose window is gone:
+/// the release needs no window, and the button must not stay down.
+pub fn release_button_xtest_at_pointer(button: u8) -> Result<(i32, i32)> {
+    use x11rb::protocol::xtest::ConnectionExt as _;
+    let (conn, screen_num) = connect_x11_for_input()?;
+    let root = conn.setup().roots[screen_num].root;
+    let pointer = conn.query_pointer(root)?.reply()?;
+    conn.xtest_fake_input(
+        BUTTON_RELEASE_EVENT,
+        button,
+        0,
+        root,
+        pointer.root_x,
+        pointer.root_y,
+        0,
+    )?
+    .check()?;
+    let _ = conn.get_input_focus()?.reply();
+    Ok((i32::from(pointer.root_x), i32::from(pointer.root_y)))
+}
+
 /// Scroll the window under a screen-absolute point via real XTest wheel-button
 /// events. X11 buttons 4/5 are vertical up/down and 6/7 horizontal left/right.
 pub fn send_scroll_xtest_desktop(x: i32, y: i32, direction: &str, amount: usize) -> Result<()> {
@@ -4458,7 +4480,7 @@ pub(crate) fn key_name_to_keysym(key: &str) -> Result<u32> {
 }
 
 #[cfg(test)]
-mod xlib_live_tests;
+pub(crate) mod xlib_live_tests;
 
 #[cfg(test)]
 mod key_name_alias_tests {
