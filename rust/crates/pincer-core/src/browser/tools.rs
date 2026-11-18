@@ -2403,7 +2403,7 @@ impl BrowserDialogTool {
         Self {
             def: ToolDef {
                 name: "browser_dialog".into(),
-                description: "Inspect or resolve a page-owned JavaScript alert, confirm, prompt, or beforeunload dialog on one exactly-bound tab. Never handles browser permission UI, extension UI, native dialogs, or file pickers. inspect returns kind, the page's message, a prompt's default_prompt, the origin of the frame that opened the dialog, and the dialog_id. accept and dismiss need the current dialog_id: the one inspect returns, or the one the browser_click that opened the dialog already printed (\"the click opened an alert dialog (dialog-1)\"); a stale id is refused. Linux refuses accept and dismiss in the default background delivery: pass delivery_mode \"foreground\".".into(),
+                description: "Inspect or resolve a page-owned JavaScript alert, confirm, prompt, or beforeunload dialog on one exactly-bound tab. Never handles browser permission UI, extension UI, native dialogs, or file pickers. inspect returns kind, the page's message, a prompt's default_prompt (empty or left out when the page set none), the origin of the frame that opened the dialog, and the dialog_id. accept and dismiss need the current dialog_id: the one inspect returns, or the one the browser_click that opened the dialog already printed (\"the click opened an alert dialog (dialog-1)\"); a stale id is refused. Linux refuses accept and dismiss in the default background delivery: pass delivery_mode \"foreground\".".into(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {

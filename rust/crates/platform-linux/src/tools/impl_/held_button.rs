@@ -816,7 +816,8 @@ impl Tool for MouseDragTool {
             description: "Move the button held by mouse_button_down to window pixel (x, y), \
                 sending motion events along the way; does not release it. Acts on the held \
                 button's window in the delivery mode it was pressed with (a foreground hold \
-                moves the system pointer). Returns the held-button state."
+                moves the system pointer). Returns a line naming the held button and the \
+                point it moved to, still held."
                 .into(),
             input_schema: json!({"type":"object","required":["x","y"],"properties":{
                 "session": pincer_core::tool_schema::session_schema_with(
@@ -1054,7 +1055,8 @@ impl Tool for MouseButtonUpTool {
             name: "mouse_button_up".into(),
             description: "Release the button held by mouse_button_down, at window pixel (x, y) \
                 or, without x/y, where it is held. Acts on the held button's window in the \
-                delivery mode it was pressed with. Returns the cleared held-button state."
+                delivery mode it was pressed with. Returns a line naming the released button \
+                and the release point."
                 .into(),
             input_schema: json!({"type":"object","properties":{
                 "session": pincer_core::tool_schema::session_schema_with(

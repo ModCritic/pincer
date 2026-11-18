@@ -53,10 +53,11 @@ impl Tool for StartRecordingTool {
                 not recorded. Without `session`, every call on this connection is recorded, \
                 named sessions included; other connections are not.\n\n\
                 Each turn folder holds `action.json` (`tool`, `arguments` as the tool \
-                received them, pid and window_id included, so a run_steps or run_script step \
-                that named its target by role/name holds the element_token it resolved to; \
-                `element`, the role and label of the row a token named, which \
-                replay_trajectory finds again; `result_summary`, `result_error`, `timestamp`, and \
+                received them, with pid and window_id when the call named them, so a run_steps \
+                or run_script step that named its target by role/name holds the element_token \
+                it resolved to; `element`, the role, label, pid and window_id of the row a \
+                token named, which replay_trajectory finds again (a token call's `arguments` \
+                have no pid or window_id); `result_summary`, `result_error`, `timestamp`, and \
                 `click_point` for clicks), `before.png`/`after.png` (target-window \
                 screenshots), `before_state.json`/`after_state.json` (accessibility tree before \
                 and after), `evidence.json` (what was captured and why anything is missing) \
@@ -193,9 +194,10 @@ impl Tool for StopRecordingTool {
         STOP_REC_DEF.get_or_init(|| ToolDef {
             name: "stop_recording".into(),
             description: "Stop trajectory recording, whichever session started it, and \
-                finalize the mp4 when video was on. Returns the folder (`output_dir`), how many \
-                turn folders were written (`turns_written`: `turn-00001` up to that number) \
-                and, with video, `last_video_path`. With nothing recording it changes nothing \
+                finalize the mp4 when video was on. Its result line names the folder \
+                (`output_dir`) and how many turn folders were written (`turns_written`: \
+                `turn-00001` up to that number) and, with video, the video file \
+                (`last_video_path`). With nothing recording it changes nothing \
                 and says so (`stopped: false`)."
                 .into(),
             input_schema: json!({
@@ -389,8 +391,9 @@ impl Tool for ReplayTrajectoryTool {
                 failure unless `stop_on_error` is false.\n\n\
                 Turns replay against the recorded pid and window_id:\n\
                 - If the app was relaunched (new pid), every turn fails. Edit `pid` and \
-                `window_id` in each action.json's `arguments` to the new values, or reset the \
-                app instead of relaunching it.\n\
+                `window_id` in each action.json's `arguments` (in its `element` for a turn \
+                that named a token) to the new values, or reset the app instead of \
+                relaunching it.\n\
                 - A pixel click (`x`, `y`) is refused until this session has a screenshot of \
                 its window: call get_window_state(pid, window_id) on each recorded window \
                 first.\n\

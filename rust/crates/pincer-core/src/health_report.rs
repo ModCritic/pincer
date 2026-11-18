@@ -425,7 +425,7 @@ Output, schema_version="1":
     }, ...],
     "build": { "version", "git_sha", "exe_sha256" }
   }
-`overall` is `failed` when a core check (binary_version, platform_supported, session_active) fails, `degraded` when any other check fails, and `ok` otherwise. Breaking changes will use schema_version "2"; new check names can appear under "1", so tolerate unknown names."#.into(),
+`overall` is `failed` when a core check (binary_version, platform_supported, session_active) fails, `degraded` when any other check fails, and `ok` otherwise. Breaking changes will use schema_version "2"; new check names can appear under "1", so tolerate unknown names. Text results (PINCER_MCP_RESULTS=text) print each check as a line with its status and message, then its hint and any data the message does not say, instead of the `checks` array."#.into(),
         input_schema: json!({
             "type": "object",
             "properties": {
