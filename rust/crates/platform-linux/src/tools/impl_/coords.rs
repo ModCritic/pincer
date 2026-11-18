@@ -548,3 +548,15 @@ fn pointer_tools_compute_the_native_refusal_before_resolving_points() {
         );
     }
 }
+
+/// The compositor snapshot a desktop-scope action is addressed in. One
+/// snapshot converts the action's points, places the overlay and sizes the
+/// virtual pointer, so they cannot disagree about the monitor layout.
+pub(super) async fn desktop_input_space() -> anyhow::Result<crate::wayland::DesktopInputSpace> {
+    if !crate::wayland::wayland_input_enabled() {
+        return Ok(crate::wayland::DesktopInputSpace::default());
+    }
+    tokio::task::spawn_blocking(crate::wayland::DesktopInputSpace::current)
+        .await
+        .map_err(|error| anyhow::anyhow!("task error: {error}"))?
+}
