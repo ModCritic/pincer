@@ -372,3 +372,77 @@ fn a_missing_option_list_cuts_long_labels() {
     let s = result.structured_content.unwrap();
     assert_eq!(s["options"][0], "x".repeat(4096));
 }
+
+/// An AT-SPI write to a web page's field changes the text the read-back
+/// sees even when the page's scripts never get an `input` event, so on
+/// Chromium and Gecko pages a matching read-back is not a confirmation.
+#[test]
+fn a_web_page_field_that_reads_back_the_value_is_unverifiable() {
+    use crate::web_engine::WebEngine;
+    for (engine, product, check) in [
+        (WebEngine::Chromium, "Chromium", "get_browser_state"),
+        (WebEngine::Gecko, "Firefox", "screenshot"),
+    ] {
+        let result = set_value_page_result(4, "hello", Some("hello".into()), false, engine);
+        let s = result.structured_content.clone().unwrap();
+        assert_eq!(s["verified"], false, "{engine:?}");
+        assert_eq!(s["effect"], "unverifiable", "{engine:?}");
+        assert_eq!(s["web_engine"], engine.name());
+        assert_eq!(s["readback"], "hello");
+        assert!(s.get("evidence").is_none(), "{s}");
+        // An escalation renders as a failed delivery; this write was delivered.
+        assert!(s.get("escalation").is_none(), "{s}");
+        let text = result_text(&result);
+        assert!(text.contains(product), "{text}");
+        assert!(text.contains(check), "{text}");
+        assert!(text.contains("Not verified"), "{text}");
+        assert!(!text.contains("read back \"hello\"."), "{text}");
+    }
+}
+
+#[test]
+fn a_web_password_field_with_the_values_length_in_masks_is_unverifiable() {
+    let masks = "\u{25cf}".repeat(8);
+    let result = set_value_page_result(
+        8,
+        "hunter22",
+        Some(masks),
+        true,
+        crate::web_engine::WebEngine::Gecko,
+    );
+    let s = result.structured_content.clone().unwrap();
+    assert_eq!(s["effect"], "unverifiable");
+    assert_eq!(s["verified"], false);
+    assert!(s.get("evidence").is_none(), "{s}");
+    let text = result_text(&result);
+    assert!(!text.contains("hunter22"), "the password is echoed: {text}");
+    assert!(text.contains("Not verified"), "{text}");
+}
+
+/// A web field that reads back something else did not take the write: that
+/// stays the same suspected no-op a native field reports.
+#[test]
+fn a_web_page_field_that_reads_back_another_value_is_a_suspected_noop() {
+    let result = set_value_page_result(
+        4,
+        "hello",
+        Some("old".into()),
+        false,
+        crate::web_engine::WebEngine::Chromium,
+    );
+    let s = result.structured_content.unwrap();
+    assert_eq!(s["effect"], "suspected_noop");
+    assert_eq!(s["readback"], "old");
+}
+
+#[test]
+fn only_page_content_of_a_browser_engine_is_a_web_page() {
+    use crate::web_engine::WebEngine;
+    let chromium = Some(WebEngine::Chromium);
+    assert_eq!(web_page_engine_of(Some(true), chromium), chromium);
+    // A field the snapshot did not record is treated as page content.
+    assert_eq!(web_page_engine_of(None, chromium), chromium);
+    // Browser chrome (the address bar) is not page content.
+    assert_eq!(web_page_engine_of(Some(false), chromium), None);
+    assert_eq!(web_page_engine_of(Some(true), None), None);
+}

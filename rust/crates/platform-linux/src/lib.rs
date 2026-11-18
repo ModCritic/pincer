@@ -47,6 +47,7 @@ pub mod tools;
 pub mod tty;
 pub mod video_wayland;
 pub mod wayland;
+mod web_engine;
 pub mod x11;
 mod x11_client_pid;
 pub mod xauth;

@@ -12107,6 +12107,9 @@ impl Tool for SetValueTool {
         let ax_error = match ax {
             Ok(Ok(())) => {
                 let (readback, password) = set_value_readback(pid, xid, idx, &value).await;
+                if let Some(engine) = web_page_engine(pid, xid, idx).await {
+                    return set_value_page_result(idx, &value, readback, password, engine);
+                }
                 return set_value_result(idx, &value, "ax", readback, password, None);
             }
             Ok(Err(error)) if crate::atspi::native::is_no_value_route(&error) => error,
@@ -12808,6 +12811,105 @@ async fn set_value_readback(pid: u32, xid: u64, idx: usize, value: &str) -> (Opt
     })
     .await
     .unwrap_or((None, false))
+}
+
+/// The engine of the web page element `idx` of `pid`'s window `xid` is part
+/// of, or `None` when it is not page content of a Chromium or Gecko app.
+async fn web_page_engine(pid: u32, xid: u64, idx: usize) -> Option<crate::web_engine::WebEngine> {
+    let in_web_content =
+        crate::atspi::snapshot::cached_element(pid, xid, idx).map(|element| element.in_web_content);
+    if in_web_content == Some(false) {
+        return None;
+    }
+    let engine = tokio::task::spawn_blocking(move || {
+        if is_chromium_embedder(pid) {
+            Some(crate::web_engine::WebEngine::Chromium)
+        } else if crate::web_engine::is_gecko_process(pid) {
+            Some(crate::web_engine::WebEngine::Gecko)
+        } else {
+            None
+        }
+    })
+    .await
+    .ok()
+    .flatten();
+    web_page_engine_of(in_web_content, engine)
+}
+
+/// [`web_page_engine`]'s rule: page content (inside a web document) of a
+/// Chromium or Gecko app. An element the snapshot did not record is taken
+/// for page content, since an unproven confirmation is the worse mistake.
+fn web_page_engine_of(
+    in_web_content: Option<bool>,
+    engine: Option<crate::web_engine::WebEngine>,
+) -> Option<crate::web_engine::WebEngine> {
+    engine.filter(|_| in_web_content != Some(false))
+}
+
+/// `set_value` result for an AT-SPI write to a field of a web page that
+/// `engine` renders. The engine changes the field's text, which is all the
+/// read-back sees, but the page's scripts may never get the `input` event a
+/// typed character fires; a framework that keeps its own copy of the value
+/// (React) then still holds and submits the old one. So a matching read-back
+/// is only `unverifiable`, and the result says to check the page. A
+/// read-back that does not match is the suspected no-op it is anywhere.
+fn set_value_page_result(
+    idx: usize,
+    value: &str,
+    readback: Option<String>,
+    password: bool,
+    engine: crate::web_engine::WebEngine,
+) -> ToolResult {
+    let result = set_value_result(idx, value, "ax", readback.clone(), password, None);
+    let confirmed = result
+        .structured_content
+        .as_ref()
+        .is_some_and(|structured| structured["effect"] == "confirmed");
+    if !confirmed {
+        return result;
+    }
+    let (product, check, retype) = match engine {
+        crate::web_engine::WebEngine::Chromium => (
+            "Chromium",
+            "with get_browser_state on a Chrome, Edge or Brave page, else in a screenshot",
+            "browser_type on a Chrome, Edge or Brave page, else type_text with the field's x,y",
+        ),
+        crate::web_engine::WebEngine::Gecko => (
+            "Gecko (Firefox)",
+            "in a screenshot",
+            "type_text with the field's x,y",
+        ),
+    };
+    let mut structured = json!({
+        "path": "ax",
+        "verified": false,
+        "effect": "unverifiable",
+        "web_engine": engine.name(),
+    });
+    let wrote = if password {
+        structured["readback_masked"] = json!(true);
+        format!(
+            "Set password field element [{idx}] to a value of {} character(s) (path=ax) on a \
+             web page rendered by {product}; the field shows that many mask characters",
+            value.chars().count()
+        )
+    } else {
+        let seen = readback.unwrap_or_default();
+        let wrote = format!(
+            "Set value of element [{idx}] to {} (path=ax) on a web page rendered by {product}; \
+             the field reads back {}",
+            quote_untrusted(value, SHOWN_NAME_CHARS),
+            readback_quoted(&seen)
+        );
+        structured["readback"] = json!(seen);
+        wrote
+    };
+    let text = format!(
+        "{wrote}, but that is the accessibility copy of its text: the page's scripts may not \
+         have seen the change, and a form can still hold the old value. Not verified: check what \
+         the page shows {check}; if it did not take, type the value instead ({retype})."
+    );
+    ToolResult::text(text).with_structured(structured)
 }
 
 /// `set_value` result with an honest verification: `verified` only when the
