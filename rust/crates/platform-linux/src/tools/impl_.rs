@@ -4033,7 +4033,7 @@ fn resolve_element_local_coords(
 }
 
 /// An element whose AT-SPI extents do not fall inside its own toplevel: GTK4
-/// reports empty extents for some widgets (a text view centre resolves to
+/// reports empty extents for some widgets (a text view center resolves to
 /// (0,0), the GNOME hot corner), and a real pointer click there would hit
 /// whatever is under that screen point. Refused before any input is sent.
 #[derive(Debug)]
@@ -4055,7 +4055,7 @@ impl std::fmt::Display for ElementBoundsUnusable {
 }
 impl std::error::Error for ElementBoundsUnusable {}
 
-/// `resolve_element_local_coords` plus the sanity check that the centre lies
+/// `resolve_element_local_coords` plus the sanity check that the center lies
 /// inside the window it belongs to. Blocking.
 fn checked_element_local_coords(
     pid: u32,
@@ -4093,7 +4093,7 @@ fn element_screen_center(pid: u32, idx: usize, xid: Option<u64>) -> anyhow::Resu
     element_screen_center_and_rect(pid, idx, xid).map(|(center, _)| center)
 }
 
-/// The element's screen centre plus its AT-SPI extents as the overlay's
+/// The element's screen center plus its AT-SPI extents as the overlay's
 /// `[x, y, width, height]`, both from one bounds lookup (same screen space).
 fn element_screen_center_and_rect(
     pid: u32,
@@ -6335,7 +6335,7 @@ fn hyprland_foreground(delivery: crate::input::delivery::DeliveryMode) -> bool {
 
 /// AT-SPI roles whose `activate`/`press` action does not move the widget
 /// focus into them, so a following keystroke would land elsewhere; a real
-/// pointer click at their centre is what a user does.
+/// pointer click at their center is what a user does.
 fn element_needs_real_click(role: &str) -> bool {
     crate::atspi::is_focus_taking_role(role)
 }
@@ -8738,7 +8738,7 @@ enum ForegroundElementPlacement {
     /// same process): XTest-click it there.
     Point { xid: u64, sx: f64, sy: f64 },
     /// The element has no usable on-screen bounds (its menu is closed, its
-    /// page is unmapped, its centre is outside every window of the process):
+    /// page is unmapped, its center is outside every window of the process):
     /// only the AT-SPI action can reach it.
     NoPoint { reason: String },
 }
@@ -8746,7 +8746,7 @@ enum ForegroundElementPlacement {
 impl ClickTool {
     /// X11 foreground element click. Behave like a user when the element is
     /// really on screen: activate the window and XTest-click the element's
-    /// centre. A degenerate centre — the walk answering (0,0) for a menu item
+    /// center. A degenerate center — the walk answering (0,0) for a menu item
     /// whose menu is closed used to glide the real pointer into the GNOME hot
     /// corner — is never clicked; the observed object's AT-SPI action is fired
     /// instead (`path: "ax_fg"`, a label the core's action record maps to
@@ -8786,7 +8786,7 @@ impl ClickTool {
                 // answers with an unrelated `panel` for web elements, so it
                 // cannot vouch for (or against) the point.
                 // A toolkit that cannot hit-test at all (it names nothing at
-                // the point or at its frame's centre) is checked with the X11
+                // the point or at its frame's center) is checked with the X11
                 // stacking instead, after activation, right before the press.
                 let owned_ref = observed
                     .object_ref
@@ -9137,7 +9137,7 @@ fn decide_foreground_element_placement(
             },
         );
     }
-    // The centre is outside the named window: a popup menu of the same
+    // The center is outside the named window: a popup menu of the same
     // process (an open menu's item) is the one legitimate case.
     if let Some(popup) = crate::input::popup_under_screen_point(px, py) {
         if popup.pid.is_none_or(|p| p == pid) {
@@ -9155,7 +9155,7 @@ fn decide_foreground_element_placement(
         xid,
         ForegroundElementPlacement::NoPoint {
             reason: format!(
-                "its centre ({px}, {py}) lies outside window {placed_xid} and every popup of \
+                "its center ({px}, {py}) lies outside window {placed_xid} and every popup of \
                  pid {pid}"
             ),
         },
@@ -9589,7 +9589,7 @@ impl ClickTool {
             .and_then(Result::ok)
             .and_then(Result::ok);
             // X11 foreground element click: behave like a user — activate the
-            // window and XTest-click the element's screen centre. No AT-SPI
+            // window and XTest-click the element's screen center. No AT-SPI
             // action, no second tree walk. Element bounds come from the
             // (bounded) placement above.
             if delivery.is_foreground()

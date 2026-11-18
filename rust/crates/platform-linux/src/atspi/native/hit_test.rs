@@ -6,7 +6,7 @@
 //! `QAccessibleTableCell::state()` never derives `invisible` from its view, so
 //! the QListView of a QFileDialog in Detail mode (a QStackedWidget page that is
 //! not current) lists every row over the visible QTreeView. Pressing the
-//! list-row centre hit the tree's "Name" column header and flipped the sort
+//! list-row center hit the tree's "Name" column header and flipped the sort
 //! order instead of selecting the file (VLC "Convert / Save", round 7).
 //!
 //! Before a press, ask the toolkit's own `GetAccessibleAtPoint` who owns the
@@ -22,7 +22,7 @@
 //! parent is the entry. So the element also owns the point when it is on
 //! the answer's parent chain, and an answer with no role is named by its
 //! nearest ancestor that has one. A toolkit that names nothing at the point
-//! and nothing at its window frame's centre cannot hit-test at all
+//! and nothing at its window frame's center cannot hit-test at all
 //! ([`PointOwnership::Unanswerable`]): the caller then checks with X11 that
 //! the window (or its popup) is on top at the point ([`x11_point_cover`]).
 
@@ -64,13 +64,13 @@ pub enum PointOwnership {
     Redirect {
         owner: PointOwner,
         target: PointOwner,
-        /// Screen centre of `target`.
+        /// Screen center of `target`.
         screen_point: (i32, i32),
     },
     /// Another object owns the point and no equivalent item was found.
     Mismatch { owner: PointOwner },
     /// The toolkit names no object at the point, nor at its window frame's
-    /// centre: it cannot hit-test, so its answer neither vouches for nor
+    /// center: it cannot hit-test, so its answer neither vouches for nor
     /// refuses the press. The caller checks the X11 stacking instead.
     Unanswerable,
     /// The toolkit could not be asked (Wayland, no application, no
@@ -106,7 +106,7 @@ async fn describe_node(node: &HitNode<'_>) -> PointOwner {
 }
 
 /// The same-named selectable item among the children of the table-like
-/// containers on `chain` (deepest first), with its trusted screen centre.
+/// containers on `chain` (deepest first), with its trusted screen center.
 async fn same_named_item_on_chain(
     conn: &AccessibilityConnection,
     chain: &[HitNode<'_>],
@@ -151,7 +151,7 @@ async fn same_named_item_on_chain(
             if !screen_extents_trusted(raw, display) || raw.2 <= 0 || raw.3 <= 0 {
                 continue;
             }
-            let centre = (raw.0 + raw.2 / 2, raw.1 + raw.3 / 2);
+            let center = (raw.0 + raw.2 / 2, raw.1 + raw.3 / 2);
             return Some((
                 PointOwner {
                     object_ref: ObjectRef {
@@ -161,7 +161,7 @@ async fn same_named_item_on_chain(
                     role: child_role,
                     name: child_name,
                 },
-                centre,
+                center,
             ));
         }
     }
@@ -259,11 +259,11 @@ pub fn point_ownership(
                 } else if let Some(named) = named_ancestor(conn, &deepest.oref, &seed).await {
                     describe_ref(conn, &named).await
                 } else {
-                    let centre = match frame_centre(conn, &seed).await {
+                    let center = match frame_center(conn, &seed).await {
                         Some((cx, cy)) => answer_at(conn, &seed, cx, cy).await,
                         None => HitAnswer::Nothing,
                     };
-                    if toolkit_cannot_hit_test(HitAnswer::Unidentified, centre) {
+                    if toolkit_cannot_hit_test(HitAnswer::Unidentified, center) {
                         return Ok(PointOwnership::Unanswerable);
                     }
                     PointOwner {
@@ -375,8 +375,8 @@ async fn answer_at(
     }
 }
 
-/// The centre of `frame` in its toolkit's `Window` coordinates.
-async fn frame_centre(conn: &AccessibilityConnection, frame: &RawObjectRef) -> Option<(i32, i32)> {
+/// The center of `frame` in its toolkit's `Window` coordinates.
+async fn frame_center(conn: &AccessibilityConnection, frame: &RawObjectRef) -> Option<(i32, i32)> {
     let component = call(raw_component(conn.connection(), frame)).await?.ok()?;
     let (x, y, w, h) = call(component.get_extents(CoordType::Window)).await?.ok()?;
     (w > 0 && h > 0).then_some((x + w / 2, y + h / 2))
@@ -588,13 +588,13 @@ mod tests {
         // at window (6, 34): its window coordinates are the main window's.
         let origin = window_origin((686, 331), (6, 34));
         assert_eq!(origin, (680, 297));
-        // "Quit", the second row (screen 686,369 258x36): its centre must be
+        // "Quit", the second row (screen 686,369 258x36): its center must be
         // asked as window (135, 90), where Qt answers "Quit". The
         // popup-relative point (129, 56) is the first row's, "Open import...".
         assert_eq!(screen_to_toolkit_window((815, 387), origin), (135, 90));
         assert_eq!(screen_to_toolkit_window((815, 349), origin), (135, 52));
         // The Category combo's list (screen 786,341, window 106,44): "Utilities"
-        // is the third row, centred at screen 881,431.
+        // is the third row, centered at screen 881,431.
         let combo = window_origin((786, 341), (106, 44));
         assert_eq!(screen_to_toolkit_window((881, 431), combo), (201, 134));
         // A toolkit that measures from the popup itself gives an origin at

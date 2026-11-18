@@ -51,13 +51,13 @@ pub(crate) enum HitAnswer {
 }
 
 /// Whether a toolkit cannot hit-test a window: its answer for the press
-/// point names nothing, and its answer for the window frame's own centre
+/// point names nothing, and its answer for the window frame's own center
 /// names nothing either. Then its hit test is no evidence for or against
 /// the press, and the X11 stacking check stands in for it. A toolkit that
-/// names a control at the centre can hit-test, so an unnamed answer at the
+/// names a control at the center can hit-test, so an unnamed answer at the
 /// press point still refuses the press.
-pub(crate) fn toolkit_cannot_hit_test(point: HitAnswer, frame_centre: HitAnswer) -> bool {
-    point == HitAnswer::Unidentified && frame_centre != HitAnswer::Control
+pub(crate) fn toolkit_cannot_hit_test(point: HitAnswer, frame_center: HitAnswer) -> bool {
+    point == HitAnswer::Unidentified && frame_center != HitAnswer::Control
 }
 
 /// What the X11 stacking puts at a press point meant for a window.
@@ -122,7 +122,7 @@ mod tests {
         use HitAnswer::*;
         assert!(toolkit_cannot_hit_test(Unidentified, Unidentified));
         assert!(toolkit_cannot_hit_test(Unidentified, Nothing));
-        // It names a control at the frame's centre: it can hit-test, and its
+        // It names a control at the frame's center: it can hit-test, and its
         // unnamed answer at the press point keeps refusing.
         assert!(!toolkit_cannot_hit_test(Unidentified, Control));
         // A named answer or none at the press point is decided as before.
