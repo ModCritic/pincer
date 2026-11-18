@@ -60,15 +60,6 @@ pub fn user_home_subdirectory() -> &'static str {
 }
 
 #[cfg(target_os = "windows")]
-pub fn uia_executable_name() -> &'static str {
-    if is_local_installation() {
-        "pincer-uia-local.exe"
-    } else {
-        "pincer-uia.exe"
-    }
-}
-
-#[cfg(target_os = "windows")]
 pub fn autostart_task_name() -> &'static str {
     if is_local_installation() {
         "pincer-local-serve"
@@ -113,19 +104,6 @@ pub fn is_executable_inside_pincer_app() -> bool {
         })
 }
 
-/// Returns `true` when the env var is one of `1|true|yes|on`
-/// (case-insensitive). Anything else, including unset, is falsy.
-#[cfg(target_os = "windows")]
-pub fn is_env_truthy(name: &str) -> bool {
-    match std::env::var(name) {
-        Ok(value) => matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        ),
-        Err(_) => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,20 +120,5 @@ mod tests {
             "/Applications/Pincer.app/Contents/MacOS/pincer"
         )));
         assert!(!path_is_local(Path::new("/tmp/pincer-local-test")));
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn env_truthiness_is_strict() {
-        let name = "PINCER_TEST_TRUTHY";
-        for value in ["1", "true", "TRUE", "Yes", "on", " 1 "] {
-            std::env::set_var(name, value);
-            assert!(is_env_truthy(name), "expected truthy for {value:?}");
-        }
-        for value in ["0", "false", "no", "off", ""] {
-            std::env::set_var(name, value);
-            assert!(!is_env_truthy(name), "expected falsy for {value:?}");
-        }
-        std::env::remove_var(name);
     }
 }
