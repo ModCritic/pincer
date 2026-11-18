@@ -321,6 +321,42 @@ impl ReplayTrajectoryTool {
 
 static REPLAY_DEF: OnceLock<ToolDef> = OnceLock::new();
 
+/// Default and largest `max_turns`: turn folders one replay goes through.
+const REPLAY_DEFAULT_MAX_TURNS: u64 = 200;
+const REPLAY_MAX_TURNS: u64 = 1_000;
+/// Default and largest `timeout_ms`: total time of one replay.
+const REPLAY_DEFAULT_TIMEOUT_MS: u64 = 300_000;
+const REPLAY_MIN_TIMEOUT_MS: u64 = 1_000;
+const REPLAY_MAX_TIMEOUT_MS: u64 = 1_800_000;
+/// Longest per-turn `result_summary`, parse error and first-failure text.
+const REPLAY_SUMMARY_CHARS: usize = 300;
+/// `turns` keeps this many entries from each end of a long replay.
+const REPLAY_TURNS_KEPT_EACH_END: usize = 50;
+/// Turn names listed in the summary text per kind (skipped, refused).
+const REPLAY_NAMES_LISTED: usize = 20;
+
+/// Per-turn entries of a replay: the first and the last
+/// [`REPLAY_TURNS_KEPT_EACH_END`], with a count of those left out between.
+#[derive(Default)]
+struct TurnLog {
+    entries: Vec<Value>,
+    omitted: usize,
+}
+
+impl TurnLog {
+    fn push(&mut self, entry: Value) {
+        if self.entries.len() == 2 * REPLAY_TURNS_KEPT_EACH_END {
+            self.entries.remove(REPLAY_TURNS_KEPT_EACH_END);
+            self.omitted += 1;
+        }
+        self.entries.push(entry);
+    }
+}
+
+fn clip_summary(text: &str) -> String {
+    crate::untrusted_text::clip(text, REPLAY_SUMMARY_CHARS).into_owned()
+}
+
 /// A replay that cannot start, with a stable `code` like dispatch's own
 /// refusals: `invalid_arguments` (no `dir`), `trajectory_not_found` (no such
 /// folder, or no turn folders in it) or `facility_unavailable`.
@@ -370,6 +406,10 @@ impl Tool for ReplayTrajectoryTool {
                 A turn naming any other tool (run_steps, run_script, replay_trajectory, \
                 set_config, or a recording, session, clipboard, upload, download or installer \
                 tool) does not run: it counts as failed, with `refusal.code: \"not_replayable\"`.\n\n\
+                A replay stops before a turn once `max_turns` turn folders were gone \
+                through or `timeout_ms` passed (`stop_reason` and `not_run` say so); `turns` \
+                keeps the first and last 50 entries, each `result_summary` cut to 300 \
+                characters.\n\n\
                 With recording on, the replay is itself recorded into the current output \
                 folder, so two runs can be diffed."
                 .into(),
@@ -380,7 +420,9 @@ impl Tool for ReplayTrajectoryTool {
                     "dir":           { "type": "string",  "description": "Trajectory directory previously written by `start_recording`. Absolute or ~-rooted." },
                     "delay_ms":      { "type": "integer", "minimum": 0, "maximum": 10000, "description": "Milliseconds to sleep between turns, for human-observable pacing. Default 500." },
                     "stop_on_error": { "type": "boolean", "description": "Default true: stop at the first turn that fails now. False replays every turn." },
-                    "include_failed_turns": { "type": "boolean", "description": "Default false. True also replays turns recorded with `result_error: true`." }
+                    "include_failed_turns": { "type": "boolean", "description": "Default false. True also replays turns recorded with `result_error: true`." },
+                    "max_turns":     { "type": "integer", "minimum": 1, "maximum": REPLAY_MAX_TURNS, "description": "Most turn folders to go through, in order; skipped and refused turns count. Default 200." },
+                    "timeout_ms":    { "type": "integer", "minimum": REPLAY_MIN_TIMEOUT_MS, "maximum": REPLAY_MAX_TIMEOUT_MS, "description": "Total time for the replay, delays included; a turn not started by then does not run. Default 300000." }
                 },
                 "additionalProperties": false
             }),
@@ -406,6 +448,14 @@ impl Tool for ReplayTrajectoryTool {
         let delay_ms = args.u64_or("delay_ms", 500).min(10_000);
         let stop_on_error = args.bool_or("stop_on_error", true);
         let include_failed_turns = args.bool_or("include_failed_turns", false);
+        let max_turns = args
+            .u64_or("max_turns", REPLAY_DEFAULT_MAX_TURNS)
+            .clamp(1, REPLAY_MAX_TURNS) as usize;
+        let timeout_ms = args
+            .u64_or("timeout_ms", REPLAY_DEFAULT_TIMEOUT_MS)
+            .clamp(REPLAY_MIN_TIMEOUT_MS, REPLAY_MAX_TIMEOUT_MS);
+        let started = std::time::Instant::now();
+        let time_limit = std::time::Duration::from_millis(timeout_ms);
 
         // Expand ~/
         let dir = {
@@ -465,7 +515,7 @@ impl Tool for ReplayTrajectoryTool {
         let mut attempted = 0u32;
         let mut succeeded = 0u32;
         let mut failed = 0u32;
-        let mut turns_json = Vec::new();
+        let mut turns_json = TurnLog::default();
         let mut first_failure: Option<(String, String, String)> = None;
         let mut skipped_turns: Vec<String> = Vec::new();
         let mut refused_turns: Vec<(String, String)> = Vec::new();
@@ -474,20 +524,25 @@ impl Tool for ReplayTrajectoryTool {
         // turn folders did not run.
         let mut stopped: Option<(String, String, usize)> = None;
         let mut cancelled = false;
-        let planned = turn_dirs.len();
+        let planned = turn_dirs.len().min(max_turns);
 
         for (position, turn_dir) in turn_dirs.iter().enumerate() {
             let turn_name = turn_dir
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "?".to_owned());
-            if crate::request_control::is_cancelled() {
+            let stop_reason = if crate::request_control::is_cancelled() {
                 cancelled = true;
-                stopped = Some((
-                    turn_name,
-                    crate::request_control::describe_cancel(),
-                    turn_dirs.len() - position,
-                ));
+                Some(crate::request_control::describe_cancel())
+            } else if position >= max_turns {
+                Some(format!("max_turns ({max_turns}) was reached"))
+            } else if started.elapsed() >= time_limit {
+                Some(format!("the time limit (timeout_ms {timeout_ms}) was reached"))
+            } else {
+                None
+            };
+            if let Some(reason) = stop_reason {
+                stopped = Some((turn_name, reason, turn_dirs.len() - position));
                 break;
             }
             crate::request_control::report_progress(position as f64, Some(planned as f64), || {
@@ -499,14 +554,15 @@ impl Tool for ReplayTrajectoryTool {
                 Ok(v) => v,
                 Err(e) => {
                     failed += 1;
+                    let error = clip_summary(&e.to_string());
                     if first_failure.is_none() {
                         first_failure =
-                            Some((turn_name.clone(), "action.json".into(), e.to_string()));
+                            Some((turn_name.clone(), "action.json".into(), error.clone()));
                     }
                     turns_json.push(json!({
                         "turn": turn_name,
                         "ok": false,
-                        "parse_error": e.to_string()
+                        "parse_error": error
                     }));
                     if stop_on_error {
                         break;
@@ -578,8 +634,8 @@ impl Tool for ReplayTrajectoryTool {
                         None
                     }
                 })
-                .unwrap_or("")
-                .to_owned();
+                .unwrap_or("");
+            let summary = clip_summary(summary);
 
             let mut turn_json = json!({
                 "turn": turn_name,
@@ -605,8 +661,11 @@ impl Tool for ReplayTrajectoryTool {
             }
 
             if delay_ms > 0 {
+                // Not past the time limit, and not after a cancel.
+                let delay = std::time::Duration::from_millis(delay_ms)
+                    .min(time_limit.saturating_sub(started.elapsed()));
                 tokio::select! {
-                    _ = tokio::time::sleep(std::time::Duration::from_millis(delay_ms)) => {}
+                    _ = tokio::time::sleep(delay) => {}
                     _ = crate::request_control::cancelled() => {}
                 }
             }
@@ -650,22 +709,35 @@ impl Tool for ReplayTrajectoryTool {
                 shown_name(turn)
             ));
         }
+        if turns_json.omitted > 0 {
+            summary_text.push_str(&format!(
+                "\n`turns` lists the first and last {REPLAY_TURNS_KEPT_EACH_END} turns; {} in \
+                 between are left out.",
+                turns_json.omitted
+            ));
+        }
         if skipped > 0 {
-            let names: Vec<_> = skipped_turns.iter().map(|turn| shown_name(turn)).collect();
+            let mut names: Vec<String> = skipped_turns
+                .iter()
+                .take(REPLAY_NAMES_LISTED)
+                .map(|turn| shown_name(turn).into_owned())
+                .collect();
+            if skipped > REPLAY_NAMES_LISTED {
+                names.push(format!("and {} more", skipped - REPLAY_NAMES_LISTED));
+            }
             summary_text.push_str(&format!(
                 "\nSkipped turns recorded as failed: {}. include_failed_turns:true replays them.",
                 names.join(", ")
             ));
         }
         if refused > 0 {
-            const LISTED: usize = 20;
             let mut names: Vec<String> = refused_turns
                 .iter()
-                .take(LISTED)
+                .take(REPLAY_NAMES_LISTED)
                 .map(|(turn, tool)| format!("{} {}", shown_name(turn), shown_name(tool)))
                 .collect();
-            if refused > LISTED {
-                names.push(format!("and {} more", refused - LISTED));
+            if refused > REPLAY_NAMES_LISTED {
+                names.push(format!("and {} more", refused - REPLAY_NAMES_LISTED));
             }
             summary_text.push_str(&format!(
                 "\nRefused turns ({NOT_REPLAYABLE}, not run): {}. {NOT_REPLAYABLE_MESSAGE}",
@@ -682,8 +754,11 @@ impl Tool for ReplayTrajectoryTool {
             "refused": refused,
             "stop_on_error": stop_on_error,
             "refound": refound,
+            "max_turns": max_turns,
+            "timeout_ms": timeout_ms,
             "stopped_early": stopped.is_some(),
-            "turns": turns_json,
+            "turns": turns_json.entries,
+            "turns_omitted": turns_json.omitted,
         });
         if let Some((turn, tool, error)) = first_failure {
             structured["first_failure"] = json!({ "turn": turn, "tool": tool, "error": error });
@@ -1340,6 +1415,100 @@ mod tests {
         let registry = Arc::new(registry);
         registry.init_self_weak();
         registry
+    }
+
+    /// The replay had no total time or turn cap: it ran every turn folder,
+    /// however many, for as long as they took.
+    #[tokio::test]
+    async fn replay_stops_at_max_turns_and_at_its_time_limit() {
+        let (registry, calls) = replay_registry(&["press_key"]);
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("trajectory");
+        write_trajectory(&dir, &vec![press_key_turn(); 5]);
+
+        let result = registry
+            .invoke(
+                "replay_trajectory",
+                json!({"dir": dir, "delay_ms": 0, "max_turns": 2}),
+            )
+            .await;
+        assert_ne!(result.is_error, Some(true), "{}", text(&result));
+        let structured = result.structured_content.clone().unwrap();
+        assert_eq!(calls.lock().unwrap().len(), 2, "{structured}");
+        assert_eq!(structured["stopped_early"], true);
+        assert_eq!(structured["stopped_before"], "turn-00003");
+        assert_eq!(structured["not_run"], 3);
+        assert_eq!(structured["max_turns"], 2);
+        assert!(
+            text(&result).contains(
+                "Stopped before turn-00003: max_turns (2) was reached; 3 turn folder(s) did not run."
+            ),
+            "{}",
+            text(&result)
+        );
+
+        // 600 ms between turns and 1 s in all: turns 1 and 2 run, and the
+        // second delay is cut to the time left.
+        calls.lock().unwrap().clear();
+        let started = std::time::Instant::now();
+        let result = registry
+            .invoke(
+                "replay_trajectory",
+                json!({"dir": dir, "delay_ms": 600, "timeout_ms": 1000}),
+            )
+            .await;
+        let elapsed = started.elapsed();
+        let structured = result.structured_content.clone().unwrap();
+        assert_eq!(calls.lock().unwrap().len(), 2, "{structured}");
+        assert_eq!(structured["stopped_before"], "turn-00003", "{structured}");
+        assert_eq!(
+            structured["stop_reason"],
+            "the time limit (timeout_ms 1000) was reached"
+        );
+        assert!(elapsed < std::time::Duration::from_millis(1500), "{elapsed:?}");
+
+        // The defaults apply when the caller sets neither.
+        let result = registry
+            .invoke("replay_trajectory", json!({"dir": dir, "delay_ms": 0}))
+            .await;
+        let structured = result.structured_content.clone().unwrap();
+        assert_eq!(structured["max_turns"], REPLAY_DEFAULT_MAX_TURNS);
+        assert_eq!(structured["timeout_ms"], REPLAY_DEFAULT_TIMEOUT_MS);
+        assert_eq!(structured["stopped_early"], false);
+        assert!(structured.get("stop_reason").is_none());
+    }
+
+    /// Each turn's result text went into `turns` whole, and a failing turn's
+    /// whole text into `first_failure`.
+    #[tokio::test]
+    async fn replay_clips_each_turn_summary() {
+        let registry = scripted_registry("x".repeat(5_000), || {});
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("trajectory");
+        write_trajectory(&dir, &[press_key_turn()]);
+        let result = registry
+            .invoke("replay_trajectory", json!({"dir": dir, "delay_ms": 0}))
+            .await;
+        let structured = result.structured_content.clone().unwrap();
+        let summary = structured["turns"][0]["result_summary"].as_str().unwrap();
+        assert!(
+            summary.ends_with("... (5000 chars)") && summary.chars().count() < 400,
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn the_turn_log_keeps_the_first_and_last_turns() {
+        let mut log = TurnLog::default();
+        for index in 0..130 {
+            log.push(json!(index));
+        }
+        assert_eq!(log.entries.len(), 2 * REPLAY_TURNS_KEPT_EACH_END);
+        assert_eq!(log.omitted, 30);
+        assert_eq!(log.entries[0], 0);
+        assert_eq!(log.entries[REPLAY_TURNS_KEPT_EACH_END - 1], 49);
+        assert_eq!(log.entries[REPLAY_TURNS_KEPT_EACH_END], 80);
+        assert_eq!(log.entries.last().unwrap(), &json!(129));
     }
 
     /// A cancelled request stops the replay before its next turn, with a
