@@ -65,8 +65,15 @@ downloads ffmpeg from that package manager's sources.
 
 This fork publishes no release binaries, Python wheels, or npm packages, and
 upstream's release installer scripts are removed. Build it from source as
-described below. The fork's own changes target Linux;
-the macOS and Windows code from upstream is still in the tree.
+described below.
+
+Platform status:
+
+- **Linux** is where this fork is developed and tested, mainly on X11 with
+  KDE Plasma.
+- **Windows** is supported.
+- **macOS** is compiled and checked: it type-checks in CI
+  (`rust/scripts/check-macos.sh`) but is not tested on real hardware.
 
 See [MCP protocol and skills](docs/mcp-protocol-and-skills.md) for the modern
 stdio profile, legacy compatibility, bundled skill resources, and HTTP limits.
@@ -348,11 +355,13 @@ Contributor documentation:
 
 ## macOS process identity and permissions
 
-This fork ships no prebuilt `Pincer.app`. On macOS,
-`scripts/install-local.sh` builds a separate `PincerLocal.app` from this
-checkout.
+macOS is compiled and checked, not tested on real hardware (see
+[Platform status](#about-this-fork)), so the launch modes below are how the
+code is meant to run, not setups this fork has tried. This fork ships no
+prebuilt `Pincer.app`. On macOS, `scripts/install-local.sh` builds a separate
+`PincerLocal.app` from this checkout.
 
-macOS attributes Accessibility and Screen Recording grants to a responsible app identity, not simply to an executable path. Use one of these supported launch modes:
+macOS attributes Accessibility and Screen Recording grants to a responsible app identity, not simply to an executable path. Use one of these launch modes:
 
 - **Standalone:** build `PincerLocal.app` with `scripts/install-local.sh`, grant permissions to it, and start its daemon with `open -n -g -a PincerLocal --args serve`. The installed `pincer-local mcp` CLI may proxy through this daemon automatically.
 - **Explicit direct MCP:** `pincer mcp --direct` makes the MCP process own
