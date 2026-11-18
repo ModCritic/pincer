@@ -16,7 +16,8 @@ impl Tool for ZoomTool {
             name: "zoom".into(),
             description: "Capture a cropped JPEG of a window region from (x1,y1) to (x2,y2), in \
                 pixels of this window's most recent get_window_state screenshot, padded by 20% \
-                of the region's width and height on each side (clamped to the window). Output \
+                of the region's width and height on each side (clamped to the window). After \
+                a resize, read the window again with a screenshot first. Output \
                 is at most 500 px wide and never enlarged past the screenshot's own pixels. \
                 Corners, not a size: x1,y1 is the top-left and x2,y2 the bottom-right (x,y,width,height is also accepted and converted). The result echoes the padded region the image actually shows, in the same screenshot pixels.\n\n\
                 After a zoom, pass from_zoom=true to click, double_click, right_click, drag or \
