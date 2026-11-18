@@ -50,8 +50,12 @@ impl Tool for DragTool {
                           (screenshot_context_missing otherwise). In background, a point covered by \
                           another app's window is refused (target_occluded); one covered by this \
                           app's own dialog goes to the dialog. Background drags need a pointer \
-                          backend some apps lack even where clicks work, so a drag can return \
-                          background_unavailable; it then needs delivery_mode foreground.".into(),
+                          route: the virtual pointer (path mpx_pointer), else synthetic \
+                          XSendEvent (path x11_xsendevent), which Qt/KDE apps (KWrite) take (a \
+                          text drag selects) and GTK3/4 and LibreOffice drop, so there a drag \
+                          returns background_unavailable even where clicks work and needs \
+                          delivery_mode foreground. A posted drag is unverifiable: check a \
+                          screenshot before retrying in foreground.".into(),
             input_schema: json!({"type":"object","required":["from_x","from_y","to_x","to_y"],"properties":{
                 "session": pincer_core::tool_schema::session_schema(),
                 "cursor_id": cursor_id_schema(),

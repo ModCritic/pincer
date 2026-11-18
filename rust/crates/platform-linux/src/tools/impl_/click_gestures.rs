@@ -16,8 +16,10 @@ impl Tool for DoubleClickTool {
             name: "double_click".into(),
             description: "Double-click at (x,y) or at the center of an element_token's bounds. \
                 Background delivery on X11 uses the session's virtual pointer (path mpx_pointer) \
-                when it can, else synthetic XSendEvent (path x11_xsendevent), which some \
-                toolkits read as a single click: check `path` and verify the result. Where no \
+                when it can, else synthetic XSendEvent (path x11_xsendevent). Qt/KDE apps \
+                (KWrite) take XSendEvent, but under Xwayland read the pair as one click when the \
+                real pointer rests over the window: check `path` and verify the result; if only \
+                one click landed, delivery_mode foreground is the route. Where no \
                 focus-free pointer route exists (a GTK3 canvas or LibreOffice, for example) \
                 background delivery is refused with background_unavailable: retry with \
                 delivery_mode foreground. In background, a \
