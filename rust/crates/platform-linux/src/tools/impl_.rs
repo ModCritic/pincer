@@ -5459,9 +5459,17 @@ fn unavailable_wayland_focused_input_background(
 enum CoordinateContext {
     Zoom(ZoomContext),
     Screenshot(f64),
+    /// Desktop (get_desktop_state) pixels, translated into the window.
+    Desktop,
+    /// Pixels of a published capture, admitted through its `capture_id`.
+    Capture(String),
 }
 
-fn coordinate_click_context(
+/// The frame of a pointer call's x,y. An unsupported native background
+/// delivery must report `background_unavailable` before the frame is
+/// consulted, because native Wayland may legitimately withhold the
+/// screenshot (`surface_identity_unproven`) that the frame needs.
+fn coordinate_context(
     native_refusal: Option<ToolResult>,
     resolve_context: impl FnOnce() -> Result<CoordinateContext, ToolResult>,
 ) -> Result<CoordinateContext, ToolResult> {
@@ -5471,28 +5479,94 @@ fn coordinate_click_context(
     resolve_context()
 }
 
-fn coordinate_drag_context(
+/// Map the x,y `points` of a pointer call on window `xid` into its real
+/// window pixels, from the frame the call names: desktop pixels
+/// (`coordinate_frame`/`scope` "desktop"), a published capture
+/// (`capture_id`, one point only), a zoom image (`from_zoom`), or by default
+/// the window's latest get_window_state screenshot. The one resolver behind
+/// click, double_click, right_click, drag, scroll, mouse_button_down and
+/// mouse_drag; `native_refusal` is reported before any frame is read.
+async fn resolve_window_points<const N: usize>(
+    state: &ToolState,
+    args: &Value,
+    tool: &str,
+    (pid, xid): (u32, u64),
+    points: [(f64, f64); N],
     native_refusal: Option<ToolResult>,
-    resolve_context: impl FnOnce() -> Result<CoordinateContext, ToolResult>,
-) -> Result<CoordinateContext, ToolResult> {
-    if let Some(refusal) = native_refusal {
-        return Err(refusal);
+) -> Result<[(f64, f64); N], ToolResult> {
+    let desktop_frame = desktop_frame_requested(args);
+    let from_zoom = args.bool_or("from_zoom", false);
+    let capture_id = args.opt_str("capture_id");
+    let invalid = |message: String| {
+        ToolResult::error(message).with_structured(json!({ "code": "invalid_arguments" }))
+    };
+    if capture_id.is_some() {
+        if from_zoom {
+            return Err(invalid(format!(
+                "{tool}.capture_id cannot be combined with from_zoom; use coordinates from the \
+                 published capture."
+            )));
+        }
+        if desktop_frame {
+            return Err(invalid(format!(
+                "{tool}.capture_id cannot be combined with desktop-frame coordinates; use \
+                 coordinates from the published capture."
+            )));
+        }
+        if N != 1 {
+            return Err(invalid(format!("{tool}.capture_id takes a single x,y point.")));
+        }
     }
-    resolve_context()
-}
-
-/// Pixel scroll shares click and drag's refusal order: an unsupported native
-/// background delivery must report `background_unavailable` before the
-/// screenshot frame is consulted, because native Wayland may legitimately
-/// withhold the screenshot (`surface_identity_unproven`) that the frame needs.
-fn coordinate_scroll_scale(
-    native_refusal: Option<ToolResult>,
-    resolve_scale: impl FnOnce() -> Result<f64, ToolResult>,
-) -> Result<f64, ToolResult> {
-    if let Some(refusal) = native_refusal {
-        return Err(refusal);
+    let context = coordinate_context(native_refusal, || {
+        if desktop_frame {
+            Ok(CoordinateContext::Desktop)
+        } else if let Some(capture_id) = &capture_id {
+            Ok(CoordinateContext::Capture(capture_id.clone()))
+        } else if from_zoom {
+            state
+                .zoom_context(args, pid, Some(xid))
+                .map(CoordinateContext::Zoom)
+        } else {
+            screenshot_scale(state, args, pid, Some(xid)).map(CoordinateContext::Screenshot)
+        }
+    })?;
+    match context {
+        CoordinateContext::Screenshot(scale) => Ok(points.map(|(x, y)| (x * scale, y * scale))),
+        CoordinateContext::Zoom(context) => Ok(points.map(|(x, y)| context.zoom_to_window(x, y))),
+        CoordinateContext::Capture(capture_id) => {
+            let mut points = points;
+            for point in &mut points {
+                *point = crate::capture_action_frame::admit_window_click(
+                    &state.capture_service,
+                    args,
+                    &capture_id,
+                    pid,
+                    xid,
+                    point.0,
+                    point.1,
+                )
+                .map_err(capture_admission_error)?;
+            }
+            Ok(points)
+        }
+        CoordinateContext::Desktop => {
+            let mapped = tokio::task::spawn_blocking(move || {
+                let mut points = points;
+                for point in &mut points {
+                    *point = desktop_to_window_local(xid, point.0, point.1)?;
+                }
+                Ok::<_, anyhow::Error>(points)
+            })
+            .await;
+            match mapped {
+                Ok(Ok(points)) => Ok(points),
+                Ok(Err(e)) => Err(ToolResult::error(format!(
+                    "desktop-frame coordinates could not be mapped into window {xid}: {e}"
+                ))),
+                Err(e) => Err(ToolResult::error(format!("Task error: {e}"))),
+            }
+        }
     }
-    resolve_scale()
 }
 
 /// Chromium's X11 renderer drops synthetic input sent to an occluded,
@@ -5564,19 +5638,17 @@ enum PointerRoute {
     /// [`Self::Foreground`] after which these popups (a context menu) of the
     /// target opened.
     ForegroundPopups(Vec<crate::input::PopupWindow>),
-    /// Native Wayland pointer route.
-    Wayland,
 }
 
 impl PointerRoute {
-    /// Result `path`; the Wayland routes keep their own tool-level labels.
+    /// Result `path`. The Wayland routes report their own labels and build
+    /// no `PointerRoute`.
     fn path(&self) -> Option<&'static str> {
         match self {
             Self::Mpx(_) => Some(crate::input::MPX_POINTER_PATH),
             Self::Atspi(_) => Some("x11_atspi"),
             Self::Synthetic(_) => Some("x11_xsendevent"),
             Self::Foreground | Self::ForegroundPopups(_) => Some("x11_xtest_fg"),
-            Self::Wayland => None,
         }
     }
 
@@ -6963,14 +7035,14 @@ fn type_text_routes_isolated_background_before_generic_wayland_refusal() {
 
 #[cfg(test)]
 #[test]
-fn coordinate_click_keeps_wayland_background_refusal_ahead_of_screenshot_context() {
+fn coordinate_context_keeps_wayland_background_refusal_ahead_of_screenshot_context() {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let resolved = AtomicBool::new(false);
     let native_refusal = crate::input::delivery::background_unavailable_error(
         crate::input::delivery::BackgroundUnavailable::FocusedInputOnly,
     );
-    let result = coordinate_click_context(Some(native_refusal), || {
+    let result = coordinate_context(Some(native_refusal), || {
         resolved.store(true, Ordering::SeqCst);
         Ok(CoordinateContext::Screenshot(7.35))
     })
@@ -6984,79 +7056,101 @@ fn coordinate_click_keeps_wayland_background_refusal_ahead_of_screenshot_context
         !resolved.load(Ordering::SeqCst),
         "snapshot context must not be consulted before the native refusal"
     );
+    assert!(matches!(
+        coordinate_context(None, || Ok(CoordinateContext::Screenshot(1.5))),
+        Ok(CoordinateContext::Screenshot(scale)) if scale == 1.5
+    ));
 }
 
 #[cfg(test)]
-#[test]
-fn coordinate_drag_keeps_wayland_background_refusal_ahead_of_screenshot_context() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    let resolved = AtomicBool::new(false);
-    let native_refusal = crate::input::delivery::background_unavailable_error(
+#[tokio::test]
+async fn window_point_resolver_maps_each_frame_and_refuses_first() {
+    let state = ToolState::new();
+    let refusal = crate::input::delivery::background_unavailable_error(
         crate::input::delivery::BackgroundUnavailable::FocusedInputOnly,
     );
-    let result = coordinate_drag_context(Some(native_refusal), || {
-        resolved.store(true, Ordering::SeqCst);
-        Ok(CoordinateContext::Screenshot(7.35))
-    })
-    .expect_err("unsupported Wayland background delivery must refuse drag");
-
+    let args = json!({"_session_id": "resolver"});
+    // The refusal wins over the missing screenshot.
+    let refused =
+        resolve_window_points(&state, &args, "click", (42, 7), [(1.0, 2.0)], Some(refusal))
+            .await
+            .expect_err("refused");
     assert_eq!(
-        result.structured_content.as_ref().unwrap()["code"],
+        refused.structured_content.as_ref().unwrap()["code"],
         "background_unavailable"
     );
-    assert!(
-        !resolved.load(Ordering::SeqCst),
-        "drag snapshot context must not be consulted before the native refusal"
+    // Without it, a window never read has no frame.
+    let missing = resolve_window_points(&state, &args, "drag", (42, 7), [(1.0, 2.0); 2], None)
+        .await
+        .expect_err("no screenshot");
+    assert_eq!(
+        missing.structured_content.as_ref().unwrap()["code"],
+        "screenshot_context_missing"
+    );
+    // A trusted caller's native window pixels pass through.
+    let native = json!({
+        "_session_id": "resolver",
+        pincer_core::snapshot_store::NATIVE_WINDOW_PIXELS_ARG: true,
+    });
+    assert_eq!(
+        resolve_window_points(&state, &native, "drag", (42, 7), [(1.0, 2.0), (3.0, 4.0)], None)
+            .await
+            .unwrap(),
+        [(1.0, 2.0), (3.0, 4.0)]
+    );
+    // capture_id names one image point and no other frame.
+    for (bad, detail) in [
+        (json!({"capture_id": "c", "from_zoom": true}), "from_zoom"),
+        (json!({"capture_id": "c", "coordinate_frame": "desktop"}), "desktop-frame"),
+    ] {
+        let refusal = resolve_window_points(&state, &bad, "click", (42, 7), [(1.0, 2.0)], None)
+            .await
+            .expect_err("invalid");
+        assert!(format!("{:?}", refusal.content).contains(detail), "{detail}");
+    }
+    let two = resolve_window_points(
+        &state,
+        &json!({"capture_id": "c"}),
+        "drag",
+        (42, 7),
+        [(1.0, 2.0); 2],
+        None,
+    )
+    .await
+    .expect_err("one point only");
+    assert_eq!(
+        two.structured_content.as_ref().unwrap()["code"],
+        "invalid_arguments"
     );
 }
 
+/// click, drag and scroll compute the native Wayland refusal before they
+/// resolve their frame (the resolver reports it before reading any frame).
 #[cfg(test)]
 #[test]
-fn coordinate_scroll_keeps_wayland_background_refusal_ahead_of_screenshot_context() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    let resolved = AtomicBool::new(false);
-    let native_refusal = crate::input::delivery::background_unavailable_error(
-        crate::input::delivery::BackgroundUnavailable::FocusedInputOnly,
-    );
-    let result = coordinate_scroll_scale(Some(native_refusal), || {
-        resolved.store(true, Ordering::SeqCst);
-        Err(ToolResult::error(
-            "screenshot context must not be consulted",
-        ))
-    })
-    .expect_err("unsupported Wayland background delivery must refuse pixel scroll");
-
-    assert_eq!(
-        result.structured_content.as_ref().unwrap()["code"],
-        "background_unavailable"
-    );
-    assert!(
-        !resolved.load(Ordering::SeqCst),
-        "scroll snapshot context must not be consulted before the native refusal"
-    );
-    assert_eq!(coordinate_scroll_scale(None, || Ok(1.5)).unwrap(), 1.5);
-
+fn pointer_tools_compute_the_native_refusal_before_resolving_points() {
     let source = include_str!("impl_.rs");
-    let invoke = source
-        .rsplit_once("impl Tool for ScrollTool {")
-        .unwrap()
-        .1
-        .split_once("async fn invoke")
-        .unwrap()
-        .1;
-    let (before_scale, _) = invoke
-        .split_once("coordinate_scroll_scale(native_refusal")
-        .expect("pixel scroll must resolve its frame through the refusal-first helper");
-    assert!(
-        before_scale.contains("unavailable_wayland_focused_input_background(delivery, true)"),
-        "pixel scroll must compute the native Wayland refusal before its frame"
-    );
-    assert!(
-        !before_scale.contains("screenshot_scale("),
-        "pixel scroll must not consult the screenshot frame before the native refusal"
-    );
+    for (start, tool) in [
+        ("    async fn click(", "click"),
+        ("impl Tool for DragTool {", "drag"),
+        ("impl Tool for ScrollTool {", "scroll"),
+    ] {
+        let body = source
+            .rsplit_once(start)
+            .unwrap_or_else(|| panic!("{tool} source"))
+            .1;
+        let (before, _) = body
+            .split_once("resolve_window_points(")
+            .unwrap_or_else(|| panic!("{tool} resolves its points through the shared resolver"));
+        assert!(
+            before.contains("unavailable_wayland_focused_input_background(delivery, true)"),
+            "{tool} must compute the native Wayland refusal before its frame"
+        );
+        assert!(
+            !before.contains("screenshot_scale("),
+            "{tool} must not consult the screenshot frame before the native refusal"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -8839,8 +8933,155 @@ impl Tool for ClickTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
+        self.click(args, ClickKind::Click).await
+    }
+}
+
+#[cfg(test)]
+mod click_delegation_tests;
+
+/// What click's pixel delivery reports: the result `path`, the foreground
+/// transaction, the pointer route and the focus guard, each when it ran.
+type PixelClickDelivery = (
+    &'static str,
+    Option<crate::input::ForegroundReport>,
+    Option<PointerRoute>,
+    Option<crate::input::FocusGuardReport>,
+);
+
+/// Which pointer tool a click call came from. double_click and right_click
+/// run click's implementation with their own button and count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClickKind {
+    Click,
+    Double,
+    Right,
+}
+
+impl ClickKind {
+    fn tool(self) -> &'static str {
+        match self {
+            Self::Click => "click",
+            Self::Double => "double_click",
+            Self::Right => "right_click",
+        }
+    }
+
+    /// The result's verb.
+    fn verb(self) -> &'static str {
+        match self {
+            Self::Click => "Clicked",
+            Self::Double => "Double-clicked",
+            Self::Right => "Right-clicked",
+        }
+    }
+
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Click => "click",
+            Self::Double => "double-click",
+            Self::Right => "right-click",
+        }
+    }
+
+    /// double_click and right_click are pointer gestures: they never stand
+    /// in an accessible action for the press.
+    fn is_gesture(self) -> bool {
+        self != Self::Click
+    }
+
+    /// The `button` and `count` a gesture tool sends.
+    fn button_and_count(self) -> (&'static str, u64) {
+        match self {
+            Self::Click => ("left", 1),
+            Self::Double => ("left", 2),
+            Self::Right => ("right", 1),
+        }
+    }
+}
+
+/// Where a double_click or right_click by element token lands: the element
+/// centre in its window's real pixels and its screen rectangle for the
+/// overlay. Bounded like click's element placement: resolving bounds
+/// re-walks the AT-SPI tree, which can stall on a large GTK or VCL window.
+async fn gesture_element_point(
+    pid: u32,
+    idx: usize,
+    xid_hint: Option<u64>,
+) -> Result<(u64, f64, f64, Option<[f64; 4]>), ToolResult> {
+    let located = tokio::time::timeout(
+        ELEMENT_AX_BUDGET,
+        tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+            let (xid, lx, ly) = checked_element_local_coords(pid, idx, xid_hint)?;
+            let rect = element_screen_center_and_rect(pid, idx, Some(xid))
+                .ok()
+                .map(|(_, rect)| rect);
+            Ok((xid, lx, ly, rect))
+        }),
+    )
+    .await;
+    match located {
+        Ok(Ok(Ok(point))) => Ok(point),
+        Ok(Ok(Err(e))) => Err(input_error_result(e.context("AT-SPI bounds failed"))),
+        Ok(Err(e)) => Err(ToolResult::error(format!("Task error: {e}"))),
+        Err(_elapsed) => Err(ToolResult::error(format!(
+            "the bounds of element [{idx}] did not resolve within {ELEMENT_AX_BUDGET:?}; no \
+             input was sent. Take a screenshot, then retry by pixel (x/y)."
+        ))
+        .with_structured(json!({ "code": "ax_timeout", "effect": "none" }))),
+    }
+}
+
+/// double_click and right_click: click's implementation with their button
+/// and count. Their own background refusals (Chromium, WebKitGTK, GTK
+/// without a real pointer, native Wayland focused input) still run first,
+/// and Hyprland foreground keeps click's exact-target route, as before.
+async fn gesture_click(state: &Arc<ToolState>, args: Value, kind: ClickKind) -> ToolResult {
+    let click = ClickTool {
+        state: state.clone(),
+    };
+    let mut args = args;
+    let (button, count) = kind.button_and_count();
+    args["button"] = json!(button);
+    args["count"] = json!(count);
+    if windowless_desktop_scope(&args) {
+        // Dispatch refuses an explicit background delivery for click's
+        // desktop scope; that check is keyed to the tool name.
+        if let Err(refusal) = pincer_core::action_target::enforce_delivery_target("click", &args)
+        {
+            return refusal;
+        }
+        return click.click(args, kind).await;
+    }
+    let pid = match args.require_u32("pid") {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let delivery = crate::input::delivery::DeliveryMode::from_args(&args);
+    if let Some(refusal) = unavailable_chromium_background(pid, delivery) {
+        return refusal;
+    }
+    if let Some(refusal) = unavailable_webkit_background(pid, delivery) {
+        return refusal;
+    }
+    if let Some(refusal) = unavailable_gtk_pointer_background(pid, delivery) {
+        return refusal;
+    }
+    if let Some(refusal) = unavailable_wayland_focused_input_background(delivery, true) {
+        return refusal;
+    }
+    if hyprland_foreground(delivery) {
+        return click.click(args, ClickKind::Click).await;
+    }
+    click.click(args, kind).await
+}
+
+impl ClickTool {
+    /// click's implementation, shared by double_click and right_click
+    /// (`kind`), which pass their own button and count in `args`.
+    async fn click(&self, args: Value, kind: ClickKind) -> ToolResult {
         let cursor_id = resolve_cursor_key(&args);
-        let modifiers = match modifier_arg("click", "modifier", &args.str_array("modifier")) {
+        let modifiers = match modifier_arg(kind.tool(), "modifier", &args.str_array("modifier")) {
             Ok(modifiers) => modifiers,
             Err(refusal) => return refusal,
         };
@@ -8860,11 +9101,11 @@ impl Tool for ClickTool {
         }
         if has_xy && !has_pid && !has_window_id {
             if args.get("scope").and_then(Value::as_str) != Some("desktop") {
-                return ToolResult::error(
-                    "click: x,y given with no pid/window_id requires scope=\"desktop\"; \
-                     use get_desktop_state to read true screen pixels first."
-                        .to_string(),
-                )
+                return ToolResult::error(format!(
+                    "{}: x,y given with no pid/window_id requires scope=\"desktop\"; \
+                     use get_desktop_state to read true screen pixels first.",
+                    kind.tool()
+                ))
                 .with_structured(json!({
                     "code": "desktop_coordinate_scope_required",
                     "suggestion": "pass scope=desktop",
@@ -8941,7 +9182,8 @@ impl Tool for ClickTool {
                 // Screen-absolute click — never driver-verifiable (no
                 // read-back); the caller confirms via screenshot.
                 Ok(Ok(())) => ToolResult::text(format!(
-                    "✅ Sent screen-absolute click at ({sx},{sy}) (desktop scope)."
+                    "✅ Sent screen-absolute {} at ({sx},{sy}) (desktop scope).",
+                    kind.noun()
                 ))
                 .with_structured(
                     json!({ "path": if crate::wayland::wayland_input_enabled() { "wayland_desktop" } else { "xtest_desktop" }, "verified": false, "effect": "unverifiable" }),
@@ -8963,7 +9205,8 @@ impl Tool for ClickTool {
         let button_str_raw = args.str_or("button", "left").to_lowercase();
         if !matches!(button_str_raw.as_str(), "" | "left" | "right" | "middle") {
             return ToolResult::error(format!(
-                "click: unknown button \"{button_str_raw}\" — expected one of left, right, middle."
+                "{}: unknown button \"{button_str_raw}\" — expected one of left, right, middle.",
+                kind.tool()
             ));
         }
         let button_str = if button_str_raw.is_empty() {
@@ -9001,7 +9244,18 @@ impl Tool for ClickTool {
             .with_structured(json!({ "code": "invalid_arguments" }));
         }
 
-        if let Some(idx) = elem_idx_resolved {
+        // double_click and right_click are pointer gestures: an element token
+        // only says where they land, never which accessible action to run.
+        let gesture_element = match elem_idx_resolved {
+            Some(idx) if kind.is_gesture() => {
+                match gesture_element_point(pid, idx, window_id_resolved).await {
+                    Ok((xid, x, y, rect)) => Some((idx, xid, x, y, rect)),
+                    Err(refusal) => return refusal,
+                }
+            }
+            _ => None,
+        };
+        if let (Some(idx), false) = (elem_idx_resolved, kind.is_gesture()) {
             // The observed element: its proven AT-SPI identity and the frame
             // the snapshot recorded. Every route below acts on that identity
             // (or its cached frame); the live ordinal `idx` is only an
@@ -9395,92 +9649,38 @@ impl Tool for ClickTool {
             }
         }
 
-        // Coordinate-based path.
-        if let Some(refusal) = require_point_args("click", &args) {
-            return refusal;
-        }
-        let xid = match args.opt_u64("window_id") {
-            Some(v) => v,
-            None => return ToolResult::error("Provide either element_token or pid + window_id + x/y."),
+        // One point in the window's real pixels: a gesture's element centre,
+        // or x,y in the frame the call names.
+        let (xid, x, y, target_rect) = match gesture_element {
+            Some((_, xid, x, y, rect)) => (xid, x, y, rect),
+            None => {
+                if let Some(refusal) = require_point_args(kind.tool(), &args) {
+                    return refusal;
+                }
+                let Some(xid) = args.opt_u64("window_id") else {
+                    return ToolResult::error(
+                        "Provide either element_token or pid + window_id + x/y.",
+                    );
+                };
+                let native_refusal = (!isolated_background)
+                    .then(|| unavailable_wayland_focused_input_background(delivery, true))
+                    .flatten();
+                let point = (args.f64_or("x", 0.0), args.f64_or("y", 0.0));
+                match resolve_window_points(
+                    &self.state,
+                    &args,
+                    kind.tool(),
+                    (pid, xid),
+                    [point],
+                    native_refusal,
+                )
+                .await
+                {
+                    Ok([(x, y)]) => (xid, x, y, None),
+                    Err(refusal) => return refusal,
+                }
+            }
         };
-        let desktop_frame = desktop_frame_requested(&args);
-        let from_zoom = args.bool_or("from_zoom", false);
-        let mut x = args.f64_or("x", 0.0);
-        let mut y = args.f64_or("y", 0.0);
-        if capture_id_arg.is_some() && from_zoom {
-            return ToolResult::error(
-                "click.capture_id cannot be combined with from_zoom; use coordinates from the published capture.",
-            )
-            .with_structured(json!({ "code": "invalid_arguments" }));
-        }
-        if capture_id_arg.is_some() && desktop_frame {
-            return ToolResult::error(
-                "click.capture_id cannot be combined with desktop-frame coordinates; use coordinates from the published capture.",
-            )
-            .with_structured(json!({ "code": "invalid_arguments" }));
-        }
-        let native_refusal = (!isolated_background)
-            .then(|| unavailable_wayland_focused_input_background(delivery, true))
-            .flatten();
-        if desktop_frame {
-            // Desktop pixels: no zoom/screenshot scaling; translated once below.
-            if let Some(refusal) = native_refusal {
-                return refusal;
-            }
-        } else if let Some(capture_id) = capture_id_arg {
-            if let Some(refusal) = native_refusal {
-                return refusal;
-            }
-            match crate::capture_action_frame::admit_window_click(
-                &self.state.capture_service,
-                &args,
-                &capture_id,
-                pid,
-                xid,
-                x,
-                y,
-            ) {
-                Ok(point) => (x, y) = point,
-                Err(error) => return capture_admission_error(error),
-            }
-        } else {
-            let context = match coordinate_click_context(native_refusal, || {
-                if from_zoom {
-                    self.state
-                        .zoom_context(&args, pid, Some(xid))
-                        .map(CoordinateContext::Zoom)
-                } else {
-                    screenshot_scale(&self.state, &args, pid, Some(xid))
-                        .map(CoordinateContext::Screenshot)
-                }
-            }) {
-                Ok(context) => context,
-                Err(refusal) => return refusal,
-            };
-            match context {
-                CoordinateContext::Zoom(context) => {
-                    (x, y) = context.zoom_to_window(x, y);
-                }
-                CoordinateContext::Screenshot(scale) => {
-                    x *= scale;
-                    y *= scale;
-                }
-            }
-        }
-        if desktop_frame {
-            match tokio::task::spawn_blocking(move || desktop_to_window_local(xid, x, y)).await {
-                Ok(Ok((lx, ly))) => {
-                    x = lx;
-                    y = ly;
-                }
-                Ok(Err(e)) => {
-                    return ToolResult::error(format!(
-                        "desktop-frame coordinates could not be mapped into window {xid}: {e}"
-                    ))
-                }
-                Err(e) => return ToolResult::error(format!("Task error: {e}")),
-            }
-        }
 
         crate::overlay::send_command_for(
             cursor_id.clone(),
@@ -9507,7 +9707,8 @@ impl Tool for ClickTool {
                 .and_then(|r| r.ok())
         };
         if let Some((sx, sy)) = glide_target {
-            reveal_pointer_action_for(&self.state, &cursor_id, sx, sy, true).await;
+            reveal_pointer_action_target_for(&self.state, &cursor_id, sx, sy, true, target_rect)
+                .await;
         }
 
         let (xi, yi) = (x as i32, y as i32);
@@ -9584,7 +9785,7 @@ impl Tool for ClickTool {
         // foreground = activate the target window (EWMH) first, then inject,
         // then restore prior active. Mirrors macOS/Windows.
         let fg_budget = foreground_budget(0);
-        let result = spawn_blocking_bounded("foreground click", fg_budget, move || -> anyhow::Result<(&'static str, Option<crate::input::ForegroundReport>, Option<PointerRoute>, Option<crate::input::FocusGuardReport>)> {
+        let result = spawn_blocking_bounded("foreground click", fg_budget, move || -> anyhow::Result<PixelClickDelivery> {
             if crate::wayland::wayland_input_enabled() {
                 if !modifiers_for_task.is_empty() {
                     anyhow::bail!(
@@ -9714,8 +9915,25 @@ impl Tool for ClickTool {
                 if let Some((sx, sy)) = pixel_screen_point {
                     opts = opts.at_point(sx, sy);
                 }
+                // A right press opens a context menu: name it, as the
+                // background MPX route does.
+                let popups_before: Option<Vec<u64>> = (button == 3).then(|| {
+                    crate::input::mapped_popup_windows()
+                        .iter()
+                        .map(|popup| popup.window)
+                        .collect()
+                });
                 crate::input::with_x11_foreground_opts(xid, opts, || inject(true))
-                .map(|((path, route, guard), report)| (path, Some(report), route, guard))
+                .map(|((path, route, guard), report)| {
+                    let route = match (route, popups_before) {
+                        (None, Some(before)) => {
+                            let popups = wait_for_new_popups(pid, &before, CONTEXT_MENU_WAIT);
+                            (!popups.is_empty()).then_some(PointerRoute::ForegroundPopups(popups))
+                        }
+                        (route, _) => route,
+                    };
+                    (path, Some(report), route, guard)
+                })
             } else {
                 inject(false).map(|(path, route, guard)| (path, None, route, guard))
             }
@@ -9797,9 +10015,13 @@ impl Tool for ClickTool {
                     }
                     suffix.push_str(&outcome.apply(&mut structured));
                 }
+                let what = match (gesture_element, kind) {
+                    (Some((idx, ..)), _) => format!("{} element [{idx}]", kind.verb()),
+                    (None, ClickKind::Click) => format!("Clicked at ({x:.1}, {y:.1}) × {count}"),
+                    (None, _) => format!("{} at ({x:.1}, {y:.1})", kind.verb()),
+                };
                 attach_focus_guard(
-                    ToolResult::text(format!("Clicked at ({x:.1}, {y:.1}) × {count} {suffix}"))
-                        .with_structured(structured),
+                    ToolResult::text(format!("{what} {suffix}")).with_structured(structured),
                     guard.as_ref(),
                 )
             }
@@ -13006,35 +13228,27 @@ impl Tool for ScrollTool {
             args.get("x").and_then(|value| value.as_f64()),
             args.get("y").and_then(|value| value.as_f64()),
         ) {
-            (Some(x), Some(y)) if desktop_frame_requested(&args) => {
-                // Desktop-frame pixels (from get_desktop_state) against a named
-                // window: map into the window-local frame the pipeline expects.
-                match tokio::task::spawn_blocking(move || desktop_to_window_local(xid, x, y)).await
-                {
-                    Ok(Ok(local)) => Some(local),
-                    Ok(Err(e)) => {
-                        return ToolResult::error(format!(
-                            "desktop-frame coordinates could not be mapped into window {xid}: {e}"
-                        ))
-                    }
-                    Err(e) => return ToolResult::error(format!("Task error: {e}")),
-                }
-            }
             (Some(x), Some(y)) => {
-                // Pixel targets use the latest screenshot's coordinate frame.
-                // Apply the same buffer-to-window ratio as click/drag before
-                // positioning either the agent cursor or the input device.
-                // An unsupported native background delivery refuses first.
-                let native_refusal = (!isolated_background)
+                // Desktop-frame pixels (from get_desktop_state) map into the
+                // named window. Screenshot pixels use the latest screenshot's
+                // frame, like click and drag, after an unsupported native
+                // background delivery refuses.
+                let native_refusal = (!isolated_background && !desktop_frame_requested(&args))
                     .then(|| unavailable_wayland_focused_input_background(delivery, true))
                     .flatten();
-                let ratio = match coordinate_scroll_scale(native_refusal, || {
-                    screenshot_scale(&self.state, &args, pid, Some(xid))
-                }) {
-                    Ok(ratio) => ratio,
+                match resolve_window_points(
+                    &self.state,
+                    &args,
+                    "scroll",
+                    (pid, xid),
+                    [(x, y)],
+                    native_refusal,
+                )
+                .await
+                {
+                    Ok([point]) => Some(point),
                     Err(refusal) => return refusal,
-                };
-                Some((x * ratio, y * ratio))
+                }
             }
             (None, None) => None,
             (Some(_), None) => return invalid_pointer_arguments("scroll", "x was given without y"),
@@ -13713,28 +13927,6 @@ fn windowless_desktop_scope(args: &Value) -> bool {
         && args.get("window_id").is_none_or(Value::is_null)
 }
 
-/// double_click / right_click in the windowless desktop form: click's
-/// screen-absolute branch with this tool's button and count. Dispatch refuses
-/// an explicit background delivery for click's desktop scope; do the same
-/// here, since that check is keyed to the tool name.
-async fn desktop_scope_click(
-    state: &Arc<ToolState>,
-    mut args: Value,
-    button: &str,
-    count: u64,
-) -> ToolResult {
-    if let Err(refusal) = pincer_core::action_target::enforce_delivery_target("click", &args) {
-        return refusal;
-    }
-    args["button"] = json!(button);
-    args["count"] = json!(count);
-    ClickTool {
-        state: state.clone(),
-    }
-    .invoke(args)
-    .await
-}
-
 pub struct DoubleClickTool {
     state: Arc<ToolState>,
 }
@@ -13749,8 +13941,9 @@ impl Tool for DoubleClickTool {
                 Background delivery on X11 uses the session's virtual pointer (path mpx_pointer) \
                 when it can, else synthetic XSendEvent (path x11_xsendevent), which some \
                 toolkits read as a single click: check `path` and verify the result. Where no \
-                focus-free pointer route exists (a GTK3 canvas, for example) background delivery \
-                is refused with background_unavailable: retry with delivery_mode foreground. In background, a \
+                focus-free pointer route exists (a GTK3 canvas or LibreOffice, for example) \
+                background delivery is refused with background_unavailable: retry with \
+                delivery_mode foreground. In background, a \
                 point covered by another application's window is refused \
                 (target_occluded), one covered by this app's own dialog is retargeted to it \
                 (retargeted_to). No focus steal. Pass pid + window_id + x,y, or an element_token \
@@ -13773,263 +13966,7 @@ impl Tool for DoubleClickTool {
         })
     }
     async fn invoke(&self, args: Value) -> ToolResult {
-        if windowless_desktop_scope(&args) {
-            return desktop_scope_click(&self.state, args, "left", 2).await;
-        }
-        let cursor_id = resolve_cursor_key(&args);
-        let pid = match args.require_u32("pid") {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let delivery = crate::input::delivery::DeliveryMode::from_args(&args);
-        if let Some(refusal) = unavailable_chromium_background(pid, delivery) {
-            return refusal;
-        }
-        if let Some(refusal) = unavailable_webkit_background(pid, delivery) {
-            return refusal;
-        }
-        if let Some(refusal) = unavailable_gtk_pointer_background(pid, delivery) {
-            return refusal;
-        }
-        if let Some(refusal) = unavailable_wayland_focused_input_background(delivery, true) {
-            return refusal;
-        }
-        if hyprland_foreground(delivery) {
-            // Share exact-target validation and the admitted native click lifecycle.
-            let mut args = args;
-            args["button"] = json!("left");
-            args["count"] = json!(2);
-            return ClickTool {
-                state: self.state.clone(),
-            }
-            .invoke(args)
-            .await;
-        }
-        let resolved = match self.state.snapshots.resolve(pid as i32, &args) {
-            Ok(r) => r,
-            Err(e) => return e,
-        };
-        let elem_idx_resolved = match &resolved {
-            pincer_core::element_token::ResolvedElement::Element { element_index, .. } => {
-                Some(*element_index)
-            }
-            pincer_core::element_token::ResolvedElement::None => None,
-        };
-        let window_id_resolved: Option<u64> = match &resolved {
-            pincer_core::element_token::ResolvedElement::Element { window_id, .. } => {
-                Some(*window_id)
-            }
-            pincer_core::element_token::ResolvedElement::None => args.opt_u64("window_id"),
-        };
-        if let Some(idx) = elem_idx_resolved {
-            let xid_hint = window_id_resolved;
-            let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(u64, f64, f64)> {
-                checked_element_local_coords(pid, idx, xid_hint)
-            })
-            .await;
-            return match result {
-                Ok(Ok((xid, lx, ly))) => {
-                    if let Ok(Ok(((sx, sy), rect))) = tokio::task::spawn_blocking(move || {
-                        element_screen_center_and_rect(pid, idx, Some(xid))
-                    })
-                    .await
-                    {
-                        crate::overlay::send_command_for(
-                            cursor_id.clone(),
-                            cursor_overlay::OverlayCommand::PinAbove(xid),
-                        );
-                        reveal_pointer_action_target_for(
-                            &self.state,
-                            &cursor_id,
-                            sx,
-                            sy,
-                            true,
-                            Some(rect),
-                        )
-                        .await;
-                    }
-                    let lxi = lx as i32;
-                    let lyi = ly as i32;
-                    let wayland_point = crate::wayland::wayland_input_enabled()
-                        .then(|| crate::wayland::window_local_to_output(xid, lxi, lyi));
-                    let cursor_id_for_task = cursor_id.clone();
-                    let click_result =
-                        tokio::task::spawn_blocking(move || -> anyhow::Result<PointerRoute> {
-                            if crate::wayland::is_inject_mode() {
-                                return crate::wayland::inject_click(pid, xid, lx, ly, 2, 1)
-                                    .map(|()| PointerRoute::Wayland);
-                            }
-                            if crate::wayland::wayland_input_enabled() {
-                                let (output_x, output_y) = wayland_point.unwrap_or((lxi, lyi));
-                                return crate::wayland::click(xid, output_x, output_y, 2, 1)
-                                    .map(|()| PointerRoute::Wayland);
-                            }
-                            if delivery.is_foreground() {
-                                // The result never reports the foreground
-                                // observation (`PointerRoute::Foreground`
-                                // carries none of it), so skip it.
-                                return crate::input::with_x11_foreground_unobserved(
-                                    xid,
-                                    80,
-                                    || {
-                                        let (sx, sy) =
-                                            window_local_to_screen(xid, lxi as f64, lyi as f64)?;
-                                        crate::input::send_click_xtest_desktop(
-                                            sx.round() as i32,
-                                            sy.round() as i32,
-                                            1,
-                                            2,
-                                        )
-                                    },
-                                )
-                                .map(|()| PointerRoute::Foreground);
-                            }
-                            x11_pixel_click_no_focus_steal(&cursor_id_for_task, xid, lxi, lyi, 1, 2)
-                        })
-                        .await;
-                    let mode_label = if delivery.is_foreground() {
-                        "foreground"
-                    } else {
-                        "background"
-                    };
-                    match click_result {
-                        Ok(Ok(route)) => ToolResult::text(format!(
-                            "Double-clicked element [{idx}] {}",
-                            route.text_suffix(mode_label)
-                        ))
-                        .with_structured(route.structured(mode_label)),
-                        Ok(Err(e)) => input_error_result(e),
-                        Err(e) => ToolResult::error(format!("Task error: {e}")),
-                    }
-                }
-                Ok(Err(e)) => input_error_result(e.context("AT-SPI bounds failed")),
-                Err(e) => ToolResult::error(format!("Task error: {e}")),
-            };
-        }
-        if let Some(refusal) = require_point_args("double_click", &args) {
-            return refusal;
-        }
-        let xid = match window_id_resolved {
-            Some(v) => v,
-            None => return ToolResult::error("Provide either element_token or pid + window_id + x/y."),
-        };
-        let desktop_frame = desktop_frame_requested(&args);
-        let from_zoom = args.bool_or("from_zoom", false);
-        let mut x = args.f64_or("x", 0.0);
-        let mut y = args.f64_or("y", 0.0);
-        if desktop_frame {
-            // Desktop pixels: no zoom/screenshot scaling; translated once below.
-        } else if from_zoom {
-            match self.state.zoom_context(&args, pid, Some(xid)) {
-                Ok(ctx) => {
-                    let (wx, wy) = ctx.zoom_to_window(x, y);
-                    x = wx;
-                    y = wy;
-                }
-                Err(refusal) => return refusal,
-            }
-        } else {
-            let ratio = match screenshot_scale(&self.state, &args, pid, Some(xid)) {
-                Ok(ratio) => ratio,
-                Err(refusal) => return refusal,
-            };
-            x *= ratio;
-            y *= ratio;
-        }
-        if desktop_frame {
-            match tokio::task::spawn_blocking(move || desktop_to_window_local(xid, x, y)).await {
-                Ok(Ok((lx, ly))) => {
-                    x = lx;
-                    y = ly;
-                }
-                Ok(Err(e)) => {
-                    return ToolResult::error(format!(
-                        "desktop-frame coordinates could not be mapped into window {xid}: {e}"
-                    ))
-                }
-                Err(e) => return ToolResult::error(format!("Task error: {e}")),
-            }
-        }
-        crate::overlay::send_command_for(
-            cursor_id.clone(),
-            cursor_overlay::OverlayCommand::PinAbove(xid),
-        );
-        let wayland_output_point = if crate::wayland::wayland_input_enabled() {
-            Some(crate::wayland::window_local_to_output(
-                xid,
-                x.round() as i32,
-                y.round() as i32,
-            ))
-        } else {
-            None
-        };
-        let glide_target = if let Some((sx, sy)) = wayland_output_point {
-            Some((sx as f64, sy as f64))
-        } else {
-            tokio::task::spawn_blocking(move || window_local_to_screen(xid, x, y))
-                .await
-                .ok()
-                .and_then(|r| r.ok())
-        };
-        if let Some((sx, sy)) = glide_target {
-            reveal_pointer_action_for(&self.state, &cursor_id, sx, sy, true).await;
-        }
-        let (xi, yi) = (x as i32, y as i32);
-        let cursor_id_for_task = cursor_id.clone();
-        let result = tokio::task::spawn_blocking(move || -> anyhow::Result<PointerRoute> {
-            if crate::wayland::is_inject_mode() {
-                return crate::wayland::inject_click(pid, xid, x, y, 2, 1)
-                    .map(|()| PointerRoute::Wayland);
-            }
-            if crate::wayland::wayland_input_enabled() {
-                let (output_x, output_y) = wayland_output_point.unwrap_or((xi, yi));
-                return crate::wayland::click(xid, output_x, output_y, 2, 1)
-                    .map(|()| PointerRoute::Wayland);
-            }
-            if delivery.is_foreground() {
-                // Unobserved: the result never reports the foreground
-                // observation (`PointerRoute::Foreground` carries none of it).
-                return crate::input::with_x11_foreground_unobserved(xid, 80, || {
-                    // Real XTest double-click at the screen point — synthetic
-                    // XSendEvent button events are dropped by GTK/Qt and the MPX
-                    // uinput path needs /dev/uinput (absent on Xvfb/Xtigervnc), so
-                    // neither lands. Mirrors the single-click foreground path.
-                    if let Ok((sx, sy)) = window_local_to_screen(xid, xi as f64, yi as f64) {
-                        crate::input::send_click_xtest_desktop(
-                            sx.round() as i32,
-                            sy.round() as i32,
-                            1,
-                            2,
-                        )?;
-                        return Ok(());
-                    }
-                    x11_pixel_click_no_focus_steal(&cursor_id_for_task, xid, xi, yi, 1, 2)
-                        .map(|_| ())
-                })
-                .map(|()| PointerRoute::Foreground);
-            }
-            x11_pixel_click_no_focus_steal(&cursor_id_for_task, xid, xi, yi, 1, 2)
-        })
-        .await;
-        let mode_label = if delivery.is_foreground() {
-            "foreground"
-        } else {
-            "background"
-        };
-        let outcome = match result {
-            Ok(Ok(route)) => ToolResult::text(format!(
-                "Double-clicked at ({x:.1}, {y:.1}) {}",
-                route.text_suffix(mode_label)
-            ))
-            .with_structured(route.structured(mode_label)),
-            Ok(Err(e)) => input_error_result(e),
-            Err(e) => ToolResult::error(format!("Task error: {e}")),
-        };
-        with_pixel_points(
-            outcome,
-            glide_target.map(|(sx, sy)| (sx.round() as i32, sy.round() as i32)),
-            (xi, yi),
-        )
+        gesture_click(&self.state, args, ClickKind::Double).await
     }
 }
 
@@ -14065,30 +14002,6 @@ fn wait_for_new_popups(
     }
 }
 
-/// Foreground right-click at window-local `(lx, ly)`: activate the window,
-/// press button 3 there via XTest, then name the context menu it opened so
-/// the result carries `popup` as the background route's does. Blocking.
-fn foreground_right_click(pid: u32, xid: u64, lx: f64, ly: f64) -> anyhow::Result<PointerRoute> {
-    let before: Vec<u64> = crate::input::mapped_popup_windows()
-        .iter()
-        .map(|popup| popup.window)
-        .collect();
-    // Unobserved: the popup wait below is this route's observation.
-    crate::input::with_x11_foreground_unobserved(xid, 80, || {
-        // Real XTest right-click at the screen point (synthetic XSendEvent is
-        // dropped by GTK/Qt; MPX needs /dev/uinput). Mirrors the single-click
-        // foreground path.
-        let (sx, sy) = window_local_to_screen(xid, lx, ly)?;
-        crate::input::send_click_xtest_desktop(sx.round() as i32, sy.round() as i32, 3, 1)
-    })?;
-    let popups = wait_for_new_popups(pid, &before, CONTEXT_MENU_WAIT);
-    Ok(if popups.is_empty() {
-        PointerRoute::Foreground
-    } else {
-        PointerRoute::ForegroundPopups(popups)
-    })
-}
-
 pub struct RightClickTool {
     state: Arc<ToolState>,
 }
@@ -14103,7 +14016,7 @@ impl Tool for RightClickTool {
                 window_id + x,y, or an element_token (pid optional); after a zoom, from_zoom=true \
                 maps zoom-image coordinates \
                 back. Background delivery does not steal focus; where no focus-free pointer \
-                route exists (a GTK3 canvas, for example) it is refused with \
+                route exists (a GTK3 canvas or LibreOffice, for example) it is refused with \
                 background_unavailable: retry with delivery_mode foreground. In background, a point \
                 covered by another app's \
                 window is refused (target_occluded), one covered by this app's own dialog goes to \
@@ -14133,227 +14046,7 @@ impl Tool for RightClickTool {
         })
     }
     async fn invoke(&self, args: Value) -> ToolResult {
-        if windowless_desktop_scope(&args) {
-            return desktop_scope_click(&self.state, args, "right", 1).await;
-        }
-        let cursor_id = resolve_cursor_key(&args);
-        let pid = match args.require_u32("pid") {
-            Ok(v) => v,
-            Err(e) => return e,
-        };
-        let delivery = crate::input::delivery::DeliveryMode::from_args(&args);
-        if let Some(refusal) = unavailable_chromium_background(pid, delivery) {
-            return refusal;
-        }
-        if let Some(refusal) = unavailable_webkit_background(pid, delivery) {
-            return refusal;
-        }
-        if let Some(refusal) = unavailable_gtk_pointer_background(pid, delivery) {
-            return refusal;
-        }
-        if let Some(refusal) = unavailable_wayland_focused_input_background(delivery, true) {
-            return refusal;
-        }
-        if hyprland_foreground(delivery) {
-            // Share exact-target validation and the admitted native click lifecycle.
-            let mut args = args;
-            args["button"] = json!("right");
-            args["count"] = json!(1);
-            return ClickTool {
-                state: self.state.clone(),
-            }
-            .invoke(args)
-            .await;
-        }
-        let resolved = match self.state.snapshots.resolve(pid as i32, &args) {
-            Ok(r) => r,
-            Err(e) => return e,
-        };
-        let elem_idx_resolved = match &resolved {
-            pincer_core::element_token::ResolvedElement::Element { element_index, .. } => {
-                Some(*element_index)
-            }
-            pincer_core::element_token::ResolvedElement::None => None,
-        };
-        let window_id_resolved: Option<u64> = match &resolved {
-            pincer_core::element_token::ResolvedElement::Element { window_id, .. } => {
-                Some(*window_id)
-            }
-            pincer_core::element_token::ResolvedElement::None => args.opt_u64("window_id"),
-        };
-        if let Some(idx) = elem_idx_resolved {
-            let xid_hint = window_id_resolved;
-            let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(u64, f64, f64)> {
-                checked_element_local_coords(pid, idx, xid_hint)
-            })
-            .await;
-            return match result {
-                Ok(Ok((xid, lx, ly))) => {
-                    if let Ok(Ok(((sx, sy), rect))) = tokio::task::spawn_blocking(move || {
-                        element_screen_center_and_rect(pid, idx, Some(xid))
-                    })
-                    .await
-                    {
-                        crate::overlay::send_command_for(
-                            cursor_id.clone(),
-                            cursor_overlay::OverlayCommand::PinAbove(xid),
-                        );
-                        reveal_pointer_action_target_for(
-                            &self.state,
-                            &cursor_id,
-                            sx,
-                            sy,
-                            true,
-                            Some(rect),
-                        )
-                        .await;
-                    }
-                    let lxi = lx as i32;
-                    let lyi = ly as i32;
-                    let wayland_point = crate::wayland::wayland_input_enabled()
-                        .then(|| crate::wayland::window_local_to_output(xid, lxi, lyi));
-                    let cursor_id_for_task = cursor_id.clone();
-                    let click_result =
-                        tokio::task::spawn_blocking(move || -> anyhow::Result<PointerRoute> {
-                            if crate::wayland::is_inject_mode() {
-                                return crate::wayland::inject_click(pid, xid, lx, ly, 1, 3)
-                                    .map(|()| PointerRoute::Wayland);
-                            }
-                            if crate::wayland::wayland_input_enabled() {
-                                let (output_x, output_y) = wayland_point.unwrap_or((lxi, lyi));
-                                return crate::wayland::click(xid, output_x, output_y, 1, 3)
-                                    .map(|()| PointerRoute::Wayland);
-                            }
-                            if delivery.is_foreground() {
-                                return foreground_right_click(pid, xid, lxi as f64, lyi as f64);
-                            }
-                            x11_pixel_click_no_focus_steal(&cursor_id_for_task, xid, lxi, lyi, 3, 1)
-                        })
-                        .await;
-                    let mode_label = if delivery.is_foreground() {
-                        "foreground"
-                    } else {
-                        "background"
-                    };
-                    match click_result {
-                        Ok(Ok(route)) => ToolResult::text(format!(
-                            "Right-clicked element [{idx}] {}",
-                            route.text_suffix(mode_label)
-                        ))
-                        .with_structured(route.structured(mode_label)),
-                        Ok(Err(e)) => input_error_result(e),
-                        Err(e) => ToolResult::error(format!("Task error: {e}")),
-                    }
-                }
-                Ok(Err(e)) => input_error_result(e.context("AT-SPI bounds failed")),
-                Err(e) => ToolResult::error(format!("Task error: {e}")),
-            };
-        }
-        if let Some(refusal) = require_point_args("right_click", &args) {
-            return refusal;
-        }
-        let xid = match window_id_resolved {
-            Some(v) => v,
-            None => return ToolResult::error("Provide either element_token or pid + window_id + x/y."),
-        };
-        let desktop_frame = desktop_frame_requested(&args);
-        let from_zoom = args.bool_or("from_zoom", false);
-        let mut x = args.f64_or("x", 0.0);
-        let mut y = args.f64_or("y", 0.0);
-        if desktop_frame {
-            // Desktop pixels: no zoom/screenshot scaling; translated once below.
-        } else if from_zoom {
-            match self.state.zoom_context(&args, pid, Some(xid)) {
-                Ok(ctx) => {
-                    let (wx, wy) = ctx.zoom_to_window(x, y);
-                    x = wx;
-                    y = wy;
-                }
-                Err(refusal) => return refusal,
-            }
-        } else {
-            let ratio = match screenshot_scale(&self.state, &args, pid, Some(xid)) {
-                Ok(ratio) => ratio,
-                Err(refusal) => return refusal,
-            };
-            x *= ratio;
-            y *= ratio;
-        }
-        if desktop_frame {
-            match tokio::task::spawn_blocking(move || desktop_to_window_local(xid, x, y)).await {
-                Ok(Ok((lx, ly))) => {
-                    x = lx;
-                    y = ly;
-                }
-                Ok(Err(e)) => {
-                    return ToolResult::error(format!(
-                        "desktop-frame coordinates could not be mapped into window {xid}: {e}"
-                    ))
-                }
-                Err(e) => return ToolResult::error(format!("Task error: {e}")),
-            }
-        }
-        crate::overlay::send_command_for(
-            cursor_id.clone(),
-            cursor_overlay::OverlayCommand::PinAbove(xid),
-        );
-        let wayland_output_point = if crate::wayland::wayland_input_enabled() {
-            Some(crate::wayland::window_local_to_output(
-                xid,
-                x.round() as i32,
-                y.round() as i32,
-            ))
-        } else {
-            None
-        };
-        let glide_target = if let Some((sx, sy)) = wayland_output_point {
-            Some((sx as f64, sy as f64))
-        } else {
-            tokio::task::spawn_blocking(move || window_local_to_screen(xid, x, y))
-                .await
-                .ok()
-                .and_then(|r| r.ok())
-        };
-        if let Some((sx, sy)) = glide_target {
-            reveal_pointer_action_for(&self.state, &cursor_id, sx, sy, true).await;
-        }
-        let (xi, yi) = (x as i32, y as i32);
-        let cursor_id_for_task = cursor_id.clone();
-        let result = tokio::task::spawn_blocking(move || -> anyhow::Result<PointerRoute> {
-            if crate::wayland::is_inject_mode() {
-                return crate::wayland::inject_click(pid, xid, x, y, 1, 3)
-                    .map(|()| PointerRoute::Wayland);
-            }
-            if crate::wayland::wayland_input_enabled() {
-                let (output_x, output_y) = wayland_output_point.unwrap_or((xi, yi));
-                return crate::wayland::click(xid, output_x, output_y, 1, 3)
-                    .map(|()| PointerRoute::Wayland);
-            }
-            if delivery.is_foreground() {
-                return foreground_right_click(pid, xid, xi as f64, yi as f64);
-            }
-            x11_pixel_click_no_focus_steal(&cursor_id_for_task, xid, xi, yi, 3, 1)
-        })
-        .await;
-        let mode_label = if delivery.is_foreground() {
-            "foreground"
-        } else {
-            "background"
-        };
-        let outcome = match result {
-            Ok(Ok(route)) => ToolResult::text(format!(
-                "Right-clicked at ({x:.1}, {y:.1}) {}",
-                route.text_suffix(mode_label)
-            ))
-            .with_structured(route.structured(mode_label)),
-            Ok(Err(e)) => input_error_result(e),
-            Err(e) => ToolResult::error(format!("Task error: {e}")),
-        };
-        with_pixel_points(
-            outcome,
-            glide_target.map(|(sx, sy)| (sx.round() as i32, sy.round() as i32)),
-            (xi, yi),
-        )
+        gesture_click(&self.state, args, ClickKind::Right).await
     }
 }
 
@@ -14549,30 +14242,11 @@ impl Tool for DragTool {
             None
         };
 
-        let from_zoom = args.bool_or("from_zoom", false);
-        let desktop_frame = desktop_frame_requested(&args);
-        let context = match coordinate_drag_context(native_refusal, || {
-            if desktop_frame {
-                // Desktop pixels: no zoom/screenshot scaling; translated below.
-                Ok(CoordinateContext::Screenshot(1.0))
-            } else if from_zoom {
-                self.state
-                    .zoom_context(&args, pid, Some(xid))
-                    .map(CoordinateContext::Zoom)
-            } else {
-                screenshot_scale(&self.state, &args, pid, Some(xid))
-                    .map(CoordinateContext::Screenshot)
-            }
-        }) {
-            Ok(context) => context,
-            Err(refusal) => return refusal,
-        };
-
         let coerce = |key: &str| -> Option<f64> {
             args.opt_f64(key)
                 .or_else(|| args.opt_i64(key).map(|i| i as f64))
         };
-        let mut from_x = match coerce("from_x") {
+        let from_x = match coerce("from_x") {
             Some(v) => v,
             None => {
                 return invalid_pointer_arguments(
@@ -14581,7 +14255,7 @@ impl Tool for DragTool {
                 )
             }
         };
-        let mut from_y = match coerce("from_y") {
+        let from_y = match coerce("from_y") {
             Some(v) => v,
             None => {
                 return invalid_pointer_arguments(
@@ -14590,11 +14264,11 @@ impl Tool for DragTool {
                 )
             }
         };
-        let mut to_x = match coerce("to_x") {
+        let to_x = match coerce("to_x") {
             Some(v) => v,
             None => return ToolResult::error("Missing: to_x"),
         };
-        let mut to_y = match coerce("to_y") {
+        let to_y = match coerce("to_y") {
             Some(v) => v,
             None => return ToolResult::error("Missing: to_y"),
         };
@@ -14603,41 +14277,19 @@ impl Tool for DragTool {
         let steps = args.u64_or("steps", 20) as usize;
         let button_str = args.str_or("button", "left");
         let button = parse_mouse_button(button_str.as_str());
-        match context {
-            CoordinateContext::Zoom(context) => {
-                (from_x, from_y) = context.zoom_to_window(from_x, from_y);
-                (to_x, to_y) = context.zoom_to_window(to_x, to_y);
-            }
-            CoordinateContext::Screenshot(scale) => {
-                from_x *= scale;
-                from_y *= scale;
-                to_x *= scale;
-                to_y *= scale;
-            }
-        }
-        if desktop_frame {
-            let mapped = tokio::task::spawn_blocking(move || {
-                Ok::<_, anyhow::Error>((
-                    desktop_to_window_local(xid, from_x, from_y)?,
-                    desktop_to_window_local(xid, to_x, to_y)?,
-                ))
-            })
-            .await;
-            match mapped {
-                Ok(Ok(((fx, fy), (tx, ty)))) => {
-                    from_x = fx;
-                    from_y = fy;
-                    to_x = tx;
-                    to_y = ty;
-                }
-                Ok(Err(e)) => {
-                    return ToolResult::error(format!(
-                        "desktop-frame coordinates could not be mapped into window {xid}: {e}"
-                    ))
-                }
-                Err(e) => return ToolResult::error(format!("Task error: {e}")),
-            }
-        }
+        let [(from_x, from_y), (to_x, to_y)] = match resolve_window_points(
+            &self.state,
+            &args,
+            "drag",
+            (pid, xid),
+            [(from_x, from_y), (to_x, to_y)],
+            native_refusal,
+        )
+        .await
+        {
+            Ok(points) => points,
+            Err(refusal) => return refusal,
+        };
 
         if hyprland_foreground(delivery) {
             if button_str != "left" || args.get("modifier").is_some_and(|value| !value.is_null()) {
@@ -15234,42 +14886,19 @@ impl Tool for MouseButtonDownTool {
         }
         let button_name = args.str_or("button", "left");
         let button = parse_mouse_button(button_name.as_str());
-        let mut x = args.f64_or("x", 0.0);
-        let mut y = args.f64_or("y", 0.0);
-        let desktop_frame = desktop_frame_requested(&args);
-        if desktop_frame {
-            // Desktop pixels: no zoom/screenshot scaling; translated once below.
-        } else if args.bool_or("from_zoom", false) {
-            match self.state.zoom_context(&args, pid, Some(xid)) {
-                Ok(ctx) => {
-                    let (wx, wy) = ctx.zoom_to_window(x, y);
-                    x = wx;
-                    y = wy;
-                }
-                Err(refusal) => return refusal,
-            }
-        } else {
-            let ratio = match screenshot_scale(&self.state, &args, pid, Some(xid)) {
-                Ok(ratio) => ratio,
-                Err(refusal) => return refusal,
-            };
-            x *= ratio;
-            y *= ratio;
-        }
-        if desktop_frame {
-            match tokio::task::spawn_blocking(move || desktop_to_window_local(xid, x, y)).await {
-                Ok(Ok((lx, ly))) => {
-                    x = lx;
-                    y = ly;
-                }
-                Ok(Err(e)) => {
-                    return ToolResult::error(format!(
-                        "desktop-frame coordinates could not be mapped into window {xid}: {e}"
-                    ))
-                }
-                Err(e) => return ToolResult::error(format!("Task error: {e}")),
-            }
-        }
+        let (x, y) = match resolve_window_points(
+            &self.state,
+            &args,
+            "mouse_button_down",
+            (pid, xid),
+            [(args.f64_or("x", 0.0), args.f64_or("y", 0.0))],
+            None,
+        )
+        .await
+        {
+            Ok([point]) => point,
+            Err(refusal) => return refusal,
+        };
 
         crate::overlay::send_command_for(
             cursor_id.clone(),
@@ -15451,25 +15080,19 @@ impl Tool for MouseDragTool {
         if let Some(refusal) = require_point_args("mouse_drag", &args) {
             return refusal;
         }
-        let mut to_x = args.f64_or("x", 0.0);
-        let mut to_y = args.f64_or("y", 0.0);
-        if args.bool_or("from_zoom", false) {
-            match self.state.zoom_context(&args, hold.pid, Some(hold.xid)) {
-                Ok(ctx) => {
-                    let (wx, wy) = ctx.zoom_to_window(to_x, to_y);
-                    to_x = wx;
-                    to_y = wy;
-                }
-                Err(refusal) => return refusal,
-            }
-        } else {
-            let ratio = match screenshot_scale(&self.state, &args, hold.pid, Some(hold.xid)) {
-                Ok(ratio) => ratio,
-                Err(refusal) => return refusal,
-            };
-            to_x *= ratio;
-            to_y *= ratio;
-        }
+        let (to_x, to_y) = match resolve_window_points(
+            &self.state,
+            &args,
+            "mouse_drag",
+            (hold.pid, hold.xid),
+            [(args.f64_or("x", 0.0), args.f64_or("y", 0.0))],
+            None,
+        )
+        .await
+        {
+            Ok([point]) => point,
+            Err(refusal) => return refusal,
+        };
 
         let xid = hold.xid;
 
