@@ -446,3 +446,27 @@ fn only_page_content_of_a_browser_engine_is_a_web_page() {
     assert_eq!(web_page_engine_of(Some(false), chromium), None);
     assert_eq!(web_page_engine_of(Some(true), None), None);
 }
+
+/// Firefox 159 answers an AT-SPI SetTextContents (and DeleteText or
+/// InsertText) on a page field with success and leaves the field as it
+/// was. The suspected no-op says so and names the route that reaches the
+/// page, typed keys, instead of only asking for a re-read.
+#[test]
+fn a_web_page_field_that_kept_its_value_says_to_type_it() {
+    use crate::web_engine::WebEngine;
+    for (engine, retype) in [
+        (WebEngine::Gecko, "type_text with the field's x,y"),
+        (WebEngine::Chromium, "browser_type"),
+    ] {
+        let result = set_value_page_result(4, "hello", Some("old".into()), false, engine);
+        let s = result.structured_content.clone().unwrap();
+        assert_eq!(s["effect"], "suspected_noop", "{engine:?}");
+        assert_eq!(s["verified"], false);
+        assert_eq!(s["readback"], "old");
+        assert_eq!(s["web_engine"], engine.name());
+        let text = result_text(&result);
+        assert!(text.contains("without applying it"), "{text}");
+        assert!(text.contains(retype), "{text}");
+        assert!(!text.contains("may not have committed"), "{text}");
+    }
+}

@@ -12889,12 +12889,20 @@ fn web_page_engine_of(
 }
 
 /// `set_value` result for an AT-SPI write to a field of a web page that
-/// `engine` renders. The engine changes the field's text, which is all the
-/// read-back sees, but the page's scripts may never get the `input` event a
-/// typed character fires; a framework that keeps its own copy of the value
-/// (React) then still holds and submits the old one. So a matching read-back
-/// is only `unverifiable`, and the result says to check the page. A
-/// read-back that does not match is the suspected no-op it is anywhere.
+/// `engine` renders. The AT-SPI read-back is the accessibility copy of the
+/// field's text, not what the page's scripts saw: a page that never gets the
+/// `input` event a typed character fires keeps its own copy of the value (a
+/// React form submits that one). So a matching read-back is only
+/// `unverifiable`, and the result says to check the page.
+///
+/// A read-back that does not match is the suspected no-op it is anywhere,
+/// and says the route that does reach the page. Checked in a KWin X11
+/// sandbox against a page that logs every event and keeps a React-style
+/// value tracker: Firefox 159 answers SetTextContents, DeleteText and
+/// InsertText on a page field with success and leaves the field and the page
+/// as they were; Chromium 156 exposes no EditableText on one (set_value
+/// types there instead); typed keys reach both pages as trusted keydown,
+/// beforeinput and input events with the tracked state equal to the field.
 fn set_value_page_result(
     idx: usize,
     value: &str,
@@ -12902,14 +12910,11 @@ fn set_value_page_result(
     password: bool,
     engine: crate::web_engine::WebEngine,
 ) -> ToolResult {
-    let result = set_value_result(idx, value, "ax", readback.clone(), password, None);
-    let confirmed = result
+    let mut result = set_value_result(idx, value, "ax", readback.clone(), password, None);
+    let effect = result
         .structured_content
         .as_ref()
-        .is_some_and(|structured| structured["effect"] == "confirmed");
-    if !confirmed {
-        return result;
-    }
+        .and_then(|structured| structured["effect"].as_str().map(str::to_owned));
     let (product, check, retype) = match engine {
         crate::web_engine::WebEngine::Chromium => (
             "Chromium",
@@ -12922,6 +12927,25 @@ fn set_value_page_result(
             "type_text with the field's x,y",
         ),
     };
+    match effect.as_deref() {
+        Some("confirmed") => {}
+        Some("suspected_noop") => {
+            let seen = readback.unwrap_or_default();
+            if let Some(structured) = result.structured_content.as_mut() {
+                structured["web_engine"] = json!(engine.name());
+            }
+            result.content = vec![pincer_core::protocol::Content::text(format!(
+                "Set value of element [{idx}] to {} (path=ax) on a web page rendered by \
+                 {product}; the field still reads back {}: the browser accepted the \
+                 accessibility write without applying it (Firefox does this for page fields). \
+                 Not changed: type the value instead ({retype}).",
+                quote_untrusted(value, SHOWN_NAME_CHARS),
+                readback_quoted(&seen)
+            ))];
+            return result;
+        }
+        _ => return result,
+    }
     let mut structured = json!({
         "path": "ax",
         "verified": false,
