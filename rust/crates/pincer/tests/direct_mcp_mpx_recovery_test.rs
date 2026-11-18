@@ -47,8 +47,11 @@ extern "C" {
 #[link(name = "Xi")]
 extern "C" {
     fn XIQueryVersion(display: *mut c_void, major: *mut c_int, minor: *mut c_int) -> c_int;
-    fn XIChangeHierarchy(display: *mut c_void, changes: *mut XIAddMasterInfo, count: c_int)
-        -> c_int;
+    fn XIChangeHierarchy(
+        display: *mut c_void,
+        changes: *mut XIAddMasterInfo,
+        count: c_int,
+    ) -> c_int;
     fn XIQueryDevice(display: *mut c_void, device: c_int, count: *mut c_int) -> *mut XIDeviceInfo;
     fn XIFreeDeviceInfo(info: *mut XIDeviceInfo);
 }
@@ -67,7 +70,15 @@ struct PrivateDisplay {
 impl PrivateDisplay {
     fn start() -> Option<Self> {
         let mut server = match Command::new("Xvfb")
-            .args(["-displayfd", "1", "-nolisten", "tcp", "-screen", "0", "640x480x24"])
+            .args([
+                "-displayfd",
+                "1",
+                "-nolisten",
+                "tcp",
+                "-screen",
+                "0",
+                "640x480x24",
+            ])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -125,7 +136,11 @@ impl PrivateDisplay {
             .iter()
             .filter(|device| device.use_ == XI_MASTER_POINTER)
             // SAFETY: each name is a C string owned by the list.
-            .map(|device| unsafe { CStr::from_ptr(device.name) }.to_string_lossy().into_owned())
+            .map(|device| {
+                unsafe { CStr::from_ptr(device.name) }
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect();
         // SAFETY: freed once, after the last read.
         unsafe { XIFreeDeviceInfo(devices) };
@@ -188,7 +203,12 @@ fn master_name(domain: &str, pid: u32, start_ticks: u64, nonce: u64) -> String {
 fn own_start_ticks() -> u64 {
     let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
     let after_command = &stat[stat.rfind(')').unwrap() + 2..];
-    after_command.split_whitespace().nth(19).unwrap().parse().unwrap()
+    after_command
+        .split_whitespace()
+        .nth(19)
+        .unwrap()
+        .parse()
+        .unwrap()
 }
 
 /// Run direct `pincer mcp` on `display` with stdin closed, so it starts and
@@ -202,7 +222,10 @@ fn run_direct_mcp(display: &PrivateDisplay, session: &[(&str, &str)]) -> String 
         .envs(state.env())
         .env("DISPLAY", &display.name)
         .env_remove("WAYLAND_DISPLAY")
-        .env("DBUS_SESSION_BUS_ADDRESS", format!("unix:path={}", bus.display()))
+        .env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={}", bus.display()),
+        )
         .env("NO_AT_BRIDGE", "1")
         .env("PINCER_DISABLE_A11Y_ADVERTISE", "1")
         .env("PINCER_TELEMETRY_ENABLED", "false")
@@ -251,7 +274,10 @@ fn add_test_masters(display: &PrivateDisplay, domain: &str, nonce: u64) -> (Stri
     }
     let masters = display.master_pointers();
     for name in [&orphan, &live] {
-        assert!(masters.contains(name), "test master {name} missing: {masters:?}");
+        assert!(
+            masters.contains(name),
+            "test master {name} missing: {masters:?}"
+        );
     }
     (orphan, live)
 }
@@ -298,6 +324,9 @@ fn direct_mcp_leaves_masters_alone_on_kde_x11() {
 
     let after = display.master_pointers();
     for name in [&orphan, &live] {
-        assert!(after.contains(name), "{name} was removed on KDE X11: {after:?}\n{outcome}");
+        assert!(
+            after.contains(name),
+            "{name} was removed on KDE X11: {after:?}\n{outcome}"
+        );
     }
 }

@@ -51,7 +51,12 @@ fn documented_flags_still_work() {
     for args in [
         &["manifest", "--pretty"][..],
         &["manifest", "-p"][..],
-        &["--no-overlay", "--cursor-theme", "pincer.default", "manifest"][..],
+        &[
+            "--no-overlay",
+            "--cursor-theme",
+            "pincer.default",
+            "manifest",
+        ][..],
         &["--glide-ms", "-1", "manifest"][..],
         &["dump-docs", "--type=cli"][..],
         &["mcp-config", "--client", "claude"][..],

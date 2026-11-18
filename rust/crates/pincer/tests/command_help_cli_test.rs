@@ -120,7 +120,10 @@ fn help_describes_what_linux_does() {
             .to_owned();
         assert!(compat.contains("no effect"), "{name}: {compat}");
     }
-    let serve = subcommand("serve")["description"].as_str().unwrap().to_owned();
+    let serve = subcommand("serve")["description"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     assert!(serve.contains("Linux"), "{serve}");
     let autostart = subcommand("autostart")["description"]
         .as_str()

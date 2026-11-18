@@ -268,7 +268,8 @@ fn unknown_flag_error(args: &[String]) -> Option<String> {
     let looks_like_flag = |arg: &str| {
         arg.len() > 1
             && arg.starts_with('-')
-            && !arg[1..].starts_with(|character: char| character.is_ascii_digit() || character == '.')
+            && !arg[1..]
+                .starts_with(|character: char| character.is_ascii_digit() || character == '.')
     };
     let mut index = 0;
     while index < args.len() {
@@ -5212,14 +5213,23 @@ mod tests {
     #[test]
     fn unknown_flags_are_named_and_known_ones_pass() {
         for (argv, error) in [
-            (&["serve", "--no-overaly"][..], "unknown option --no-overaly"),
-            (&["mcp", "--sockt=/tmp/s"][..], "unknown option --sockt=/tmp/s"),
+            (
+                &["serve", "--no-overaly"][..],
+                "unknown option --no-overaly",
+            ),
+            (
+                &["mcp", "--sockt=/tmp/s"][..],
+                "unknown option --sockt=/tmp/s",
+            ),
             (&["-x", "status"][..], "unknown option -x"),
             (&["status", "--"][..], "unknown option --"),
             (&["status", "--json=yes"][..], "--json takes no value"),
             (&["status", "--socket"][..], "--socket needs a value"),
             // Removed upstream options that nothing read.
-            (&["call", "click", "--window-id", "7"][..], "unknown option --window-id"),
+            (
+                &["call", "click", "--window-id", "7"][..],
+                "unknown option --window-id",
+            ),
         ] {
             assert_eq!(
                 unknown_flag_error(&args(argv)).as_deref(),
@@ -5228,14 +5238,40 @@ mod tests {
             );
         }
         for argv in [
-            &["serve", "--socket", "/tmp/s", "--no-overlay", "--pid-file=/tmp/p"][..],
+            &[
+                "serve",
+                "--socket",
+                "/tmp/s",
+                "--no-overlay",
+                "--pid-file=/tmp/p",
+            ][..],
             &["--glide-ms", "-1", "mcp", "--cursor-reduced-motion", "on"][..],
             &["config", "set", "cursor.motion.glide_ms", "-250"][..],
-            &["cursor-theme", "build", "a.lottie", "--output", "b", "--development"][..],
-            &["recording", "render", "in", "out.mp4", "--scale", "1.5", "--no-zoom"][..],
+            &[
+                "cursor-theme",
+                "build",
+                "a.lottie",
+                "--output",
+                "b",
+                "--development",
+            ][..],
+            &[
+                "recording",
+                "render",
+                "in",
+                "out.mp4",
+                "--scale",
+                "1.5",
+                "--no-zoom",
+            ][..],
             &["skills", "install", "--force", "--all-platforms"][..],
             &["history", "delete", "--yes", "--json"][..],
-            &["--embedded", "--parent-liveness-stdio", "serve", "--experimental-pip"][..],
+            &[
+                "--embedded",
+                "--parent-liveness-stdio",
+                "serve",
+                "--experimental-pip",
+            ][..],
             &["revoke", "--session=abc"][..],
         ] {
             assert_eq!(unknown_flag_error(&args(argv)), None, "{argv:?}");

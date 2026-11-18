@@ -1679,7 +1679,10 @@ mod tests {
             )
             .await;
             let response = serde_json::to_value(response).unwrap();
-            assert_eq!(response["result"]["protocolVersion"], answered, "{requested}");
+            assert_eq!(
+                response["result"]["protocolVersion"], answered,
+                "{requested}"
+            );
         }
     }
 

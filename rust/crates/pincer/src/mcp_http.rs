@@ -1489,7 +1489,9 @@ mod tests {
         let (status, _, body) = exchange(addr, "POST", Some(&session), Some(&tools_list)).await;
         assert_eq!(status, 200, "{body}");
         let body: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert!(body["result"]["tools"].as_array().is_some_and(|tools| !tools.is_empty()));
+        assert!(body["result"]["tools"]
+            .as_array()
+            .is_some_and(|tools| !tools.is_empty()));
 
         let start = json!({
             "jsonrpc": "2.0", "id": 3, "method": "tools/call",
@@ -1537,7 +1539,10 @@ mod tests {
         let expiring = SessionRegistry::new(sdk.clone(), Duration::ZERO);
         let idle = expiring.open().unwrap().id.clone();
         let busy = expiring.open().unwrap();
-        assert!(expiring.enter(&idle).is_none(), "an idle session outlived the TTL");
+        assert!(
+            expiring.enter(&idle).is_none(),
+            "an idle session outlived the TTL"
+        );
         assert!(expiring.enter(&busy.id).is_some(), "a busy session expired");
         drop(busy);
 
@@ -1546,14 +1551,22 @@ mod tests {
         let rest: Vec<String> = (1..MAX_SESSIONS)
             .map(|_| full.open().unwrap().id.clone())
             .collect();
-        let newest = full.open().expect("room made by ending the oldest idle session");
-        assert!(full.enter(&oldest).is_none(), "the least recently used session stayed");
+        let newest = full
+            .open()
+            .expect("room made by ending the oldest idle session");
+        assert!(
+            full.enter(&oldest).is_none(),
+            "the least recently used session stayed"
+        );
         let mut held: Vec<SessionLease> = rest
             .iter()
             .map(|id| full.enter(id).expect("a newer session ended"))
             .collect();
         held.push(newest);
-        assert!(full.open().is_none(), "a busy session was ended to make room");
+        assert!(
+            full.open().is_none(),
+            "a busy session was ended to make room"
+        );
         drop(held);
         drop(full);
         drop(expiring);
