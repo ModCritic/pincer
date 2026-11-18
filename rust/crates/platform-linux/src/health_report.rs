@@ -144,7 +144,7 @@ async fn check_ax_capability() -> CheckEntry {
         }
         let hint = if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() {
             format!(
-                "DBUS_SESSION_BUS_ADDRESS is set but org.a11y.Bus has no owner — {}.",
+                "DBUS_SESSION_BUS_ADDRESS is set but org.a11y.Bus has no owner: {}.",
                 crate::a11y::no_bus_advice(crate::a11y::current_desktop().as_deref())
             )
         } else {

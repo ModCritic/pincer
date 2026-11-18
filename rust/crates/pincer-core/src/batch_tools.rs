@@ -275,7 +275,7 @@ impl Tool for RunStepsTool {
             Some(registry) => registry,
             None => {
                 return ToolResult::error(
-                    "run_steps is not available: registry not initialised yet.",
+                    "run_steps is not available: registry not initialized yet.",
                 )
             }
         };

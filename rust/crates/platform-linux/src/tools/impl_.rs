@@ -8527,7 +8527,7 @@ static CLICK_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
 /// Where a foreground element click may put the real pointer.
 enum ForegroundElementPlacement {
-    /// The element centre lies inside the target window (or a popup of the
+    /// The element center lies inside the target window (or a popup of the
     /// same process): XTest-click it there.
     Point { xid: u64, sx: f64, sy: f64 },
     /// The element has no usable on-screen bounds (its menu is closed, its
@@ -9052,7 +9052,7 @@ impl ClickKind {
 }
 
 /// Where a double_click or right_click by element token lands: the element
-/// centre in its window's real pixels and its screen rectangle for the
+/// center in its window's real pixels and its screen rectangle for the
 /// overlay. Bounded like click's element placement: resolving bounds
 /// re-walks the AT-SPI tree, which can stall on a large GTK or VCL window.
 async fn gesture_element_point(
@@ -9256,7 +9256,7 @@ impl ClickTool {
         let button_str_raw = args.str_or("button", "left").to_lowercase();
         if !matches!(button_str_raw.as_str(), "" | "left" | "right" | "middle") {
             return ToolResult::error(format!(
-                "{}: unknown button \"{button_str_raw}\" — expected one of left, right, middle.",
+                "{}: unknown button \"{button_str_raw}\"; expected one of left, right, middle.",
                 kind.tool()
             ));
         }
@@ -9700,7 +9700,7 @@ impl ClickTool {
             }
         }
 
-        // One point in the window's real pixels: a gesture's element centre,
+        // One point in the window's real pixels: a gesture's element center,
         // or x,y in the frame the call names.
         let (xid, x, y, target_rect) = match gesture_element {
             Some((_, xid, x, y, rect)) => (xid, x, y, rect),
@@ -17605,7 +17605,7 @@ impl Tool for CheckPermissionsTool {
                 .to_string()
         } else {
             format!(
-                "❌ session bus present but org.a11y.Bus has no owner — {}",
+                "❌ session bus present but org.a11y.Bus has no owner: {}",
                 crate::a11y::no_bus_advice(crate::a11y::current_desktop().as_deref())
             )
         };

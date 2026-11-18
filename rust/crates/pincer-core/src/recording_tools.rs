@@ -457,7 +457,7 @@ impl Tool for ReplayTrajectoryTool {
             None => {
                 return replay_error(
                     "facility_unavailable",
-                    "Replay not available: registry not initialised yet.".into(),
+                    "Replay not available: registry not initialized yet.".into(),
                 )
             }
         };

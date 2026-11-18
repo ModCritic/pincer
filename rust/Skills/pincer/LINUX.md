@@ -126,7 +126,7 @@ The loop still closes for most questions, and none of this needs a vision model:
 `verify_state` proves state and returns a real `satisfied` / `unsatisfied` /
 `unknown` verdict; `list_windows` shows which window is in front (highest
 `z_index`); and, where the client reads files, scanning a saved capture for
-colour transitions proves coarse layout.
+color transitions proves coarse layout.
 What none of them prove is that a specific small control was activated. For that
 use an app that exposes a usable accessibility tree.
 

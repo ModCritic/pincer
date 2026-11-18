@@ -238,7 +238,7 @@ impl Tool for RunScriptTool {
             Some(registry) => registry,
             None => {
                 return ToolResult::error(
-                    "run_script is not available: registry not initialised yet.",
+                    "run_script is not available: registry not initialized yet.",
                 )
             }
         };
