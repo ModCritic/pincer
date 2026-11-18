@@ -51,7 +51,7 @@ atspi = { version = "0.30", default-features = false, features = ["proxies", "wr
 # route this crate takes. CI checks that `cargo tree -e features -i
 # atspi-connection` shows no `p2p`.
 atspi-connection = { version = "0.14", default-features = false, features = ["wrappers"] }
-evdev = "0.12"
+evdev = "0.13"
 # Native Wayland backend (window enumeration via wlr-foreign-toplevel-management;
 # capture/input protocols added as those slices land). Pure-Rust client; used
 # when running under a Wayland compositor with no X11 (no DISPLAY).

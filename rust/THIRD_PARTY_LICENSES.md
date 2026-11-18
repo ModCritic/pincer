@@ -51,7 +51,6 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | base64 | 0.22.1 | MIT OR Apache-2.0 | MIT |
 | bit-set | 0.8.0 | Apache-2.0 OR MIT | MIT |
 | bit-vec | 0.8.0 | Apache-2.0 OR MIT | MIT |
-| bitflags | 1.3.2 | MIT/Apache-2.0 | MIT |
 | bitflags | 2.11.1 | MIT OR Apache-2.0 | MIT |
 | bitvec | 1.0.1 | MIT | MIT |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 | MIT |
@@ -104,7 +103,7 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | enumflags2 | 0.7.12 | MIT OR Apache-2.0 | MIT |
 | equivalent | 1.0.2 | Apache-2.0 OR MIT | MIT |
 | errno | 0.3.14 | MIT OR Apache-2.0 | MIT |
-| evdev | 0.12.2 | Apache-2.0 OR MIT | MIT |
+| evdev | 0.13.2 | Apache-2.0 OR MIT | MIT |
 | event-listener | 5.4.1 | Apache-2.0 OR MIT | MIT |
 | event-listener-strategy | 0.5.4 | Apache-2.0 OR MIT | MIT |
 | fancy-regex | 0.18.0 | MIT | MIT |
@@ -175,13 +174,12 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | matchers | 0.2.0 | MIT | MIT |
 | memchr | 2.8.0 | Unlicense OR MIT | MIT |
 | memmap2 | 0.9.10 | MIT OR Apache-2.0 | MIT |
-| memoffset | 0.6.5 | MIT | MIT |
 | micromap | 0.3.0 | MIT | MIT |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | MIT |
 | mio | 1.2.0 | MIT | MIT |
 | moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 | Apache-2.0 |
 | msvc_spectre_libs | 0.1.3 | MIT OR Apache-2.0 | MIT |
-| nix | 0.23.2 | MIT | MIT |
+| nix | 0.29.0 | MIT | MIT |
 | nom | 8.0.0 | MIT | MIT |
 | nu-ansi-term | 0.50.3 | MIT | MIT |
 | num | 0.4.3 | MIT OR Apache-2.0 | MIT |
@@ -329,7 +327,7 @@ crates.io at the versions listed; Pincer's own files are not affected.
 Each text below is copied from the crate's published package; the crates that
 ship an identical text are listed together above it.
 
-### adler2 2.0.1, allocator-api2 0.2.21, anyhow 1.0.102, async-channel 2.5.0, async-compat 0.2.5, async-executor 1.14.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atomic-waker 1.1.2, blocking 1.6.2, camino 1.2.4, cargo-platform 0.1.9, cargo_metadata 0.19.2, concurrent-queue 2.5.0, dyn-clone 1.0.20, endi 1.1.1, evdev 0.12.2, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, futures-lite 2.6.1, itoa 1.0.18, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, proc-macro2 1.0.106, quote 1.0.45, ref-cast 1.0.25, rustix 1.1.4, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_json 1.0.149, syn 2.0.117, thiserror 1.0.69, thiserror 2.0.18, unicode-ident 1.0.24, unsafe-libyaml 0.2.11, utf-8 0.7.6, x11 2.21.0, zbus-lockstep 0.5.2, zmij 1.0.21, zvariant_utils 3.4.0
+### adler2 2.0.1, allocator-api2 0.2.21, anyhow 1.0.102, async-channel 2.5.0, async-compat 0.2.5, async-executor 1.14.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atomic-waker 1.1.2, blocking 1.6.2, camino 1.2.4, cargo-platform 0.1.9, cargo_metadata 0.19.2, concurrent-queue 2.5.0, dyn-clone 1.0.20, endi 1.1.1, evdev 0.13.2, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, futures-lite 2.6.1, itoa 1.0.18, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, proc-macro2 1.0.106, quote 1.0.45, ref-cast 1.0.25, rustix 1.1.4, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_json 1.0.149, syn 2.0.117, thiserror 1.0.69, thiserror 2.0.18, unicode-ident 1.0.24, unsafe-libyaml 0.2.11, utf-8 0.7.6, x11 2.21.0, zbus-lockstep 0.5.2, zmij 1.0.21, zvariant_utils 3.4.0
 
 ```text
 Permission is hereby granted, free of charge, to any
@@ -754,7 +752,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### bitflags 1.3.2, bitflags 2.11.1, fraction 0.15.4, log 0.4.29, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-integer 0.1.46, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, regex 1.12.3, regex-automata 0.4.14, regex-syntax 0.8.10
+### bitflags 2.11.1, fraction 0.15.4, log 0.4.29, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-integer 0.1.46, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, regex 1.12.3, regex-automata 0.4.14, regex-syntax 0.8.10
 
 ```text
 Copyright (c) 2014 The Rust Project Developers
@@ -4311,30 +4309,6 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### memoffset 0.6.5
-
-```text
-Copyright (c) 2017 Gilad Naaman
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
 ### micromap 0.3.0
 
 ```text
@@ -4705,7 +4679,7 @@ MIT License
     SOFTWARE
 ```
 
-### nix 0.23.2
+### nix 0.29.0
 
 ```text
 The MIT License (MIT)

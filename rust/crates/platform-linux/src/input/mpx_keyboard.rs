@@ -275,13 +275,13 @@ impl KeyboardDeliveryReport {
 
 fn create_uinput_keyboard(name: &str) -> Result<VirtualDevice> {
     guarded_uinput_creation(name, |name| {
-        let mut keys = AttributeSet::<Key>::new();
+        let mut keys = AttributeSet::<KeyCode>::new();
         // Every KEY_* code the X keycode range can address, so any keycode the
         // server's keymap resolves to can be emitted, including the modifiers.
         for code in 1..=MAX_EVDEV_KEY {
-            keys.insert(Key::new(code));
+            keys.insert(KeyCode::new(code));
         }
-        Ok(evdev::uinput::VirtualDeviceBuilder::new()?
+        Ok(VirtualDevice::builder()?
             .name(name)
             .with_keys(&keys)?
             .build()?)
@@ -374,7 +374,7 @@ fn warm_up_keyboard(
     ];
     for step in steps {
         let _ = device.emit(&[InputEvent::new(
-            EventType::KEY,
+            EventType::KEY.0,
             step.evdev_code,
             if step.press { 1 } else { 0 },
         )]);
@@ -575,7 +575,7 @@ fn deliver(
             let emitted = {
                 let mut device = device.lock().unwrap();
                 device.emit(&[InputEvent::new(
-                    EventType::KEY,
+                    EventType::KEY.0,
                     step.evdev_code,
                     if step.press { 1 } else { 0 },
                 )])
@@ -585,7 +585,7 @@ fn deliver(
                 // every later key of this session.
                 let mut device = device.lock().unwrap();
                 for code in held.iter().rev() {
-                    let _ = device.emit(&[InputEvent::new(EventType::KEY, *code, 0)]);
+                    let _ = device.emit(&[InputEvent::new(EventType::KEY.0, *code, 0)]);
                 }
                 return Err(error.into());
             }

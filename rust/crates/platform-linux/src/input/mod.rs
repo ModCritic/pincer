@@ -45,7 +45,7 @@ use xdisplay::open_display;
 
 use anyhow::{anyhow, bail, Context, Result};
 use evdev::uinput::VirtualDevice;
-use evdev::{AttributeSet, EventType, InputEvent, Key, RelativeAxisType};
+use evdev::{AttributeSet, EventType, InputEvent, KeyCode, RelativeAxisCode};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -185,7 +185,7 @@ static MPX_IDLE_REAPER: std::sync::Once = std::sync::Once::new();
 const MPX_IDLE_TTL: Duration = Duration::from_secs(1800);
 const MPX_IDLE_REAPER_PERIOD: Duration = Duration::from_secs(60);
 static MPX_NAME_COUNTER: AtomicU64 = AtomicU64::new(1);
-// evdev 0.12.2 asserts `name.len() + 1 < UINPUT_MAX_NAME_SIZE` while building
+// evdev 0.13.2 asserts `name.len() + 1 < UINPUT_MAX_NAME_SIZE` while building
 // a device. Linux defines UINPUT_MAX_NAME_SIZE as 80, leaving 78 usable bytes.
 const EVDEV_UINPUT_NAME_MAX_BYTES: usize = 78;
 const UINPUT_POINTER_SUFFIX: &str = " uinput pointer";
@@ -889,22 +889,22 @@ pub(crate) fn reap_orphaned_master_pointers() {
 
 fn create_uinput_pointer(name: &str) -> Result<VirtualDevice> {
     guarded_uinput_creation(name, |name| {
-        let mut keys = AttributeSet::<Key>::new();
-        keys.insert(Key::BTN_LEFT);
-        keys.insert(Key::BTN_RIGHT);
-        keys.insert(Key::BTN_MIDDLE);
+        let mut keys = AttributeSet::<KeyCode>::new();
+        keys.insert(KeyCode::BTN_LEFT);
+        keys.insert(KeyCode::BTN_RIGHT);
+        keys.insert(KeyCode::BTN_MIDDLE);
 
-        let mut rel_axes = AttributeSet::<RelativeAxisType>::new();
-        rel_axes.insert(RelativeAxisType::REL_X);
-        rel_axes.insert(RelativeAxisType::REL_Y);
+        let mut rel_axes = AttributeSet::<RelativeAxisCode>::new();
+        rel_axes.insert(RelativeAxisCode::REL_X);
+        rel_axes.insert(RelativeAxisCode::REL_Y);
         // REL_WHEEL (vertical) and REL_HWHEEL (horizontal) so the same uinput
         // slave can also drive scroll: libinput turns these into the XI2
         // smooth-scroll events GTK consumes, where synthetic Button4-7
         // XSendEvents are dropped.
-        rel_axes.insert(RelativeAxisType::REL_WHEEL);
-        rel_axes.insert(RelativeAxisType::REL_HWHEEL);
+        rel_axes.insert(RelativeAxisCode::REL_WHEEL);
+        rel_axes.insert(RelativeAxisCode::REL_HWHEEL);
 
-        Ok(evdev::uinput::VirtualDeviceBuilder::new()?
+        Ok(VirtualDevice::builder()?
             .name(name)
             .with_keys(&keys)?
             .with_relative_axes(&rel_axes)?
@@ -1211,7 +1211,7 @@ fn release_stuck_virtual_input(
         let mut any = false;
         for code in MODIFIER_EVDEV_CODES {
             any |= keyboard
-                .emit(&[InputEvent::new(EventType::KEY, code, 0)])
+                .emit(&[InputEvent::new(EventType::KEY.0, code, 0)])
                 .is_ok();
         }
         if any {
@@ -1437,11 +1437,11 @@ pub fn x11_activate_window_persistent(xid: u64) -> Result<Option<u64>> {
     Ok(prior)
 }
 
-fn button_code(button: u8) -> Result<Key> {
+fn button_code(button: u8) -> Result<KeyCode> {
     match button {
-        1 => Ok(Key::BTN_LEFT),
-        2 => Ok(Key::BTN_MIDDLE),
-        3 => Ok(Key::BTN_RIGHT),
+        1 => Ok(KeyCode::BTN_LEFT),
+        2 => Ok(KeyCode::BTN_MIDDLE),
+        3 => Ok(KeyCode::BTN_RIGHT),
         _ => bail!("unsupported button {button} for uinput pointer"),
     }
 }
@@ -1449,7 +1449,7 @@ fn button_code(button: u8) -> Result<Key> {
 fn emit_button(device: &mut VirtualDevice, button: u8, press: bool) -> Result<()> {
     let code = button_code(button)?;
     device.emit(&[InputEvent::new(
-        EventType::KEY,
+        EventType::KEY.0,
         code.0,
         if press { 1 } else { 0 },
     )])?;
@@ -1471,15 +1471,15 @@ fn emit_relative_motion(device: &mut VirtualDevice, dx: i32, dy: i32) -> Result<
     let mut events = Vec::with_capacity(2);
     if dx != 0 {
         events.push(InputEvent::new(
-            EventType::RELATIVE,
-            RelativeAxisType::REL_X.0,
+            EventType::RELATIVE.0,
+            RelativeAxisCode::REL_X.0,
             dx,
         ));
     }
     if dy != 0 {
         events.push(InputEvent::new(
-            EventType::RELATIVE,
-            RelativeAxisType::REL_Y.0,
+            EventType::RELATIVE.0,
+            RelativeAxisCode::REL_Y.0,
             dy,
         ));
     }
@@ -1495,11 +1495,11 @@ fn emit_relative_motion(device: &mut VirtualDevice, dx: i32, dy: i32) -> Result<
 /// detent count. libinput translates these into the XI2 scroll events GTK reads.
 fn emit_scroll(device: &mut VirtualDevice, horizontal: bool, value: i32) -> Result<()> {
     let axis = if horizontal {
-        RelativeAxisType::REL_HWHEEL
+        RelativeAxisCode::REL_HWHEEL
     } else {
-        RelativeAxisType::REL_WHEEL
+        RelativeAxisCode::REL_WHEEL
     };
-    device.emit(&[InputEvent::new(EventType::RELATIVE, axis.0, value)])?;
+    device.emit(&[InputEvent::new(EventType::RELATIVE.0, axis.0, value)])?;
     Ok(())
 }
 
