@@ -1149,14 +1149,15 @@ mod element_window_tests {
         // type_text by token failed with "GrabFocus returned false".
         let pid = 515_151;
         let (main, dialog) = (0x560_0007, 0x560_0011);
-        cache::update_snapshot(pid, main, &[field(8, "list item", "/main/8")], &[]);
-        cache::update_snapshot(pid, dialog, &[field(8, "text", "/dialog/8")], &[]);
+        // The side index lives as long as the published payloads do.
+        let mut _main = cache::update_snapshot(pid, main, &[field(8, "list item", "/main/8")], &[]);
+        let _dialog = cache::update_snapshot(pid, dialog, &[field(8, "text", "/dialog/8")], &[]);
         for _ in 0..2 {
             assert_eq!(cached_ref(pid, dialog, 8).unwrap().path, "/dialog/8");
             assert_eq!(cached_ref(pid, main, 8).unwrap().path, "/main/8");
             // Reading the main window again must not change what the
             // dialog's index names.
-            cache::update_snapshot(pid, main, &[field(8, "list item", "/main/8")], &[]);
+            _main = cache::update_snapshot(pid, main, &[field(8, "list item", "/main/8")], &[]);
         }
         assert!(cached_ref(pid, 0x560_0099, 8).is_none());
         cache::forget_window(pid, main);
@@ -1179,13 +1180,17 @@ mod element_window_tests {
         let main_bounds = [(8, 786, 521, 191, 36), (30, 900, 700, 80, 20)];
         let dialog_bounds = [(8, 1150, 650, 300, 30)];
         for main_first in [true, false] {
-            if main_first {
-                cache::update_snapshot(pid, main, &main_nodes, &main_bounds);
-                cache::update_snapshot(pid, dialog, &dialog_nodes, &dialog_bounds);
+            // The side index lives as long as the published payloads do.
+            let _payloads = if main_first {
+                let main = cache::update_snapshot(pid, main, &main_nodes, &main_bounds);
+                (
+                    main,
+                    cache::update_snapshot(pid, dialog, &dialog_nodes, &dialog_bounds),
+                )
             } else {
-                cache::update_snapshot(pid, dialog, &dialog_nodes, &dialog_bounds);
-                cache::update_snapshot(pid, main, &main_nodes, &main_bounds);
-            }
+                let dialog = cache::update_snapshot(pid, dialog, &dialog_nodes, &dialog_bounds);
+                (cache::update_snapshot(pid, main, &main_nodes, &main_bounds), dialog)
+            };
             assert_eq!(cached_ref(pid, dialog, 8).unwrap().path, "/dialog/8");
             assert_eq!(cached_role_in(pid, dialog, 8).as_deref(), Some("text"));
             assert_eq!(cached_bounds(pid, dialog, 8), Some((1150, 650, 300, 30)));

@@ -2129,6 +2129,16 @@ impl Tool for GetWindowStateTool {
                         invalidated.extend(state.snapshots.remove(pid as i32, xid));
                         crate::atspi::snapshot::forget_window(pid, xid);
                     }
+                    // Windows of processes that have exited leave the store,
+                    // and with it the AT-SPI side index, instead of holding
+                    // their elements until the runtime ends.
+                    if !observation_only {
+                        for (gone_pid, gone_xid) in
+                            crate::atspi::snapshot::windows_of_exited_processes()
+                        {
+                            state.snapshots.remove(gone_pid as i32, gone_xid);
+                        }
+                    }
                     let (snapshot_id, replaced) = (!observation_only && target_scoped)
                         .then(|| {
                             state.snapshots.publish_sized_for_session(

@@ -14,7 +14,10 @@
 //! 2. A process-global (pid, xid) side index over the same elements, so the
 //!    free functions in `atspi` (get_element_bounds,
 //!    perform_action_at_point_in, ...) can consult the last snapshot by window
-//!    without the tool state threaded through every input path.
+//!    without the tool state threaded through every input path. The index
+//!    holds only a weak reference: the runtime store owns the elements, so a
+//!    window the store retires (per-pid LRU, a newer read, session end, an
+//!    exited process) leaves the index with it.
 //!
 //! Membership follows the runtime cache rule: only nodes with an
 //! `element_index` AND a proven identity are addressable. An unproven
@@ -25,7 +28,7 @@ use super::native::{self, ObjectRef};
 use super::{AtspiIdentity, AtspiNode};
 use pincer_core::snapshot_store::{SnapshotPayload, SnapshotStore};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CacheKey {
@@ -133,7 +136,11 @@ pub type Snapshots = SnapshotStore<AtspiSnapshot>;
 
 // -- (pid, xid) side index ----------------------------------------------------
 
-type SideIndex = HashMap<CacheKey, Arc<HashMap<usize, CachedElement>>>;
+/// Weak: the [`AtspiSnapshot`] published into the runtime store holds the only
+/// strong reference. A strong copy here outlived every store eviction, so the
+/// index grew by one element map per window ever read and a retired window
+/// still answered index lookups.
+type SideIndex = HashMap<CacheKey, Weak<HashMap<usize, CachedElement>>>;
 
 fn store() -> &'static Mutex<SideIndex> {
     static STORE: OnceLock<Mutex<SideIndex>> = OnceLock::new();
@@ -141,7 +148,9 @@ fn store() -> &'static Mutex<SideIndex> {
 }
 
 /// Build the payload for (pid, xid) and record its elements in the side index.
-/// Returns the payload for the caller to publish into the runtime cache.
+/// Returns the payload for the caller to publish into the runtime cache; the
+/// index entry lives exactly as long as that payload does. Entries whose
+/// payload is gone are pruned here.
 pub(crate) fn update_snapshot(
     pid: u32,
     xid: u64,
@@ -149,10 +158,9 @@ pub(crate) fn update_snapshot(
     bounds: &[(usize, i32, i32, u32, u32)],
 ) -> AtspiSnapshot {
     let snapshot = AtspiSnapshot::from_nodes_with_bounds(nodes, bounds);
-    store()
-        .lock()
-        .unwrap()
-        .insert(CacheKey { pid, xid }, snapshot.elements.clone());
+    let mut index = store().lock().unwrap();
+    index.retain(|_, elements| elements.strong_count() > 0);
+    index.insert(CacheKey { pid, xid }, Arc::downgrade(&snapshot.elements));
     snapshot
 }
 
@@ -162,11 +170,43 @@ pub(crate) fn forget_window(pid: u32, xid: u64) {
     store().lock().unwrap().remove(&CacheKey { pid, xid });
 }
 
+/// The (pid, window) pairs of live side-index entries whose process has
+/// exited, for the caller to remove from the runtime store (which frees the
+/// elements and so the entries). Reports only: entries of a live store are
+/// never dropped behind its back.
+pub(crate) fn windows_of_exited_processes() -> Vec<(u32, u64)> {
+    let keys: Vec<CacheKey> = store()
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, elements)| elements.strong_count() > 0)
+        .map(|(key, _)| *key)
+        .collect();
+    let mut alive: HashMap<u32, bool> = HashMap::new();
+    keys.into_iter()
+        .filter(|key| {
+            !*alive
+                .entry(key.pid)
+                .or_insert_with(|| process_exists(key.pid))
+        })
+        .map(|key| (key.pid, key.xid))
+        .collect()
+}
+
+/// Whether `pid` names a process this one can see (its own pid namespace).
+fn process_exists(pid: u32) -> bool {
+    pid != 0 && std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
 /// The snapshot of window `xid` of `pid`. Always by window: element indices
 /// are per window, and a lookup by pid alone took whichever window's snapshot
 /// the map listed first, so the same index named another window's control.
 fn snapshot_for(pid: u32, xid: u64) -> Option<Arc<HashMap<usize, CachedElement>>> {
-    store().lock().unwrap().get(&CacheKey { pid, xid }).cloned()
+    store()
+        .lock()
+        .unwrap()
+        .get(&CacheKey { pid, xid })
+        .and_then(Weak::upgrade)
 }
 
 /// The cached element at `idx` in the last snapshot of window `xid` of `pid`.
@@ -445,5 +485,119 @@ mod tests {
         assert!(cached_element(pid, 78, 2).is_none());
         forget_window(pid, 77);
         assert!(cached_element(pid, 77, 0).is_none());
+    }
+
+    fn side_index_holds(pid: u32, xid: u64) -> bool {
+        store().lock().unwrap().contains_key(&CacheKey { pid, xid })
+    }
+
+    // The side index held its own strong copy of every window ever read, so
+    // a window the runtime store had retired (LRU, replacement, session end)
+    // still answered index lookups and kept its elements in memory.
+    #[test]
+    fn a_window_the_store_evicts_leaves_the_side_index() {
+        let pid = 434_343;
+        let cache = Snapshots::new();
+        let first = 0x900_0001;
+        cache.publish(
+            pid as i32,
+            first,
+            update_snapshot(pid, first, &[node(1)], &[]),
+        );
+        assert!(cached_element(pid, first, 1).is_some());
+        // Eight more windows of the same pid push the first out of the
+        // store's per-pid LRU.
+        for xid in 0x900_0002..0x900_000a {
+            cache.publish(pid as i32, xid, update_snapshot(pid, xid, &[node(1)], &[]));
+        }
+        assert!(!cache.contains_window(pid as i32, first));
+        assert!(
+            cached_element(pid, first, 1).is_none(),
+            "evicted window still answers"
+        );
+        // A later read prunes the dead entry from the map itself.
+        let last = 0x900_000b;
+        cache.publish(
+            pid as i32,
+            last,
+            update_snapshot(pid, last, &[node(1)], &[]),
+        );
+        assert!(!side_index_holds(pid, first), "dead entry kept in the map");
+        for xid in 0x900_0002..=last {
+            forget_window(pid, xid);
+        }
+    }
+
+    #[test]
+    fn a_session_end_or_removal_retires_the_side_index_entry() {
+        let pid = 434_344;
+        let cache = Snapshots::new();
+        let (owned, other) = (0x910_0001, 0x910_0002);
+        cache.publish_for_session(
+            pid as i32,
+            owned,
+            update_snapshot(pid, owned, &[node(2)], &[]),
+            Some("side-index-ending-session"),
+            Some(1.0),
+        );
+        cache.publish(
+            pid as i32,
+            other,
+            update_snapshot(pid, other, &[node(2)], &[]),
+        );
+        cache.retire_session_screenshots("side-index-ending-session");
+        assert!(
+            cached_element(pid, owned, 2).is_none(),
+            "ended session's window still answers"
+        );
+        assert!(cached_element(pid, other, 2).is_some());
+        cache.remove(pid as i32, other);
+        assert!(
+            cached_element(pid, other, 2).is_none(),
+            "removed window still answers"
+        );
+    }
+
+    #[test]
+    fn a_read_published_after_its_session_ended_is_not_indexed() {
+        let pid = 434_345;
+        let cache = Snapshots::new();
+        let xid = 0x920_0001;
+        pincer_core::session::end_session("side-index-ended-session");
+        let published = cache.publish_for_session(
+            pid as i32,
+            xid,
+            update_snapshot(pid, xid, &[node(4)], &[]),
+            Some("side-index-ended-session"),
+            Some(1.0),
+        );
+        assert!(published.is_none());
+        assert!(cached_element(pid, xid, 4).is_none());
+    }
+
+    #[test]
+    fn an_exited_process_gives_up_its_windows() {
+        // No process has this pid: it is above the kernel's largest pid_max.
+        let gone = 4_294_000_001;
+        let alive = std::process::id();
+        let cache = Snapshots::new();
+        let (a, b, c) = (0x930_0001, 0x930_0002, 0x930_0003);
+        cache.publish(gone as i32, a, update_snapshot(gone, a, &[node(1)], &[]));
+        cache.publish(gone as i32, b, update_snapshot(gone, b, &[node(1)], &[]));
+        cache.publish(alive as i32, c, update_snapshot(alive, c, &[node(1)], &[]));
+        // Other tests index made-up pids at the same time: look at ours only.
+        let mut exited: Vec<(u32, u64)> = windows_of_exited_processes()
+            .into_iter()
+            .filter(|(pid, _)| [gone, alive].contains(pid))
+            .collect();
+        exited.sort_unstable();
+        assert_eq!(exited, vec![(gone, a), (gone, b)]);
+        for (pid, xid) in exited {
+            cache.remove(pid as i32, xid);
+        }
+        assert!(cached_element(gone, a, 1).is_none());
+        assert!(cached_element(gone, b, 1).is_none());
+        assert!(cached_element(alive, c, 1).is_some());
+        forget_window(alive, c);
     }
 }
