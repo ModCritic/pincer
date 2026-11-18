@@ -10,21 +10,32 @@
 //! concurrent cross-connection actions non-colliding (see the session-identity
 //! work in trycua/cua#1799).
 //!
-//! Minimal hand-rolled HTTP/1.1 — no new dependency, mirroring how the daemon
-//! already hand-rolls its UDS line protocol. `POST` with a JSON-RPC body → the
-//! shared MCP dispatch (`pincer_core::server::handle_request`) → an
-//! `application/json` JSON-RPC response. Each TCP connection is its own task, so
-//! N clients run concurrently. (SSE streaming + transport-level session headers
-//! are a follow-up; tool calls are request/response, so `application/json`
-//! suffices.) Loopback-only — a local automation surface, not a public endpoint.
+//! Minimal hand-rolled HTTP/1.1 with no new dependency, mirroring how the
+//! daemon already hand-rolls its UDS line protocol. `POST` with a JSON-RPC body
+//! goes to the shared MCP dispatch (`pincer_core::server::handle_request`) and
+//! gets an `application/json` JSON-RPC response. Each TCP connection is its own
+//! task, so N clients run concurrently. (SSE streaming is a follow-up; tool
+//! calls are request/response, so `application/json` suffices.) Loopback only:
+//! a local automation surface, not a public endpoint.
+//!
+//! Sessions follow MCP 2025-06-18, Basic > Transports > Streamable HTTP >
+//! Session Management. The response to `initialize` carries a new
+//! `Mcp-Session-Id`; every later request must send it (400 without it), an
+//! unknown or ended id gets 404, and `DELETE` with the header ends the
+//! session. A session is not tied to a TCP connection: a client may reconnect
+//! or use several connections. It ends at `DELETE`, after the configured
+//! session idle TTL with no request, when [`MAX_SESSIONS`] are open and it is
+//! the least recently used idle one, or when the listener stops; its Pincer
+//! sessions end with it.
 //!
 //! Every local account can reach a loopback port, so nothing is read or
 //! allocated for a request body until its headers pass the Origin and bearer
 //! checks. Connections are capped, and a connection that has not yet sent an
 //! authorized request must send a complete request head within a time limit.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use pincer_core::protocol::{Request, Response};
@@ -54,6 +65,180 @@ const BODY_TIMEOUT: Duration = Duration::from_secs(30);
 const LINGER_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_HEAD: usize = 64 * 1024;
 const MAX_BODY: usize = 16 * 1024 * 1024;
+/// MCP HTTP sessions open at once. A new one past this ends the least
+/// recently used idle session; when every one is busy, `initialize` gets 503.
+const MAX_SESSIONS: usize = 256;
+
+const MISSING_SESSION: &[u8] = br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Send the Mcp-Session-Id header from the initialize response, or initialize first"}}"#;
+const INVALID_SESSION: &[u8] = br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Send one Mcp-Session-Id header of visible ASCII characters"}}"#;
+const UNKNOWN_SESSION: &[u8] = br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Unknown or ended MCP session; send initialize without Mcp-Session-Id to start a new one"}}"#;
+const TOO_MANY_SESSIONS: &[u8] = br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"Too many MCP HTTP sessions are busy; end one with DELETE and retry"}}"#;
+
+/// One MCP HTTP session.
+struct HttpSession {
+    /// The transport session its Pincer sessions belong to. Distinct from the
+    /// `Mcp-Session-Id`, which only its client holds.
+    transport_session: String,
+    last_used: std::time::Instant,
+    /// Requests running in it; a busy session never ends for idleness.
+    in_flight: usize,
+}
+
+/// The open MCP HTTP sessions by `Mcp-Session-Id`, shared by every connection
+/// of one listener. Dropping it ends them all.
+struct SessionRegistry {
+    sdk: Arc<crate::sdk_adapter::SdkAdapter>,
+    idle_ttl: Duration,
+    sessions: Mutex<HashMap<String, HttpSession>>,
+}
+
+/// A request's hold on its session: it keeps the session from ending for
+/// idleness until the request is answered.
+struct SessionLease {
+    registry: Arc<SessionRegistry>,
+    id: String,
+    transport_session: String,
+}
+
+impl Drop for SessionLease {
+    fn drop(&mut self) {
+        self.registry.leave(&self.id);
+    }
+}
+
+impl SessionRegistry {
+    fn new(sdk: Arc<crate::sdk_adapter::SdkAdapter>, idle_ttl: Duration) -> Arc<Self> {
+        Arc::new(Self {
+            sdk,
+            idle_ttl,
+            sessions: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, HttpSession>> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Remove the sessions idle past the TTL; returns their transport
+    /// sessions, to end once the lock is released.
+    fn expire(&self, sessions: &mut HashMap<String, HttpSession>) -> Vec<String> {
+        let now = std::time::Instant::now();
+        let expired: Vec<String> = sessions
+            .iter()
+            .filter(|(_, session)| {
+                session.in_flight == 0 && now.duration_since(session.last_used) >= self.idle_ttl
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        expired
+            .iter()
+            .filter_map(|id| sessions.remove(id))
+            .map(|session| session.transport_session)
+            .collect()
+    }
+
+    fn end_transport_sessions(&self, transport_sessions: Vec<String>) {
+        for transport_session in transport_sessions {
+            self.sdk.end_transport_sessions(&transport_session);
+        }
+    }
+
+    /// Open a new session for an `initialize`, or `None` when
+    /// [`MAX_SESSIONS`] are open and busy.
+    fn open(self: &Arc<Self>) -> Option<SessionLease> {
+        let (lease, ended) = {
+            let mut sessions = self.lock();
+            let mut ended = self.expire(&mut sessions);
+            if sessions.len() >= MAX_SESSIONS {
+                let idlest = sessions
+                    .iter()
+                    .filter(|(_, session)| session.in_flight == 0)
+                    .min_by_key(|(_, session)| session.last_used)
+                    .map(|(id, _)| id.clone());
+                match idlest.and_then(|id| sessions.remove(&id)) {
+                    Some(session) => ended.push(session.transport_session),
+                    None => {
+                        drop(sessions);
+                        self.end_transport_sessions(ended);
+                        return None;
+                    }
+                }
+            }
+            // Random v4 UUIDs: unguessable, and plain visible ASCII.
+            let id = uuid::Uuid::new_v4().simple().to_string();
+            let transport_session = format!("http-{}", uuid::Uuid::new_v4());
+            sessions.insert(
+                id.clone(),
+                HttpSession {
+                    transport_session: transport_session.clone(),
+                    last_used: std::time::Instant::now(),
+                    in_flight: 1,
+                },
+            );
+            let lease = SessionLease {
+                registry: self.clone(),
+                id,
+                transport_session,
+            };
+            (lease, ended)
+        };
+        self.end_transport_sessions(ended);
+        Some(lease)
+    }
+
+    /// Hold session `id` for one request, or `None` when it is unknown or
+    /// ended.
+    fn enter(self: &Arc<Self>, id: &str) -> Option<SessionLease> {
+        let (lease, ended) = {
+            let mut sessions = self.lock();
+            let ended = self.expire(&mut sessions);
+            let lease = sessions.get_mut(id).map(|session| {
+                session.in_flight += 1;
+                session.last_used = std::time::Instant::now();
+                SessionLease {
+                    registry: self.clone(),
+                    id: id.to_owned(),
+                    transport_session: session.transport_session.clone(),
+                }
+            });
+            (lease, ended)
+        };
+        self.end_transport_sessions(ended);
+        lease
+    }
+
+    fn leave(&self, id: &str) {
+        if let Some(session) = self.lock().get_mut(id) {
+            session.in_flight = session.in_flight.saturating_sub(1);
+            session.last_used = std::time::Instant::now();
+        }
+    }
+
+    /// End session `id` and its Pincer sessions; `false` when it is unknown.
+    fn end(&self, id: &str) -> bool {
+        let removed = self.lock().remove(id);
+        match removed {
+            Some(session) => {
+                self.end_transport_sessions(vec![session.transport_session]);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+impl Drop for SessionRegistry {
+    fn drop(&mut self) {
+        let ended: Vec<String> = self
+            .lock()
+            .drain()
+            .map(|(_, session)| session.transport_session)
+            .collect();
+        self.end_transport_sessions(ended);
+    }
+}
 
 /// Resolve the configured HTTP MCP port: `PINCER_MCP_HTTP_PORT` (> 0), or
 /// `None` (disabled — the daemon spawns the listener only when this is set).
@@ -118,6 +303,10 @@ async fn serve_listener(
     token: Arc<str>,
 ) {
     let permits = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
+    let sessions = SessionRegistry::new(
+        sdk.clone(),
+        pincer_core::session::configured_session_idle_ttl(),
+    );
     // Owned here so that stopping the listener also closes its connections.
     let mut connections = tokio::task::JoinSet::new();
     loop {
@@ -131,9 +320,10 @@ async fn serve_listener(
                     };
                     let sdk = sdk.clone();
                     let token = token.clone();
+                    let sessions = sessions.clone();
                     connections.spawn(async move {
                         let _permit = permit;
-                        if let Err(e) = serve_conn(stream, sdk, token).await {
+                        if let Err(e) = serve_conn(stream, sdk, token, sessions).await {
                             debug!(%peer, "MCP HTTP connection closed: {e}");
                         }
                     });
@@ -159,32 +349,22 @@ fn refuse_over_capacity(stream: TcpStream) {
             503,
             br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"Too many MCP HTTP connections are open; close idle connections and retry"}}"#,
             false,
+            None,
         ));
     }
 }
 
 /// Handle one TCP connection: a keep-alive loop of HTTP requests. Requests on a
 /// single connection stay FIFO-ordered (so one agent's ordered calls are safe);
-/// parallelism comes from DISTINCT connections, each its own task.
+/// parallelism comes from DISTINCT connections, each its own task. Which MCP
+/// session a request belongs to comes from its `Mcp-Session-Id`, not from the
+/// connection.
 async fn serve_conn(
     mut stream: TcpStream,
     sdk: Arc<crate::sdk_adapter::SdkAdapter>,
     token: Arc<str>,
+    sessions: Arc<SessionRegistry>,
 ) -> anyhow::Result<()> {
-    let transport_session = format!("http-{}", uuid::Uuid::new_v4());
-    struct TransportCleanup {
-        sdk: Arc<crate::sdk_adapter::SdkAdapter>,
-        transport_session: String,
-    }
-    impl Drop for TransportCleanup {
-        fn drop(&mut self) {
-            self.sdk.end_transport_sessions(&self.transport_session);
-        }
-    }
-    let _cleanup = TransportCleanup {
-        sdk: sdk.clone(),
-        transport_session: transport_session.clone(),
-    };
     let mut authenticated = false;
     loop {
         let head = match read_request_head(&mut stream, authenticated).await? {
@@ -258,32 +438,24 @@ async fn serve_conn(
             }
         }
         let keep_alive = head.keep_alive;
-        if !head.method.eq_ignore_ascii_case("POST") {
-            write_http(
-                &mut stream,
+        let reply = if head.method.eq_ignore_ascii_case("DELETE") {
+            end_session(&head.session_id, &sessions)
+        } else if !head.method.eq_ignore_ascii_case("POST") {
+            Reply::new(
                 405,
                 br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Use POST /mcp with a JSON-RPC body"}}"#,
-                keep_alive,
             )
-            .await?;
         } else {
-            if let Some(error) =
-                unsupported_protocol_error(&body, head.protocol_version.as_deref())
-            {
-                write_http(&mut stream, 400, error.as_bytes(), keep_alive).await?;
-                if !keep_alive {
-                    return Ok(());
-                }
-                continue;
-            }
-            match dispatch(&body, &sdk, &transport_session).await {
-                Some(resp_json) => {
-                    write_http(&mut stream, 200, resp_json.as_bytes(), keep_alive).await?
-                }
-                // Notification (no id): MCP wants 202 Accepted, no body.
-                None => write_http(&mut stream, 202, b"", keep_alive).await?,
-            }
-        }
+            answer_post(&head, &body, &sdk, &sessions).await
+        };
+        write_http(
+            &mut stream,
+            reply.status,
+            &reply.body,
+            keep_alive,
+            reply.session.as_deref(),
+        )
+        .await?;
         // Honor the client's Connection: close (and HTTP/1.0 default) — close the
         // connection so a client reading until EOF doesn't hang. Parallelism comes
         // from distinct connections regardless of keep-alive.
@@ -299,7 +471,7 @@ async fn serve_conn(
 async fn refuse(stream: &mut TcpStream, status: u16, body: &[u8]) {
     let deadline = Instant::now() + LINGER_TIMEOUT;
     let written =
-        tokio::time::timeout_at(deadline, write_http(stream, status, body, false)).await;
+        tokio::time::timeout_at(deadline, write_http(stream, status, body, false, None)).await;
     if !matches!(written, Ok(Ok(()))) {
         return;
     }
@@ -312,9 +484,92 @@ async fn refuse(stream: &mut TcpStream, status: u16, body: &[u8]) {
     }
 }
 
-/// Parse a JSON-RPC request body and dispatch via the shared MCP handler. Returns
-/// `Some(json)` for a request, or `None` for a notification (no `id`). Applies the
-/// caller-declared `session` identity so HTTP behaves identically to stdio.
+/// One HTTP response: status, body, and the `Mcp-Session-Id` of a session
+/// that `initialize` just opened.
+struct Reply {
+    status: u16,
+    body: Vec<u8>,
+    session: Option<String>,
+}
+
+impl Reply {
+    fn new(status: u16, body: &[u8]) -> Self {
+        Self {
+            status,
+            body: body.to_vec(),
+            session: None,
+        }
+    }
+}
+
+/// Where a request's `Mcp-Session-Id` header left it.
+#[derive(Debug, PartialEq, Eq)]
+enum SessionHeader {
+    Absent,
+    /// Repeated with different values, empty, or not visible ASCII.
+    Invalid,
+    Present(String),
+}
+
+/// `DELETE`: end the session the header names.
+fn end_session(header: &SessionHeader, sessions: &SessionRegistry) -> Reply {
+    match header {
+        SessionHeader::Absent => Reply::new(400, MISSING_SESSION),
+        SessionHeader::Invalid => Reply::new(400, INVALID_SESSION),
+        SessionHeader::Present(id) if sessions.end(id) => Reply::new(200, b""),
+        SessionHeader::Present(_) => Reply::new(404, UNKNOWN_SESSION),
+    }
+}
+
+/// `POST`: one JSON-RPC message, in the session its header names. An
+/// `initialize` without the header opens a new session.
+async fn answer_post(
+    head: &RequestHead,
+    body: &[u8],
+    sdk: &Arc<crate::sdk_adapter::SdkAdapter>,
+    sessions: &Arc<SessionRegistry>,
+) -> Reply {
+    if let Some(error) = unsupported_protocol_error(body, head.protocol_version.as_deref()) {
+        return Reply::new(400, error.as_bytes());
+    }
+    let Ok(request) = serde_json::from_slice::<Request>(body) else {
+        return Reply::new(200, serialize(&Response::parse_error()).as_bytes());
+    };
+    let (lease, opened) = match &head.session_id {
+        SessionHeader::Invalid => return Reply::new(400, INVALID_SESSION),
+        SessionHeader::Present(id) => match sessions.enter(id) {
+            Some(lease) => (lease, false),
+            None => return Reply::new(404, UNKNOWN_SESSION),
+        },
+        SessionHeader::Absent if request.method == "initialize" && request.id.is_some() => {
+            match sessions.open() {
+                Some(lease) => (lease, true),
+                None => return Reply::new(503, TOO_MANY_SESSIONS),
+            }
+        }
+        SessionHeader::Absent => return Reply::new(400, MISSING_SESSION),
+    };
+    let Some(response) = dispatch_request(request, sdk, &lease.transport_session).await else {
+        // Notification (no id): MCP wants 202 Accepted, no body.
+        return Reply::new(202, b"");
+    };
+    let mut reply = Reply::new(200, serialize(&response).as_bytes());
+    if opened {
+        if matches!(
+            response.body,
+            pincer_core::protocol::ResponseBody::Result { .. }
+        ) {
+            reply.session = Some(lease.id.clone());
+        } else {
+            // No InitializeResult, so no session for the client to use.
+            sessions.end(&lease.id);
+        }
+    }
+    reply
+}
+
+/// [`dispatch_request`] for a raw body, serialized.
+#[cfg(test)]
 async fn dispatch(
     body: &[u8],
     sdk: &Arc<crate::sdk_adapter::SdkAdapter>,
@@ -323,10 +578,24 @@ async fn dispatch(
     if let Some(error) = unsupported_protocol_error(body, None) {
         return Some(error);
     }
-    let mut req: Request = match serde_json::from_slice(body) {
+    let req: Request = match serde_json::from_slice(body) {
         Ok(r) => r,
         Err(_) => return Some(serialize(&Response::parse_error())),
     };
+    dispatch_request(req, sdk, transport_session)
+        .await
+        .map(|response| serialize(&response))
+}
+
+/// Dispatch one JSON-RPC message via the shared MCP handler in
+/// `transport_session`. Returns the response to a request, or `None` for a
+/// notification (no `id`). Applies the caller-declared `session` identity so
+/// HTTP behaves identically to stdio.
+async fn dispatch_request(
+    mut req: Request,
+    sdk: &Arc<crate::sdk_adapter::SdkAdapter>,
+    transport_session: &str,
+) -> Option<Response> {
     req.id.as_ref()?;
     apply_session_identity(&mut req, transport_session);
     let session_context = req.tool_call().ok().and_then(|call| {
@@ -349,16 +618,15 @@ async fn dispatch(
         }
     }
     // After the observation, so it reads the structured result.
-    let response = pincer_core::mcp_text_results::for_client(&method, response);
-    Some(serialize(&response))
+    Some(pincer_core::mcp_text_results::for_client(&method, response))
 }
 
 fn is_legacy_protocol(version: &str) -> bool {
     pincer_core::protocol::is_supported_protocol_version(version)
 }
 
-// HTTP still uses connection-scoped sessions. A legacy error permits dual-era
-// clients to fall back to initialize; -32022 would falsely identify a modern
+// HTTP speaks only the initialize-based (legacy) eras. A legacy error permits
+// dual-era clients to fall back to initialize; -32022 would falsely identify a modern
 // endpoint and tell clients to retry per-request version negotiation here.
 fn unsupported_protocol_error(body: &[u8], header: Option<&str>) -> Option<String> {
     let body: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
@@ -435,6 +703,7 @@ struct RequestHead {
     keep_alive: bool,
     authorized: bool,
     protocol_version: Option<String>,
+    session_id: SessionHeader,
 }
 
 enum HeadRead {
@@ -494,6 +763,7 @@ fn parse_request_head(head: &[u8], token: &str) -> RequestHead {
     let mut keep_alive = version.eq_ignore_ascii_case("HTTP/1.1"); // 1.1 defaults to keep-alive
     let mut authorized = false;
     let mut protocol_version = None;
+    let mut session_id = SessionHeader::Absent;
     for line in lines {
         if let Some((k, v)) = line.split_once(':') {
             let (k, v) = (k.trim(), v.trim());
@@ -517,6 +787,16 @@ fn parse_request_head(head: &[u8], token: &str) -> RequestHead {
                 authorized = v.split_once(' ').is_some_and(|(scheme, candidate)| {
                     scheme.eq_ignore_ascii_case("bearer") && constant_time_equal(candidate, token)
                 });
+            } else if k.eq_ignore_ascii_case("mcp-session-id") {
+                // Visible ASCII only (0x21 to 0x7E), once.
+                let valid = !v.is_empty() && v.bytes().all(|byte| (0x21..=0x7e).contains(&byte));
+                session_id = match session_id {
+                    SessionHeader::Absent if valid => SessionHeader::Present(v.to_owned()),
+                    SessionHeader::Present(first) if valid && first == v => {
+                        SessionHeader::Present(first)
+                    }
+                    _ => SessionHeader::Invalid,
+                };
             } else if k.eq_ignore_ascii_case("mcp-protocol-version") {
                 // Keep an unsupported value even if a later duplicate is legacy.
                 if protocol_version.as_deref().is_none_or(is_legacy_protocol) {
@@ -532,6 +812,7 @@ fn parse_request_head(head: &[u8], token: &str) -> RequestHead {
         keep_alive,
         authorized,
         protocol_version,
+        session_id,
     }
 }
 
@@ -598,13 +879,14 @@ fn constant_time_equal(left: &str, right: &str) -> bool {
     difference == 0
 }
 
-fn http_response(status: u16, body: &[u8], keep_alive: bool) -> Vec<u8> {
+fn http_response(status: u16, body: &[u8], keep_alive: bool, session: Option<&str>) -> Vec<u8> {
     let reason = match status {
         200 => "OK",
         202 => "Accepted",
         400 => "Bad Request",
         401 => "Unauthorized",
         403 => "Forbidden",
+        404 => "Not Found",
         405 => "Method Not Allowed",
         408 => "Request Timeout",
         413 => "Payload Too Large",
@@ -612,8 +894,11 @@ fn http_response(status: u16, body: &[u8], keep_alive: bool) -> Vec<u8> {
         _ => "OK",
     };
     let conn = if keep_alive { "keep-alive" } else { "close" };
+    let session = session
+        .map(|id| format!("Mcp-Session-Id: {id}\r\n"))
+        .unwrap_or_default();
     let mut response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: {conn}\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: {conn}\r\n{session}\r\n",
         body.len()
     )
     .into_bytes();
@@ -626,9 +911,10 @@ async fn write_http(
     status: u16,
     body: &[u8],
     keep_alive: bool,
+    session: Option<&str>,
 ) -> anyhow::Result<()> {
     stream
-        .write_all(&http_response(status, body, keep_alive))
+        .write_all(&http_response(status, body, keep_alive, session))
         .await?;
     stream.flush().await?;
     Ok(())
@@ -644,10 +930,12 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
+            let sessions = SessionRegistry::new(sdk.clone(), Duration::from_secs(60));
             serve_conn(
                 stream,
                 sdk,
                 Arc::<str>::from("0123456789abcdef0123456789abcdef"),
+                sessions,
             )
             .await
             .unwrap();
@@ -914,10 +1202,12 @@ mod tests {
         let server_sdk = sdk.clone();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
+            let sessions = SessionRegistry::new(server_sdk.clone(), Duration::from_secs(60));
             serve_conn(
                 stream,
                 server_sdk,
                 Arc::<str>::from("0123456789abcdef0123456789abcdef"),
+                sessions,
             )
             .await
             .unwrap();
@@ -948,7 +1238,8 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            let _ = serve_conn(stream, sdk, Arc::<str>::from(TEST_TOKEN)).await;
+            let sessions = SessionRegistry::new(sdk.clone(), Duration::from_secs(60));
+            let _ = serve_conn(stream, sdk, Arc::<str>::from(TEST_TOKEN), sessions).await;
         });
         (addr, server)
     }
@@ -1089,6 +1380,184 @@ mod tests {
             assert!(message.contains(&port.to_string()), "{message}");
             drop(squatter);
         });
+    }
+
+    /// One request on a fresh connection that closes after the response:
+    /// the status code, the lowercased headers and the body.
+    async fn exchange(
+        addr: SocketAddr,
+        method: &str,
+        session: Option<&str>,
+        body: Option<&serde_json::Value>,
+    ) -> (u16, Vec<(String, String)>, String) {
+        let body = body.map(ToString::to_string).unwrap_or_default();
+        let session = session
+            .map(|id| format!("Mcp-Session-Id: {id}\r\n"))
+            .unwrap_or_default();
+        let request = format!(
+            "{method} /mcp HTTP/1.1\r\nAuthorization: Bearer {TEST_TOKEN}\r\n{session}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        client.write_all(request.as_bytes()).await.unwrap();
+        let mut response = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            client.read_to_end(&mut response),
+        )
+        .await
+        .expect("a response within 20 s")
+        .unwrap();
+        let response = String::from_utf8(response).unwrap();
+        let (head, body) = response.split_once("\r\n\r\n").expect("an HTTP response");
+        let mut lines = head.split("\r\n");
+        let status = lines
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|code| code.parse().ok())
+            .expect("a status line");
+        let headers = lines
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim().to_owned()))
+            .collect();
+        (status, headers, body.to_owned())
+    }
+
+    fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+        headers
+            .iter()
+            .find(|(candidate, _)| candidate == name)
+            .map(|(_, value)| value.as_str())
+    }
+
+    fn session_labels(sdk: &crate::sdk_adapter::SdkAdapter) -> Vec<String> {
+        sdk.operator_sessions_json()["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|session| session["session"].as_str().map(str::to_owned))
+            .collect()
+    }
+
+    /// MCP 2025-06-18, Basic > Transports > Streamable HTTP > Session
+    /// Management: the session id comes in an `Mcp-Session-Id` header on the
+    /// InitializeResult response, later requests carry it (400 without it),
+    /// an unknown or ended id gets 404, and DELETE ends the session. A
+    /// session is not tied to a TCP connection, so it outlives the one that
+    /// opened it.
+    #[tokio::test]
+    async fn http_sessions_follow_the_streamable_http_session_rules() {
+        let _runtime_guard = crate::test_runtime_lock().lock().await;
+        let sdk = crate::sdk_adapter::SdkAdapter::load(crate::build_driver_without_cursor())
+            .await
+            .expect("SDK adapter");
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(serve_listener(
+            listener,
+            sdk.clone(),
+            Arc::<str>::from(TEST_TOKEN),
+        ));
+        let initialize = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "session-test", "version": "1"}}
+        });
+        let tools_list = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}});
+
+        let (status, headers, body) = exchange(addr, "POST", None, Some(&initialize)).await;
+        assert_eq!(status, 200, "{body}");
+        let session = header(&headers, "mcp-session-id")
+            .expect("Mcp-Session-Id on the InitializeResult response")
+            .to_owned();
+        assert!(
+            !session.is_empty() && session.bytes().all(|byte| (0x21..=0x7e).contains(&byte)),
+            "{session:?}"
+        );
+
+        let initialized = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+        let (status, _, _) = exchange(addr, "POST", Some(&session), Some(&initialized)).await;
+        assert_eq!(status, 202);
+
+        let (status, _, body) = exchange(addr, "POST", None, Some(&tools_list)).await;
+        assert_eq!(status, 400, "a request without the session id: {body}");
+        let (status, _, body) =
+            exchange(addr, "POST", Some("no-such-session"), Some(&tools_list)).await;
+        assert_eq!(status, 404, "an unknown session id: {body}");
+
+        // Each exchange is its own TCP connection: the session outlives them.
+        let (status, _, body) = exchange(addr, "POST", Some(&session), Some(&tools_list)).await;
+        assert_eq!(status, 200, "{body}");
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(body["result"]["tools"].as_array().is_some_and(|tools| !tools.is_empty()));
+
+        let start = json!({
+            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": {"name": "start_session", "arguments": {"session": "http-session-test"}}
+        });
+        let (status, _, body) = exchange(addr, "POST", Some(&session), Some(&start)).await;
+        assert_eq!(status, 200, "{body}");
+        assert!(
+            session_labels(&sdk).contains(&"http-session-test".to_owned()),
+            "start_session left no session: {body}"
+        );
+
+        let (status, _, _) = exchange(addr, "DELETE", None, None).await;
+        assert_eq!(status, 400, "DELETE without a session id");
+        let (status, _, _) = exchange(addr, "DELETE", Some(&session), None).await;
+        assert_eq!(status, 200);
+        assert!(
+            !session_labels(&sdk).contains(&"http-session-test".to_owned()),
+            "DELETE did not end the session's Pincer sessions"
+        );
+        let (status, _, _) = exchange(addr, "POST", Some(&session), Some(&tools_list)).await;
+        assert_eq!(status, 404, "a request in an ended session");
+        let (status, _, _) = exchange(addr, "DELETE", Some(&session), None).await;
+        assert_eq!(status, 404, "DELETE of an ended session");
+
+        let (status, headers, _) = exchange(addr, "POST", None, Some(&initialize)).await;
+        assert_eq!(status, 200);
+        assert_ne!(header(&headers, "mcp-session-id"), Some(session.as_str()));
+
+        server.abort();
+        let _ = server.await;
+        sdk.shutdown().await.expect("SDK shutdown");
+    }
+
+    /// A session idle past the TTL ends, a busy one never does, and at
+    /// MAX_SESSIONS a new session ends the least recently used idle one; when
+    /// every session is busy there is no room.
+    #[tokio::test]
+    async fn idle_sessions_expire_and_the_least_recently_used_makes_room() {
+        let _runtime_guard = crate::test_runtime_lock().lock().await;
+        let sdk = crate::sdk_adapter::SdkAdapter::load(crate::build_driver_without_cursor())
+            .await
+            .expect("SDK adapter");
+
+        let expiring = SessionRegistry::new(sdk.clone(), Duration::ZERO);
+        let idle = expiring.open().unwrap().id.clone();
+        let busy = expiring.open().unwrap();
+        assert!(expiring.enter(&idle).is_none(), "an idle session outlived the TTL");
+        assert!(expiring.enter(&busy.id).is_some(), "a busy session expired");
+        drop(busy);
+
+        let full = SessionRegistry::new(sdk.clone(), Duration::from_secs(3600));
+        let oldest = full.open().unwrap().id.clone();
+        let rest: Vec<String> = (1..MAX_SESSIONS)
+            .map(|_| full.open().unwrap().id.clone())
+            .collect();
+        let newest = full.open().expect("room made by ending the oldest idle session");
+        assert!(full.enter(&oldest).is_none(), "the least recently used session stayed");
+        let mut held: Vec<SessionLease> = rest
+            .iter()
+            .map(|id| full.enter(id).expect("a newer session ended"))
+            .collect();
+        held.push(newest);
+        assert!(full.open().is_none(), "a busy session was ended to make room");
+        drop(held);
+        drop(full);
+        drop(expiring);
+        sdk.shutdown().await.expect("SDK shutdown");
     }
 
     // DAEMON-2: concurrent connections are capped, and a connection over the
