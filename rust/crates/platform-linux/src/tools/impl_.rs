@@ -4201,6 +4201,72 @@ async fn spawn_blocking_bounded<T: Send + 'static>(
     }
 }
 
+/// Which check vouched for the point a foreground element click pressed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PointCheck {
+    /// The toolkit's own hit test (AT-SPI `GetAccessibleAtPoint`).
+    Toolkit,
+    /// The toolkit cannot hit-test the window; X11 stacking showed the
+    /// window (or its popup) on top at the point after activation.
+    X11Stacking,
+    /// Neither: web content, or a toolkit that gave no answer.
+    Unchecked,
+}
+
+impl PointCheck {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Toolkit => "atspi_hit_test",
+            Self::X11Stacking => "x11_stacking",
+            Self::Unchecked => "unchecked",
+        }
+    }
+}
+
+/// The refusal for an element click whose window's toolkit cannot hit-test
+/// and whose press point X11 shows covered after activation. Nothing was
+/// pressed.
+fn x11_point_cover_refusal(
+    idx: usize,
+    pid: u32,
+    xid: u64,
+    (sx, sy): (f64, f64),
+    cover: crate::atspi::native::hit_test::X11Cover,
+) -> ToolResult {
+    use crate::atspi::native::hit_test::X11Cover;
+    let (sx, sy) = (sx.round() as i32, sy.round() as i32);
+    let (what, reason) = match cover {
+        X11Cover::Covered {
+            window,
+            pid: Some(owner),
+        } => (
+            format!("window {window} of pid {owner} is on top there"),
+            "point_covered",
+        ),
+        X11Cover::Covered { window, pid: None } => {
+            (format!("window {window} is on top there"), "point_covered")
+        }
+        X11Cover::Outside => ("no window is there".to_owned(), "point_outside_window"),
+        X11Cover::Unknown | X11Cover::Target | X11Cover::Popup => (
+            format!("X11 could not confirm window {xid} is there"),
+            "point_unconfirmed",
+        ),
+    };
+    ToolResult::error(format!(
+        "click: element [{idx}] (pid {pid}) is at ({sx}, {sy}), and the app's toolkit cannot \
+         hit-test its window, so X11 checked the point after activating window {xid}: {what}. \
+         Nothing was clicked. Close or move what covers it, or click by pixel from a \
+         screenshot."
+    ))
+    .with_structured(json!({
+        "code": "element_bounds_unavailable",
+        "effect": "none",
+        "element_index": idx,
+        "reason": reason,
+        "point_check": PointCheck::X11Stacking.as_str(),
+    }))
+}
+
 /// Map an input-path error to a tool error, attaching the structured
 /// foreground `code` (`foreground_unavailable` / `foreground_timeout`) when the
 /// message carries one so the caller can branch instead of parsing prose.
@@ -8719,11 +8785,14 @@ impl ClickTool {
                 // Web content is exempt: Chromium's GetAccessibleAtPoint
                 // answers with an unrelated `panel` for web elements, so it
                 // cannot vouch for (or against) the point.
+                // A toolkit that cannot hit-test at all (it names nothing at
+                // the point or at its frame's centre) is checked with the X11
+                // stacking instead, after activation, right before the press.
                 let owned_ref = observed
                     .object_ref
                     .clone()
                     .filter(|_| !observed.in_web_content);
-                let (sx, sy, redirect_note) = if let Some(oref) = owned_ref {
+                let (sx, sy, redirect_note, point_check) = if let Some(oref) = owned_ref {
                     let (pid_c, oref_c, sx_i, sy_i) =
                         (pid, oref, sx.round() as i32, sy.round() as i32);
                     let ownership = tokio::task::spawn_blocking(move || {
@@ -8742,7 +8811,14 @@ impl ClickTool {
                             screen_point.0 as f64,
                             screen_point.1 as f64,
                             Some(format!("redirected the press to {}", target.describe())),
+                            PointCheck::Toolkit,
                         ),
+                        crate::atspi::native::hit_test::PointOwnership::Owned => {
+                            (sx, sy, None, PointCheck::Toolkit)
+                        }
+                        crate::atspi::native::hit_test::PointOwnership::Unanswerable => {
+                            (sx, sy, None, PointCheck::X11Stacking)
+                        }
                         crate::atspi::native::hit_test::PointOwnership::Mismatch { owner } => {
                             return ToolResult::error(format!(
                                 "click: element [{idx}] (pid {pid}) has a snapshot frame at \
@@ -8758,12 +8834,15 @@ impl ClickTool {
                                 "element_index": idx,
                                 "reason": "point_owned_by_another_element",
                                 "owner": owner.describe(),
+                                "point_check": PointCheck::Toolkit.as_str(),
                             }));
                         }
-                        _ => (sx, sy, None),
+                        crate::atspi::native::hit_test::PointOwnership::Unknown => {
+                            (sx, sy, None, PointCheck::Unchecked)
+                        }
                     }
                 } else {
-                    (sx, sy, None)
+                    (sx, sy, None, PointCheck::Unchecked)
                 };
                 crate::overlay::send_command_for(
                     cursor_id.to_owned(),
@@ -8794,6 +8873,17 @@ impl ClickTool {
                                 .for_pid(pid)
                                 .at_point(sx.round() as i32, sy.round() as i32),
                             || {
+                                if point_check == PointCheck::X11Stacking {
+                                    let cover = crate::atspi::native::hit_test::x11_point_cover(
+                                        xid,
+                                        pid,
+                                        sx.round() as i32,
+                                        sy.round() as i32,
+                                    );
+                                    if !cover.reaches_target() {
+                                        return Ok(Some(cover));
+                                    }
+                                }
                                 crate::input::send_click_xtest_desktop_with_modifiers(
                                     sx.round() as i32,
                                     sy.round() as i32,
@@ -8801,13 +8891,17 @@ impl ClickTool {
                                     count,
                                     &modifier_refs,
                                 )
+                                .map(|()| None)
                             },
                         )
                     },
                 )
                 .await;
                 match result {
-                    Ok(Ok(((), report))) => {
+                    Ok(Ok((Some(cover), _))) => {
+                        x11_point_cover_refusal(idx, pid, xid, (sx, sy), cover)
+                    }
+                    Ok(Ok((None, report))) => {
                         let confirmed = report.window_change_confirms();
                         let popup_outcome = PopupClickOutcome::from_foreground(&report);
                         let mut structured = foreground_structured(
@@ -8820,7 +8914,8 @@ impl ClickTool {
                             .unwrap_or_default();
                         let result = ToolResult::text(format!(
                             "Clicked element {} (pid {pid}) with a real pointer click \
-                             (delivery_mode=foreground{}, focus_after={}){}{}{popup_note}",
+                             (delivery_mode=foreground{}, focus_after={}, point_check={}){}{}{}\
+                             {popup_note}",
                             observed.described(idx),
                             report
                                 .popup_target
@@ -8829,6 +8924,7 @@ impl ClickTool {
                                 ))
                                 .unwrap_or_default(),
                             report.focus_after.as_str(),
+                            point_check.as_str(),
                             if confirmed {
                                 format!("; {}.", report.window_change.as_deref().unwrap_or(""))
                             } else {
@@ -8838,6 +8934,12 @@ impl ClickTool {
                                 .as_deref()
                                 .map(|n| format!(" ({n})."))
                                 .unwrap_or_default(),
+                            if point_check == PointCheck::X11Stacking {
+                                " The app's toolkit cannot hit-test this window, so X11 \
+                                 confirmed the window is on top at the press point instead."
+                            } else {
+                                ""
+                            },
                         ))
                         .with_structured(structured);
                         with_pixel_points(

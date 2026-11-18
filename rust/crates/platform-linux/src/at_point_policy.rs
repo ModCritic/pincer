@@ -36,9 +36,148 @@ pub(crate) fn cmdline_is_chromium_helper(raw: &[u8]) -> bool {
         })
 }
 
+/// What a toolkit's hit test answered for one point, once an answer that is
+/// not the clicked element has been followed up its parent chain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HitAnswer {
+    /// An object with a role, or one whose parent chain reaches one below
+    /// the window's frame.
+    Control,
+    /// Only an object with no role (AT-SPI `invalid`) and no such ancestor:
+    /// the toolkit named nothing at the point.
+    Unidentified,
+    /// No answer at all.
+    Nothing,
+}
+
+/// Whether a toolkit cannot hit-test a window: its answer for the press
+/// point names nothing, and its answer for the window frame's own centre
+/// names nothing either. Then its hit test is no evidence for or against
+/// the press, and the X11 stacking check stands in for it. A toolkit that
+/// names a control at the centre can hit-test, so an unnamed answer at the
+/// press point still refuses the press.
+pub(crate) fn toolkit_cannot_hit_test(point: HitAnswer, frame_centre: HitAnswer) -> bool {
+    point == HitAnswer::Unidentified && frame_centre != HitAnswer::Control
+}
+
+/// What the X11 stacking puts at a press point meant for a window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum X11Cover {
+    /// The target window's own toplevel (its window-manager frame).
+    Target,
+    /// An override-redirect window (a menu, a tooltip, Pincer's cursor
+    /// overlay) of the target's process, of Pincer, or of no known process.
+    Popup,
+    /// Another toplevel, or another process's popup.
+    Covered { window: u32, pid: Option<u32> },
+    /// No window at all at the point (the root).
+    Outside,
+    /// The target is not on this screen, or the server did not answer.
+    Unknown,
+}
+
+impl X11Cover {
+    /// Whether a real press at the point reaches the target window.
+    pub(crate) fn reaches_target(self) -> bool {
+        matches!(self, Self::Target | Self::Popup)
+    }
+}
+
+/// Classify the topmost root child `under` a point (`0`: none) against the
+/// target's toplevel `frame`.
+pub(crate) fn classify_x11_cover(
+    under: u32,
+    frame: Option<u32>,
+    under_is_override_redirect: bool,
+    under_pid: Option<u32>,
+    target_pid: u32,
+    own_pid: u32,
+) -> X11Cover {
+    let Some(frame) = frame else {
+        return X11Cover::Unknown;
+    };
+    if under == 0 {
+        return X11Cover::Outside;
+    }
+    if under == frame {
+        return X11Cover::Target;
+    }
+    if under_is_override_redirect && under_pid.is_none_or(|pid| pid == target_pid || pid == own_pid)
+    {
+        return X11Cover::Popup;
+    }
+    X11Cover::Covered {
+        window: under,
+        pid: under_pid,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::{classify_x11_cover, toolkit_cannot_hit_test, HitAnswer, X11Cover};
     use super::{cmdline_is_chromium_helper, is_top_level_shell_role};
+
+    #[test]
+    fn only_a_toolkit_that_names_nothing_anywhere_hands_over_to_x11() {
+        use HitAnswer::*;
+        assert!(toolkit_cannot_hit_test(Unidentified, Unidentified));
+        assert!(toolkit_cannot_hit_test(Unidentified, Nothing));
+        // It names a control at the frame's centre: it can hit-test, and its
+        // unnamed answer at the press point keeps refusing.
+        assert!(!toolkit_cannot_hit_test(Unidentified, Control));
+        // A named answer or none at the press point is decided as before.
+        assert!(!toolkit_cannot_hit_test(Control, Unidentified));
+        assert!(!toolkit_cannot_hit_test(Nothing, Nothing));
+    }
+
+    #[test]
+    fn x11_cover_passes_the_target_and_its_popups_only() {
+        let (target, own) = (500, 900);
+        assert_eq!(
+            classify_x11_cover(7, Some(7), false, None, target, own),
+            X11Cover::Target
+        );
+        // Its own menu, Pincer's overlay, or a popup without a pid.
+        for pid in [Some(target), Some(own), None] {
+            assert_eq!(
+                classify_x11_cover(8, Some(7), true, pid, target, own),
+                X11Cover::Popup
+            );
+        }
+        // Another app's window or popup over the point.
+        assert_eq!(
+            classify_x11_cover(9, Some(7), false, Some(33), target, own),
+            X11Cover::Covered {
+                window: 9,
+                pid: Some(33)
+            }
+        );
+        assert_eq!(
+            classify_x11_cover(9, Some(7), true, Some(33), target, own),
+            X11Cover::Covered {
+                window: 9,
+                pid: Some(33)
+            }
+        );
+        // The target's own other toplevel (a dialog) is not the target either.
+        assert_eq!(
+            classify_x11_cover(10, Some(7), false, Some(target), target, own),
+            X11Cover::Covered {
+                window: 10,
+                pid: Some(target)
+            }
+        );
+        assert_eq!(
+            classify_x11_cover(0, Some(7), false, None, target, own),
+            X11Cover::Outside
+        );
+        assert_eq!(
+            classify_x11_cover(7, None, false, None, target, own),
+            X11Cover::Unknown
+        );
+        assert!(X11Cover::Target.reaches_target() && X11Cover::Popup.reaches_target());
+        assert!(!X11Cover::Outside.reaches_target() && !X11Cover::Unknown.reaches_target());
+    }
 
     #[test]
     fn application_frames_and_windows_are_never_click_targets() {
