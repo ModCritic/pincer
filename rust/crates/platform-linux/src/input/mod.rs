@@ -24,6 +24,7 @@ pub mod interactive;
 pub mod modifier;
 mod mpx_keyboard;
 mod mpx_owner;
+mod xdisplay;
 /// Path sampling and timing for `move_along_path`.
 pub mod path;
 /// One-shot targeted pointer/keyboard delivery with explicit
@@ -36,6 +37,7 @@ pub use mpx_keyboard::{
     real_keyboard_input_available, send_virtual_keyboard_key, send_virtual_keyboard_text,
     KeyboardDeliveryReport, MPX_UINPUT_PATH,
 };
+use xdisplay::open_display;
 
 use anyhow::{anyhow, bail, Context, Result};
 use evdev::uinput::VirtualDevice;
@@ -164,7 +166,6 @@ struct MasterPointerIds {
 static MPX_POINTERS: OnceLock<Mutex<HashMap<String, MasterPointerIds>>> = OnceLock::new();
 static UINPUT_POINTERS: OnceLock<Mutex<HashMap<String, Arc<Mutex<VirtualDevice>>>>> =
     OnceLock::new();
-static XLIB_THREADS_READY: OnceLock<Result<(), String>> = OnceLock::new();
 /// Serialises every MPX operation against the idle reaper (and each other),
 /// so a retained master pair is never torn down while a call is using it.
 static MPX_OP_LOCK: Mutex<()> = Mutex::new(());
@@ -333,25 +334,6 @@ fn master_pointer_device_name(master_name: &str) -> String {
 
 fn master_keyboard_device_name(master_name: &str) -> String {
     format!("{master_name} keyboard")
-}
-
-fn open_display() -> Result<*mut x11::xlib::Display> {
-    match XLIB_THREADS_READY.get_or_init(|| {
-        let rc = unsafe { x11::xlib::XInitThreads() };
-        if rc == 0 {
-            Err("XInitThreads failed".to_owned())
-        } else {
-            Ok(())
-        }
-    }) {
-        Ok(()) => {}
-        Err(err) => bail!("{err}"),
-    }
-    let display = unsafe { x11::xlib::XOpenDisplay(ptr::null()) };
-    if display.is_null() {
-        bail!("XOpenDisplay returned null");
-    }
-    Ok(display)
 }
 
 fn xi2_query_devices(display: *mut x11::xlib::Display) -> Result<Vec<(i32, i32, String)>> {
@@ -648,12 +630,12 @@ pub fn real_pointer_unavailable_reason() -> Option<String> {
     if !uinput_accessible() {
         return Some("this process cannot open /dev/uinput".to_owned());
     }
-    let Ok(display) = open_display() else {
+    let Ok(xdisplay) = open_display() else {
         return Some("the X display cannot be opened".to_owned());
     };
-    let server = supports_parallel_pointer_injection(display);
+    let server = supports_parallel_pointer_injection(xdisplay.as_ptr());
+    drop(xdisplay);
     let xvfb = is_xvfb_process_running();
-    unsafe { x11::xlib::XCloseDisplay(display) };
     if real_pointer_capabilities_available(server.is_ok(), xvfb, true, false) {
         return None;
     }
@@ -680,12 +662,12 @@ fn ensure_master_pointer_for_session(
         return Ok(ids);
     }
 
-    let display = open_display()?;
+    let xdisplay = open_display()?;
+    let dpy = xdisplay.as_ptr();
     let mut major = 2;
     let mut minor = 3;
-    let rc = unsafe { x11::xinput2::XIQueryVersion(display, &mut major, &mut minor) };
+    let rc = unsafe { x11::xinput2::XIQueryVersion(dpy, &mut major, &mut minor) };
     if rc != 0 {
-        unsafe { x11::xlib::XCloseDisplay(display) };
         bail!("XIQueryVersion failed with status {rc}");
     }
 
@@ -695,13 +677,7 @@ fn ensure_master_pointer_for_session(
     // inexpensive availability probe above handles the normal permission
     // denial; this ordering also prevents a race or late open failure from
     // leaking a newly created master pair.
-    let uinput_device = match create_uinput_pointer(&device_name) {
-        Ok(device) => device,
-        Err(error) => {
-            unsafe { x11::xlib::XCloseDisplay(display) };
-            return Err(error);
-        }
-    };
+    let uinput_device = create_uinput_pointer(&device_name)?;
     let mut change = x11::xinput2::XIAnyHierarchyChangeInfo::default();
     let name = CString::new(base.clone())?;
     unsafe {
@@ -715,52 +691,59 @@ fn ensure_master_pointer_for_session(
         (*add).send_core = 1;
         (*add).enable = 1;
     }
-    let rc = unsafe { x11::xinput2::XIChangeHierarchy(display, &mut change, 1) };
+    let rc = unsafe { x11::xinput2::XIChangeHierarchy(dpy, &mut change, 1) };
     unsafe {
-        x11::xlib::XSync(display, 0);
+        x11::xlib::XSync(dpy, 0);
     }
     if rc != 0 {
-        unsafe { x11::xlib::XCloseDisplay(display) };
         bail!("XIChangeHierarchy(XIAddMaster) failed with status {rc}");
     }
 
-    let devices = xi2_query_devices(display)?;
-    let mut pointer_id = None;
-    let mut keyboard_id = None;
+    // The server now holds a new master pair. Every error below removes it
+    // again: a stray master with nothing attached is exactly the leak the
+    // startup reaper exists for. The usual way here is a slave that never
+    // hotplugs (no udev/libinput on this server).
     let pointer_name = master_pointer_device_name(&base);
     let keyboard_name = master_keyboard_device_name(&base);
-    for (device_id, use_, device_name) in devices {
-        if use_ == x11::xinput2::XIMasterPointer && device_name == pointer_name {
-            pointer_id = Some(device_id);
-        } else if use_ == x11::xinput2::XIMasterKeyboard && device_name == keyboard_name {
-            keyboard_id = Some(device_id);
+    let attached = (|| -> Result<(i32, i32, i32)> {
+        let mut pointer_id = None;
+        let mut keyboard_id = None;
+        for (device_id, use_, device_name) in xi2_query_devices(dpy)? {
+            if use_ == x11::xinput2::XIMasterPointer && device_name == pointer_name {
+                pointer_id = Some(device_id);
+            } else if use_ == x11::xinput2::XIMasterKeyboard && device_name == keyboard_name {
+                keyboard_id = Some(device_id);
+            }
         }
-    }
-
-    let pointer_id = pointer_id
-        .ok_or_else(|| anyhow!("failed to locate created master pointer for '{cursor_id}'"))?;
-    let keyboard_id = keyboard_id
-        .ok_or_else(|| anyhow!("failed to locate created master keyboard for '{cursor_id}'"))?;
-
-    let slave_pointer_id = match wait_for_slave_id(
-        display,
-        &device_name,
-        x11::xinput2::XISlavePointer,
-        Duration::from_secs(5),
-    ) {
-        Ok(id) => id,
+        let pointer_id = pointer_id
+            .ok_or_else(|| anyhow!("failed to locate created master pointer for '{cursor_id}'"))?;
+        let keyboard_id = keyboard_id.ok_or_else(|| {
+            anyhow!("failed to locate created master keyboard for '{cursor_id}'")
+        })?;
+        let slave_pointer_id = wait_for_slave_id(
+            dpy,
+            &device_name,
+            x11::xinput2::XISlavePointer,
+            Duration::from_secs(5),
+        )?;
+        attach_slave_to_master(dpy, slave_pointer_id, pointer_id)?;
+        Ok((pointer_id, keyboard_id, slave_pointer_id))
+    })();
+    let (pointer_id, keyboard_id, slave_pointer_id) = match attached {
+        Ok(ids) => ids,
         Err(error) => {
-            // Never leave the fresh master pair behind when the slave never
-            // hotplugs (no udev/libinput on this server): a stray master with
-            // nothing attached is exactly the leak the startup reaper exists for.
-            let _ = remove_master_pointer(display, pointer_id);
-            unsafe { x11::xlib::XCloseDisplay(display) };
+            // Unplug the uinput slave first, as `forget_master_pointer` does,
+            // then find the master by name: the error may have come before
+            // its id was known.
+            drop(uinput_device);
+            if let Err(cleanup) = remove_master_pointer_named(dpy, &pointer_name) {
+                tracing::warn!("could not remove the half-made MPX master pair: {cleanup:#}");
+            }
             return Err(error);
         }
     };
-    attach_slave_to_master(display, slave_pointer_id, pointer_id)?;
-    set_flat_pointer_accel(display, slave_pointer_id);
-    unsafe { x11::xlib::XCloseDisplay(display) };
+    set_flat_pointer_accel(dpy, slave_pointer_id);
+    drop(xdisplay);
 
     let ids = MasterPointerIds {
         pointer_id,
@@ -790,11 +773,25 @@ pub fn forget_master_pointer(cursor_id: &str) {
         return;
     };
 
-    let Ok(display) = open_display() else {
+    let Ok(xdisplay) = open_display() else {
         return;
     };
-    let _ = remove_master_pointer(display, ids.pointer_id);
-    unsafe { x11::xlib::XCloseDisplay(display) };
+    let _ = remove_master_pointer(xdisplay.as_ptr(), ids.pointer_id);
+}
+
+/// Remove the master pointer (and its paired keyboard) whose device name is
+/// `pointer_name`, if the server has one.
+fn remove_master_pointer_named(
+    display: *mut x11::xlib::Display,
+    pointer_name: &str,
+) -> Result<()> {
+    let found = xi2_query_devices(display)?
+        .into_iter()
+        .find(|(_, use_, name)| *use_ == x11::xinput2::XIMasterPointer && name == pointer_name);
+    match found {
+        Some((pointer_id, _, _)) => remove_master_pointer(display, pointer_id),
+        None => Ok(()),
+    }
 }
 
 fn remove_master_pointer(display: *mut x11::xlib::Display, pointer_id: i32) -> Result<()> {
@@ -842,9 +839,10 @@ pub(crate) fn reap_orphaned_master_pointers() {
     let Ok(owner) = mpx_owner::Owner::current() else {
         return;
     };
-    let Ok(display) = open_display() else {
+    let Ok(xdisplay) = open_display() else {
         return;
     };
+    let display = xdisplay.as_ptr();
     // Prevent an ID from being removed/reused by another X client between our
     // enumeration and removal. No network or arbitrary filesystem reads occur
     // under this grab: owner checks inspect local procfs and kill(pid, 0).
@@ -872,7 +870,6 @@ pub(crate) fn reap_orphaned_master_pointers() {
     unsafe {
         x11::xlib::XUngrabServer(display);
         x11::xlib::XSync(display, 0);
-        x11::xlib::XCloseDisplay(display);
     }
     match result {
         Ok(Ok(())) => {}
@@ -1415,13 +1412,13 @@ pub fn x11_activate_window_persistent(xid: u64) -> Result<Option<u64>> {
     // lock here (this function calls nothing that itself takes it), so no
     // reentrancy risk.
     let _op = mpx_op_guard("x11_activate_window_persistent");
-    let display = unsafe { x11::xlib::XOpenDisplay(ptr::null()) };
-    if display.is_null() {
+    let Ok(xdisplay) = open_display() else {
         bail!(
             "cannot activate window: no X display (DISPLAY={:?})",
             std::env::var("DISPLAY").ok()
         );
-    }
+    };
+    let display = xdisplay.as_ptr();
     let prior = ewmh_active_window(display);
     ewmh_activate_window(
         display,
@@ -1442,7 +1439,6 @@ pub fn x11_activate_window_persistent(xid: u64) -> Result<Option<u64>> {
         );
         x11::xlib::XSync(display, 0);
         x11::xlib::XSetErrorHandler(previous_handler);
-        x11::xlib::XCloseDisplay(display);
     }
     Ok(prior)
 }
@@ -1526,7 +1522,8 @@ pub fn send_parallel_virtual_pointer_drags(drags: &[(String, VirtualPointerDrag)
             last_use.insert(cursor_id.clone(), std::time::Instant::now());
         }
     }
-    let display = open_display()?;
+    let xdisplay = open_display()?;
+    let display = xdisplay.as_ptr();
     supports_parallel_pointer_injection(display)?;
 
     struct ActiveDrag {
@@ -1681,9 +1678,6 @@ pub fn send_parallel_virtual_pointer_drags(drags: &[(String, VirtualPointerDrag)
     // still saved and restored around each gesture.
     let _ = drags;
     restore_focus_state(display, &saved_focus);
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
-    }
     result
 }
 
@@ -1974,35 +1968,26 @@ fn mapped_popups(display: *mut x11::xlib::Display) -> Vec<PopupWindow> {
 /// The mapped override-redirect popup (menu, popover, combo list) under the
 /// screen point, if any.
 pub fn popup_under_screen_point(x: i32, y: i32) -> Option<PopupWindow> {
-    let display = open_display().ok()?;
-    let popup = root_child_under_point(display, x, y).and_then(|child| popup_info(display, child));
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
-    }
-    popup
+    let xdisplay = open_display().ok()?;
+    let display = xdisplay.as_ptr();
+    root_child_under_point(display, x, y).and_then(|child| popup_info(display, child))
 }
 
 /// `xid` described as a popup when it is a mapped override-redirect window.
 pub fn popup_window_info(xid: u64) -> Option<PopupWindow> {
-    let display = open_display().ok()?;
-    let popup = popup_info(display, xid as x11::xlib::Window);
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
-    }
-    popup
+    let xdisplay = open_display().ok()?;
+    let display = xdisplay.as_ptr();
+    popup_info(display, xid as x11::xlib::Window)
 }
 
 /// Mapped popups on the screen right now (bottom to top), for a caller that
 /// wants "the menu that is open" without a window id.
 pub fn mapped_popup_windows() -> Vec<PopupWindow> {
-    let Ok(display) = open_display() else {
+    let Ok(xdisplay) = open_display() else {
         return Vec::new();
     };
-    let popups = mapped_popups(display);
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
-    }
-    popups
+    let display = xdisplay.as_ptr();
+    mapped_popups(display)
 }
 
 /// `_NET_WM_WINDOW_TYPE` says the popup is a tooltip / notification / DND
@@ -2022,21 +2007,18 @@ fn popup_is_passive(display: *mut x11::xlib::Display, window: x11::xlib::Window)
 /// `xid` says it is a popup or dropdown menu (`_NET_WM_WINDOW_TYPE`), as Qt
 /// and GTK menus do; a combo list says COMBO instead.
 pub fn popup_is_menu(xid: u64) -> bool {
-    let Ok(display) = open_display() else {
+    let Ok(xdisplay) = open_display() else {
         return false;
     };
-    let menu = window_type_is_one_of(
+    let display = xdisplay.as_ptr();
+    window_type_is_one_of(
         display,
         xid as x11::xlib::Window,
         &[
             "_NET_WM_WINDOW_TYPE_POPUP_MENU",
             "_NET_WM_WINDOW_TYPE_DROPDOWN_MENU",
         ],
-    );
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
-    }
-    menu
+    )
 }
 
 fn window_type_is_one_of(
@@ -2102,22 +2084,20 @@ fn intern_atom(display: *mut x11::xlib::Display, name: &str) -> x11::xlib::Atom 
 /// so the virtual master keyboard route is silently lost while it is up.
 /// Tooltips / notifications are not grabs and do not count.
 pub fn popup_of_pid(pid: u32) -> Option<PopupWindow> {
-    let display = open_display().ok()?;
-    let popup = mapped_popups(display)
+    let xdisplay = open_display().ok()?;
+    let display = xdisplay.as_ptr();
+    mapped_popups(display)
         .into_iter()
         .rev()
         .filter(|popup| popup.pid == Some(pid))
-        .find(|popup| !popup_is_passive(display, popup.window as x11::xlib::Window));
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
-    }
-    popup
+        .find(|popup| !popup_is_passive(display, popup.window as x11::xlib::Window))
 }
 
 /// `_NET_WM_PID` of the window holding the core keyboard focus, walking up
 /// its X parents (the focus often sits on a child of the client toplevel).
 pub fn core_focus_owner_pid() -> Option<u32> {
-    let display = open_display().ok()?;
+    let xdisplay = open_display().ok()?;
+    let display = xdisplay.as_ptr();
     let mut focus: x11::xlib::Window = 0;
     let mut revert: std::os::raw::c_int = 0;
     unsafe { x11::xlib::XGetInputFocus(display, &mut focus, &mut revert) };
@@ -2159,9 +2139,6 @@ pub fn core_focus_owner_pid() -> Option<u32> {
             break;
         }
         current = parent;
-    }
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
     }
     owner
 }
@@ -2217,14 +2194,12 @@ pub fn send_keys_under_popup_grab(
         }
         .into());
     }
-    let display = open_display()?;
+    let xdisplay = open_display()?;
+    let display = xdisplay.as_ptr();
     let saved = save_focus_state(display);
     let sent = send();
     unsafe { x11::xlib::XSync(display, 0) };
     let unchanged = focus_state_unchanged(display, &saved);
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
-    }
     sent?;
     Ok(KeyboardDeliveryReport {
         virtual_focus_held: true,
@@ -2713,11 +2688,9 @@ pub struct SameAppCover {
 /// ([`PointOutsideWindow`]). A window of the target's own process over the
 /// point (its dialog) and an override-redirect popup pass.
 pub fn refuse_covered_point(xid: u64, x: i32, y: i32) -> Result<()> {
-    let display = open_display()?;
+    let xdisplay = open_display()?;
+    let display = xdisplay.as_ptr();
     let cover = occluding_window(display, xid as x11::xlib::Window, x, y);
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
-    }
     match cover? {
         PointCover::Clear | PointCover::SameApp(_) => Ok(()),
         PointCover::Occluded(occluded) => Err(occluded.into()),
@@ -2780,7 +2753,8 @@ pub fn send_virtual_pointer_click(
         .lock()
         .unwrap()
         .insert(cursor_id.to_owned(), std::time::Instant::now());
-    let display = open_display()?;
+    let xdisplay = open_display()?;
+    let display = xdisplay.as_ptr();
     supports_parallel_pointer_injection(display)?;
     let saved_focus = save_focus_state(display);
 
@@ -2850,9 +2824,6 @@ pub fn send_virtual_pointer_click(
     })();
 
     restore_focus_state(display, &saved_focus);
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
-    }
     result
 }
 
@@ -2869,7 +2840,8 @@ pub fn send_virtual_pointer_drag(
         .lock()
         .unwrap()
         .insert(cursor_id.to_owned(), std::time::Instant::now());
-    let display = open_display()?;
+    let xdisplay = open_display()?;
+    let display = xdisplay.as_ptr();
     supports_parallel_pointer_injection(display)?;
     let saved_focus = save_focus_state(display);
 
@@ -2952,9 +2924,6 @@ pub fn send_virtual_pointer_drag(
     })();
 
     restore_focus_state(display, &saved_focus);
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
-    }
     result
 }
 
@@ -2980,7 +2949,8 @@ pub struct VirtualPointerScroll {
 /// click/drag paths.
 pub fn send_virtual_pointer_scroll(cursor_id: &str, scroll: &VirtualPointerScroll) -> Result<()> {
     let _op = mpx_op_guard(cursor_id);
-    let display = open_display()?;
+    let xdisplay = open_display()?;
+    let display = xdisplay.as_ptr();
     supports_parallel_pointer_injection(display)?;
     let saved_focus = save_focus_state(display);
 
@@ -3011,9 +2981,6 @@ pub fn send_virtual_pointer_scroll(cursor_id: &str, scroll: &VirtualPointerScrol
 
     let _ = cursor_id; // master pair retained for reuse (see the drag path).
     restore_focus_state(display, &saved_focus);
-    unsafe {
-        x11::xlib::XCloseDisplay(display);
-    }
     result
 }
 
@@ -4547,6 +4514,9 @@ pub(crate) fn key_name_to_keysym(key: &str) -> Result<u32> {
     };
     Ok(keysym)
 }
+
+#[cfg(test)]
+mod xlib_live_tests;
 
 #[cfg(test)]
 mod key_name_alias_tests {

@@ -302,7 +302,8 @@ fn ensure_master_keyboard(
         return Ok((ids, device));
     }
 
-    let display = open_display()?;
+    let xdisplay = open_display()?;
+    let display = xdisplay.as_ptr();
     let result = (|| -> Result<(MasterPointerIds, Arc<Mutex<VirtualDevice>>)> {
         // The master keyboard's device name is "<base> keyboard"; recover the
         // base to derive the slave's name so the reaper can pair them by eye.
@@ -336,7 +337,6 @@ fn ensure_master_keyboard(
             .insert(cursor_id.to_owned(), device.clone());
         Ok((ids, device))
     })();
-    unsafe { x11::xlib::XCloseDisplay(display) };
     result
 }
 
@@ -522,7 +522,8 @@ fn deliver(
     keymap_conn: &RustConnection,
 ) -> Result<KeyboardDeliveryReport> {
     let _op = mpx_op_guard(cursor_id);
-    let display = open_display()?;
+    let xdisplay = open_display()?;
+    let display = xdisplay.as_ptr();
     let result = (|| -> Result<KeyboardDeliveryReport> {
         supports_parallel_pointer_injection(display)?;
         let mut major = 2;
@@ -641,7 +642,6 @@ fn deliver(
     // batch — enough to crash LibreOffice VCL. The pair is cleaned up on
     // end_session / idle / startup reap instead.
     let _ = cursor_id;
-    unsafe { x11::xlib::XCloseDisplay(display) };
     result
 }
 
