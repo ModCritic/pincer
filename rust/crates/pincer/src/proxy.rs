@@ -141,8 +141,9 @@ async fn serve_direct_stdio(
 
 /// [`serve_direct_stdio`] over caller-provided I/O. Requests run one at a
 /// time in arrival order while [`crate::mcp_stdio::read_requests`] keeps
-/// reading: it answers `ping` at once and applies `notifications/cancelled`,
-/// and EOF cancels what is still running or waiting.
+/// reading: it answers `ping` at once and applies `notifications/cancelled`.
+/// At EOF the requests already read still run and are answered before the
+/// loop ends; a termination signal cancels them.
 async fn serve_direct_io<R, W>(
     sdk: &Arc<crate::sdk_adapter::SdkAdapter>,
     transport_session: &str,
@@ -434,14 +435,15 @@ async fn supervise_control_connection<T>(
 
 /// Run the service-owned stdio loop over caller-provided I/O.
 ///
-/// A clean reader EOF must return `Ok(())` promptly. The caller then drops the
-/// persistent control connection, allowing the daemon to reap the MCP session
-/// and its recording, preview, and overlay state (issue #2002).
+/// A clean reader EOF must return `Ok(())` as soon as the requests already
+/// read are answered. The caller then drops the persistent control
+/// connection, allowing the daemon to reap the MCP session and its
+/// recording, preview, and overlay state (issue #2002).
 ///
 /// Requests are forwarded one at a time in arrival order while
 /// [`crate::mcp_stdio::read_requests`] keeps reading stdin, as in direct mode;
-/// a cancelled call closes its side of the daemon connection (see
-/// [`forward_tool_call`]).
+/// a cancelled call (never EOF alone) closes its side of the daemon
+/// connection (see [`forward_tool_call`]).
 async fn run_proxy_io<R, W>(
     reader: R,
     writer: W,

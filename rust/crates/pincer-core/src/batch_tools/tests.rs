@@ -208,7 +208,7 @@ async fn a_cancelled_request_runs_no_further_step() {
         let token = token.clone();
         async move {
             tokio::time::sleep(Duration::from_millis(300)).await;
-            token.cancel("the MCP client closed stdin");
+            token.cancel("Pincer received SIGTERM");
         }
     });
     let started = std::time::Instant::now();
@@ -238,7 +238,7 @@ async fn a_cancelled_request_runs_no_further_step() {
     assert_eq!(structured["steps"][1]["phase"], "cancelled");
     assert!(
         text(&result).starts_with(
-            "run_steps: cancelled (the MCP client closed stdin) before step 2 of 3; \
+            "run_steps: cancelled (Pincer received SIGTERM) before step 2 of 3; \
              1 step(s) ran, 2 not run"
         ),
         "{}",

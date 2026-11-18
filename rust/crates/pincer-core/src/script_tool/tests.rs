@@ -424,7 +424,7 @@ async fn dropping_the_request_cancels_the_script() {
     );
 }
 
-/// A cancelled request (MCP notifications/cancelled, stdin EOF) stops a
+/// A cancelled request (MCP notifications/cancelled, SIGTERM) stops a
 /// script that is sleeping, with a cancelled result naming the reason, and
 /// each driver op reports progress.
 #[tokio::test]

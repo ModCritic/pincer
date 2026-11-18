@@ -9,10 +9,15 @@
 //!   running. Per the MCP cancellation rules (2025-06-18 and later) a
 //!   cancelled request gets no response, a request that already finished
 //!   keeps its answer, and `initialize` cannot be cancelled;
-//! - EOF, a read error or a failed write cancels every request not yet
-//!   answered: a waiting `tools/call` does not start, and a running long tool
-//!   stops at its next step. Requests that do not run tools are still
-//!   answered, so a piped `initialize` still gets its reply;
+//! - EOF stops the reading only: the running request and every request
+//!   already read run to completion in order and are answered, then the
+//!   server exits. Closing stdin is how an MCP client shuts a stdio server
+//!   down (Lifecycle, Shutdown: close stdin, wait for the exit, then
+//!   SIGTERM), and a scripted client may close it right after its last
+//!   request. SIGTERM cancels what is still running;
+//! - a read error or a failed write (nobody left to read the answers)
+//!   cancels every request not yet answered: a waiting `tools/call` does
+//!   not start, and a running long tool stops at its next step;
 //! - a request whose `_meta.progressToken` is a string or an integer gets
 //!   `notifications/progress` from long tools, at most every
 //!   [`MIN_PROGRESS_INTERVAL`] and always increasing.
@@ -42,9 +47,6 @@ pub(crate) const MIN_PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 /// Requests read ahead of the one running. A client that sends more waits,
 /// as it did on the pipe before stdin was read concurrently.
 const MAX_QUEUED_REQUESTS: usize = 64;
-
-/// Cancel reason when the client closes stdin.
-const STDIN_CLOSED: &str = "the MCP client closed stdin";
 
 /// Lines for stdout, written in the order they were sent.
 #[derive(Clone)]
@@ -198,7 +200,7 @@ impl Admitted {
             .ticket
             .cancel
             .reason()
-            .unwrap_or_else(|| STDIN_CLOSED.to_owned());
+            .unwrap_or_else(|| "the request was cancelled".to_owned());
         let result = pincer_core::mcp_result::conforming_tool_result(
             &name,
             pincer_core::mcp_result::tool_error_result(
@@ -303,8 +305,8 @@ fn number(value: f64) -> Value {
 
 /// Read requests from `reader` until EOF or `stop`. Admitted requests and
 /// replies go to `jobs` in arrival order; `ping` is answered on `output` at
-/// once and `notifications/cancelled` is applied at once. EOF and read errors
-/// cancel everything in flight.
+/// once and `notifications/cancelled` is applied at once. At EOF the
+/// requests already read still run; a read error cancels them.
 pub(crate) async fn read_requests<R>(
     mut reader: R,
     mut admit: impl FnMut(&Request) -> Result<ProtocolEra, Response>,
@@ -331,8 +333,8 @@ where
             }
         };
         if read == 0 {
-            // EOF: the MCP client disconnected or shut the server down.
-            inflight.cancel_all(STDIN_CLOSED);
+            // EOF: the client is done sending. What it sent still runs and is
+            // answered; dropping `jobs` lets the executor end after it.
             return Ok(());
         }
         let trimmed = line.trim();
@@ -478,8 +480,10 @@ mod tests {
     use pincer_core::mcp_wire::ProtocolSession;
     use tokio::io::BufReader;
 
-    /// An executor whose `tools/call` "slow" runs until cancelled and
-    /// reports two progress steps first; anything else is answered at once.
+    /// An executor for fake tools: "slow" runs until cancelled, "steady"
+    /// runs for 300 ms unless cancelled first, and both report two progress
+    /// steps first (the second one rate limited); anything else is answered
+    /// at once.
     async fn fake_executor(
         mut jobs: Receiver<Job>,
         output: Output,
@@ -507,25 +511,37 @@ mod tests {
             let control = admitted.control(&output);
             let (request, ticket) = admitted.into_parts();
             let id = request.id.clone().unwrap_or(Value::Null);
-            let slow = request.tool_call().is_ok_and(|call| call.name == "slow");
+            let name = request
+                .tool_call()
+                .map(|call| call.name)
+                .unwrap_or_default();
             let observed_in = observed.clone();
             let response = control
                 .scope(async move {
-                    if !slow {
-                        return Response::ok(id, json!({"done": true}));
-                    }
+                    let runs_for = match name.as_str() {
+                        "slow" => Duration::from_secs(3600),
+                        "steady" => Duration::from_millis(300),
+                        _ => return Response::ok(id, json!({"done": true})),
+                    };
                     pincer_core::request_control::report_progress(1.0, Some(3.0), || {
                         "step 1".into()
                     });
                     pincer_core::request_control::report_progress(2.0, Some(3.0), || {
                         "step 2 (rate limited)".into()
                     });
-                    pincer_core::request_control::cancelled().await;
-                    observed_in.lock().unwrap().push(format!(
-                        "slow stopped: {}",
-                        pincer_core::request_control::cancel_reason().unwrap_or_default()
-                    ));
-                    Response::ok(id, json!({"cancelled": true}))
+                    tokio::select! {
+                        _ = tokio::time::sleep(runs_for) => {
+                            observed_in.lock().unwrap().push(format!("{name} finished"));
+                            Response::ok(id, json!({"done": true, "tool": name}))
+                        }
+                        _ = pincer_core::request_control::cancelled() => {
+                            observed_in.lock().unwrap().push(format!(
+                                "{name} stopped: {}",
+                                pincer_core::request_control::cancel_reason().unwrap_or_default()
+                            ));
+                            Response::ok(id, json!({"cancelled": true}))
+                        }
+                    }
                 })
                 .await;
             if let Some(response) = ticket.deliver(&inflight, response) {
@@ -610,7 +626,7 @@ mod tests {
     #[tokio::test]
     async fn ping_is_answered_while_a_call_runs() {
         let mut harness = initialized().await;
-        harness.send(call(2, "slow", Some(json!("tok")))).await;
+        harness.send(call(2, "steady", Some(json!("tok")))).await;
         let progress = harness.next().await;
         assert_eq!(progress["method"], "notifications/progress");
         assert_eq!(progress["params"]["progressToken"], "tok");
@@ -623,16 +639,18 @@ mod tests {
         assert_eq!(pong, json!({"jsonrpc": "2.0", "id": 3, "result": {}}));
         assert!(
             harness.observed.lock().unwrap().is_empty(),
-            "the slow call is still running"
+            "the call is still running"
         );
+        assert_eq!(harness.next().await["result"]["tool"], "steady");
         drop(harness.to_server);
         harness.server.await.unwrap().unwrap();
     }
 
-    /// Start the slow call `id` and wait until it runs (its first progress
-    /// notification), so what follows cannot reach it before it starts.
-    async fn start_slow(harness: &mut Harness, id: u64) {
-        harness.send(call(id, "slow", Some(json!(id)))).await;
+    /// Start the fake tool `name` as call `id` and wait until it runs (its
+    /// first progress notification), so what follows cannot reach it before
+    /// it starts.
+    async fn start(harness: &mut Harness, id: u64, name: &str) {
+        harness.send(call(id, name, Some(json!(id)))).await;
         let progress = harness.next().await;
         assert_eq!(progress["method"], "notifications/progress", "{progress}");
     }
@@ -640,7 +658,7 @@ mod tests {
     #[tokio::test]
     async fn notifications_cancelled_stops_that_request_and_sends_no_response() {
         let mut harness = initialized().await;
-        start_slow(&mut harness, 2).await;
+        start(&mut harness, 2, "slow").await;
         // Waits behind the slow call; cancelled before it starts.
         harness.send(call(3, "slow", None)).await;
         harness.send(call(4, "fast", None)).await;
@@ -684,46 +702,68 @@ mod tests {
         );
     }
 
+    /// EOF is how a client shuts a stdio server down, and a scripted client
+    /// may close stdin right after its last request: everything already
+    /// read runs to completion and is answered, in order, nothing is
+    /// cancelled, and then the loop ends.
     #[tokio::test]
-    async fn eof_cancels_the_running_call_and_answers_the_rest() {
+    async fn eof_lets_requests_already_read_finish() {
         let mut harness = initialized().await;
-        start_slow(&mut harness, 2).await;
-        harness.send(call(3, "slow", None)).await;
+        start(&mut harness, 2, "steady").await;
+        harness.send(call(3, "steady", None)).await;
+        harness.send(call(4, "fast", None)).await;
         harness
-            .send(json!({"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": {}}))
+            .send(json!({"jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": {}}))
             .await;
         drop(harness.to_server);
         tokio::time::timeout(Duration::from_secs(5), harness.server)
             .await
-            .expect("EOF ends the loop while a call runs")
+            .expect("the loop ends once what was read is answered")
             .unwrap()
             .unwrap();
         let mut replies = Vec::new();
         while let Some(line) = harness.from_server.next_line().await.unwrap() {
             replies.push(serde_json::from_str::<Value>(&line).unwrap());
         }
-        assert_eq!(replies.len(), 3, "{replies:?}");
-        // The running call stopped and still answers: the client is gone,
-        // but a pipe reading stdout learns what happened.
-        assert_eq!(replies[0]["id"], 2);
-        assert_eq!(replies[0]["result"]["cancelled"], true);
-        // The waiting call never started.
-        assert_eq!(replies[1]["id"], 3);
-        assert_eq!(replies[1]["result"]["isError"], true);
-        assert_eq!(
-            replies[1]["result"]["structuredContent"]["code"],
-            "cancelled"
-        );
-        assert!(replies[1]["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("did not run: cancelled (the MCP client closed stdin)"));
-        // A request that runs no tool is still answered.
-        assert_eq!(replies[2]["id"], 4);
+        let ids: Vec<Value> = replies.iter().map(|reply| reply["id"].clone()).collect();
+        assert_eq!(ids, [json!(2), json!(3), json!(4), json!(5)], "{replies:?}");
+        for reply in &replies[..3] {
+            assert_eq!(reply["result"]["done"], true, "{reply}");
+        }
         assert_eq!(
             *harness.observed.lock().unwrap(),
+            vec!["steady finished".to_owned(), "steady finished".to_owned()]
+        );
+    }
+
+    /// With nobody left to read the answers (the write to stdout fails),
+    /// everything in flight is cancelled and the loop ends with the error.
+    #[tokio::test]
+    async fn a_failed_write_cancels_everything_in_flight() {
+        let mut harness = initialized().await;
+        start(&mut harness, 2, "slow").await;
+        harness.send(call(3, "fast", None)).await;
+        let Harness {
+            mut to_server,
+            from_server,
+            observed,
+            server,
+        } = harness;
+        drop(from_server);
+        // Its reply is the next write, and it fails.
+        to_server
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"ping\"}\n")
+            .await
+            .unwrap();
+        let ended = tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("a failed write ends the loop with stdin still open")
+            .unwrap();
+        assert!(ended.is_err(), "the write error is returned");
+        assert_eq!(
+            *observed.lock().unwrap(),
             vec![
-                "slow stopped: the MCP client closed stdin".to_owned(),
+                "slow stopped: writing to stdout failed".to_owned(),
                 "not started".to_owned(),
             ]
         );

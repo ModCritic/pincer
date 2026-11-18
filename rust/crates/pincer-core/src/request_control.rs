@@ -1,7 +1,7 @@
 //! Cancellation and progress for the request a tool call runs in.
 //!
 //! A transport that can tell a request was cancelled (an MCP
-//! `notifications/cancelled`, the client closing stdin, a termination signal,
+//! `notifications/cancelled`, a termination signal, stdout or stdin failing,
 //! a proxy closing its daemon connection) runs the request inside
 //! [`RequestControl::scope`]. Nested registry dispatch (run_script and
 //! run_steps calling other tools, replay_trajectory replaying turns) stays in

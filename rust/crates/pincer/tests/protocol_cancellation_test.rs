@@ -1,9 +1,10 @@
 //! MCP `ping`, `notifications/cancelled` and stdin EOF while a tool runs,
 //! over stdio through the built binary: direct `pincer mcp` and the proxy to
-//! a test-owned daemon.
+//! a test-owned daemon. Also requests piped in with stdin closed at once, as
+//! a scripted smoke test sends them.
 //!
-//! The tool is a run_script that sleeps in 100 ms steps for a minute, so it
-//! needs no desktop. A client that sends a progress token gets a progress
+//! The tool is a run_script that sleeps in 100 ms steps, so it needs no
+//! desktop. A client that sends a progress token gets a progress
 //! notification for each step, which shows the call is running.
 //!
 //! `PINCER_TEST_DRIVER_BIN` selects another binary (as for the rest of the
@@ -18,9 +19,10 @@ use std::time::{Duration, Instant};
 use pincer_testkit::{spawn_in_job, ChildReaper, CliDriver, IsolatedStateRoot};
 use serde_json::{json, Value};
 
-/// A minute of sleeping in steps: far longer than any wait below.
-const LONG_SCRIPT: &str =
-    "for (let i = 0; i < 600; i++) { await pincer.sleep(100); } return 'finished';";
+/// A run_script that sleeps `steps` times 100 ms and returns "finished".
+fn sleeping_script(steps: u32) -> String {
+    format!("for (let i = 0; i < {steps}; i++) {{ await pincer.sleep(100); }} return 'finished';")
+}
 
 struct Client {
     _reaper: ChildReaper,
@@ -119,15 +121,15 @@ impl Client {
         self.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
     }
 
-    /// Start the long script as request `id` and wait for its first
-    /// progress notification.
-    fn start_long_script(&mut self, id: u64) {
+    /// Start a script of `steps` 100 ms sleeps as request `id` and wait for
+    /// its first progress notification.
+    fn start_script(&mut self, id: u64, steps: u32) {
         let token = format!("progress-{id}");
         self.send(json!({
             "jsonrpc": "2.0", "id": id, "method": "tools/call",
             "params": {
                 "name": "run_script",
-                "arguments": {"script": LONG_SCRIPT, "timeout_ms": 90000},
+                "arguments": {"script": sleeping_script(steps), "timeout_ms": 90000},
                 "_meta": {"progressToken": token}
             }
         }));
@@ -160,11 +162,11 @@ impl Client {
     }
 }
 
-/// Ping during the long call, cancel it by id, then end stdin during a
-/// second one.
+/// Ping during a minute-long call, cancel it by id, then end stdin during a
+/// second, shorter one.
 fn ping_cancel_and_eof(mut client: Client) {
     client.initialize();
-    client.start_long_script(2);
+    client.start_script(2, 600);
 
     // ping is answered while run_script still runs.
     let asked = Instant::now();
@@ -205,23 +207,72 @@ fn ping_cancel_and_eof(mut client: Client) {
         client.seen
     );
 
-    // EOF while a call runs: the call stops with a cancelled result and the
-    // process exits without waiting out the script.
-    client.start_long_script(5);
+    // EOF while a call runs: the client is shutting the server down, as the
+    // MCP stdio lifecycle does (close stdin, wait, then SIGTERM). The
+    // running call and the one read after it finish and are answered in
+    // order, then the process exits.
+    client.start_script(5, 20);
+    client.send(json!({
+        "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+        "params": {"name": "get_config", "arguments": {}}
+    }));
     let closed = Instant::now();
     drop(client.stdin.take());
-    let last = client.reply(5, Duration::from_secs(20));
-    let last = last.unwrap_or_else(|| panic!("no reply to 5 after EOF: {:?}", client.seen));
-    assert_eq!(last["result"]["isError"], true, "{last}");
+    let script = client.reply(5, Duration::from_secs(30));
+    let script = script.unwrap_or_else(|| panic!("no reply to 5 after EOF: {:?}", client.seen));
+    assert_ne!(script["result"]["isError"], true, "{script}");
     assert_eq!(
-        last["result"]["structuredContent"]["code"], "cancelled",
-        "{last}"
+        script["result"]["structuredContent"]["value"], "finished",
+        "{script}"
+    );
+    let config = client.reply(6, Duration::from_secs(10));
+    assert!(
+        config.is_some_and(|config| config["result"]["isError"] != true),
+        "the call read before EOF did not run: {:?}",
+        client.seen
     );
     assert!(
         client.exited_within(Duration::from_secs(20)),
         "pincer mcp did not exit after EOF"
     );
-    assert!(closed.elapsed() < Duration::from_secs(30));
+    assert!(closed.elapsed() < Duration::from_secs(40));
+}
+
+/// A scripted smoke test writes initialize and a few tool calls, closes
+/// stdin at once and reads until the server exits: every request is
+/// answered, none with "did not run".
+fn piped_requests_all_run(mut client: Client) {
+    let mut requests = vec![json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "smoke-test", "version": "1"}
+        }
+    })];
+    for (id, tool) in [(2, "get_screen_size"), (3, "list_apps"), (4, "get_config")] {
+        requests.push(json!({
+            "jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {"name": tool, "arguments": {}}
+        }));
+    }
+    for request in requests {
+        client.send(request);
+    }
+    drop(client.stdin.take());
+    for id in 1..=4 {
+        let reply = client
+            .reply(id, Duration::from_secs(60))
+            .unwrap_or_else(|| panic!("no reply to {id}: {:?}", client.seen));
+        assert!(
+            !reply.to_string().contains("did not run"),
+            "request {id} was dropped: {reply}"
+        );
+    }
+    assert!(
+        client.exited_within(Duration::from_secs(20)),
+        "pincer mcp did not exit after EOF"
+    );
 }
 
 #[test]
@@ -240,4 +291,22 @@ fn daemon_proxy_answers_ping_and_stops_a_cancelled_run_script() {
     let socket = daemon.daemon_socket().unwrap().to_owned();
     let state = IsolatedStateRoot::new().expect("state root");
     ping_cancel_and_eof(Client::spawn(&["mcp", "--socket", &socket], &state));
+}
+
+#[test]
+fn direct_mcp_answers_every_request_piped_before_eof() {
+    let state = IsolatedStateRoot::new().expect("state root");
+    piped_requests_all_run(Client::spawn(&["mcp"], &state));
+}
+
+#[test]
+fn daemon_proxy_answers_every_request_piped_before_eof() {
+    let daemon = CliDriver::new();
+    if !daemon.available() {
+        eprintln!("[cancellation] test daemon unavailable; skipping");
+        return;
+    }
+    let socket = daemon.daemon_socket().unwrap().to_owned();
+    let state = IsolatedStateRoot::new().expect("state root");
+    piped_requests_all_run(Client::spawn(&["mcp", "--socket", &socket], &state));
 }
