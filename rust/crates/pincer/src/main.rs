@@ -389,6 +389,11 @@ fn run_mcp_direct(compatibility_mode: bool) -> anyhow::Result<()> {
     // adapter repeats this check before reading stdin as defense in depth.
     pincer_core::authorization::validate_startup_authorization()?;
     pincer_core::policy::validate_configured_policy()?;
+    // The same startup recovery `pincer serve` runs: remove the XI2 master
+    // pointers a crashed Pincer left behind. Masters whose owning process
+    // still runs (another live Pincer) are kept.
+    #[cfg(target_os = "linux")]
+    platform_linux::recover_orphaned_mpx_devices();
     let cursor = cursor_overlay::CursorConfig::from_args();
     // A plain stdio MCP process does not provide the required AppKit
     // main-thread host adapter. Explicit direct mode on macOS must therefore

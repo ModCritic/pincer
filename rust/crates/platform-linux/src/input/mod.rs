@@ -835,6 +835,13 @@ pub(crate) fn reap_orphaned_master_pointers() {
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         return;
     }
+    // Where the MPX route is blocked (KDE Plasma on X11, XWayland) Pincer adds
+    // no masters, and removing any master crashes every running Qt 6 X11
+    // client at once (a double delete in QXcbConnection::xi2SetupDevices), so
+    // a leftover there is not worth that.
+    if mpx_hotplug_block_for_session().is_some() {
+        return;
+    }
     let Ok(owner) = mpx_owner::Owner::current() else {
         return;
     };
