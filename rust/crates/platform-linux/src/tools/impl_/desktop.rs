@@ -265,7 +265,9 @@ impl Tool for GetDesktopStateTool {
                 visible windows with pid, window_id, z_index and geometry, labeled \
                 `screenshot px` (this image) and `desktop px` (list_windows and set_window_frame). The \
                 agent cursor is hidden for the capture; `agent_overlay_capture` says how, and \
-                `excluded` means it is not in the image.".into(),
+                `excluded` means it is not in the image. Refused in XWayland mode (the default \
+                on a Wayland session): rootless Xwayland has no root pixels, so read each window \
+                with get_window_state instead.".into(),
             input_schema: json!({"type":"object","properties":{
                 "session": pincer_core::tool_schema::session_schema(),
                 "screenshot_out_file":{"type":"string","description":"Write PNG here instead of base64."},
