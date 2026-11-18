@@ -51,6 +51,9 @@ lib_left_out=(
     pointer_shape::tests::live_x11_hit_test_system_shape_and_probe
     # A Wayland compositor with a focused native surface, and wtype.
     wayland::tests::standalone_modifiers_reach_wayland_keyboard
+    # Not a test of its own: a_process_a_descendant_started_from_a_second_thread_is_listed
+    # runs it in a child copy of the test binary, and alone it returns at once.
+    tools::impl_::launch_child::tests::second_thread_starts_a_sleeper
 )
 # Integration test targets whose ignored tests all run here.
 linux_targets=(short_connection_x11 key_input_x11 click_input_x11)
