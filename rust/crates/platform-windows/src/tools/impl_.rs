@@ -1036,12 +1036,7 @@ impl Tool for ListWindowsTool {
             .iter()
             .filter(|r| r["is_on_screen"].as_bool().unwrap_or(false))
             .count();
-        // Swift text format 1:1 — append the SPI-unavailable note since
-        // Windows has no equivalent of macOS Spaces.
-        let header = format!(
-            "✅ Found {total} window(s) across {pid_count} app(s); {on_screen} on-screen. \
-             (SkyLight Space SPIs unavailable — on_current_space / space_ids omitted.)"
-        );
+        let header = super::list_windows_header(total, pid_count, on_screen);
         let mut lines = vec![header];
         if let Some(warning) = missing_pid_warning {
             lines.push(warning);
