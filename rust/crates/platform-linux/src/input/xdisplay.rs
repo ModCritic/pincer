@@ -16,6 +16,16 @@
 //! so the earlier pattern of swapping in an ignoring handler around single
 //! calls raced between threads and left calls outside the swaps on the
 //! exiting default.
+//!
+//! A broken connection (the server closed it or went away) still ends the
+//! process, cleanly: [`on_x_io_error`] logs why and releases the XTest
+//! buttons Pincer still holds down, then libX11 exits. Failing only the call
+//! that saw it is not sound with libX11 1.8 (checked in the 1.8.14 binary:
+//! `_XIOError` unlocks the display's mutex before it calls the handlers and
+//! does not lock it again, so returning into Xlib would unlock that mutex a
+//! second time, which POSIX leaves undefined), and Rust has no `longjmp` out
+//! of the handler. Surviving it means moving these routes from Xlib to
+//! x11rb, whose errors are plain return values.
 
 use anyhow::{bail, Result};
 use std::os::raw::c_int;
@@ -110,6 +120,46 @@ unsafe extern "C" fn record_x_error(
     0
 }
 
+/// The process's Xlib I/O error handler, for a connection that broke. libX11
+/// calls it, then the display's exit handler, whose default exits with
+/// status 1. Log why, and release the core pointer buttons Pincer pressed
+/// through XTest: the server keeps them down after the process is gone, and
+/// the session cleanup that would release them never runs. The release uses
+/// a connection of its own and gets at most a second, so a server that went
+/// away or stopped answering cannot hold up the exit.
+unsafe extern "C" fn on_x_io_error(display: *mut x11::xlib::Display) -> c_int {
+    // SAFETY: a field read on the display Xlib passes; no protocol request.
+    let name = unsafe { x11::xlib::XDisplayString(display) };
+    let name = if name.is_null() {
+        String::new()
+    } else {
+        // SAFETY: XDisplayString returns the display's NUL-terminated name.
+        unsafe { std::ffi::CStr::from_ptr(name) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _ = std::thread::Builder::new()
+        .name("pincer-xio-release".into())
+        .spawn(move || {
+            let _ = tx.send(super::release_xtest_buttons_still_down());
+        });
+    let released = match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+        Ok(buttons) if buttons.is_empty() => "no held button to release".to_owned(),
+        Ok(buttons) => buttons
+            .iter()
+            .map(|button| format!("released held button {button}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        Err(_) => "could not release held buttons within a second".to_owned(),
+    };
+    tracing::error!(
+        "the connection to X display {name:?} broke (the server closed it or went away); \
+         libX11 cannot go on after that, so Pincer exits now ({released})"
+    );
+    0
+}
+
 /// An open Xlib display, closed exactly once when dropped.
 ///
 /// Not `Send`: an Xlib display is used by the thread that opened it.
@@ -179,9 +229,12 @@ pub(super) fn open_display() -> Result<XDisplay> {
         if rc == 0 {
             return Err("XInitThreads failed".to_owned());
         }
-        // SAFETY: installs a handler with the signature Xlib expects; this
+        // SAFETY: installs handlers with the signatures Xlib expects; this
         // crate is the only Xlib user in the process.
-        unsafe { x11::xlib::XSetErrorHandler(Some(record_x_error)) };
+        unsafe {
+            x11::xlib::XSetErrorHandler(Some(record_x_error));
+            x11::xlib::XSetIOErrorHandler(Some(on_x_io_error));
+        }
         Ok(())
     }) {
         Ok(()) => {}

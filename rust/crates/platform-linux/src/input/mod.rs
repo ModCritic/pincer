@@ -48,7 +48,7 @@ use std::ffi::{CStr, CString};
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::sleep;
 use std::time::Duration;
@@ -3939,8 +3939,36 @@ pub fn send_button_xtest_desktop(point: Option<(i32, i32)>, button: u8, press: b
     };
     conn.xtest_fake_input(kind, button, 0, root, x as i16, y as i16, 0)?
         .check()?;
+    note_xtest_button(button, press);
     let _ = conn.get_input_focus()?.reply();
     Ok(())
+}
+
+/// Buttons 1 to 7 that [`send_button_xtest_desktop`] pressed and nothing has
+/// released yet, one bit each. They are the core pointer's real buttons, and
+/// the X server keeps them down after this process ends.
+static XTEST_BUTTONS_DOWN: AtomicU8 = AtomicU8::new(0);
+
+fn note_xtest_button(button: u8, down: bool) {
+    let Some(bit) = (1..=7).contains(&button).then(|| 1u8 << (button - 1)) else {
+        return;
+    };
+    if down {
+        XTEST_BUTTONS_DOWN.fetch_or(bit, Ordering::SeqCst);
+    } else {
+        XTEST_BUTTONS_DOWN.fetch_and(!bit, Ordering::SeqCst);
+    }
+}
+
+/// Release, where the pointer is, every XTest button this process pressed
+/// and has not released, on a connection of its own; the buttons released.
+/// For an exit that skips the session cleanup (see `xdisplay`).
+pub(crate) fn release_xtest_buttons_still_down() -> Vec<u8> {
+    let down = XTEST_BUTTONS_DOWN.load(Ordering::SeqCst);
+    (1..=7u8)
+        .filter(|button| down & (1 << (button - 1)) != 0)
+        .filter(|button| release_button_xtest_at_pointer(*button).is_ok())
+        .collect()
 }
 
 /// Release XTest `button` where the core pointer is now, without moving it,
@@ -3961,6 +3989,7 @@ pub fn release_button_xtest_at_pointer(button: u8) -> Result<(i32, i32)> {
         0,
     )?
     .check()?;
+    note_xtest_button(button, false);
     let _ = conn.get_input_focus()?.reply();
     Ok((i32::from(pointer.root_x), i32::from(pointer.root_y)))
 }

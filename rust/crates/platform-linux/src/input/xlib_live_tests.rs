@@ -286,3 +286,70 @@ fn which(name: &str) -> Option<PathBuf> {
         .map(|dir| Path::new(dir).join(name))
         .find(|path| path.is_file())
 }
+
+/// When an Xlib connection breaks (here the server kills the client), libX11
+/// ends the process: no Xlib call may run on that display again, and its
+/// handler cannot be returned from soundly while other threads use Xlib. The
+/// exit must still say why, and release the core pointer buttons Pincer
+/// pressed through XTest, which otherwise stay down after the process ends.
+#[test]
+#[ignore = "starts its own Xvfb; run inside a sandbox"]
+fn a_broken_connection_releases_held_buttons_before_the_exit() {
+    const MARKER: &str = "XLIB_CHILD_WENT_ON_AFTER_A_BROKEN_CONNECTION";
+    if in_child() {
+        use x11rb::connection::Connection as _;
+        use x11rb::protocol::xproto::ConnectionExt as _;
+        let _ = tracing_subscriber::fmt()
+            .with_writer(std::io::stderr)
+            .try_init();
+        super::send_button_xtest_desktop(Some((20, 20)), 1, true).expect("XTest press");
+        let xdisplay = super::open_display().expect("open the test display");
+        let display = xdisplay.as_ptr();
+        let window = unsafe {
+            let root = x11::xlib::XDefaultRootWindow(display);
+            let window = x11::xlib::XCreateSimpleWindow(display, root, 0, 0, 1, 1, 0, 0, 0);
+            x11::xlib::XSync(display, 0);
+            window
+        };
+        let (killer, _) =
+            x11rb::rust_connection::RustConnection::connect(None).expect("connect killer");
+        killer
+            .kill_client(window as u32)
+            .expect("KillClient request")
+            .check()
+            .expect("KillClient");
+        killer.flush().expect("flush");
+        // libX11 notices the closed connection here and ends the process.
+        unsafe { x11::xlib::XSync(display, 0) };
+        println!("{MARKER}");
+        return;
+    }
+    let server = Server::start(Path::new("Xvfb"));
+    let output = run_child(
+        "input::xlib_live_tests::a_broken_connection_releases_held_buttons_before_the_exit",
+        &server.display,
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stdout.contains(MARKER), "the child went on:\n{stdout}");
+    assert_eq!(output.status.code(), Some(1), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("connection to X display") && stderr.contains("released held button 1"),
+        "the exit says why and what it released:\n{stderr}"
+    );
+    let (conn, screen_num) =
+        x11rb::rust_connection::RustConnection::connect(Some(&server.display)).expect("connect");
+    use x11rb::connection::Connection as _;
+    use x11rb::protocol::xproto::ConnectionExt as _;
+    let root = conn.setup().roots[screen_num].root;
+    let mask = conn
+        .query_pointer(root)
+        .expect("QueryPointer request")
+        .reply()
+        .expect("QueryPointer reply")
+        .mask;
+    assert!(
+        !mask.contains(x11rb::protocol::xproto::KeyButMask::BUTTON1),
+        "the XTest button is still down after the exit"
+    );
+}
