@@ -20,6 +20,8 @@ pub mod focus_guard;
 pub mod foreground;
 /// Low-latency ordered input batches for one target (embedders).
 pub mod interactive;
+/// The one table of keyboard modifier names every route parses.
+pub mod modifier;
 mod mpx_keyboard;
 mod mpx_owner;
 /// Path sampling and timing for `move_along_path`.
@@ -3837,7 +3839,9 @@ pub fn send_key_xtest(key: &str, modifiers: &[&str]) -> Result<()> {
     // Hold Shift around the key when it lives at the shifted level and the caller
     // didn't already pass Shift as a modifier. Resolve the Shift keycode from the
     // server's modifier map so the mask actually engages.
-    let shift_requested = modifiers.iter().any(|m| m.eq_ignore_ascii_case("shift"));
+    let shift_requested = modifiers
+        .iter()
+        .any(|m| modifier::Modifier::parse(m) == Some(modifier::Modifier::Shift));
     let auto_shift_kc = if needs_shift && !shift_requested {
         let modmap = conn.get_modifier_mapping()?.reply()?;
         let kpm = modmap.keycodes_per_modifier() as usize;
@@ -4487,6 +4491,9 @@ fn char_to_keycode_shift(mapping: &GetKeyboardMappingReply, keysym: u32) -> Opti
 /// press_key terminal short-circuit gate) can test key identity against
 /// this canonical mapping instead of a local string comparison.
 pub(crate) fn key_name_to_keysym(key: &str) -> Result<u32> {
+    if let Some(modifier) = modifier::Modifier::parse(key) {
+        return Ok(modifier.keysym());
+    }
     // Common X11 keysym names.
     let keysym: u32 = match key.to_lowercase().as_str() {
         "return" | "enter" => 0xFF0D,
@@ -4516,10 +4523,6 @@ pub(crate) fn key_name_to_keysym(key: &str) -> Result<u32> {
         "f10" => 0xFFC7,
         "f11" => 0xFFC8,
         "f12" => 0xFFC9,
-        "shift" => 0xFFE1,
-        "ctrl" | "control" => 0xFFE3,
-        "alt" => 0xFFE9,
-        "super" | "meta" | "win" | "cmd" => 0xFFEB,
         "capslock" => 0xFFE5,
         "numlock" => 0xFF7F,
         // Common X keysym names for punctuation. The single-char branch below
@@ -4721,6 +4724,26 @@ mod key_name_alias_tests {
             key_name_to_keysym("cmd").unwrap(),
             key_name_to_keysym("super").unwrap()
         );
+    }
+
+    /// The X11 XTest and virtual-keyboard routes resolve modifiers here, so
+    /// every spelling the tool schemas accept must resolve: hotkey
+    /// ["command","s"] failed with "Unknown key: command" in background.
+    #[test]
+    fn every_modifier_spelling_resolves_to_its_keysym() {
+        for (names, keysym) in [
+            (&["ctrl", "Control"][..], 0xFFE3),
+            (&["shift"][..], 0xFFE1),
+            (&["alt", "option", "Option"][..], 0xFFE9),
+            (
+                &["super", "cmd", "command", "COMMAND", "meta", "windows", "win"][..],
+                0xFFEB,
+            ),
+        ] {
+            for name in names {
+                assert_eq!(key_name_to_keysym(name).unwrap(), keysym, "{name}");
+            }
+        }
     }
 }
 
@@ -4982,16 +5005,10 @@ fn ping_window(
 }
 
 fn modifiers_to_state(modifiers: &[&str]) -> KeyButMask {
-    let mut state = 0u16;
-    for m in modifiers {
-        match m.to_lowercase().as_str() {
-            "shift" => state |= u16::from(KeyButMask::SHIFT),
-            "ctrl" | "control" => state |= u16::from(KeyButMask::CONTROL),
-            "alt" | "mod1" => state |= u16::from(KeyButMask::MOD1),
-            "super" | "mod4" | "win" | "meta" => state |= u16::from(KeyButMask::MOD4),
-            _ => {}
-        }
-    }
+    let state = modifiers
+        .iter()
+        .filter_map(|name| modifier::Modifier::parse(name))
+        .fold(0u16, |state, modifier| state | modifier.state_mask());
     KeyButMask::from(state)
 }
 
@@ -5198,6 +5215,16 @@ mod path_tests {
             modifiers_to_state(&["control", "alt"]),
             KeyButMask::from(u16::from(KeyButMask::CONTROL) | u16::from(KeyButMask::MOD1))
         );
+        // The synthetic route dropped option, cmd, command and windows.
+        assert_eq!(
+            modifiers_to_state(&["option", "command"]),
+            KeyButMask::from(u16::from(KeyButMask::MOD1) | u16::from(KeyButMask::MOD4))
+        );
+        assert_eq!(
+            modifiers_to_state(&["cmd"]),
+            modifiers_to_state(&["windows"])
+        );
+        assert!(modifiers_to_state(&["windows"]).contains(KeyButMask::MOD4));
     }
 
     #[test]

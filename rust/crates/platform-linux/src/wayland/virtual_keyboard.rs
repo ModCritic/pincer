@@ -104,7 +104,10 @@ impl Dispatch<ZwpVirtualKeyboardV1, ()> for State {
     }
 }
 
-pub(super) fn hotkey(modifiers: &[String], key: &str) -> anyhow::Result<()> {
+pub(super) fn hotkey(
+    modifiers: &[crate::input::modifier::Modifier],
+    key: &str,
+) -> anyhow::Result<()> {
     let transitions = hotkey_transitions(modifiers, key)?;
     let conn = Connection::connect_to_env()?;
     let mut queue = conn.new_event_queue::<State>();
@@ -184,19 +187,17 @@ struct KeyTransition {
     modifier_mask: u32,
 }
 
-fn hotkey_transitions(modifiers: &[String], key: &str) -> anyhow::Result<Vec<KeyTransition>> {
+fn hotkey_transitions(
+    modifiers: &[crate::input::modifier::Modifier],
+    key: &str,
+) -> anyhow::Result<Vec<KeyTransition>> {
     let mut modifier_mask = 0;
-    let mut modifier_keys = Vec::with_capacity(modifiers.len());
-    for modifier in modifiers {
-        let (keycode, mask) = match modifier.as_str() {
-            "ctrl" => (29, 4),
-            "shift" => (42, 1),
-            "alt" => (56, 8),
-            "logo" => (125, 64),
-            other => anyhow::bail!("unsupported Wayland modifier '{other}'"),
-        };
-        modifier_keys.push((keycode, mask));
-    }
+    // The keymap is evdev + 8 with the standard XKB modifier map, so a
+    // modifier's XKB mask is its X11 state bit.
+    let modifier_keys: Vec<(u32, u32)> = modifiers
+        .iter()
+        .map(|modifier| (modifier.evdev_code(), u32::from(modifier.state_mask())))
+        .collect();
     let keycode = super::key_to_evdev(key)
         .ok_or_else(|| anyhow::anyhow!("no evdev keycode mapping for key '{key}'"))?;
     let mut transitions = Vec::with_capacity(modifier_keys.len() * 2 + 2);
@@ -236,7 +237,14 @@ mod tests {
     #[test]
     fn chord_uses_physical_digit7_and_balanced_modifiers() {
         assert_eq!(
-            hotkey_transitions(&["ctrl".into(), "shift".into()], "7").unwrap(),
+            hotkey_transitions(
+                &[
+                    crate::input::modifier::Modifier::Ctrl,
+                    crate::input::modifier::Modifier::Shift
+                ],
+                "7"
+            )
+            .unwrap(),
             [
                 KeyTransition {
                     keycode: 29,

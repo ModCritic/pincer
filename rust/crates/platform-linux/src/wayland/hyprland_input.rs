@@ -836,12 +836,14 @@ impl Action {
                     .context("key has no evdev mapping; Unicode text is unsupported")?;
                 let mut mask = 0;
                 for modifier in modifiers {
-                    mask |= match modifier.to_ascii_lowercase().as_str() {
-                        "shift" => 1,
-                        "ctrl" | "control" => 2,
-                        "alt" | "option" => 4,
-                        "super" | "meta" | "cmd" | "command" | "win" => 8,
-                        _ => bail!("unsupported modifier"),
+                    use crate::input::modifier::Modifier;
+                    // The plugin protocol's own bits.
+                    mask |= match Modifier::parse(modifier) {
+                        Some(Modifier::Shift) => 1,
+                        Some(Modifier::Ctrl) => 2,
+                        Some(Modifier::Alt) => 4,
+                        Some(Modifier::Super) => 8,
+                        None => bail!("unsupported modifier"),
                     };
                 }
                 format!("KEY {prefix} {keycode} {mask}")

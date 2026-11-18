@@ -27,8 +27,10 @@ fn wm_chords_are_recognised() {
         wm_chord_kind("F4", &m(&["alt"])),
         Some(WmChord::CloseWindow)
     );
+    // Any spelling the modifier table accepts ("Alt_L" is a keysym name,
+    // which the tools now refuse as a modifier before this point).
     assert_eq!(
-        wm_chord_kind("f4", &m(&["Alt_L"])),
+        wm_chord_kind("f4", &m(&["Option"])),
         Some(WmChord::CloseWindow)
     );
     assert_eq!(

@@ -61,8 +61,11 @@ const XK_INSERT: u32 = 0xff63;
 const XK_SPACE: u32 = 0x0020;
 const XK_CAPS_LOCK: u32 = 0xffe5;
 pub(crate) const XK_SHIFT_L: u32 = 0xffe1;
+#[cfg(test)]
 const XK_CONTROL_L: u32 = 0xffe3;
+#[cfg(test)]
 const XK_ALT_L: u32 = 0xffe9;
+#[cfg(test)]
 const XK_SUPER_L: u32 = 0xffeb;
 const XK_F1: u32 = 0xffbe;
 
@@ -152,9 +155,10 @@ pub fn x_key_name(key: &str) -> String {
         "arrowdown" => "down".into(),
         "arrowleft" => "left".into(),
         "arrowright" => "right".into(),
-        "command" | "cmd" => "super".into(),
-        "option" => "alt".into(),
-        _ => key.to_owned(),
+        _ => match super::modifier::Modifier::parse(key) {
+            Some(modifier) => modifier.name().into(),
+            None => key.to_owned(),
+        },
     }
 }
 
@@ -435,13 +439,7 @@ pub(crate) fn ensure_point_hits(
 // ---------------------------------------------------------------------------
 
 pub(crate) fn modifier_keysym(name: &str) -> Option<u32> {
-    Some(match name.to_ascii_lowercase().as_str() {
-        "shift" => XK_SHIFT_L,
-        "control" | "ctrl" => XK_CONTROL_L,
-        "alt" | "option" => XK_ALT_L,
-        "command" | "cmd" | "super" | "win" | "meta" => XK_SUPER_L,
-        _ => return None,
-    })
+    super::modifier::Modifier::parse(name).map(super::modifier::Modifier::keysym)
 }
 
 /// Resolve a key name into an X keysym. Named keys win; a single character
@@ -479,11 +477,10 @@ fn named_key_keysym(name: &str) -> Option<u32> {
         "pagedown" => XK_PAGE_DOWN,
         "insert" => XK_INSERT,
         "capslock" => XK_CAPS_LOCK,
-        "shift" => XK_SHIFT_L,
-        "control" | "ctrl" => XK_CONTROL_L,
-        "alt" | "option" => XK_ALT_L,
-        "command" | "cmd" | "super" | "win" | "meta" => XK_SUPER_L,
         _ => {
+            if let Some(sym) = modifier_keysym(&lower) {
+                return Some(sym);
+            }
             if let Some(rest) = lower.strip_prefix('f') {
                 if let Ok(number) = rest.parse::<u32>() {
                     if (1..=35).contains(&number) {
@@ -583,7 +580,14 @@ pub(crate) fn press_modifiers(
 ) -> Result<Vec<u8>, TargetedInputError> {
     let mut held = Vec::new();
     for name in modifiers {
-        if let Some((code, _)) = modifier_keysym(name).and_then(|sym| keymap.lookup(sym)) {
+        let Some(sym) = modifier_keysym(name) else {
+            release_keys(conn, root, &held)?;
+            return Err(TargetedInputError::Unsupported(format!(
+                "unsupported modifier name {name}; accepted: {}",
+                super::modifier::ACCEPTED_NAMES
+            )));
+        };
+        if let Some((code, _)) = keymap.lookup(sym) {
             fake_key(conn, true, code, root)?;
             held.push(code);
         }
@@ -1106,6 +1110,8 @@ mod tests {
         assert_eq!(modifier_keysym("alt"), Some(XK_ALT_L));
         assert_eq!(modifier_keysym("option"), Some(XK_ALT_L));
         assert_eq!(modifier_keysym("cmd"), Some(XK_SUPER_L));
+        assert_eq!(modifier_keysym("Command"), Some(XK_SUPER_L));
+        assert_eq!(modifier_keysym("windows"), Some(XK_SUPER_L));
         assert_eq!(modifier_keysym("shift"), Some(XK_SHIFT_L));
         assert_eq!(modifier_keysym("hyper"), None);
     }

@@ -2583,7 +2583,18 @@ pub fn hotkey_focused(keys: &[String]) -> anyhow::Result<()> {
     }
 }
 
-fn wtype_hotkey_args(mods: &[String], keysym: &str) -> Vec<String> {
+/// wtype's name for a modifier (`-M`/`-m`).
+fn wtype_modifier_name(modifier: crate::input::modifier::Modifier) -> &'static str {
+    use crate::input::modifier::Modifier;
+    match modifier {
+        Modifier::Ctrl => "ctrl",
+        Modifier::Shift => "shift",
+        Modifier::Alt => "alt",
+        Modifier::Super => "logo",
+    }
+}
+
+fn wtype_hotkey_args(mods: &[crate::input::modifier::Modifier], keysym: &str) -> Vec<String> {
     // Keep the same harmless first-event primer used by `press_key`. A fresh
     // virtual-keyboard object on headless seats can drop its first event. Give
     // wlroots one event cycle after the primer and modifier transitions;
@@ -2592,7 +2603,7 @@ fn wtype_hotkey_args(mods: &[String], keysym: &str) -> Vec<String> {
     let mut args: Vec<String> = vec!["-k".into(), "Shift_L".into(), "-s".into(), "30".into()];
     for m in mods {
         args.push("-M".into());
-        args.push(m.clone());
+        args.push(wtype_modifier_name(*m).into());
     }
     args.push("-s".into());
     args.push("20".into());
@@ -2603,42 +2614,45 @@ fn wtype_hotkey_args(mods: &[String], keysym: &str) -> Vec<String> {
     // Release modifiers in reverse press order.
     for m in mods.iter().rev() {
         args.push("-m".into());
-        args.push(m.clone());
+        args.push(wtype_modifier_name(*m).into());
     }
     args
 }
 
-/// Split a `keys` array into wtype-compatible modifier names and a single
-/// final key. Recognised modifier inputs: ctrl/control, alt, shift,
-/// super/meta/cmd/command/win/windows. The final key must be the one
-/// non-modifier in the list.
-fn partition_modifiers(keys: &[String]) -> anyhow::Result<(Vec<String>, String)> {
-    let mut mods: Vec<String> = Vec::new();
-    let mut non_mods: Vec<String> = Vec::new();
+/// Split a `keys` array into its modifiers ([`crate::input::modifier`]) and
+/// the one non-modifier key, which must be the only one in the list.
+fn partition_modifiers(
+    keys: &[String],
+) -> anyhow::Result<(Vec<crate::input::modifier::Modifier>, String)> {
+    let mut mods = Vec::new();
+    let mut non_mods: Vec<&String> = Vec::new();
     for k in keys {
-        match k.to_ascii_lowercase().as_str() {
-            "ctrl" | "control" => mods.push("ctrl".into()),
-            "alt" => mods.push("alt".into()),
-            "shift" => mods.push("shift".into()),
-            "super" | "meta" | "cmd" | "command" | "win" | "windows" => mods.push("logo".into()),
-            _ => non_mods.push(k.clone()),
+        match crate::input::modifier::Modifier::parse(k) {
+            Some(modifier) if !mods.contains(&modifier) => mods.push(modifier),
+            Some(_) => {}
+            None => non_mods.push(k),
         }
     }
-    let final_key = non_mods
-        .last()
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("hotkey requires at least one non-modifier key"))?;
-    Ok((mods, final_key))
+    match non_mods.as_slice() {
+        [key] => Ok((mods, (*key).clone())),
+        [] => anyhow::bail!("hotkey requires at least one non-modifier key"),
+        more => anyhow::bail!(
+            "hotkey takes modifiers plus one key, got {} non-modifier keys ({}); modifiers \
+             are {}",
+            more.len(),
+            more.iter().map(|key| key.as_str()).collect::<Vec<_>>().join(", "),
+            crate::input::modifier::ACCEPTED_NAMES
+        ),
+    }
 }
 
 /// Map pincer key names to X keysym names that `wtype -k` understands. Unknown
 /// values pass through (single characters and valid keysym names work as-is).
 fn key_to_keysym(key: &str) -> String {
+    if let Some(modifier) = crate::input::modifier::Modifier::parse(key) {
+        return modifier.keysym_name().to_owned();
+    }
     match key.to_lowercase().as_str() {
-        "ctrl" | "control" => "Control_L",
-        "alt" => "Alt_L",
-        "shift" => "Shift_L",
-        "super" | "meta" | "cmd" | "command" | "win" | "windows" => "Super_L",
         "enter" | "return" => "Return",
         "tab" => "Tab",
         "esc" | "escape" => "Escape",
@@ -2869,19 +2883,10 @@ fn libei_press_key(key: &str) -> anyhow::Result<()> {
 }
 
 #[cfg(feature = "portal-input")]
-fn libei_hotkey(mods: &[String], key: &str) -> anyhow::Result<()> {
+fn libei_hotkey(mods: &[crate::input::modifier::Modifier], key: &str) -> anyhow::Result<()> {
     use libei::KeyTransition::{Press, Release};
 
-    let mut modifier_codes = Vec::with_capacity(mods.len());
-    for modifier in mods {
-        modifier_codes.push(match modifier.as_str() {
-            "ctrl" => 29,
-            "shift" => 42,
-            "alt" => 56,
-            "logo" => 125,
-            other => anyhow::bail!("no evdev keycode mapping for modifier '{other}'"),
-        });
-    }
+    let modifier_codes: Vec<u32> = mods.iter().map(|modifier| modifier.evdev_code()).collect();
     let keycode = key_to_evdev(key)
         .ok_or_else(|| anyhow::anyhow!("no evdev keycode mapping for key '{key}' (libei path)"))?;
     let mut transitions = Vec::with_capacity(modifier_codes.len() * 2 + 2);
@@ -2897,11 +2902,10 @@ fn libei_hotkey(mods: &[String], key: &str) -> anyhow::Result<()> {
 /// emits `linux/input-event-codes.h` values. Returns `None` for keys with no
 /// known mapping so the caller can fail loudly.
 fn key_to_evdev(key: &str) -> Option<u32> {
+    if let Some(modifier) = crate::input::modifier::Modifier::parse(key) {
+        return Some(modifier.evdev_code());
+    }
     let code = match key.to_lowercase().as_str() {
-        "ctrl" | "control" => 29, // KEY_LEFTCTRL
-        "alt" => 56,              // KEY_LEFTALT
-        "shift" => 42,            // KEY_LEFTSHIFT
-        "super" | "meta" | "cmd" | "command" | "win" | "windows" => 125, // KEY_LEFTMETA
 
         "enter" | "return" => 28,        // KEY_ENTER
         "tab" => 15,                     // KEY_TAB
@@ -3137,13 +3141,17 @@ fn validate_injectable_hotkey(keys: &[String]) -> anyhow::Result<(String, String
     }
     let mut normalized = Vec::with_capacity(modifiers.len());
     for modifier in modifiers {
-        let modifier = modifier.trim().to_ascii_lowercase();
-        let canonical = match modifier.as_str() {
-            "ctrl" | "control" => "ctrl",
-            "shift" => "shift",
-            "alt" | "option" => "alt",
-            "meta" | "super" | "win" | "cmd" => "meta",
-            _ => anyhow::bail!("cua-compositor does not support modifier {modifier:?}"),
+        use crate::input::modifier::Modifier;
+        // The compositor protocol names Super "meta".
+        let canonical = match Modifier::parse(modifier) {
+            Some(Modifier::Ctrl) => "ctrl",
+            Some(Modifier::Shift) => "shift",
+            Some(Modifier::Alt) => "alt",
+            Some(Modifier::Super) => "meta",
+            None => anyhow::bail!(
+                "cua-compositor does not support modifier {:?}",
+                modifier.trim().to_ascii_lowercase()
+            ),
         };
         normalized.push(canonical);
     }
@@ -4355,13 +4363,37 @@ mod tests {
         );
         assert!(validate_injectable_hotkey(&["7".to_owned()]).is_err());
         assert!(validate_injectable_hotkey(&["hyper".to_owned(), "k".to_owned()]).is_err());
+        let spelled = ["Command", "option", "windows", "k"].map(str::to_owned);
+        assert_eq!(
+            validate_injectable_hotkey(&spelled).expect("macOS and Windows spellings"),
+            ("meta,alt,meta".to_owned(), "k".to_owned())
+        );
+    }
+
+    #[test]
+    fn hotkey_keys_split_into_modifiers_and_one_key() {
+        use crate::input::modifier::Modifier;
+        let keys = ["option", "Command", "s"].map(str::to_owned);
+        assert_eq!(
+            partition_modifiers(&keys).unwrap(),
+            (vec![Modifier::Alt, Modifier::Super], "s".to_owned())
+        );
+        // option was a key here, so the chord sent a bare "s".
+        let keys = ["option", "s"].map(str::to_owned);
+        assert_eq!(
+            partition_modifiers(&keys).unwrap(),
+            (vec![Modifier::Alt], "s".to_owned())
+        );
+        let two_keys = ["ctrl", "k", "s"].map(str::to_owned);
+        assert!(partition_modifiers(&two_keys).is_err());
+        assert!(partition_modifiers(&["ctrl".to_owned()]).is_err());
     }
 
     #[test]
     fn standalone_modifiers_map_to_native_keyboard_keys() {
         for (aliases, keysym, evdev) in [
             (&["ctrl", "control"][..], "Control_L", 29),
-            (&["alt"][..], "Alt_L", 56),
+            (&["alt", "option"][..], "Alt_L", 56),
             (&["shift"][..], "Shift_L", 42),
             (
                 &["super", "meta", "cmd", "command", "win", "windows"][..],
@@ -4390,7 +4422,8 @@ mod tests {
 
     #[test]
     fn wtype_hotkey_keeps_primer_chord_and_releases_in_order() {
-        let args = wtype_hotkey_args(&["ctrl".into(), "shift".into()], "7");
+        use crate::input::modifier::Modifier;
+        let args = wtype_hotkey_args(&[Modifier::Ctrl, Modifier::Shift], "7");
         assert_eq!(
             args,
             [

@@ -6010,17 +6010,16 @@ enum WmChord {
 /// do nothing. Recognise them so the tool can act (close the window through
 /// EWMH) or refuse with a typed reason instead of reporting `unverifiable`.
 fn wm_chord_kind(key: &str, modifiers: &[String]) -> Option<WmChord> {
-    let mods: Vec<String> = modifiers
-        .iter()
-        .map(|m| m.trim().to_ascii_lowercase())
-        .collect();
-    let has = |names: &[&str]| mods.iter().any(|m| names.contains(&m.as_str()));
-    let alt = has(&["alt", "alt_l", "alt_r", "option"]);
-    let ctrl = has(&["ctrl", "control", "ctrl_l", "ctrl_r"]);
-    let shift = has(&["shift", "shift_l", "shift_r"]);
-    let super_ = has(&[
-        "super", "super_l", "super_r", "meta", "win", "cmd", "command", "hyper",
-    ]);
+    use crate::input::modifier::Modifier;
+    let has = |wanted: Modifier| {
+        modifiers
+            .iter()
+            .any(|name| Modifier::parse(name) == Some(wanted))
+    };
+    let alt = has(Modifier::Alt);
+    let ctrl = has(Modifier::Ctrl);
+    let shift = has(Modifier::Shift);
+    let super_ = has(Modifier::Super);
     let key_lower = key.trim().to_ascii_lowercase();
     if super_ {
         return Some(WmChord::Unavailable);
@@ -8690,7 +8689,10 @@ impl Tool for ClickTool {
 
     async fn invoke(&self, args: Value) -> ToolResult {
         let cursor_id = resolve_cursor_key(&args);
-        let modifiers: Vec<String> = args.str_array("modifier");
+        let modifiers = match modifier_arg("click", "modifier", &args.str_array("modifier")) {
+            Ok(modifiers) => modifiers,
+            Err(refusal) => return refusal,
+        };
 
         // ── Window-less screen-absolute branch (desktop target) ───────────────
         // x,y with NO pid and NO window_id → TRUE SCREEN pixels. Foreground,
@@ -10725,7 +10727,7 @@ impl Tool for PressKeyTool {
                     "pid":{"type":"integer","description":"Target process ID. Omit with scope \"desktop\" to send the key to the focused application."},
                     "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                     "key":{"type":"string","description":"Key name: enter/return, tab, escape, space, backspace, delete, insert, home, end, pageup, pagedown, up, down, left, right, f1-f12, or any single ASCII character."},
-                    "modifiers":{"type":"array","items":{"type":"string"},"description":"Modifier keys held while the key is pressed: ctrl, shift, alt, super."},
+                    "modifiers":{"type":"array","items":{"type":"string"},"description":"Modifier keys held while the key is pressed: ctrl, shift, alt (or option), super (or cmd, win)."},
                     "element_token": pincer_core::tool_schema::element_token_schema(),
                     "x":{"type":"number","description":"Pixel X, the element px action form: pixel-click there to focus, then send the key. Use when the key must go to a Chromium/Electron surface the AX path can't focus. Pass with y, no element_token. Window-local pixels by default (same convention as click); for get_desktop_state pixels pass scope:\"desktop\" (or coordinate_frame:\"desktop\")."},
                     "y":{"type":"number","description":"Pixel Y (see x)."},
@@ -10748,9 +10750,14 @@ impl Tool for PressKeyTool {
                 Ok(input) => input,
                 Err(result) => return result,
             };
-            let key = input.key;
-            let display = key.clone();
-            let modifiers = input.modifiers.unwrap_or_default();
+            let (combo_mods, key) = split_key_combo(&input.key);
+            let display = input.key.clone();
+            let mut modifiers = input.modifiers.unwrap_or_default();
+            modifiers.extend(combo_mods);
+            let modifiers = match modifier_arg("press_key", "modifiers", &modifiers) {
+                Ok(modifiers) => modifiers,
+                Err(refusal) => return refusal,
+            };
             position_named_session_keyboard_cursor(&self.state, &args, 0, 0, None, None, false)
                 .await;
             let wayland = crate::wayland::wayland_input_enabled();
@@ -10785,6 +10792,10 @@ impl Tool for PressKeyTool {
         let mut mods: Vec<String> = args.str_array("modifiers");
         let (combo_mods, key) = split_key_combo(&key);
         mods.extend(combo_mods);
+        let mods = match modifier_arg("press_key", "modifiers", &mods) {
+            Ok(mods) => mods,
+            Err(refusal) => return refusal,
+        };
 
         // Resolve the element token into both its owning window and exact
         // child. Foreground delivery establishes child focus inside the
@@ -11127,20 +11138,78 @@ impl Tool for PressKeyTool {
 
 // ── hotkey ────────────────────────────────────────────────────────────────────
 
-fn is_modifier(k: &str) -> bool {
-    matches!(
-        k.to_lowercase().as_str(),
-        "ctrl"
-            | "control"
-            | "shift"
-            | "alt"
-            | "super"
-            | "meta"
-            | "cmd"
-            | "command"
-            | "win"
-            | "windows"
-    )
+use crate::input::modifier::is_modifier;
+
+/// A tool's `modifier` / `modifiers` argument as canonical names (ctrl,
+/// shift, alt, super). A name that is not a modifier is refused: the X11
+/// synthetic route used to drop it and send the unmodified action.
+fn modifier_arg(tool: &str, field: &str, names: &[String]) -> Result<Vec<String>, ToolResult> {
+    crate::input::modifier::canonical_modifier_names(names).map_err(|unknown| {
+        unknown_modifier_refusal(tool, field, &unknown)
+    })
+}
+
+fn unknown_modifier_refusal(tool: &str, field: &str, unknown: &[String]) -> ToolResult {
+    let accepted = crate::input::modifier::ACCEPTED_NAMES;
+    ToolResult::error(format!(
+        "{tool}: {field} {} not a modifier name; accepted: {accepted}.",
+        if unknown.len() == 1 {
+            format!("\"{}\" is", unknown[0])
+        } else {
+            format!(
+                "{} are",
+                unknown
+                    .iter()
+                    .map(|name| format!("\"{name}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+    ))
+    .with_structured(json!({
+        "code": "invalid_arguments",
+        "tool": tool,
+        "field": field,
+        "unknown": unknown,
+        "accepted": accepted,
+    }))
+}
+
+/// Split hotkey `keys` into canonical modifier names and the one key that
+/// is not a modifier. More than one non-modifier is refused: the extra one is
+/// usually a modifier spelling the tool did not know, and the chord would
+/// otherwise go out without it.
+fn split_hotkey_keys(keys: &[String]) -> Result<(Vec<String>, String), ToolResult> {
+    let (modifiers, others): (Vec<&String>, Vec<&String>) =
+        keys.iter().partition(|key| is_modifier(key));
+    match others.as_slice() {
+        [key] => {
+            let modifiers = crate::input::modifier::canonical_modifier_names(&modifiers)
+                .expect("partitioned as modifiers");
+            Ok((modifiers, (*key).clone()))
+        }
+        [] => Err(ToolResult::error("keys must include at least one non-modifier key.")
+            .with_structured(json!({ "code": "invalid_arguments", "tool": "hotkey" }))),
+        [.., key] => {
+            let extra: Vec<String> = others[..others.len() - 1]
+                .iter()
+                .map(|name| (*name).clone())
+                .collect();
+            let mut refusal = unknown_modifier_refusal("hotkey", "keys", &extra);
+            refusal.content = vec![pincer_core::protocol::Content::text(format!(
+                "hotkey: keys takes modifiers plus one key (\"{key}\" here); {} {} not a \
+                 modifier name. Accepted modifiers: {}.",
+                extra
+                    .iter()
+                    .map(|name| format!("\"{name}\""))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if extra.len() == 1 { "is" } else { "are" },
+                crate::input::modifier::ACCEPTED_NAMES
+            ))];
+            Err(refusal)
+        }
+    }
 }
 
 pub struct HotkeyTool {
@@ -11195,13 +11264,9 @@ impl Tool for HotkeyTool {
                 return ToolResult::error("hotkey.keys must contain at least two keys.")
                     .with_structured(json!({ "code": "invalid_arguments" }));
             }
-            let modifiers: Vec<String> = keys
-                .iter()
-                .filter(|key| is_modifier(key))
-                .cloned()
-                .collect();
-            let Some(key) = keys.iter().rev().find(|key| !is_modifier(key)).cloned() else {
-                return ToolResult::error("keys must include at least one non-modifier key.");
+            let (modifiers, key) = match split_hotkey_keys(&keys) {
+                Ok(split) => split,
+                Err(refusal) => return refusal,
             };
             let display = keys.join("+");
             position_named_session_keyboard_cursor(&self.state, &args, 0, 0, None, None, false)
@@ -11301,15 +11366,15 @@ impl Tool for HotkeyTool {
                 .iter()
                 .filter_map(|v| v.as_str().map(str::to_owned))
                 .collect();
-            let modifiers: Vec<String> = keys.iter().filter(|k| is_modifier(k)).cloned().collect();
-            let non_mods: Vec<String> = keys.iter().filter(|k| !is_modifier(k)).cloned().collect();
-            if non_mods.is_empty() {
-                return ToolResult::error("keys must include at least one non-modifier key.");
+            match split_hotkey_keys(&keys) {
+                Ok((modifiers, key)) => (key, modifiers),
+                Err(refusal) => return refusal,
             }
-            (non_mods.last().unwrap().clone(), modifiers)
         } else if let Some(k) = args.opt_str("key") {
-            let mods: Vec<String> = args.str_array("modifiers");
-            (k, mods)
+            match modifier_arg("hotkey", "modifiers", &args.str_array("modifiers")) {
+                Ok(mods) => (k, mods),
+                Err(refusal) => return refusal,
+            }
         } else {
             return ToolResult::error(
                 "Provide 'keys' array (e.g. [\"ctrl\",\"c\"]) or 'key'+'modifiers' parameters.",
@@ -12632,7 +12697,10 @@ impl Tool for ScrollTool {
         let cursor_id = resolve_cursor_key(&args);
         // Keys held around the wheel steps (ctrl+wheel to zoom). Only the X11
         // XTest and XSendEvent routes can carry them.
-        let modifiers: Vec<String> = args.str_array("modifier");
+        let modifiers = match modifier_arg("scroll", "modifier", &args.str_array("modifier")) {
+            Ok(modifiers) => modifiers,
+            Err(refusal) => return refusal,
+        };
         if !modifiers.is_empty() && crate::wayland::wayland_input_enabled() {
             return ToolResult::error(
                 "scroll with modifier is unavailable on native Wayland: the wheel route \
@@ -14211,7 +14279,10 @@ impl Tool for DragTool {
     }
     async fn invoke(&self, args: Value) -> ToolResult {
         let cursor_id = resolve_cursor_key(&args);
-        let modifiers: Vec<String> = args.str_array("modifier");
+        let modifiers = match modifier_arg("drag", "modifier", &args.str_array("modifier")) {
+            Ok(modifiers) => modifiers,
+            Err(refusal) => return refusal,
+        };
         if args.opt_str("scope").as_deref() == Some("desktop")
             && args.get("pid").is_none()
             && args.get("window_id").is_none()

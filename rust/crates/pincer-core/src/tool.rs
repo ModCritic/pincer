@@ -254,10 +254,32 @@ pub(crate) fn normalize_argument_aliases(tool_name: &str, args: &mut Value) -> R
         }
     }
     normalize_zoom_args(tool_name, args);
+    normalize_modifier_args(tool_name, args);
     normalize_key_args(tool_name, args);
     normalize_menu_args(tool_name, args);
     normalize_scroll_args(tool_name, args)?;
     normalize_set_config_args(tool_name, args)
+}
+
+/// Pointer tools take held keys as `modifier`, `press_key` as `modifiers`.
+/// Models mix the two up, so accept the other spelling for each without
+/// advertising it. When both are sent nothing is renamed, and the closed
+/// schema refuses the one the tool does not take.
+fn normalize_modifier_args(tool_name: &str, args: &mut Value) {
+    let (field, alias) = match tool_name {
+        "click" | "right_click" | "drag" | "scroll" => ("modifier", "modifiers"),
+        "press_key" => ("modifiers", "modifier"),
+        _ => return,
+    };
+    let Some(arguments) = args.as_object_mut() else {
+        return;
+    };
+    if arguments.contains_key(field) {
+        return;
+    }
+    if let Some(value) = arguments.remove(alias) {
+        arguments.insert(field.to_owned(), value);
+    }
 }
 
 /// `{key, value}` is unadvertised; rewrite it before the closed schema rejects `key`.
@@ -7799,6 +7821,67 @@ mod argument_shape_tests {
         let mut combo = json!({"keys": "cmd+s"});
         normalize_argument_aliases("hotkey", &mut combo).unwrap();
         assert_eq!(combo, json!({"keys": ["cmd", "s"]}));
+    }
+
+    #[test]
+    fn modifier_and_modifiers_are_accepted_for_each_other() {
+        let normalized = |tool: &str, args: serde_json::Value| {
+            let mut args = args;
+            normalize_argument_aliases(tool, &mut args).unwrap();
+            args
+        };
+        for tool in ["click", "right_click", "drag", "scroll"] {
+            assert_eq!(
+                normalized(tool, json!({"x": 1, "modifiers": ["ctrl"]})),
+                json!({"x": 1, "modifier": ["ctrl"]}),
+                "{tool}"
+            );
+            assert_eq!(
+                normalized(tool, json!({"modifier": ["shift"]})),
+                json!({"modifier": ["shift"]}),
+                "{tool}"
+            );
+        }
+        assert_eq!(
+            normalized("press_key", json!({"key": "s", "modifier": ["cmd"]})),
+            json!({"key": "s", "modifiers": ["cmd"]})
+        );
+        // The alias joins a combination written into `key`.
+        assert_eq!(
+            normalized("press_key", json!({"key": "ctrl+s", "modifier": ["shift"]})),
+            json!({"key": "s", "modifiers": ["shift", "ctrl"]})
+        );
+        // Both spellings: left for the closed schema to refuse.
+        assert_eq!(
+            normalized("click", json!({"modifier": ["ctrl"], "modifiers": ["alt"]})),
+            json!({"modifier": ["ctrl"], "modifiers": ["alt"]})
+        );
+        // Other tools are untouched.
+        assert_eq!(
+            normalized("hotkey", json!({"keys": ["ctrl", "s"], "modifiers": ["alt"]})),
+            json!({"keys": ["ctrl", "s"], "modifiers": ["alt"]})
+        );
+    }
+
+    #[test]
+    fn the_modifier_alias_is_not_advertised() {
+        // The alias passes the closed-schema check only because it is renamed
+        // first; the schemas keep their one spelling.
+        let click = ToolDef {
+            name: "click".into(),
+            description: String::new(),
+            input_schema: json!({"type": "object", "properties": {
+                "x": {"type": "number"}, "modifier": {"type": "array"}
+            }, "additionalProperties": false}),
+            read_only: false,
+            destructive: true,
+            idempotent: false,
+            open_world: true,
+        };
+        let mut args = json!({"x": 1, "modifiers": ["ctrl"]});
+        assert!(unknown_argument(&click, &args).is_some());
+        normalize_argument_aliases("click", &mut args).unwrap();
+        assert!(unknown_argument(&click, &args).is_none());
     }
 
     fn zoom_def() -> ToolDef {
