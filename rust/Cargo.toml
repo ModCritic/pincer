@@ -42,6 +42,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 zune-core = "=0.5.1"
 uniffi = "=0.31.0"
 postcard = { version = "1", features = ["alloc"] }
+# sha2, hkdf and hmac stay on the digest 0.10 line with secret-service 5,
+# which keyring's Secret Service store needs (zbus-secret-service-keyring-store
+# 1 requires secret-service ^5). Moved alone, they would keep digest 0.10 and
+# add a second sha2, hkdf and hmac. Move them with secret-service 6, which is
+# on the 0.11 line (a release candidate on 2026-11-18).
 sha2 = "0.10"
 zstd = "0.13"
 chacha20poly1305 = { version = "0.11", features = ["rand_core", "zeroize"] }
