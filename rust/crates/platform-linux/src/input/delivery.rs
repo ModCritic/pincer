@@ -14,9 +14,10 @@
 //!     injects to the compositor's input focus, so "background" cannot aim at a
 //!     specific non-focused window the way X11/macOS/Windows can (this is a
 //!     platform constraint, reported honestly, like macOS pixel input being
-//!     driver-unverifiable). When no libei backend is available
-//!     (`PORTAL_INPUT_ENABLED == false`) the tool returns a structured
-//!     `background_unavailable` error so the caller can escalate to foreground.
+//!     driver-unverifiable). On a compositor without the wlroots virtual
+//!     pointer (KDE Plasma, GNOME) in a build without `portal-input`, input
+//!     has no backend and the tool fails with a "no input backend" error
+//!     (`wayland::NO_VPTR_MARKER`); foreground does not help there.
 //!
 //! - `foreground` — activate the target first, then inject. On X11 the target
 //!   stays active afterwards (see `input/foreground.rs`: restoring the prior

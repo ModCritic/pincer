@@ -24,9 +24,11 @@ uses XSendEvent or that every toolkit accepts it. Inspect the result's public
 route and independently verify the application.
 
 These targets cannot take background input and return `background_unavailable`
-(the refusal's detail says why): Chromium and Electron windows, WebKitGTK,
-toolkits reachable only through the focused widget, and Wayland without libei.
-On Wayland, background input reaches only the focused window.
+(the refusal's detail says why): Chromium and Electron windows, WebKitGTK, and
+toolkits reachable only through the focused widget. On Wayland, background
+input reaches only the focused window, and on KDE Plasma or GNOME a build
+without the portal input feature has no input route at all: the error says
+"no input backend".
 
 `delivery_mode:"foreground"` is a user-visible takeover. Never select it automatically.
 Use explicitly authorized `delivery_mode:"foreground"` only after evidence
