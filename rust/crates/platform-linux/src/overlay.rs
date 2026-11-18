@@ -3508,11 +3508,43 @@ mod tests {
         anyhow::bail!("timed out waiting for an X11 button press")
     }
 
+    /// Whether this process should run the body of the live overlay test
+    /// `name`. The overlay is process-wide (`init` takes effect once), so two
+    /// such tests in one process share the first one's window and the second
+    /// waits for its own forever. Outside the child copy this runs `name` in
+    /// a child copy of the test binary, checks that it passed, and answers
+    /// false.
+    fn in_own_overlay_process(name: &str) -> bool {
+        const CHILD: &str = "PINCER_OVERLAY_LIVE_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            return true;
+        }
+        let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([name, "--exact", "--ignored", "--nocapture", "--test-threads=1"])
+            .env(CHILD, "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("run the child test");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("test result: ok. 1 passed"),
+            "child test failed ({}):\n--- stdout\n{stdout}\n--- stderr\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        false
+    }
+
     #[test]
     #[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
     fn x11_overlay_owner_stays_click_through_across_cursor_lifecycle_and_randr(
     ) -> anyhow::Result<()> {
         let _display = crate::throwaway_display::throwaway_display();
+        if !in_own_overlay_process(
+            "overlay::tests::x11_overlay_owner_stays_click_through_across_cursor_lifecycle_and_randr",
+        ) {
+            return Ok(());
+        }
         use x11rb::connection::Connection;
         use x11rb::protocol::randr::ConnectionExt as RandrConnectionExt;
         use x11rb::protocol::shape::{ConnectionExt as ShapeConnectionExt, SK};
@@ -3798,6 +3830,11 @@ mod tests {
     #[ignore = "drives the X server DISPLAY names; run with rust/scripts/ci-x11-tests.sh"]
     fn x11_desktop_capture_hides_the_resting_overlay_and_restores_it() -> anyhow::Result<()> {
         let _display = crate::throwaway_display::throwaway_display();
+        if !in_own_overlay_process(
+            "overlay::tests::x11_desktop_capture_hides_the_resting_overlay_and_restores_it",
+        ) {
+            return Ok(());
+        }
         use cursor_overlay::capture_exclusion::{
             capture_excluding_overlays, AgentOverlayCaptureStatus,
         };

@@ -37,6 +37,12 @@ pub(crate) fn run_child(name: &str, display: &str) -> Output {
         .env(CHILD_ENV, "1")
         .env("DISPLAY", display)
         .env_remove("WAYLAND_DISPLAY")
+        // A plain X server, not the desktop the tests were started from:
+        // on KDE X11 the MPX route refuses before the code under test runs.
+        .env_remove("XDG_CURRENT_DESKTOP")
+        .env_remove("XDG_SESSION_DESKTOP")
+        .env_remove("DESKTOP_SESSION")
+        .env_remove("KDE_FULL_SESSION")
         .stdin(Stdio::null())
         .output()
         .expect("run the child test")
