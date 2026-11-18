@@ -5545,8 +5545,9 @@ fn coordinate_context(
 /// (`coordinate_frame`/`scope` "desktop"), a published capture
 /// (`capture_id`, one point only), a zoom image (`from_zoom`), or by default
 /// the window's latest get_window_state screenshot. The one resolver behind
-/// click, double_click, right_click, drag, scroll, mouse_button_down and
-/// mouse_drag; `native_refusal` is reported before any frame is read.
+/// click, double_click, right_click, drag, scroll, mouse_button_down,
+/// mouse_drag and mouse_button_up; `native_refusal` is reported before any
+/// frame is read.
 async fn resolve_window_points<const N: usize>(
     state: &ToolState,
     args: &Value,
@@ -7215,8 +7216,8 @@ fn pointer_tools_compute_the_native_refusal_before_resolving_points() {
 }
 
 #[cfg(test)]
-#[test]
-fn coordinate_less_mouse_button_up_survives_snapshot_replacement() {
+#[tokio::test]
+async fn coordinate_less_mouse_button_up_survives_snapshot_replacement() {
     let state = ToolState::new();
     let cursor_id = "held-after-replacement";
     let hold = MouseHoldState {
@@ -7250,13 +7251,16 @@ fn coordinate_less_mouse_button_up_survives_snapshot_replacement() {
 
     let release_args = json!({"_session_id": "press-owner"});
     assert_eq!(
-        mouse_button_up_coordinates(&state, &release_args, &hold).unwrap(),
+        mouse_button_up_point(&state, &release_args, cursor_id, &hold)
+            .await
+            .unwrap(),
         (hold.x, hold.y),
         "coordinate-less release must use the stored native hold point"
     );
 
     let stale_coordinate_args = json!({"_session_id": "press-owner", "x": 60.0, "y": 40.0});
-    let refusal = mouse_button_up_coordinates(&state, &stale_coordinate_args, &hold)
+    let refusal = mouse_button_up_point(&state, &stale_coordinate_args, cursor_id, &hold)
+        .await
         .expect_err("coordinate-bearing release must still reject a replaced snapshot");
     assert_eq!(
         refusal.structured_content.as_ref().unwrap()["code"],
@@ -7270,6 +7274,43 @@ fn coordinate_less_mouse_button_up_survives_snapshot_replacement() {
         .unwrap()
         .insert(cursor_id.to_owned(), hold)
         .is_none());
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn a_lone_release_coordinate_keeps_the_held_point_on_the_other_axis() {
+    let state = ToolState::new();
+    let hold = MouseHoldState {
+        pid: 42,
+        xid: 7,
+        button: 1,
+        x: 120.0,
+        y: 80.0,
+        foreground: false,
+    };
+    state.snapshots.publish_for_session(
+        hold.pid as i32,
+        hold.xid,
+        crate::atspi::snapshot::AtspiSnapshot::from_nodes(&[]),
+        Some("owner"),
+        Some(2.0),
+    );
+    let args = json!({"_session_id": "owner", "x": 30.0});
+    assert_eq!(
+        mouse_button_up_point(&state, &args, "lone", &hold)
+            .await
+            .unwrap(),
+        (60.0, hold.y),
+        "the held y is already in window pixels"
+    );
+    let both = json!({"_session_id": "owner", "x": 30.0, "y": 10.0});
+    assert_eq!(
+        mouse_button_up_point(&state, &both, "lone", &hold)
+            .await
+            .unwrap(),
+        (60.0, 20.0),
+        "a full point maps like the other pointer tools"
+    );
 }
 
 #[cfg(test)]
@@ -7725,26 +7766,44 @@ fn held_input_error(
     result
 }
 
-fn mouse_button_up_coordinates(
+/// The release point of mouse_button_up, in window pixels. Without x/y it is
+/// where the button is held, read from no frame, so a release still works
+/// after the window's snapshot was replaced. With them, the shared
+/// [`resolve_window_points`] maps the point from the frame the call names
+/// (window screenshot, zoom image or desktop), as for the other pointer
+/// tools. A lone x or y keeps the held point's other coordinate, which is
+/// stored in window pixels already.
+async fn mouse_button_up_point(
     state: &ToolState,
     args: &Value,
+    cursor_id: &str,
     hold: &MouseHoldState,
 ) -> Result<(f64, f64), ToolResult> {
-    if args.get("x").is_none() && args.get("y").is_none() {
+    let (x, y) = (args.opt_f64("x"), args.opt_f64("y"));
+    if x.is_none() && y.is_none() {
         return Ok((hold.x, hold.y));
     }
-
-    let mut x = args.opt_f64("x").unwrap_or(hold.x);
-    let mut y = args.opt_f64("y").unwrap_or(hold.y);
-    if args.bool_or("from_zoom", false) {
-        let context = state.zoom_context(args, hold.pid, Some(hold.xid))?;
-        return Ok(context.zoom_to_window(x, y));
-    }
-
-    let ratio = screenshot_scale(state, args, hold.pid, Some(hold.xid))?;
-    x *= ratio;
-    y *= ratio;
-    Ok((x, y))
+    let [(mapped_x, mapped_y)] = resolve_window_points(
+        state,
+        args,
+        "mouse_button_up",
+        (hold.pid, hold.xid),
+        [(x.unwrap_or(0.0), y.unwrap_or(0.0))],
+        None,
+    )
+    .await
+    .map_err(|mut refusal| {
+        // The desktop-frame refusals come without structured content; they
+        // keep naming the held button, as this tool's own mapping did.
+        if refusal.structured_content.is_none() {
+            refusal.structured_content = Some(mouse_hold_json(cursor_id, Some(hold)));
+        }
+        refusal
+    })?;
+    Ok((
+        if x.is_some() { mapped_x } else { hold.x },
+        if y.is_some() { mapped_y } else { hold.y },
+    ))
 }
 
 fn clear_mouse_hold_after_release(state: &ToolState, cursor_id: &str) {
@@ -15504,36 +15563,10 @@ impl Tool for MouseButtonUpTool {
 
         let xid = hold.xid;
 
-        let desktop_frame = args.opt_f64("x").is_some()
-            && args.opt_f64("y").is_some()
-            && desktop_frame_requested(&args);
-        let (mut x, mut y) = if desktop_frame {
-            // Desktop pixels: no zoom/screenshot scaling; translated below.
-            (args.f64_or("x", hold.x), args.f64_or("y", hold.y))
-        } else {
-            match mouse_button_up_coordinates(&self.state, &args, &hold) {
-                Ok(point) => point,
-                Err(refusal) => return refusal,
-            }
+        let (x, y) = match mouse_button_up_point(&self.state, &args, &cursor_id, &hold).await {
+            Ok(point) => point,
+            Err(refusal) => return refusal,
         };
-        if desktop_frame {
-            match tokio::task::spawn_blocking(move || desktop_to_window_local(xid, x, y)).await {
-                Ok(Ok((lx, ly))) => {
-                    x = lx;
-                    y = ly;
-                }
-                Ok(Err(e)) => {
-                    return ToolResult::error(format!(
-                        "desktop-frame coordinates could not be mapped into window {xid}: {e}"
-                    ))
-                    .with_structured(mouse_hold_json(&cursor_id, Some(&hold)))
-                }
-                Err(e) => {
-                    return ToolResult::error(format!("Task error: {e}"))
-                        .with_structured(mouse_hold_json(&cursor_id, Some(&hold)))
-                }
-            }
-        }
 
         crate::overlay::send_command_for(
             cursor_id.clone(),
