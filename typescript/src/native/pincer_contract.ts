@@ -2125,10 +2125,6 @@ export type DragInput = {
     fromY: number,
     toX: number,
     toY: number,
-    /**
-     * Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-     * (`kind="desktop"`, `display_id="primary"`).
-     */
     target?: ActionTarget,
     /**
      * Deprecated flat desktop target retained for wire compatibility.
@@ -2870,10 +2866,6 @@ const FfiConverterTypeGetWindowStateInput = (() => {
 
 export type HotkeyInput = {
     keys: Array<string>,
-    /**
-     * Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-     * (`kind="desktop"`, `display_id="primary"`).
-     */
     target?: ActionTarget,
     /**
      * Deprecated flat desktop target retained for wire compatibility.
@@ -3570,10 +3562,6 @@ export type MoveCursorInput = {
      * Destination Y, in the same space as `x`.
      */
     y: number,
-    /**
-     * Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-     * (`kind="desktop"`, `display_id="primary"`).
-     */
     target?: ActionTarget,
     /**
      * Deprecated flat desktop target retained for wire compatibility.
@@ -3761,10 +3749,6 @@ const FfiConverterTypePredicateOutcome = (() => {
 
 export type PressKeyInput = {
     key: string,
-    /**
-     * Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-     * (`kind="desktop"`, `display_id="primary"`).
-     */
     target?: ActionTarget,
     /**
      * Deprecated flat desktop target retained for wire compatibility.
@@ -3889,10 +3873,6 @@ export type ScrollInput = {
     x: number,
     y: number,
     direction: ScrollDirection,
-    /**
-     * Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-     * (`kind="desktop"`, `display_id="primary"`).
-     */
     target?: ActionTarget,
     /**
      * Deprecated flat desktop target retained for wire compatibility.
@@ -4053,8 +4033,7 @@ const FfiConverterTypeSetAgentCursorEnabledOutput = (() => {
 
 export type SetAgentCursorMotionInput = {
     /**
-     * Public label of the session that owns the cursor. Omitted or null motion fields keep
-     * their current value.
+     * Public label of the session that owns the cursor.
      */
     session: string,
     /**
@@ -4473,8 +4452,10 @@ export type StartSessionInput = {
      */
     cursorTheme?: CursorThemeSelection,
     /**
-     * Initial cursor motion, applied before the cursor first appears. Overrides the saved
-     * default (`cursor.motion.*` config); a later `set_agent_cursor_motion` overrides it.
+     * Initial cursor motion, applied before the cursor first appears: the fields of
+     * `set_agent_cursor_motion` except `session`, with the meanings and defaults its schema
+     * gives. Overrides the saved default (`cursor.motion.*` config); a later
+     * `set_agent_cursor_motion` overrides it.
      */
     cursorMotion?: CursorMotionSelection
 }
@@ -4668,10 +4649,6 @@ const FfiConverterTypeStatePredicate = (() => {
 
 export type TypeTextInput = {
     text: string,
-    /**
-     * Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-     * (`kind="desktop"`, `display_id="primary"`).
-     */
     target?: ActionTarget,
     /**
      * Deprecated flat desktop target retained for wire compatibility.
@@ -4737,10 +4714,6 @@ export type VerifyStateInput = {
      * One to eight predicates, combined with logical AND.
      */
     expect: Array<StatePredicate>,
-    /**
-     * Short session label for multi-call work; repeat it on every call. Omit to use the
-     * connection's default session. This field never selects capture modality or authorization.
-     */
     session?: string,
     /**
      * Bounded wait. Zero performs one sample.

@@ -95,7 +95,7 @@ mod tests {
         let description = schema["description"]
             .as_str()
             .expect("browser session description");
-        assert!(description.contains("session label for multi-call work"));
+        assert!(description.contains("Session label"));
         assert!(description.contains("repeat it on every call"));
         assert!(description.contains("Browser targets, tabs, and refs"));
     }

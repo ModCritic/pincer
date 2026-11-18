@@ -4116,9 +4116,18 @@ fn coordinate_frame_schema() -> Value {
     json!({
         "type": "string",
         "enum": ["window", "desktop"],
-        "description": "Frame of all x/y coordinates: \"window\" (default) get_window_state \
-            screenshot pixels; \"desktop\" get_desktop_state pixels. scope:\"desktop\" with \
-            pid/window_id means the same."
+        "description": "Frame of all x/y: \"window\" (default) get_window_state screenshot \
+            pixels; \"desktop\" get_desktop_state pixels (scope:\"desktop\" with pid/window_id \
+            means the same)."
+    })
+}
+
+/// Shared schema for the optional `cursor_id` of pointer tools (move_cursor
+/// says more, since there the session label names the cursor).
+fn cursor_id_schema() -> Value {
+    json!({
+        "type": "string",
+        "description": "Multi-cursor instance id (default \"default\")."
     })
 }
 
@@ -8951,7 +8960,7 @@ impl Tool for ClickTool {
                 // in pincer_core::tool_schema.
                 "type":"object","required":[],"properties":{
                     "session": pincer_core::tool_schema::session_schema(),
-                    "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
+                    "cursor_id": cursor_id_schema(),
                     "pid":{"type":"integer","description":"Process id. Required unless scope is \"desktop\" or element_token is given (the token carries it)."},
                     "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                     "x":{"type":"number","description":"Pixel X in the window's get_window_state screenshot (0..screenshot_width). Pass scope:\"desktop\" for get_desktop_state pixels."},
@@ -13217,7 +13226,7 @@ impl Tool for ScrollTool {
                 // in pincer_core::tool_schema.
                 "type":"object","required":["direction"],"properties":{
                     "session": pincer_core::tool_schema::session_schema(),
-                    "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
+                    "cursor_id": cursor_id_schema(),
                     "pid":{"type":"integer","description":"Process id. Required unless scope is \"desktop\" or element_token is given (the token carries it)."},
                     "direction":{"type":"string","enum":["up","down","left","right"],"description":"Scroll direction."},
                     "by":{"type":"string","enum":["line","page"],"description":"line (default): one wheel step per amount; page: 3 wheel steps per amount."},
@@ -14121,7 +14130,7 @@ impl Tool for DoubleClickTool {
                 After a zoom call, pass from_zoom=true to auto-translate zoom-image coords.".into(),
             input_schema: json!({"type":"object","required":[],"properties":{
                 "session": pincer_core::tool_schema::session_schema(),
-                "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
+                "cursor_id": cursor_id_schema(),
                 "pid":{"type":"integer","description":"Target process ID. Required unless scope is \"desktop\" or element_token is given (the token carries the pid)."},
                 "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                 "x":{"type":"number","description":"Pixel X in the window's get_window_state screenshot (0..screenshot_width). Pass scope:\"desktop\" for get_desktop_state pixels."},
@@ -14200,7 +14209,7 @@ impl Tool for RightClickTool {
                 it.".into(),
             input_schema: json!({"type":"object","required":[],"properties":{
                 "session": pincer_core::tool_schema::session_schema(),
-                "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
+                "cursor_id": cursor_id_schema(),
                 "pid":{"type":"integer","description":"Target process ID. Required unless scope is \"desktop\" or element_token is given (the token carries the pid)."},
                 "window_id":{"type":"integer","description":"Window id from list_windows. Required with x/y; optional with element_token (the token carries it)."},
                 "x":{"type":"number","description":"Pixel X in the window's get_window_state screenshot (0..screenshot_width). Pass scope:\"desktop\" for get_desktop_state pixels."},
@@ -14272,7 +14281,7 @@ impl Tool for DragTool {
                           background_unavailable; it then needs delivery_mode foreground.".into(),
             input_schema: json!({"type":"object","required":["from_x","from_y","to_x","to_y"],"properties":{
                 "session": pincer_core::tool_schema::session_schema(),
-                "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
+                "cursor_id": cursor_id_schema(),
                 "pid":{"type":"integer","description":"Target process ID. Required unless scope is \"desktop\"."},
                 "window_id":{"type":"integer","description":"Target window XID. Required unless scope is \"desktop\"."},
                 "from_x":{"type":"number","description":"Start X in the window's get_window_state screenshot pixels; pass scope:\"desktop\" for get_desktop_state pixels."},
@@ -15010,7 +15019,7 @@ impl Tool for MouseButtonDownTool {
                 "session": pincer_core::tool_schema::session_schema_with(
                     "Takes precedence over cursor_id."
                 ),
-                "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
+                "cursor_id": cursor_id_schema(),
                 "pid":{"type":"integer","description":"Target process ID."},
                 "window_id":{"type":"integer","description":"Window id from list_windows."},
                 "x":{"type":"number","description":"Pixel X in the window's latest get_window_state screenshot (0..screenshot_width), or in get_desktop_state pixels with coordinate_frame \"desktop\"."},
@@ -15211,7 +15220,7 @@ impl Tool for MouseDragTool {
                 "session": pincer_core::tool_schema::session_schema_with(
                     "Takes precedence over cursor_id."
                 ),
-                "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
+                "cursor_id": cursor_id_schema(),
                 "pid":{"type":"integer","description":"Optional process ID; must match the held button's target."},
                 "window_id":{"type":"integer","description":"Optional window id; must match the held button's target."},
                 "x":{"type":"number","description":"Pixel X in the held window's latest get_window_state screenshot (0..screenshot_width), whatever coordinate_frame mouse_button_down used."},
@@ -15448,7 +15457,7 @@ impl Tool for MouseButtonUpTool {
                 "session": pincer_core::tool_schema::session_schema_with(
                     "Takes precedence over cursor_id."
                 ),
-                "cursor_id":{"type":"string","description":"Optional multi-cursor instance id. Default: 'default'."},
+                "cursor_id": cursor_id_schema(),
                 "pid":{"type":"integer","description":"Optional process ID; must match the held button's target."},
                 "window_id":{"type":"integer","description":"Optional window id; must match the held button's target."},
                 "x":{"type":"number","description":"Optional release X in the held window's latest get_window_state screenshot (0..screenshot_width), or in get_desktop_state pixels with coordinate_frame \"desktop\". Default: where the button is held."},

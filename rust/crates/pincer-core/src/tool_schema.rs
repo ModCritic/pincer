@@ -93,14 +93,15 @@ pub fn scope_schema() -> Value {
 }
 
 /// `element_token` — the opaque, validity-checked handle from get_window_state.
+/// A stale token's error names the current snapshot, so the description need
+/// not say so on every tool that takes a token.
 pub fn element_token_schema() -> Value {
     json!({
         "type": "string",
         "pattern": "^s[0-9a-f]{8}:[0-9]+$",
-        "description": "Element handle `<snapshot_id>:<row>` from get_window_state: row \
-            `[11]` of snapshot s0000002a is \"s0000002a:11\". Take the row from that same \
-            read: rows renumber between reads. Stale once a newer read replaces that \
-            snapshot; the error names the current one."
+        "description": "Element handle `<snapshot_id>:<row>` from one get_window_state read: \
+            row `[11]` of s0000002a is \"s0000002a:11\". Rows renumber; stale once a newer \
+            read replaces that snapshot."
     })
 }
 

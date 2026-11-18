@@ -63,19 +63,18 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           },
           "target": {
             "additionalProperties": true,
-            "description": "Exact window (kind \"window\", with pid and window_id) or desktop (kind \"desktop\", with display_id). \"primary\" is the portable desktop target.",
+            "description": "A window `{kind:\"window\", pid, window_id}` or the desktop `{kind:\"desktop\", display_id:\"primary\"}`.",
             "properties": {
               "display_id": {
-                "description": "Display id. Required when kind is desktop; use \"primary\".",
+                "description": "Use \"primary\".",
                 "type": "string"
               },
               "kind": {
-                "description": "window requires pid and window_id; desktop requires display_id.",
                 "enum": [
                   "window",
                   "desktop"
@@ -83,12 +82,11 @@
                 "type": "string"
               },
               "pid": {
-                "description": "Process id. Required when kind is window.",
                 "minimum": 0,
                 "type": "integer"
               },
               "window_id": {
-                "description": "Window id from list_windows. Required when kind is window.",
+                "description": "From list_windows.",
                 "minimum": 0,
                 "type": "integer"
               }
@@ -289,7 +287,7 @@
             "type": "boolean"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           }
         },
@@ -372,7 +370,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           },
           "text": {
@@ -472,7 +470,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           },
           "steps": {
@@ -482,14 +480,13 @@
           },
           "target": {
             "additionalProperties": true,
-            "description": "Target: a window (`kind=\"window\"`, `pid`, `window_id`) or the desktop\n(`kind=\"desktop\"`, `display_id=\"primary\"`).",
+            "description": "A window `{kind:\"window\", pid, window_id}` or the desktop `{kind:\"desktop\", display_id:\"primary\"}`.",
             "properties": {
               "display_id": {
-                "description": "Display id. Required when kind is desktop; use \"primary\".",
+                "description": "Use \"primary\".",
                 "type": "string"
               },
               "kind": {
-                "description": "window requires pid and window_id; desktop requires display_id.",
                 "enum": [
                   "window",
                   "desktop"
@@ -497,12 +494,11 @@
                 "type": "string"
               },
               "pid": {
-                "description": "Process id. Required when kind is window.",
                 "minimum": 0,
                 "type": "integer"
               },
               "window_id": {
-                "description": "Window id from list_windows. Required when kind is window.",
+                "description": "From list_windows.",
                 "minimum": 0,
                 "type": "integer"
               }
@@ -1039,7 +1035,7 @@
         "additionalProperties": false,
         "properties": {
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           }
         },
@@ -1100,7 +1096,7 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           }
         },
@@ -1221,7 +1217,7 @@
         "additionalProperties": false,
         "properties": {
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           }
         },
@@ -1810,19 +1806,18 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           },
           "target": {
             "additionalProperties": true,
-            "description": "Target: a window (`kind=\"window\"`, `pid`, `window_id`) or the desktop\n(`kind=\"desktop\"`, `display_id=\"primary\"`).",
+            "description": "A window `{kind:\"window\", pid, window_id}` or the desktop `{kind:\"desktop\", display_id:\"primary\"}`.",
             "properties": {
               "display_id": {
-                "description": "Display id. Required when kind is desktop; use \"primary\".",
+                "description": "Use \"primary\".",
                 "type": "string"
               },
               "kind": {
-                "description": "window requires pid and window_id; desktop requires display_id.",
                 "enum": [
                   "window",
                   "desktop"
@@ -1830,12 +1825,11 @@
                 "type": "string"
               },
               "pid": {
-                "description": "Process id. Required when kind is window.",
                 "minimum": 0,
                 "type": "integer"
               },
               "window_id": {
-                "description": "Window id from list_windows. Required when kind is window.",
+                "description": "From list_windows.",
                 "minimum": 0,
                 "type": "integer"
               }
@@ -2041,7 +2035,7 @@
             "type": "integer"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           },
           "window_id": {
@@ -2612,19 +2606,18 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           },
           "target": {
             "additionalProperties": true,
-            "description": "Target: a window (`kind=\"window\"`, `pid`, `window_id`) or the desktop\n(`kind=\"desktop\"`, `display_id=\"primary\"`).",
+            "description": "A window `{kind:\"window\", pid, window_id}` or the desktop `{kind:\"desktop\", display_id:\"primary\"}`.",
             "properties": {
               "display_id": {
-                "description": "Display id. Required when kind is desktop; use \"primary\".",
+                "description": "Use \"primary\".",
                 "type": "string"
               },
               "kind": {
-                "description": "window requires pid and window_id; desktop requires display_id.",
                 "enum": [
                   "window",
                   "desktop"
@@ -2632,12 +2625,11 @@
                 "type": "string"
               },
               "pid": {
-                "description": "Process id. Required when kind is window.",
                 "minimum": 0,
                 "type": "integer"
               },
               "window_id": {
-                "description": "Window id from list_windows. Required when kind is window.",
+                "description": "From list_windows.",
                 "minimum": 0,
                 "type": "integer"
               }
@@ -2851,19 +2843,18 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           },
           "target": {
             "additionalProperties": true,
-            "description": "Target: a window (`kind=\"window\"`, `pid`, `window_id`) or the desktop\n(`kind=\"desktop\"`, `display_id=\"primary\"`).",
+            "description": "A window `{kind:\"window\", pid, window_id}` or the desktop `{kind:\"desktop\", display_id:\"primary\"}`.",
             "properties": {
               "display_id": {
-                "description": "Display id. Required when kind is desktop; use \"primary\".",
+                "description": "Use \"primary\".",
                 "type": "string"
               },
               "kind": {
-                "description": "window requires pid and window_id; desktop requires display_id.",
                 "enum": [
                   "window",
                   "desktop"
@@ -2871,12 +2862,11 @@
                 "type": "string"
               },
               "pid": {
-                "description": "Process id. Required when kind is window.",
                 "minimum": 0,
                 "type": "integer"
               },
               "window_id": {
-                "description": "Window id from list_windows. Required when kind is window.",
+                "description": "From list_windows.",
                 "minimum": 0,
                 "type": "integer"
               }
@@ -3093,19 +3083,18 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           },
           "target": {
             "additionalProperties": true,
-            "description": "Target: a window (`kind=\"window\"`, `pid`, `window_id`) or the desktop\n(`kind=\"desktop\"`, `display_id=\"primary\"`).",
+            "description": "A window `{kind:\"window\", pid, window_id}` or the desktop `{kind:\"desktop\", display_id:\"primary\"}`.",
             "properties": {
               "display_id": {
-                "description": "Display id. Required when kind is desktop; use \"primary\".",
+                "description": "Use \"primary\".",
                 "type": "string"
               },
               "kind": {
-                "description": "window requires pid and window_id; desktop requires display_id.",
                 "enum": [
                   "window",
                   "desktop"
@@ -3113,12 +3102,11 @@
                 "type": "string"
               },
               "pid": {
-                "description": "Process id. Required when kind is window.",
                 "minimum": 0,
                 "type": "integer"
               },
               "window_id": {
-                "description": "Window id from list_windows. Required when kind is window.",
+                "description": "From list_windows.",
                 "minimum": 0,
                 "type": "integer"
               }
@@ -3441,7 +3429,7 @@
             "type": "number"
           },
           "session": {
-            "description": "Public label of the session that owns the cursor. Omitted or null motion fields keep\ntheir current value.",
+            "description": "Public label of the session that owns the cursor.",
             "type": "string"
           },
           "spring": {
@@ -3742,7 +3730,7 @@
             "type": "integer"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           },
           "width": {
@@ -3947,26 +3935,21 @@
         "properties": {
           "cursor_motion": {
             "additionalProperties": false,
-            "description": "Initial cursor motion, applied before the cursor first appears. Overrides the saved\ndefault (`cursor.motion.*` config); a later `set_agent_cursor_motion` overrides it.",
+            "description": "Initial cursor motion, applied before the cursor first appears: the fields of\n`set_agent_cursor_motion` except `session`, with the meanings and defaults its schema\ngives. Overrides the saved default (`cursor.motion.*` config); a later\n`set_agent_cursor_motion` overrides it.",
             "properties": {
               "arc_flow": {
-                "description": "Arc asymmetry added for `signature_arc`, `spring_settle`, `comet_swoop`; positive moves\nthe apex toward the destination. Clamped to -1..1 (default 0).",
                 "type": "number"
               },
               "arc_size": {
-                "description": "Arc scale for `signature_arc`, `spring_settle`, `comet_swoop`: 0.25 (default) keeps the\nstyle's arc, 0 is straight, 0.5 doubles it. Clamped to 0..1.",
                 "type": "number"
               },
               "dwell_after_click_ms": {
-                "description": "Pause after a click animation, in milliseconds. Clamped to 0..5000 (default 80).",
                 "type": "number"
               },
               "effects": {
                 "additionalProperties": false,
-                "description": "Turn effects on or off. Omit a field to keep it; `\"default\"` restores the style default.",
                 "properties": {
                   "glow": {
-                    "description": "Soft glow around the cursor that grows with speed.",
                     "enum": [
                       "on",
                       "off",
@@ -3975,7 +3958,6 @@
                     "type": "string"
                   },
                   "magnet": {
-                    "description": "Target glow when the `magnetic` style locks on.",
                     "enum": [
                       "on",
                       "off",
@@ -3984,7 +3966,6 @@
                     "type": "string"
                   },
                   "ripple": {
-                    "description": "Ring that expands from the hotspot on click.",
                     "enum": [
                       "on",
                       "off",
@@ -3993,7 +3974,6 @@
                     "type": "string"
                   },
                   "squish": {
-                    "description": "Brief scale-down of the cursor on click.",
                     "enum": [
                       "on",
                       "off",
@@ -4002,7 +3982,6 @@
                     "type": "string"
                   },
                   "trail": {
-                    "description": "Short fading trail behind the cursor.",
                     "enum": [
                       "on",
                       "off",
@@ -4015,27 +3994,21 @@
                 "type": "object"
               },
               "end_handle": {
-                "description": "Arc control point offset from the end, as a fraction of the distance (`signature_arc`,\n`spring_settle`, `comet_swoop`). Clamped to 0..1 (default 0.3).",
                 "type": "number"
               },
               "glide_duration_ms": {
-                "description": "Move duration in ms for `fixed` timing (0, the default, means 1430 ms). A nonzero value\nalso fixes the duration under `native` or `steady`. Clamped to 0..5000.",
                 "type": "number"
               },
               "idle_hide_ms": {
-                "description": "Hide the cursor after this many idle milliseconds; 0 never hides it. Clamped to\n0..60000 (default 15000).",
                 "type": "number"
               },
               "spring": {
-                "description": "Arrival spring damping for `classic`: 1 is critically damped, 0.3 is bouncy. Clamped\nto 0.3..1 (default 0.72).",
                 "type": "number"
               },
               "start_handle": {
-                "description": "Arc control point offset from the start, as a fraction of the distance (`signature_arc`,\n`spring_settle`, `comet_swoop`). Clamped to 0..1 (default 0.3).",
                 "type": "number"
               },
               "style": {
-                "description": "Path style: `signature_arc` (default) one arc with a small follow-through;\n`spring_settle` one soft bounce on landing; `magnetic` pulled into the target;\n`comet_swoop` wide arc with a short trail; `adaptive` careful for small targets, swoop\nfor long moves; `classic` Dubins glide. Reduced motion forces a short straight glide.",
                 "enum": [
                   "signature_arc",
                   "spring_settle",
@@ -4047,7 +4020,6 @@
                 "type": "string"
               },
               "timing": {
-                "description": "`steady` (default) style timing with a 600 ms minimum and a gentler ease; `relaxed`,\n`calm` the same with a 450 or 750 ms minimum; `native` the style's own timing; `fitts`\nscales with distance and target size; `deliberate` slower Fitts (450..1300 ms); `fixed`\nuses glide_duration_ms.",
                 "enum": [
                   "native",
                   "fitts",
@@ -4060,7 +4032,6 @@
                 "type": "string"
               },
               "turn_radius": {
-                "description": "Minimum turning radius of the `classic` glide path, in points; smaller turns tighter.\nClamped to 1..1000 (default 80).",
                 "type": "number"
               }
             },
@@ -4287,19 +4258,18 @@
             "type": "string"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the connection's default session.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           },
           "target": {
             "additionalProperties": true,
-            "description": "Target: a window (`kind=\"window\"`, `pid`, `window_id`) or the desktop\n(`kind=\"desktop\"`, `display_id=\"primary\"`).",
+            "description": "A window `{kind:\"window\", pid, window_id}` or the desktop `{kind:\"desktop\", display_id:\"primary\"}`.",
             "properties": {
               "display_id": {
-                "description": "Display id. Required when kind is desktop; use \"primary\".",
+                "description": "Use \"primary\".",
                 "type": "string"
               },
               "kind": {
-                "description": "window requires pid and window_id; desktop requires display_id.",
                 "enum": [
                   "window",
                   "desktop"
@@ -4307,12 +4277,11 @@
                 "type": "string"
               },
               "pid": {
-                "description": "Process id. Required when kind is window.",
                 "minimum": 0,
                 "type": "integer"
               },
               "window_id": {
-                "description": "Window id from list_windows. Required when kind is window.",
+                "description": "From list_windows.",
                 "minimum": 0,
                 "type": "integer"
               }
@@ -4606,7 +4575,7 @@
             "type": "integer"
           },
           "session": {
-            "description": "Short session label for multi-call work; repeat it on every call. Omit to use the\nconnection's default session. This field never selects capture modality or authorization.",
+            "description": "Session label; repeat it on every call. Omit for the connection's default session.",
             "type": "string"
           },
           "stable_samples": {

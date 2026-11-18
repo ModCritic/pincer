@@ -23,6 +23,11 @@ can use AT-SPI hit-testing or a virtual-pointer route. Do not assume all input
 uses XSendEvent or that every toolkit accepts it. Inspect the result's public
 route and independently verify the application.
 
+These targets cannot take background input and return `background_unavailable`
+(the refusal's detail says why): Chromium and Electron windows, WebKitGTK,
+toolkits reachable only through the focused widget, and Wayland without libei.
+On Wayland, background input reaches only the focused window.
+
 `delivery_mode:"foreground"` is a user-visible takeover. Never select it automatically.
 Use explicitly authorized `delivery_mode:"foreground"` only after evidence
 that the chosen background route is unavailable or ineffective. Target-specific

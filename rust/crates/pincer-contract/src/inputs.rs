@@ -91,9 +91,16 @@ fn element_token_schema(_: &mut SchemaGenerator) -> Schema {
 /// The `session` argument of every multi-call tool. What happens after an
 /// idle end is said once, in start_session's description, and by the
 /// restarted call's own result: on 51 tools it cost about 4 KB of tools/list.
+/// Using a short label for multi-call work is advised once, in start_session's
+/// description and the server instructions, not on every tool.
 pub const MULTI_CALL_SESSION_DESCRIPTION: &str =
-    "Short session label for multi-call work; repeat it on every call. Omit to use the \
-     connection's default session.";
+    "Session label; repeat it on every call. Omit for the connection's default session.";
+
+/// Description of an action's `target` object, on every tool that takes one.
+/// `target` fields carry no doc comment of their own, which would replace it.
+const ACTION_TARGET_DESCRIPTION: &str =
+    "A window `{kind:\"window\", pid, window_id}` or the desktop \
+     `{kind:\"desktop\", display_id:\"primary\"}`.";
 
 fn string_list_schema(generator: &mut SchemaGenerator) -> Schema {
     Vec::<String>::json_schema(generator)
@@ -186,15 +193,17 @@ impl JsonSchema for ActionTarget {
     }
 
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        // The object's description shows the fields each kind takes, so the
+        // fields themselves do not repeat it.
         json_schema!({
             "type": "object",
-            "description": "Exact window (kind \"window\", with pid and window_id) or desktop (kind \"desktop\", with display_id). \"primary\" is the portable desktop target.",
+            "description": ACTION_TARGET_DESCRIPTION,
             "required": ["kind"],
             "properties": {
-                "kind": {"type": "string", "enum": ["window", "desktop"], "description": "window requires pid and window_id; desktop requires display_id."},
-                "pid": {"type": "integer", "minimum": 0, "description": "Process id. Required when kind is window."},
-                "window_id": {"type": "integer", "minimum": 0, "description": "Window id from list_windows. Required when kind is window."},
-                "display_id": {"type": "string", "description": "Display id. Required when kind is desktop; use \"primary\"."}
+                "kind": {"type": "string", "enum": ["window", "desktop"]},
+                "pid": {"type": "integer", "minimum": 0},
+                "window_id": {"type": "integer", "minimum": 0, "description": "From list_windows."},
+                "display_id": {"type": "string", "description": "Use \"primary\"."}
             }
         })
     }
@@ -274,10 +283,34 @@ pub struct StartSessionInput {
     /// Initial cursor theme, applied before the cursor first appears.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor_theme: Option<CursorThemeSelection>,
-    /// Initial cursor motion, applied before the cursor first appears. Overrides the saved
-    /// default (`cursor.motion.*` config); a later `set_agent_cursor_motion` overrides it.
+    /// Initial cursor motion, applied before the cursor first appears: the fields of
+    /// `set_agent_cursor_motion` except `session`, with the meanings and defaults its schema
+    /// gives. Overrides the saved default (`cursor.motion.*` config); a later
+    /// `set_agent_cursor_motion` overrides it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "start_session_cursor_motion_schema")]
     pub cursor_motion: Option<CursorMotionSelection>,
+}
+
+/// `start_session.cursor_motion` without its fields' descriptions. They repeat
+/// `set_agent_cursor_motion`'s field by field, which cost about 2.3K characters
+/// of tools/list; names, types and enums stay, so calls validate the same.
+fn start_session_cursor_motion_schema(generator: &mut SchemaGenerator) -> Schema {
+    fn strip_property_descriptions(schema: &mut Value) {
+        let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) else {
+            return;
+        };
+        for property in properties.values_mut() {
+            if let Some(property) = property.as_object_mut() {
+                property.remove("description");
+            }
+            strip_property_descriptions(property);
+        }
+    }
+    let mut value = serde_json::to_value(CursorMotionSelection::json_schema(generator))
+        .expect("cursor motion schema serializes");
+    strip_property_descriptions(&mut value);
+    Schema::try_from(value).expect("cursor motion schema is an object")
 }
 
 impl ToolInput for StartSessionInput {
@@ -396,8 +429,7 @@ pub struct CursorMotionSelection {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, uniffi::Record)]
 #[serde(deny_unknown_fields)]
 pub struct SetAgentCursorMotionInput {
-    /// Public label of the session that owns the cursor. Omitted or null motion fields keep
-    /// their current value.
+    /// Public label of the session that owns the cursor.
     pub session: String,
     /// Path style: `signature_arc` (default) one arc with a small follow-through;
     /// `spring_settle` one soft bounce on landing; `magnetic` pulled into the target;
@@ -554,8 +586,6 @@ pub struct MoveCursorInput {
     /// Destination Y, in the same space as `x`.
     #[schemars(schema_with = "number_schema")]
     pub y: f64,
-    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
@@ -632,8 +662,6 @@ pub struct LegacyClickInput {
     pub x: f64,
     #[schemars(schema_with = "number_schema")]
     pub y: f64,
-    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
@@ -807,8 +835,6 @@ pub struct DragInput {
     pub to_x: f64,
     #[schemars(schema_with = "number_schema")]
     pub to_y: f64,
-    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
@@ -844,8 +870,6 @@ pub struct ScrollInput {
     #[schemars(schema_with = "number_schema")]
     pub y: f64,
     pub direction: ScrollDirection,
-    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
@@ -871,8 +895,6 @@ impl ToolInput for ScrollInput {
 #[serde(deny_unknown_fields)]
 pub struct TypeTextInput {
     pub text: String,
-    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
@@ -932,8 +954,6 @@ impl ToolInput for ClipboardWriteInput {
 #[serde(deny_unknown_fields)]
 pub struct PressKeyInput {
     pub key: String,
-    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.
@@ -962,8 +982,6 @@ pub struct HotkeyInput {
     #[schemars(length(min = 2))]
     #[serde(deserialize_with = "at_least_two_keys")]
     pub keys: Vec<String>,
-    /// Target: a window (`kind="window"`, `pid`, `window_id`) or the desktop
-    /// (`kind="desktop"`, `display_id="primary"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<ActionTarget>,
     /// Deprecated flat desktop target retained for wire compatibility.

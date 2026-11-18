@@ -541,18 +541,20 @@ mod tests {
         }
 
         let verify = tool_contract("verify_state").expect("verify_state contract");
-        let description = verify.input_schema["properties"]["session"]["description"]
-            .as_str()
-            .expect("verify_state session description")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(description.starts_with(MULTI_CALL_SESSION_DESCRIPTION));
-        assert!(description.contains("never selects capture modality or authorization"));
+        assert_eq!(
+            verify.input_schema["properties"]["session"]["description"],
+            MULTI_CALL_SESSION_DESCRIPTION
+        );
 
-        assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("session label for multi-call work"));
+        assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("Session label"));
         assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("repeat it on every call"));
         assert!(MULTI_CALL_SESSION_DESCRIPTION.contains("connection's default session"));
+        // The short-label advice for multi-call work is said once, by
+        // start_session, instead of on every tool's session argument.
+        let start = tool_contract("start_session").expect("start_session contract");
+        assert!(start
+            .description
+            .contains("For multi-call work, use a short `session` label and repeat it on every call"));
         // The idle restart is start_session's to explain (and the restarted
         // call's own result), not every tool's session argument.
         assert!(!MULTI_CALL_SESSION_DESCRIPTION.contains("idle"));

@@ -160,10 +160,13 @@ pub struct VerifyStateInput {
     /// One to eight predicates, combined with logical AND.
     #[schemars(length(min = 1, max = 8))]
     pub expect: Vec<StatePredicate>,
-    /// Short session label for multi-call work; repeat it on every call. Omit to use the
-    /// connection's default session. This field never selects capture modality or authorization.
+    // A session never selects capture modality or authorization; SKILL.md says
+    // so once instead of this field's description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(
+        schema_with = "string_schema",
+        description = crate::MULTI_CALL_SESSION_DESCRIPTION
+    )]
     pub session: Option<String>,
     /// Bounded wait. Zero performs one sample.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -40,14 +40,15 @@ pub fn delivery_mode_schema() -> Value {
     // from macOS / Windows, while keeping the Linux-specific Wayland/X11 prose
     // (the gate compares shape only — descriptions may vary per platform). The
     // `default` advertisement is additive on top of the canon shape.
+    //
+    // Ten tools carry this text, so it holds only what picking a value needs.
+    // Which targets refuse background input is in LINUX.md ("Delivery") and in
+    // each refusal's own detail.
     let mut v = pincer_core::tool_schema::delivery_mode_schema_with(
         "\"background\" (default) acts without activating or raising the window; on \
-         Wayland it reaches only the focused window. Targets that cannot take \
-         background input (Chromium/Electron, WebKitGTK, toolkits reachable only \
-         through the focused widget, Wayland without libei) return \
-         background_unavailable. \"foreground\" activates and raises the window (the \
-         pointer may move) and acts; the window stays active afterwards. Use it only \
-         when a background attempt is refused or unverifiable.",
+         Wayland it reaches only the focused window. \"foreground\" activates and raises \
+         the window (the pointer may move); it stays active afterwards. Use foreground \
+         only when background is refused (background_unavailable) or unverifiable.",
     );
     v["default"] = serde_json::json!("background");
     v
