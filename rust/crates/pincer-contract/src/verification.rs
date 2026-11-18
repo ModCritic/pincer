@@ -234,7 +234,8 @@ pub fn contracts() -> Vec<ToolContract> {
             element's existence, value, enabled or selected state. Reads until all hold for \
             `stable_samples` reads in a row or `timeout_ms` ends. Each predicate is satisfied, \
             unsatisfied or unknown, and unknown never means success; `observed_json` shows what \
-            was read."
+            was read. Its window `bounds` and an element's `frame` are screen coordinates as \
+            list_windows gives them (Linux: desktop pixels), not window-screenshot pixels."
             .into(),
         platforms: ALL_PLATFORMS.to_vec(),
         aliases: Vec::new(),
@@ -338,5 +339,21 @@ mod tests {
             satisfied.validate().is_ok(),
             "published output schema must accept runtime null optionals"
         );
+    }
+
+    #[test]
+    fn description_names_the_space_of_observed_frames() {
+        // Round 10 (X11): an element's `frame: {h: 34, w: 91, x: 1218, y: 530}`
+        // was the window origin (960,494) plus the button's offset, and the
+        // tester had to work that out from list_windows.
+        let description = &contracts()[0].description;
+        for words in [
+            "`bounds` and an element's `frame`",
+            "screen coordinates",
+            "(Linux: desktop pixels)",
+            "not window-screenshot pixels",
+        ] {
+            assert!(description.contains(words), "{words}: {description}");
+        }
     }
 }
