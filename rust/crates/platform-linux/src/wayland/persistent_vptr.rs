@@ -1,7 +1,7 @@
 //! Persistent virtual-pointer for stateful `mouse_button_down` / `mouse_drag` /
 //! `mouse_button_up`.
 //!
-//! The non-persistent path in [`crate::wayland::click`] opens its own
+//! The non-persistent path in [`crate::wayland::click_focused`] opens its own
 //! `ZwlrVirtualPointerV1`, presses, releases, drops the connection — useful
 //! for one-shot clicks but useless for held-button drags: each tool call
 //! emits a fresh device whose press/release pair is matched by the
@@ -17,8 +17,9 @@
 //!
 //! Lifecycle:
 //! - First `press` for a cursor_id binds a fresh `ZwlrVirtualPointerV1`,
-//!   activates the foreign-toplevel target window once, presses the button,
-//!   adds to the held-button set, roundtrips.
+//!   presses the button, adds to the held-button set, roundtrips. It
+//!   activates nothing: the caller runs it inside
+//!   [`crate::wayland::with_target_foreground`], which focused the target.
 //! - Subsequent `move_to` calls emit `motion_absolute` on the same vptr (no
 //!   activate — would steal focus mid-drag) and roundtrip.
 //! - `release` emits a button release, removes from the held set; if the
@@ -41,7 +42,6 @@ use super::{evdev_pointer_button, open_vptr_session};
 enum Cmd {
     Press {
         cursor_id: String,
-        window_id: u64,
         x: i32,
         y: i32,
         button: u8,
@@ -95,13 +95,12 @@ fn owner_thread(rx: Receiver<Cmd>) {
         match cmd {
             Cmd::Press {
                 cursor_id,
-                window_id,
                 x,
                 y,
                 button,
                 reply,
             } => {
-                let r = handle_press(&mut active, &cursor_id, window_id, x, y, button);
+                let r = handle_press(&mut active, &cursor_id, x, y, button);
                 let _ = reply.send(r);
             }
             Cmd::MoveTo {
@@ -128,17 +127,16 @@ fn owner_thread(rx: Receiver<Cmd>) {
 fn handle_press(
     active: &mut HashMap<String, ActivePointer>,
     cursor_id: &str,
-    window_id: u64,
     x: i32,
     y: i32,
     button: u8,
 ) -> anyhow::Result<()> {
-    // Open a fresh session for this press — this binds the seat, the foreign-
-    // toplevel manager, activates the target window, and creates a new vptr.
-    // Keep the (out_w, out_h) but drop the queue + state at end of scope; the
-    // vptr itself remains alive (Wayland objects survive their original queue
-    // as long as the Connection is alive).
-    let mut sess = open_vptr_session(Some(window_id))?;
+    // Open a fresh session for this press: it binds the seat and creates a
+    // new vptr, and activates nothing (the caller's foreground guard focused
+    // the target). Keep the (out_w, out_h) but drop the queue + state at end
+    // of scope; the vptr itself remains alive (Wayland objects survive their
+    // original queue as long as the Connection is alive).
+    let mut sess = open_vptr_session(None)?;
     let (w, h) = (sess.output_w, sess.output_h);
     let (px, py) = sess.abs(x, y);
     let btn = evdev_pointer_button(button);
@@ -270,15 +268,15 @@ fn roundtrip_on_persistent(cursor_id: &str) -> anyhow::Result<()> {
 // ── public API ────────────────────────────────────────────────────────────
 
 /// Press and HOLD `button` (evdev code) at output coordinates `(x, y)` on the
-/// toplevel identified by `window_id`. Subsequent `move_to` / `release` calls
-/// targeting the same `cursor_id` reuse the same virtual-pointer device, so
-/// the compositor treats the sequence as one logical drag rather than as
-/// independent clicks. Errors if `cursor_id` already has a held button.
-pub fn press(cursor_id: &str, window_id: u64, x: i32, y: i32, button: u8) -> anyhow::Result<()> {
+/// toplevel the caller's [`crate::wayland::with_target_foreground`] focused.
+/// Subsequent `move_to` / `release` calls targeting the same `cursor_id`
+/// reuse the same virtual-pointer device, so the compositor treats the
+/// sequence as one logical drag rather than as independent clicks. Errors if
+/// `cursor_id` already has a held button.
+pub fn press(cursor_id: &str, x: i32, y: i32, button: u8) -> anyhow::Result<()> {
     let (tx_r, rx_r) = bounded(1);
     tx().send(Cmd::Press {
         cursor_id: cursor_id.to_string(),
-        window_id,
         x,
         y,
         button,

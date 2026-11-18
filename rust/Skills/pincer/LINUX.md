@@ -415,12 +415,11 @@ driver selects a backend from compositor capabilities:
   always off: KWin offers no foreign-toplevel activation, and the optional
   KWin helper identifies windows but refuses every input call. So
   window-targeted raw input never reaches a KWin window, in any build: it
-  refuses with `foreground_unavailable` (or, in the default build, fails
-  with "no input backend"), and `bring_to_front` refuses too. In the default
-  build, desktop-scope pointer input fails with "no input backend" (KWin has
-  no wlroots virtual pointer) and desktop-scope keys fail as well (KWin 6.7
-  offers no virtual keyboard protocol). Without the helper, window
-  screenshots refuse with `surface_identity_unproven`.
+  refuses with `foreground_unavailable`, and so does `bring_to_front`. In
+  the default build, desktop-scope pointer input fails with "no input
+  backend" (KWin has no wlroots virtual pointer) and desktop-scope keys fail
+  as well (KWin 6.7 offers no virtual keyboard protocol). Without the
+  helper, window screenshots refuse with `surface_identity_unproven`.
 - Upstream's optional `cua-compositor` is a separate nested session enabled
   explicitly for controlled automation. GNOME and KDE never switch into it.
 

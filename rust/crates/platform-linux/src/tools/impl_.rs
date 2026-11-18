@@ -13897,8 +13897,15 @@ impl Tool for ScrollTool {
             let output_point = local_point.map(|(x, y)| {
                 crate::wayland::window_local_to_output(xid, x.round() as i32, y.round() as i32)
             });
+            // The exact-target foreground guard click uses.
             let result = tokio::task::spawn_blocking(move || {
-                crate::wayland::scroll_at(xid, output_point, &direction_for_wayland, amount as u32)
+                crate::wayland::with_target_foreground(pid, xid, || {
+                    crate::wayland::scroll_focused(
+                        output_point,
+                        &direction_for_wayland,
+                        amount as u32,
+                    )
+                })
             })
             .await;
             return match result {
@@ -13972,15 +13979,10 @@ impl Tool for ScrollTool {
                 .unwrap_or_default()
         };
         let cursor_id_for_task = cursor_id.clone();
-        let direction_for_wayland = direction.clone();
-        let steps_u32 = steps as u32;
         let modifiers_for_task = modifiers.clone();
+        // Native Wayland returned above: from here on the route is X11.
         let result = tokio::task::spawn_blocking(move || -> anyhow::Result<&'static str> {
             let modifier_refs: Vec<&str> = modifiers_for_task.iter().map(String::as_str).collect();
-            if crate::wayland::wayland_input_enabled() {
-                return crate::wayland::scroll(xid, &direction_for_wayland, steps_u32)
-                    .map(|()| "wayland");
-            }
             // foreground: activate the window, then scroll, then restore — for
             // surfaces that only route wheel events to the active window.
             let x11_scroll = || -> anyhow::Result<&'static str> {
@@ -15319,8 +15321,11 @@ impl Tool for MouseButtonDownTool {
         };
         let delivery = crate::input::delivery::DeliveryMode::from_args(&args);
         // Like drag: the background refusal comes before the screenshot
-        // frame is consulted.
+        // frame is consulted. Native Wayland has no focus-free press either.
         if let Some(refusal) = unavailable_held_button_background(pid, delivery) {
+            return refusal;
+        }
+        if let Some(refusal) = unavailable_wayland_focused_input_background(delivery, false) {
             return refusal;
         }
         let button_name = args.str_or("button", "left");
@@ -15356,12 +15361,16 @@ impl Tool for MouseButtonDownTool {
         let xi = x as i32;
         let yi = y as i32;
         let is_wl = crate::wayland::is_wayland();
-        // Native Wayland keeps the persistent virtual pointer in both modes,
-        // as drag outside Hyprland does: it is real input already, and this
-        // route has no activation step to add.
-        let foreground = delivery.is_foreground() && !is_wl;
+        // Native Wayland presses only in the foreground (refused above
+        // otherwise), so mouse_drag and mouse_button_up confirm that mode.
+        let foreground = delivery.is_foreground();
         let result = if is_wl {
+            // The persistent virtual pointer presses inside the exact-target
+            // foreground guard click uses, and like the X11 foreground press
+            // below, the hold is recorded as the press lands, or the button
+            // released at once when the call already gave up.
             let cid = cursor_id.clone();
+            let release_cid = cursor_id.clone();
             let (output_x, output_y) = persistent_pointer_coordinates(
                 is_wl,
                 xid,
@@ -15369,9 +15378,32 @@ impl Tool for MouseButtonDownTool {
                 yi,
                 crate::wayland::window_local_to_output,
             );
-            tokio::task::spawn_blocking(move || {
-                crate::wayland::persistent_vptr::press(&cid, xid, output_x, output_y, button)
-            })
+            let state = self.state.clone();
+            let held_cursor = cursor_id.clone();
+            let hold = MouseHoldState {
+                pid,
+                xid,
+                button,
+                x,
+                y,
+                foreground,
+            };
+            crate::input::held_press::press_and_hold_bounded(
+                "foreground mouse_button_down",
+                foreground_budget(0),
+                move || {
+                    crate::wayland::with_target_foreground(pid, xid, || {
+                        crate::wayland::persistent_vptr::press(&cid, output_x, output_y, button)
+                    })
+                },
+                // Errors only when nothing is held for the cursor.
+                move || {
+                    let _ = crate::wayland::persistent_vptr::release(&release_cid, button);
+                },
+                move || {
+                    state.mouse_hold.lock().unwrap().insert(held_cursor, hold);
+                },
+            )
             .await
         } else if foreground {
             // The press is the core pointer's real button, and the blocking
@@ -15586,9 +15618,10 @@ impl Tool for MouseDragTool {
         let mut prev_x = from_x;
         let mut prev_y = from_y;
         let is_wl = crate::wayland::is_wayland();
-        // A foreground hold moves the real pointer in screen pixels: resolve
-        // the window origin once for the whole motion.
-        let origin = if foreground {
+        // A foreground X11 hold moves the real pointer in screen pixels:
+        // resolve the window origin once for the whole motion. Native
+        // Wayland moves the persistent virtual pointer in output pixels.
+        let origin = if foreground && !is_wl {
             match tokio::task::spawn_blocking(move || window_local_to_screen(xid, 0.0, 0.0)).await {
                 Ok(Ok(origin)) => Some(origin),
                 Ok(Err(e)) => return held_input_error(e, &cursor_id, Some(&hold), foreground),

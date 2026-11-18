@@ -1626,22 +1626,13 @@ fn open_vptr_session_in(
     })
 }
 
-/// Focus and raise a specific native Wayland toplevel before focus-bound
-/// keyboard or portal/libei input. wlroots exposes an activation request on its
-/// foreign-toplevel protocol; GNOME uses the bundled compositor helper. Other
-/// compositors must refuse until they provide an equally target-addressable
-/// adapter, because global injection without this gate can affect the wrong app.
-pub fn activate_window_for_input(window_id: u64) -> anyhow::Result<()> {
-    let pid = crate::atspi::list_windows(None)
-        .into_iter()
-        .find(|window| window.xid == window_id)
-        .and_then(|window| window.pid);
-    activate_window_for_input_target(window_id, pid)
-}
-
-/// Activate a Wayland target with an explicit process identity when available.
-/// The bundled compositor does not depend on connection-local Wayland object
-/// ids: its control protocol resolves the one mapped toplevel owned by `pid`.
+/// Focus and raise a native Wayland toplevel (bring_to_front): wlroots through
+/// its foreign-toplevel activation request, GNOME through the bundled
+/// compositor helper, and the nested compositor by `pid`, whose control
+/// protocol resolves the one mapped toplevel that process owns. Other
+/// compositors refuse. Input does not come here: it goes through
+/// [`with_target_foreground`], which also checks the pid and restores the
+/// prior focus.
 pub fn activate_window_for_input_target(
     window_id: u64,
     target_pid: Option<u32>,
@@ -1800,24 +1791,6 @@ fn event_time_ms() -> u32 {
         .clamp(1, u32::MAX as u128) as u32
 }
 
-/// Click a native Wayland toplevel identified by its `window_id` (the
-/// foreign-toplevel protocol id from `list_windows`) at output-relative
-/// `(x, y)`, with `button` (1/2/3 = left/middle/right) emitted `count` times.
-/// Coordinates default to the output centre when both x and y are zero so
-/// the legacy focus-based behaviour is preserved when callers can't supply
-/// real coords. A short delay between iterations gives the compositor time
-/// to discriminate single vs. double clicks.
-pub fn click(window_id: u64, x: i32, y: i32, count: u32, button: u8) -> anyhow::Result<()> {
-    with_libei_fallback(
-        || click_vptr(Some(window_id), x, y, count, button, None),
-        || {
-            libei_wait_pointer_ready()?;
-            activate_window_for_input(window_id)?;
-            libei_click(x, y, count, button)
-        },
-    )
-}
-
 /// Click through a foreground target already guarded by
 /// [`with_target_foreground`]. wlroots keeps its native virtual-pointer path.
 /// If that path is unavailable and libei needs a potentially blocking portal
@@ -1864,7 +1837,7 @@ pub fn click_desktop(
     )
 }
 
-/// wlroots virtual-pointer implementation of [`click`]. Falls back to libei via
+/// wlroots virtual-pointer implementation of [`click_focused`]. Falls back to libei via
 /// [`with_libei_fallback`] when the compositor exposes no virtual-pointer.
 fn click_vptr(
     window_id: Option<u64>,
@@ -1910,14 +1883,6 @@ fn click_vptr(
     sess.vptr.destroy();
     sess.queue.roundtrip(&mut sess.state)?;
     Ok(())
-}
-
-/// Synthesize a vertical or horizontal scroll on the activated toplevel. Each
-/// tick emits an `axis_source(wheel)` + `axis_discrete(1)` pair through the
-/// virtual-pointer protocol, mirroring how a real wheel notch decomposes. The
-/// magnitude follows wl_pointer convention: ±10 (in wl_fixed = ×256) per tick.
-pub fn scroll(window_id: u64, direction: &str, amount: u32) -> anyhow::Result<()> {
-    scroll_at(window_id, None, direction, amount)
 }
 
 /// Translate window-local screenshot coordinates into compositor output
@@ -1999,27 +1964,47 @@ pub fn window_geometry(window_id: u64) -> Option<(i32, i32, u32, u32)> {
     })
 }
 
-/// Scroll after positioning the synthetic pointer over an output-relative
-/// target. Wayland routes wheel events to the surface beneath the pointer, so
-/// pixel-addressed scrolls must not inherit an unrelated cursor position.
-pub fn scroll_at(
-    window_id: u64,
+/// Scroll on a native Wayland toplevel already guarded by
+/// [`with_target_foreground`], like [`click_focused`]. Each tick emits an
+/// `axis_source(wheel)` + `axis_discrete(1)` pair through the virtual-pointer
+/// protocol, mirroring how a real wheel notch decomposes; the magnitude
+/// follows wl_pointer convention: 10 (in wl_fixed = 256x) per tick. With a
+/// `point`, the pointer moves to that output-relative point first: Wayland
+/// routes wheel events to the surface beneath the pointer, so pixel-addressed
+/// scrolls must not inherit an unrelated cursor position. The libei route
+/// re-enters the exact foreground guard after its readiness wait.
+#[cfg(feature = "portal-input")]
+pub fn scroll_focused(
     point: Option<(i32, i32)>,
     direction: &str,
     amount: u32,
 ) -> anyhow::Result<()> {
     let direction = direction.to_string();
     with_libei_fallback(
-        || scroll_vptr(Some(window_id), point, &direction, amount, None),
+        || scroll_vptr(None, point, &direction, amount, None),
         || {
             libei_wait_scroll_ready()?;
-            activate_window_for_input(window_id)?;
-            if let Some((x, y)) = point {
-                libei_move_absolute(x, y)?;
+            let scroll = || {
+                if let Some((x, y)) = point {
+                    libei_move_absolute(x, y)?;
+                }
+                libei_scroll(&direction, amount)
+            };
+            match current_foreground_target() {
+                Some((pid, window_id)) => with_target_foreground(pid, window_id, scroll),
+                None => scroll(),
             }
-            libei_scroll(&direction, amount)
         },
     )
+}
+
+#[cfg(not(feature = "portal-input"))]
+pub fn scroll_focused(
+    point: Option<(i32, i32)>,
+    direction: &str,
+    amount: u32,
+) -> anyhow::Result<()> {
+    scroll_vptr(None, point, direction, amount, None)
 }
 
 /// Scroll at a desktop-absolute point without activating a named toplevel.
@@ -2053,7 +2038,7 @@ pub fn scroll_desktop(
     )
 }
 
-/// wlroots virtual-pointer implementation of [`scroll`].
+/// wlroots virtual-pointer implementation of [`scroll_focused`].
 fn scroll_vptr(
     window_id: Option<u64>,
     point: Option<(i32, i32)>,
@@ -2226,7 +2211,7 @@ pub fn drag_desktop(
     )
 }
 
-/// wlroots virtual-pointer implementation of [`drag`].
+/// wlroots virtual-pointer implementation of [`drag_focused`].
 #[allow(clippy::too_many_arguments)]
 fn drag_vptr(
     window_id: Option<u64>,
@@ -2530,47 +2515,6 @@ pub fn press_key_focused(key: &str) -> anyhow::Result<()> {
             },
             other.map(|out| String::from_utf8_lossy(&out.stderr).into_owned()),
         ),
-    }
-}
-
-/// Press a key combination (modifiers + final key) via `wtype`. Each modifier
-/// is pressed before the key, then released after, exactly like
-/// `wtype -M ctrl -M shift -k key -m shift -m ctrl`. Unknown values pass
-/// straight to wtype's `-k` so single-character keys and X keysym names work
-/// as-is. This is the Wayland equivalent of the X11 `send_key` modifier mask.
-pub fn hotkey(window_id: u64, keys: &[String]) -> anyhow::Result<()> {
-    activate_window_for_input(window_id)?;
-    let (mods, final_key) = partition_modifiers(keys)?;
-    if let Ok(()) = virtual_keyboard::hotkey(&mods, &final_key) {
-        return Ok(());
-    }
-    let keysym = key_to_keysym(&final_key);
-    let args = wtype_hotkey_args(&mods, &keysym);
-    let result = std::process::Command::new("wtype").args(&args).output();
-    match result {
-        Ok(out) if out.status.success() => Ok(()),
-        other => {
-            let stderr = other.map(|o| String::from_utf8_lossy(&o.stderr).into_owned());
-            #[cfg(feature = "portal-input")]
-            {
-                return with_wtype_libei_fallback(
-                    || {
-                        libei::wait_keyboard_ready()?;
-                        activate_window_for_input(window_id)?;
-                        libei_hotkey(&mods, &final_key)
-                    },
-                    stderr,
-                );
-            }
-            #[cfg(not(feature = "portal-input"))]
-            {
-                anyhow::bail!(
-                    "wtype {} failed: {}",
-                    args.join(" "),
-                    stderr.unwrap_or_else(|_| "wtype unavailable".into())
-                );
-            }
-        }
     }
 }
 
@@ -4052,8 +3996,10 @@ mod tests {
     /// sends its input inside `with_target_foreground`, which checks the
     /// exact pid and window with a compositor adapter, focuses it, restores
     /// the prior focus and refuses when no adapter can prove the target.
-    /// `activate_window_for_input` (and the `hotkey` / `drag` / `click`
-    /// wrappers that call it) checks no pid and restores nothing.
+    /// The window-addressed wrappers that activated without it
+    /// (`activate_window_for_input` and the `click` / `hotkey` / `drag` /
+    /// `scroll` built on it) checked no pid and restored nothing; this keeps
+    /// them gone.
     /// double_click and right_click run click's own pipeline.
     #[test]
     fn native_wayland_input_tools_take_the_target_foreground_guard() {
@@ -4064,6 +4010,8 @@ mod tests {
             ("press_key", "impl Tool for PressKeyTool {"),
             ("hotkey", "impl Tool for HotkeyTool {"),
             ("drag", "impl Tool for DragTool {"),
+            ("scroll", "impl Tool for ScrollTool {"),
+            ("mouse_button_down", "impl Tool for MouseButtonDownTool {"),
         ] {
             let body = item_source(source, start);
             assert!(
@@ -4075,6 +4023,8 @@ mod tests {
                 "crate::wayland::click(",
                 "crate::wayland::hotkey(",
                 "crate::wayland::drag(",
+                "crate::wayland::scroll(",
+                "crate::wayland::scroll_at(",
             ] {
                 assert!(
                     !body.contains(unguarded),
@@ -4085,6 +4035,23 @@ mod tests {
         let gesture = item_source(source, "async fn gesture_click(");
         assert!(gesture.contains("click.click(args, kind).await"));
         assert!(!gesture.contains("crate::wayland::click"));
+
+        // A native press refuses background delivery like click and drag,
+        // and goes through the late-press gate like the X11 foreground press:
+        // recorded as it lands, or released when the call stopped waiting.
+        let down = item_source(source, "impl Tool for MouseButtonDownTool {");
+        assert!(down.contains("unavailable_wayland_focused_input_background(delivery, false)"));
+        assert_eq!(down.matches("press_and_hold_bounded(").count(), 2);
+        // Motion and release reuse the pressed device and activate nothing.
+        for start in ["impl Tool for MouseDragTool {", "impl Tool for MouseButtonUpTool {"] {
+            let body = item_source(source, start);
+            assert!(!body.contains("activate_window_for_input"), "{start}");
+            assert!(!body.contains("persistent_vptr::press"), "{start}");
+        }
+        // The browser setup page's own guard sends its close-tab chord to
+        // the focused target, like its other chords.
+        let setup = include_str!("../browser_setup_ui.rs");
+        assert!(!setup.contains("crate::wayland::hotkey("));
     }
 
     /// XWayland mode on a Wayland session lists X11 clients only: the note

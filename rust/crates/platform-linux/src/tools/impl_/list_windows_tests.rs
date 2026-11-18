@@ -175,7 +175,11 @@ fn xwayland_mode_note_ends_the_list_once() {
 
     let plain = list_windows_result(records, None);
     assert!(!result_text(&plain).contains("XWayland"));
-    assert!(plain.structured_content.expect("structured").get("note").is_none());
+    assert!(plain
+        .structured_content
+        .expect("structured")
+        .get("note")
+        .is_none());
 }
 
 /// An `Exec=` line keeps its own quotes and backslashes, escaped inside the
