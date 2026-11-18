@@ -204,6 +204,11 @@ impl Tool for Fake {
                 }
                 ToolResult::text(markdown.clone()).with_structured(structured)
             }
+            // A paste into the text field.
+            "press_key" if args["key"] == "v" => {
+                ui.email = "pasted".into();
+                ToolResult::text("press_key done")
+            }
             "click" | "set_value" => {
                 let token = args["element_token"].as_str().unwrap_or_default();
                 let label = ui
@@ -704,6 +709,92 @@ async fn a_window_the_caller_never_read_gets_a_baseline_read() {
         .run(json!({"steps": [{"click": {"app": "Demo", "role": "button", "name": "Next"}}]}))
         .await;
     assert_eq!(harness.calls("get_window_state").len(), before + 1);
+}
+
+/// Index in the harness's call log of each plain read with `max_elements`
+/// (the baseline shape: no since, no full_output, not a check's poll).
+fn baseline_reads(harness: &Harness, max_elements: u64) -> Vec<(usize, u64)> {
+    harness
+        .ui
+        .lock()
+        .unwrap()
+        .calls
+        .iter()
+        .enumerate()
+        .filter(|(_, (name, args))| {
+            name == "get_window_state"
+                && args["max_elements"] == max_elements
+                && args.get("since").is_none()
+                && args.get("full_output").is_none()
+                && args.get("_observation_only").is_none()
+        })
+        .map(|(at, (_, args))| (at, args["window_id"].as_u64().unwrap()))
+        .collect()
+}
+
+/// Round 11 (Wayland, KWrite): hotkey ctrl+Home, then hotkey ctrl+v with an
+/// `expect`, then `observe` with max_elements 40, in a window the caller had
+/// read only with another view. The expect's check read the window first,
+/// after the paste: that read became the baseline and the end diff said "no
+/// change". A read taken after a step acted in the window never becomes the
+/// baseline; with none from before, the end read is a full read.
+#[tokio::test]
+async fn a_read_after_a_step_acted_never_becomes_the_baseline() {
+    let harness = Harness::new();
+    let result = harness
+        .run(json!({
+            "pid": 42, "window_id": 7,
+            "steps": [
+                {"press_key": {"key": "Home"}},
+                {"press_key": {"key": "v"},
+                 "expect": {"role": "textfield", "name": "Email", "value": "pasted"}}
+            ],
+            "observe": {"max_elements": 40}
+        }))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let baselines = baseline_reads(&harness, 40);
+    assert!(baselines.is_empty(), "taken after the paste: {baselines:?}");
+
+    // Nor does a name lookup's read after a step already acted there.
+    let harness = Harness::new();
+    let result = harness
+        .run(json!({
+            "pid": 42, "window_id": 7,
+            "steps": [
+                {"press_key": {"key": "v"}},
+                {"click": {"role": "button", "name": "Next"}}
+            ],
+            "observe": {"max_elements": 40}
+        }))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let baselines = baseline_reads(&harness, 40);
+    assert!(baselines.is_empty(), "taken after the paste: {baselines:?}");
+}
+
+/// A check after a step's action never takes the baseline: a dialog the
+/// action opened, read first by that check, would diff as "no change" at
+/// the end although the batch opened it.
+#[tokio::test]
+async fn a_check_after_an_action_takes_no_baseline() {
+    let harness = Harness::new();
+    harness.ui.lock().unwrap().screen = 1;
+    let result = harness
+        .run(json!({
+            "steps": [
+                {"click": {"app": "Demo", "role": "button", "name": "Back"},
+                 "expect": {"app": "Demo", "window": "Unsaved", "role": "button", "name": "Keep"}}
+            ],
+            "observe": {"pid": 42, "window_id": 8, "max_elements": 41}
+        }))
+        .await;
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let windows: Vec<u64> = baseline_reads(&harness, 41)
+        .into_iter()
+        .map(|(_, window)| window)
+        .collect();
+    assert_eq!(windows, [7], "only the window clicked in, before the click");
 }
 
 #[tokio::test]

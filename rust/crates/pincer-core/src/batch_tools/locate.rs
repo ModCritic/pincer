@@ -569,6 +569,9 @@ pub(crate) struct Locator<'a> {
     /// observation can say a diff is against the batch's own read rather
     /// than one the caller made.
     baseline_ids: std::sync::Mutex<Vec<String>>,
+    /// Set once a step acted wherever the focus was: any window may have
+    /// changed, so no later read becomes a baseline.
+    baselines_closed: std::sync::atomic::AtomicBool,
     /// Windows a read of which this batch's dispatch admitted (session,
     /// policy and approval checks passed). A check's later polls of them
     /// skip the dispatch.
@@ -584,6 +587,7 @@ impl<'a> Locator<'a> {
             baseline_max_elements: None,
             baselined: Default::default(),
             baseline_ids: Default::default(),
+            baselines_closed: Default::default(),
             admitted: Default::default(),
         }
     }
@@ -816,16 +820,37 @@ impl<'a> Locator<'a> {
             .unwrap_or_default()
     }
 
+    /// A step is about to act in `window` (`None`: wherever the focus is)
+    /// without a name lookup's read before it. A read of that window taken
+    /// later would miss what the step changed, so none becomes a baseline:
+    /// the end observation is then a full read, as described.
+    pub(crate) fn acting_in(&self, window: Option<&Window>) {
+        match window {
+            Some(window) => {
+                self.baselined
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert((window.pid, window.window_id));
+            }
+            None => self
+                .baselines_closed
+                .store(true, std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+
     /// The first lookup of each window in a batch that ends with a default
     /// `observe` also makes one plain read, the baseline of that observation
-    /// (see `baseline_max_elements`).
+    /// (see `baseline_max_elements`), unless a step already acted there.
     async fn take_baseline(&self, window: &Window) {
         if let Some(max_elements) = self.baseline_max_elements {
             let first = self
                 .baselined
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .insert((window.pid, window.window_id));
+                .insert((window.pid, window.window_id))
+                && !self
+                    .baselines_closed
+                    .load(std::sync::atomic::Ordering::Relaxed);
             // The caller's own last read of the window is the baseline the
             // `observe` description promises; a read here is only for a
             // window the caller never read with this view. It used to be
@@ -895,9 +920,11 @@ impl<'a> Locator<'a> {
 
     /// One fresh accessibility read for a check: the same tree and elements
     /// as [`Self::read`], but it publishes no snapshot, so it leaves every
-    /// element token current, and its elements carry no tokens.
+    /// element token current, and its elements carry no tokens. It never
+    /// takes the baseline: a step's `expect` runs after its action, and a
+    /// baseline taken there hid what the action changed (round 11: a paste
+    /// diffed as "no change").
     async fn observe(&self, window: &Window) -> Result<Read, Miss> {
-        self.take_baseline(window).await;
         let mut args = lookup_read_args(window);
         let result = if self.is_admitted(window) {
             // A platform gives a window's first read a longer cold-start

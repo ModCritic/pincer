@@ -258,7 +258,7 @@ impl Tool for RunStepsTool {
                     },
                     "observe": {
                         "type": "object",
-                        "description": "End-of-batch get_window_state arguments; `pid`/`window_id` default to the last step that names both. Defaults: since=\"latest\" (a diff against your last read of that window made with no query and the default max_elements; without one, against a read run_steps takes before its first step that finds an element by role or name, which the diff names as its own; else a full read), include_screenshot=false, max_elements=250. Pass include_screenshot=true to see the window or since=null for a full read. Omit to read nothing; {} observes the last window."
+                        "description": "End-of-batch get_window_state arguments; `pid`/`window_id` default to the last step that names both. Defaults: since=\"latest\" (a diff against your last read of that window made with no query and the default max_elements; without one, against run_steps' own read before its first role/name lookup there, if no step acted there earlier; else a full read), include_screenshot=false, max_elements=250. Pass include_screenshot=true to see the window or since=null for a full read. Omit to read nothing; {} observes the last window."
                     }
                 },
                 "additionalProperties": false
@@ -635,7 +635,8 @@ impl Plan {
         );
         // A default diff observation diffs against the caller's last read of
         // the window; a window the caller never read gets a baseline from
-        // the batch's first read of it.
+        // the batch's first name lookup in it, unless a step acted there
+        // first (then the end read is a full read).
         if let Some(observe) = &self.observe {
             let plain_view = observe.get("query").is_none()
                 && observe.get("max_depth").is_none()
@@ -1042,6 +1043,7 @@ async fn run_step(
                             .or_insert_with(|| json!(resolved.window_id));
                     }
                     report["target"] = json!({ "window": resolved.to_json() });
+                    locator.acting_in(Some(&resolved));
                     *last_window = Some(resolved);
                 }
                 Err(miss) => {
@@ -1052,13 +1054,17 @@ async fn run_step(
             args.get("pid").and_then(Value::as_i64),
             args.get("window_id").and_then(Value::as_u64),
         ) {
-            *last_window = Some(Window {
+            let window = Window {
                 pid,
                 window_id,
                 app: None,
                 title: None,
                 on_screen: true,
-            });
+            };
+            locator.acting_in(Some(&window));
+            *last_window = Some(window);
+        } else if desktop {
+            locator.acting_in(None);
         }
 
         let mut result = registry.invoke(tool, args.clone()).await;
