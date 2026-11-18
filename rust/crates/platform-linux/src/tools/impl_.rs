@@ -201,9 +201,159 @@ pub struct ToolState {
     pub capture_service: Arc<pincer_core::capture_runtime::CaptureService>,
     pub mouse_hold: std::sync::Mutex<std::collections::HashMap<String, MouseHoldState>>,
     pub config: Arc<RwLock<DriverConfig>>,
+    /// Each session's latest get_desktop_state image, for a later desktop
+    /// `region` read off it (keyed by `_session_id`).
+    desktop_images: std::sync::Mutex<std::collections::HashMap<String, DesktopImageFrame>>,
 }
 
-impl ToolState {}
+/// What a get_desktop_state image shows: its size and the full-size desktop
+/// rectangle it was scaled from, so a region read off the image maps back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DesktopImageFrame {
+    /// The capture binding's session generation: an ended and restarted
+    /// session does not inherit the image.
+    generation: u64,
+    /// The image the caller was given, in its own pixels.
+    image: (u32, u32),
+    /// The part of the desktop it shows, in full-size desktop pixels.
+    shows: pincer_core::image_utils::PixelRect,
+}
+
+impl ToolState {
+    /// Remember the get_desktop_state image this call returned.
+    fn record_desktop_image(
+        &self,
+        args: &Value,
+        image: (u32, u32),
+        shows: pincer_core::image_utils::PixelRect,
+    ) {
+        let (Some(session), Ok(binding)) = (
+            args.get("_session_id").and_then(Value::as_str),
+            self.capture_service.binding_from_args(args),
+        ) else {
+            return;
+        };
+        self.desktop_images.lock().unwrap().insert(
+            session.to_owned(),
+            DesktopImageFrame {
+                generation: binding.session_generation(),
+                image,
+                shows,
+            },
+        );
+    }
+
+    /// The calling session's latest get_desktop_state image, if it has one.
+    fn desktop_image(&self, args: &Value) -> Option<DesktopImageFrame> {
+        let session = args.get("_session_id").and_then(Value::as_str)?;
+        let generation = self
+            .capture_service
+            .binding_from_args(args)
+            .ok()?
+            .session_generation();
+        self.desktop_images
+            .lock()
+            .unwrap()
+            .get(session)
+            .copied()
+            .filter(|frame| frame.generation == generation)
+    }
+
+    /// A desktop `region` argument in full-size desktop pixels. By default
+    /// it was read off the session's latest get_desktop_state image and is
+    /// mapped back; `native_pixels:true` (or no earlier image, whose frame
+    /// would be the full-size one) takes it as it is. `Ok` also says
+    /// whether it was mapped.
+    fn desktop_region_arg(
+        &self,
+        args: &Value,
+        region: pincer_core::image_utils::PixelRect,
+    ) -> Result<(pincer_core::image_utils::PixelRect, bool), String> {
+        if native_pixels_requested(args) {
+            return Ok((region, false));
+        }
+        match self.desktop_image(args) {
+            Some(frame) => desktop_region_from_image(region, &frame).map(|rect| (rect, true)),
+            None => Ok((region, false)),
+        }
+    }
+}
+
+/// `native_pixels:true`: coordinates or a region are in the target's own
+/// pixels (full-size desktop pixels, or the window's native pixels), not in
+/// the screenshot the caller was given.
+fn native_pixels_requested(args: &Value) -> bool {
+    args.get("native_pixels").and_then(Value::as_bool) == Some(true)
+}
+
+/// Schema of the `native_pixels` flag.
+fn native_pixels_schema(description: &str) -> Value {
+    json!({ "type": "boolean", "description": description })
+}
+
+/// Map a region read off a desktop image back to full-size desktop pixels,
+/// rounded to whole pixels and kept inside what the image shows.
+fn desktop_region_from_image(
+    region: pincer_core::image_utils::PixelRect,
+    frame: &DesktopImageFrame,
+) -> Result<pincer_core::image_utils::PixelRect, String> {
+    let (image_w, image_h) = frame.image;
+    if !region.fits_within(image_w, image_h) {
+        return Err(format!(
+            "region {},{} {}x{} does not fit the {image_w}x{image_h} get_desktop_state image \
+             it is read from (needs x+width <= {image_w} and y+height <= {image_h}); pass \
+             native_pixels:true for full-size desktop pixels",
+            region.x, region.y, region.width, region.height
+        ));
+    }
+    let shows = frame.shows;
+    let axis = |start: u32, length: u32, image: u32, shows_start: u32, shows_len: u32| {
+        let scale = f64::from(shows_len) / f64::from(image);
+        let lo = (f64::from(shows_start) + f64::from(start) * scale).round() as u32;
+        let hi = (f64::from(shows_start) + f64::from(start + length) * scale).round() as u32;
+        let lo = lo.clamp(shows_start, shows_start + shows_len - 1);
+        let hi = hi.clamp(lo + 1, shows_start + shows_len);
+        (lo, hi - lo)
+    };
+    let (x, width) = axis(region.x, region.width, image_w, shows.x, shows.width);
+    let (y, height) = axis(region.y, region.height, image_h, shows.y, shows.height);
+    Ok(pincer_core::image_utils::PixelRect {
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
+#[cfg(test)]
+mod region_frame_tests;
+
+/// Map a region read off a window's get_window_state screenshot to its
+/// native pixels (`scale` native pixels per screenshot pixel), rounded to
+/// whole pixels and kept inside `native` when that size is known.
+fn window_region_from_screenshot(
+    region: pincer_core::image_utils::PixelRect,
+    scale: f64,
+    native: Option<(u32, u32)>,
+) -> pincer_core::image_utils::PixelRect {
+    let axis = |start: u32, length: u32, limit: Option<u32>| {
+        let mut lo = (f64::from(start) * scale).round().max(0.0) as u32;
+        let mut hi = (f64::from(start + length) * scale).round().max(0.0) as u32;
+        if let Some(limit) = limit.filter(|limit| *limit > 0) {
+            lo = lo.min(limit - 1);
+            hi = hi.min(limit);
+        }
+        (lo, hi.max(lo + 1) - lo)
+    };
+    let (x, width) = axis(region.x, region.width, native.map(|size| size.0));
+    let (y, height) = axis(region.y, region.height, native.map(|size| size.1));
+    pincer_core::image_utils::PixelRect {
+        x,
+        y,
+        width,
+        height,
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct MouseHoldState {
@@ -237,6 +387,7 @@ impl ToolState {
             capture_service,
             mouse_hold: std::sync::Mutex::new(Default::default()),
             config: Arc::new(RwLock::new(load_driver_config())),
+            desktop_images: std::sync::Mutex::new(Default::default()),
         })
     }
 
@@ -15652,7 +15803,7 @@ static PMDRAG_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 /// and run them as concurrent multi-cursor injections over the control socket.
 /// Coordinates stay window-local (the compositor maps them per app_id), so no
 /// X11 geometry/MPX is needed — the X11 path's hard blocker on Wayland.
-async fn parallel_drag_inject(args: &Value) -> ToolResult {
+async fn parallel_drag_inject(state: &ToolState, args: &Value) -> ToolResult {
     let Some(items) = args.get("drags").and_then(|v| v.as_array()) else {
         return ToolResult::error("drags[] is required.");
     };
@@ -15686,6 +15837,10 @@ async fn parallel_drag_inject(args: &Value) -> ToolResult {
         if local.len() < 2 {
             return ToolResult::error("drag path needs at least 2 points.");
         }
+        let local = match parallel_drag_scale(state, args, xid) {
+            Ok(scale) => scale_points(local, scale),
+            Err(refusal) => return refusal,
+        };
         let steps = item
             .get("steps")
             .and_then(|v| v.as_u64())
@@ -15723,6 +15878,29 @@ async fn parallel_drag_inject(args: &Value) -> ToolResult {
     }
 }
 
+/// Window pixels per caller pixel for one parallel_mouse_drag item: 1 with
+/// `native_pixels` (or a trusted caller's native window pixels), else the
+/// scale of this session's latest get_window_state screenshot of the window
+/// (refused without one, as click is).
+fn parallel_drag_scale(state: &ToolState, args: &Value, xid: u64) -> Result<f64, ToolResult> {
+    if native_pixels_requested(args)
+        || args.get(pincer_core::snapshot_store::NATIVE_WINDOW_PIXELS_ARG) == Some(&json!(true))
+    {
+        return Ok(1.0);
+    }
+    state
+        .snapshots
+        .screenshot_context_for_zoom(None, xid, args.get("_session_id").and_then(Value::as_str))
+        .map(|(_, context)| context.scale)
+}
+
+fn scale_points(points: Vec<(f64, f64)>, scale: f64) -> Vec<(f64, f64)> {
+    points
+        .into_iter()
+        .map(|(x, y)| (x * scale, y * scale))
+        .collect()
+}
+
 /// parallel_mouse_drag without its uinput device. Unlike the other pointer
 /// tools it has no foreground route, so the advice is to draw the strokes
 /// one at a time with drag.
@@ -15754,9 +15932,10 @@ impl Tool for ParallelMouseDragTool {
                 /dev/uinput cannot be opened; the call is then refused (uinput_unavailable) and \
                 there is no foreground fallback: draw the strokes one at a time with drag. Each \
                 item names its window by window_id alone (no pid) and needs its own session, \
-                different from the other items'. Coordinates are window pixels: get_window_state \
-                screenshot pixels divided by frame_scale (the same when frame_scale is 1); no \
-                screenshot is required. A path is a straight segment (from_x/from_y to \
+                different from the other items'. Coordinates are pixels of that window's latest \
+                get_window_state screenshot in this session (refused without one), mapped to \
+                the window for you; native_pixels:true takes window pixels instead (screenshot \
+                pixels divided by frame_scale) and needs no screenshot. A path is a straight segment (from_x/from_y to \
                 to_x/to_y), waypoints (path), or a function fn = y(x) sampled over [x_from, x_to] \
                 (fn:\"300+120*sin(x/40)\" is a sine wave; + - * / ^, sin, cos, tan, sqrt, abs, \
                 exp, ln, pi, e). A start point covered by another app's window is refused \
@@ -15765,19 +15944,20 @@ impl Tool for ParallelMouseDragTool {
                 "drags":{"type":"array","minItems":2,"description":"Two or more drags to run at the same time, each on its own virtual pointer.","items":{"type":"object","required":["session","window_id"],"properties":{
                     "session":{"type":"string","description":"Cursor id for this item, different from every other item's: it keys the item's virtual pointer and agent cursor."},
                     "window_id":{"type":"integer","description":"Window id from list_windows; the window is found by this id alone."},
-                    "path":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"Waypoints [[x,y],...] (at least 2) in window pixels; pressed once, moved through, released once. Takes precedence over fn and from/to."},
-                    "fn":{"type":"string","description":"Expression y(x) in window pixels, sampled over [x_from, x_to]. Instead of from_x/to_x."},
-                    "x_from":{"type":"number","description":"Domain start (window x) when `fn` is used."},
-                    "x_to":{"type":"number","description":"Domain end (window x) when `fn` is used."},
+                    "path":{"type":"array","items":{"type":"array","items":{"type":"number"}},"description":"Waypoints [[x,y],...] (at least 2) in screenshot pixels; pressed once, moved through, released once. Takes precedence over fn and from/to."},
+                    "fn":{"type":"string","description":"Expression y(x) in screenshot pixels, sampled over [x_from, x_to]. Instead of from_x/to_x."},
+                    "x_from":{"type":"number","description":"Domain start (screenshot x) when `fn` is used."},
+                    "x_to":{"type":"number","description":"Domain end (screenshot x) when `fn` is used."},
                     "samples":{"type":"integer","minimum":2,"maximum":400,"description":"Waypoints sampled along `fn`. Default: 80."},
-                    "from_x":{"type":"number","description":"Straight-segment start X (window pixels: screenshot pixels / frame_scale)."},
-                    "from_y":{"type":"number","description":"Straight-segment start Y (window pixels)."},
-                    "to_x":{"type":"number","description":"Straight-segment end X (window pixels)."},
-                    "to_y":{"type":"number","description":"Straight-segment end Y (window pixels)."},
+                    "from_x":{"type":"number","description":"Straight-segment start X (screenshot pixels)."},
+                    "from_y":{"type":"number","description":"Straight-segment start Y (screenshot pixels)."},
+                    "to_x":{"type":"number","description":"Straight-segment end X (screenshot pixels)."},
+                    "to_y":{"type":"number","description":"Straight-segment end Y (screenshot pixels)."},
                     "button": pincer_core::tool_schema::button_schema(),
                     "duration_ms":{"type":"integer","minimum":0,"maximum":10000,"description":"Default: 1500 for fn paths, 500 for straight."},
                     "steps":{"type":"integer","minimum":1,"maximum":300,"description":"Motion sub-steps along the whole path. Default: scaled to path length."}
-                },"additionalProperties":false}}
+                },"additionalProperties":false}},
+                "native_pixels": native_pixels_schema("true: every item's coordinates are window pixels (get_window_state screenshot pixels divided by frame_scale) and no screenshot is needed. Default false.")
             },"additionalProperties":false}),
             read_only: false, destructive: true, idempotent: false, open_world: true,
         })
@@ -15787,7 +15967,7 @@ impl Tool for ParallelMouseDragTool {
         // Nested cua-compositor: run the drags as concurrent multi-cursor
         // injections (window-local, no X11 MPX/geometry needed).
         if crate::wayland::is_inject_mode() {
-            return parallel_drag_inject(&args).await;
+            return parallel_drag_inject(&self.state, &args).await;
         }
         // Native Wayland without the inject socket: MPX/XI2 + uinput master
         // pointers don't exist on Wayland. Surface a typed error instead of
@@ -15882,6 +16062,11 @@ impl Tool for ParallelMouseDragTool {
                     (Some(fx), Some(fy), Some(tx), Some(ty)) => vec![(fx, fy), (tx, ty)],
                     _ => return ToolResult::error("each drag item requires either `fn`+x_from+x_to, or from_x/from_y/to_x/to_y."),
                 }
+            };
+            // Screenshot pixels to window pixels.
+            let local = match parallel_drag_scale(&self.state, &args, xid) {
+                Ok(scale) => scale_points(local, scale),
+                Err(refusal) => return refusal,
             };
 
             let button = parse_mouse_button(
@@ -16293,8 +16478,9 @@ impl Tool for GetDesktopStateTool {
                 "screenshot_out_file":{"type":"string","description":"Write PNG here instead of base64."},
                 "max_image_dimension": pincer_core::tool_schema::desktop_max_image_dimension_schema(),
                 "region": pincer_core::capture_series::region_schema(
-                    "Optional crop in full-size desktop pixels (the uncapped get_desktop_state frame; physical screen pixels on X11), applied before max_image_dimension. Must lie inside the screen. Screenshot pixel (px,py) is desktop (x + px*frame_scale, y + py*frame_scale); capture_id maps it for you."
-                )
+                    "Optional crop, in pixels of this session's latest get_desktop_state image (mapped back to the desktop for you, through its frame_scale and region; full-size desktop pixels when there is no earlier image). Must lie inside that image. Applied before max_image_dimension."
+                ),
+                "native_pixels": native_pixels_schema("true: region is in full-size desktop pixels (list_windows bounds; physical screen pixels on X11) instead. Default false.")
             },"additionalProperties":false}),
             read_only: true, destructive: false, idempotent: false, open_world: false,
         })
@@ -16307,19 +16493,29 @@ impl Tool for GetDesktopStateTool {
             Ok(input) => input,
             Err(result) => return result,
         };
-        let region = match pincer_core::capture_series::parse_region(args.get("region")) {
-            Ok(region) => region,
-            Err(message) => {
-                return ToolResult::error(format!(
-                    "get_desktop_state: invalid arguments: {message}"
-                ))
+        let invalid = |message: String| {
+            ToolResult::error(format!("get_desktop_state: invalid arguments: {message}"))
                 .with_structured(json!({
                     "code": "invalid_arguments",
                     "tool": "get_desktop_state",
                     "detail": message,
                 }))
-            }
         };
+        let requested_region = match pincer_core::capture_series::parse_region(args.get("region"))
+        {
+            Ok(region) => region,
+            Err(message) => return invalid(message),
+        };
+        // The region is read off the image the caller was given; crop in
+        // full-size desktop pixels.
+        let (region, mapped_from) = match requested_region {
+            None => (None, None),
+            Some(requested) => match self.state.desktop_region_arg(&args, requested) {
+                Ok((region, mapped)) => (Some(region), mapped.then_some(requested)),
+                Err(message) => return invalid(message),
+            },
+        };
+        let record_args = args.clone();
         let capture_args = args;
         let out_file = input.screenshot_out_file;
         let max_image_dimension = input.max_image_dimension;
@@ -16430,6 +16626,16 @@ impl Tool for GetDesktopStateTool {
                 capture_id,
                 overlay_capture,
             ))) => {
+                self.state.record_desktop_image(
+                    &record_args,
+                    (shot_w, shot_h),
+                    region.unwrap_or(pincer_core::image_utils::PixelRect {
+                        x: 0,
+                        y: 0,
+                        width: screen_w,
+                        height: screen_h,
+                    }),
+                );
                 // Desktop pixels per screenshot pixel: the crop's width when a
                 // region was taken, the whole screen's otherwise.
                 let source_w = region.map_or(screen_w, |region| region.width);
@@ -16458,6 +16664,13 @@ impl Tool for GetDesktopStateTool {
                         "x": region.x, "y": region.y,
                         "width": region.width, "height": region.height,
                     });
+                    if let Some(requested) = mapped_from {
+                        structured["region_requested"] = json!({
+                            "x": requested.x, "y": requested.y,
+                            "width": requested.width, "height": requested.height,
+                            "frame": "previous_screenshot",
+                        });
+                    }
                 } else if (frame_scale - 1.0).abs() > 0.001 {
                     // Capped: the uncapped capture is the action frame.
                     structured["screenshot_original_width"] = json!(screen_w);
@@ -16473,10 +16686,16 @@ impl Tool for GetDesktopStateTool {
                     if region.is_some() { 1.0 } else { frame_scale },
                 );
                 let mut frame_note = if let Some(region) = region {
+                    let from = mapped_from.map_or_else(String::new, |requested| {
+                        format!(
+                            " (your {},{} {}x{} in the previous screenshot)",
+                            requested.x, requested.y, requested.width, requested.height
+                        )
+                    });
                     format!(
-                        "; region {},{} {}x{} of the desktop: screenshot pixel (px,py) is desktop \
-                         ({} + px*{frame_scale:.2}, {} + py*{frame_scale:.2}); window positions \
-                         below are full-size desktop pixels",
+                        "; region {},{} {}x{} of the desktop{from}: screenshot pixel (px,py) is \
+                         desktop ({} + px*{frame_scale:.2}, {} + py*{frame_scale:.2}); window \
+                         positions below are full-size desktop pixels",
                         region.x, region.y, region.width, region.height, region.x, region.y
                     )
                 } else if (frame_scale - 1.0).abs() > 0.001 {
@@ -18204,6 +18423,8 @@ impl pincer_core::capture_series::FrameSource for DesktopFrameSource {
 struct WindowFrameSource {
     pid: u32,
     xid: u64,
+    /// The native size when a probe already measured it.
+    known_size: Option<(u32, u32)>,
 }
 
 impl WindowFrameSource {
@@ -18229,6 +18450,9 @@ impl WindowFrameSource {
 
 impl pincer_core::capture_series::FrameSource for WindowFrameSource {
     fn frame_size(&self) -> anyhow::Result<Option<(u32, u32)>> {
+        if let Some(size) = self.known_size {
+            return Ok(Some(size));
+        }
         // Only a capture tells the exact native size, so probe once.
         self.grab()?.dimensions().map(Some)
     }
@@ -18251,7 +18475,9 @@ impl pincer_core::capture_series::FrameSource for WindowFrameSource {
     }
 }
 
-pub struct CaptureSeriesTool;
+pub struct CaptureSeriesTool {
+    state: Arc<ToolState>,
+}
 static CAPTURE_SERIES_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
 
 #[async_trait]
@@ -18263,10 +18489,10 @@ impl Tool for CaptureSeriesTool {
                 (default 5 x 1000 ms) or at `offsets_ms` from the start, all timed from one \
                 start so delays never accumulate. Captures the desktop, or one window with \
                 pid + window_id. `region` crops each frame, then `max_image_dimension` caps \
-                its long edge. Desktop regions are full-size desktop pixels (physical screen \
-                pixels on X11), not pixels of a capped get_desktop_state image; window regions \
-                are native window pixels (get_window_state pixels divided by its frame_scale). \
-                `return_frames`: all, changed (differs from the last kept frame in more than \
+                its long edge. A region is in the pixels of the image you read it off: this \
+                session's latest get_desktop_state image for the desktop, the window's latest \
+                get_window_state screenshot for a window (with native_pixels:true, full-size \
+                desktop or native window pixels). `return_frames`: all, changed (differs from the last kept frame in more than \
                 `change_threshold` of its pixels) or last. Inline replies carry at most \
                 `max_inline_images`; `output:\"files\"` writes new frame-0001.png, ... into \
                 `out_dir` instead. Each frame reports t_ms, and late when the previous capture \
@@ -18282,8 +18508,9 @@ impl Tool for CaptureSeriesTool {
                 "interval_ms":{"type":"integer","minimum":0,"maximum":60000,"description":"Time between frame starts (default 1000; 0 = back to back). Not with offsets_ms."},
                 "offsets_ms":{"type":"array","items":{"type":"integer","minimum":0},"minItems":1,"maxItems":120,"description":"Strictly increasing capture times in ms from the start, instead of count and interval_ms."},
                 "region": pincer_core::capture_series::region_schema(
-                    "Crop {x,y,width,height}: full-size desktop pixels, or native window pixels with pid/window_id. Must lie inside the frame."
+                    "Crop {x,y,width,height} in pixels of this session's latest get_desktop_state image (desktop), or of the window's latest get_window_state screenshot (pid/window_id); mapped to the frame for you. Must lie inside that image."
                 ),
+                "native_pixels": native_pixels_schema("true: region is in full-size desktop pixels (physical screen pixels on X11), or native window pixels with pid/window_id, instead. Default false."),
                 "max_image_dimension":{"type":"integer","minimum":0,"description":"Long-edge cap applied after the crop (0 or omitted: none)."},
                 "format":{"type":"string","enum":["png","jpeg"],"description":"Image format (default png)."},
                 "quality":{"type":"integer","minimum":1,"maximum":100,"description":"JPEG quality (default 80)."},
@@ -18303,12 +18530,20 @@ impl Tool for CaptureSeriesTool {
 
     async fn invoke(&self, args: Value) -> ToolResult {
         use pincer_core::capture_series::{self, FrameSource, SeriesRequest};
-        let request = match SeriesRequest::parse(&args) {
+        let mut request = match SeriesRequest::parse(&args) {
             Ok(request) => request,
             Err(message) => return capture_series::invalid_arguments(&message),
         };
         let source: Arc<dyn FrameSource> = match (args.get("pid"), args.get("window_id")) {
-            (None, None) => Arc::new(DesktopFrameSource),
+            (None, None) => {
+                if let Some(region) = request.region {
+                    match self.state.desktop_region_arg(&args, region) {
+                        Ok((region, _)) => request.region = Some(region),
+                        Err(message) => return capture_series::invalid_arguments(&message),
+                    }
+                }
+                Arc::new(DesktopFrameSource)
+            }
             (Some(pid), Some(window_id)) => {
                 let Some(pid) = pid
                     .as_u64()
@@ -18338,7 +18573,33 @@ impl Tool for CaptureSeriesTool {
                         "Window target pid {pid}, window_id {xid} is stale or no longer running; refresh list_windows."
                     ));
                 }
-                Arc::new(WindowFrameSource { pid, xid })
+                let mut source = WindowFrameSource {
+                    pid,
+                    xid,
+                    known_size: None,
+                };
+                if let Some(region) = request.region.filter(|_| !native_pixels_requested(&args)) {
+                    // Screenshot pixels of the window's latest get_window_state
+                    // read; the series crops native window pixels.
+                    let scale = match screenshot_scale(&self.state, &args, pid, Some(xid)) {
+                        Ok(scale) => scale,
+                        Err(refusal) => return refusal,
+                    };
+                    let probe = WindowFrameSource {
+                        pid,
+                        xid,
+                        known_size: None,
+                    };
+                    let native = match tokio::task::spawn_blocking(move || probe.frame_size()).await
+                    {
+                        Ok(Ok(size)) => size,
+                        Ok(Err(error)) => return ToolResult::error(format!("{error:#}")),
+                        Err(error) => return ToolResult::error(format!("Task error: {error}")),
+                    };
+                    source.known_size = native;
+                    request.region = Some(window_region_from_screenshot(region, scale, native));
+                }
+                Arc::new(source)
             }
             _ => {
                 return capture_series::invalid_arguments(
@@ -19659,7 +19920,9 @@ pub fn build_registry_with_provider(
     r.register(Box::new(ZoomTool {
         state: state.clone(),
     }));
-    r.register(Box::new(CaptureSeriesTool));
+    r.register(Box::new(CaptureSeriesTool {
+        state: state.clone(),
+    }));
     // `type_text_chars` needs no tool here: pincer-core's registry resolves
     // it to `type_text` at invoke time and keeps it out of tools/list.
     pincer_core::browser::register_browser_tools(&browser_engine, &mut r);
