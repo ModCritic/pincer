@@ -130,7 +130,7 @@ impl MockCdpServer {
                             if let Some(sid) = event.session_id {
                                 frame["sessionId"] = json!(sid);
                             }
-                            if ws.send(Message::Text(frame.to_string())).await.is_err() {
+                            if ws.send(Message::Text(frame.to_string().into())).await.is_err() {
                                 return;
                             }
                         }
@@ -146,7 +146,7 @@ impl MockCdpServer {
                         if let Some(sid) = &call.session_id {
                             response["sessionId"] = json!(sid);
                         }
-                        if ws.send(Message::Text(response.to_string())).await.is_err() {
+                        if ws.send(Message::Text(response.to_string().into())).await.is_err() {
                             return;
                         }
                     }

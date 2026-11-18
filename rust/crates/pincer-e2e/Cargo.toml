@@ -37,7 +37,7 @@ base64 = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tempfile = "3"
 futures-util = "0.3"
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.30"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

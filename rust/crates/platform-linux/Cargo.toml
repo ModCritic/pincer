@@ -129,7 +129,7 @@ crossbeam-channel = "0.5"
 # Resolve `$XDG_STATE_HOME` (with platform fallback) for persisting the
 # ScreenCast and RemoteDesktop `restore_token`s so users see the consent
 # dialog only once per install, not once per process.
-dirs = "5"
+dirs = "7"
 
 [features]
 default = []

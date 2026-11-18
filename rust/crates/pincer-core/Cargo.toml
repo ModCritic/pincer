@@ -62,7 +62,7 @@ zune-core = { workspace = true }
 # Same versions platform-macos already depends on, to avoid duplicate
 # crate versions in the workspace graph. No TLS features: the endpoint
 # contract is loopback ws:// only.
-tokio-tungstenite = "0.24"
+tokio-tungstenite = "0.30"
 futures-util = "0.3"
 uuid = { workspace = true }
 base64 = { workspace = true }

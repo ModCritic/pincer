@@ -46,8 +46,8 @@ pub(crate) enum ExprError {
     BadNumber { at: usize },
     #[error("missing an operand at the end")]
     MissingOperand,
-    #[error("missing {0} closing {}", if *.0 == 1 { "parenthesis" } else { "parentheses" })]
-    MissingCloseParen(usize),
+    #[error("missing {count} closing {}", if *count == 1 { "parenthesis" } else { "parentheses" })]
+    MissingCloseParen { count: usize },
     #[error("nested more than {MAX_NESTING} levels deep")]
     TooDeep,
     #[error("unknown variable `{0}`")]
@@ -71,7 +71,7 @@ impl ExprError {
             ExprError::Unexpected { .. }
                 | ExprError::BadNumber { .. }
                 | ExprError::MissingOperand
-                | ExprError::MissingCloseParen(_)
+                | ExprError::MissingCloseParen { .. }
                 | ExprError::TooDeep
         )
     }
@@ -403,7 +403,9 @@ impl<'a> Parser<'a> {
             self.open_parens -= 1;
             Ok(())
         } else if self.peek_char().is_none() {
-            Err(ExprError::MissingCloseParen(self.open_parens))
+            Err(ExprError::MissingCloseParen {
+                count: self.open_parens,
+            })
         } else {
             Err(self.unexpected())
         }

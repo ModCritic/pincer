@@ -810,7 +810,7 @@ mod tests {
                     other => panic!("unexpected method {other}"),
                 };
                 websocket
-                    .send(Message::Text(response.to_string()))
+                    .send(Message::Text(response.to_string().into()))
                     .await
                     .unwrap();
             }
@@ -877,7 +877,7 @@ mod tests {
                     other => panic!("unexpected method {other}"),
                 };
                 websocket
-                    .send(Message::Text(response.to_string()))
+                    .send(Message::Text(response.to_string().into()))
                     .await
                     .unwrap();
             }

@@ -508,7 +508,7 @@ impl CdpConnection {
         }
         let sent = {
             let mut writer = self.writer.lock().await;
-            writer.send(Message::Text(msg.to_string())).await
+            writer.send(Message::Text(msg.to_string().into())).await
         };
         if let Err(e) = sent {
             self.demux.pending.lock().unwrap().remove(&id);
@@ -1628,7 +1628,7 @@ mod tests {
             }
             for id in ids.iter().rev() {
                 let reply = json!({ "id": id, "result": { "for_id": id } });
-                ws.send(Message::Text(reply.to_string())).await.unwrap();
+                ws.send(Message::Text(reply.to_string().into())).await.unwrap();
             }
         });
 

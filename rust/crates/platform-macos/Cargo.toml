@@ -73,7 +73,7 @@ getrandom = { workspace = true }
 tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
 
 # WebSocket CDP client (used by browser/cdp_client.rs)
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
 futures-util = "0.3"
 
 [dev-dependencies]

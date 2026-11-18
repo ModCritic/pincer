@@ -82,6 +82,7 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | cmov | 0.5.4 | Apache-2.0 OR MIT | MIT |
 | cobs | 0.3.0 | MIT OR Apache-2.0 | MIT |
 | concurrent-queue | 2.5.0 | Apache-2.0 OR MIT | MIT |
+| const-oid | 0.10.3 | Apache-2.0 OR MIT | MIT |
 | coset | 0.4.2 | Apache-2.0 | Apache-2.0 |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 | MIT |
 | cpufeatures | 0.3.0 | MIT OR Apache-2.0 | MIT |
@@ -94,8 +95,9 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | data-encoding | 2.11.0 | MIT | MIT |
 | deranged | 0.5.8 | MIT OR Apache-2.0 | MIT |
 | digest | 0.10.7 | MIT OR Apache-2.0 | MIT |
-| dirs | 5.0.1 | MIT OR Apache-2.0 | MIT |
-| dirs-sys | 0.4.1 | MIT OR Apache-2.0 | MIT |
+| digest | 0.11.3 | MIT OR Apache-2.0 | MIT |
+| dirs | 7.0.0 | MIT OR Apache-2.0 | MIT |
+| dirs-sys | 0.5.0 | MIT OR Apache-2.0 | MIT |
 | downcast-rs | 1.2.1 | MIT/Apache-2.0 | MIT |
 | dyn-clone | 1.0.20 | MIT OR Apache-2.0 | MIT |
 | email_address | 0.2.9 | MIT | MIT |
@@ -211,17 +213,13 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | postcard | 1.1.3 | MIT OR Apache-2.0 | MIT |
 | potential_utf | 0.1.5 | Unicode-3.0 | Unicode-3.0 |
 | powerfmt | 0.2.0 | MIT OR Apache-2.0 | MIT |
-| ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 | MIT |
 | proc-macro2 | 1.0.106 | MIT OR Apache-2.0 | MIT |
 | pxfm | 0.1.29 | BSD-3-Clause OR Apache-2.0 | Apache-2.0 |
 | quick-xml | 0.39.4 | MIT | MIT |
 | quote | 1.0.45 | MIT OR Apache-2.0 | MIT |
 | radium | 0.7.0 | MIT | MIT |
 | rand | 0.10.2 | MIT OR Apache-2.0 | MIT |
-| rand | 0.8.6 | MIT OR Apache-2.0 | MIT |
-| rand_chacha | 0.3.1 | MIT OR Apache-2.0 | MIT |
 | rand_core | 0.10.1 | MIT OR Apache-2.0 | MIT |
-| rand_core | 0.6.4 | MIT OR Apache-2.0 | MIT |
 | ref-cast | 1.0.25 | MIT OR Apache-2.0 | MIT |
 | referencing | 0.46.10 | MIT | MIT |
 | regex | 1.12.3 | MIT OR Apache-2.0 | MIT |
@@ -241,7 +239,7 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | serde_core | 1.0.228 | MIT OR Apache-2.0 | MIT |
 | serde_json | 1.0.149 | MIT OR Apache-2.0 | MIT |
 | serde_yaml_ng | 0.10.0 | MIT | MIT |
-| sha1 | 0.10.6 | MIT OR Apache-2.0 | MIT |
+| sha1 | 0.11.0 | MIT OR Apache-2.0 | MIT |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | MIT |
 | sharded-slab | 0.1.7 | MIT | MIT |
 | signal-hook-registry | 1.4.8 | MIT OR Apache-2.0 | MIT |
@@ -259,7 +257,6 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | syn | 2.0.117 | MIT OR Apache-2.0 | MIT |
 | tap | 1.0.1 | MIT | MIT |
 | tempfile | 3.27.0 | MIT OR Apache-2.0 | MIT |
-| thiserror | 1.0.69 | MIT OR Apache-2.0 | MIT |
 | thiserror | 2.0.18 | MIT OR Apache-2.0 | MIT |
 | thread_local | 1.1.9 | MIT OR Apache-2.0 | MIT |
 | time | 0.3.47 | MIT OR Apache-2.0 | MIT |
@@ -268,14 +265,14 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | tiny-skia-path | 0.11.4 | BSD-3-Clause | BSD-3-Clause |
 | tinystr | 0.8.3 | Unicode-3.0 | Unicode-3.0 |
 | tokio | 1.54.1 | MIT | MIT |
-| tokio-tungstenite | 0.24.0 | MIT | MIT |
+| tokio-tungstenite | 0.30.0 | MIT | MIT |
 | tracing | 0.1.44 | MIT | MIT |
 | tracing-core | 0.1.36 | MIT | MIT |
 | tracing-log | 0.2.0 | MIT | MIT |
 | tracing-subscriber | 0.3.23 | MIT | MIT |
 | tree_magic_mini | 3.2.2 | MIT | MIT |
 | ttf-parser | 0.21.1 | MIT OR Apache-2.0 | MIT |
-| tungstenite | 0.24.0 | MIT OR Apache-2.0 | MIT |
+| tungstenite | 0.30.0 | MIT OR Apache-2.0 | MIT |
 | typenum | 1.20.0 | MIT OR Apache-2.0 | MIT |
 | unicode-general-category | 1.1.0 | Apache-2.0 | Apache-2.0 |
 | unicode-ident | 1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 | MIT |
@@ -285,7 +282,6 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | universal-hash | 0.6.1 | MIT OR Apache-2.0 | MIT |
 | unsafe-libyaml | 0.2.11 | MIT | MIT |
 | url | 2.5.8 | MIT OR Apache-2.0 | MIT |
-| utf-8 | 0.7.6 | MIT OR Apache-2.0 | MIT |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT | MIT |
 | uuid | 1.23.1 | Apache-2.0 OR MIT | MIT |
 | uuid-simd | 0.8.0 | MIT | MIT |
@@ -327,7 +323,7 @@ crates.io at the versions listed; Pincer's own files are not affected.
 Each text below is copied from the crate's published package; the crates that
 ship an identical text are listed together above it.
 
-### adler2 2.0.1, allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-compat 0.2.5, async-executor 1.14.1, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atomic-waker 1.1.2, blocking 1.6.2, camino 1.2.4, cargo-platform 0.1.9, cargo_metadata 0.19.2, concurrent-queue 2.5.0, dyn-clone 1.0.20, endi 1.1.1, evdev 0.13.2, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, futures-lite 2.6.1, itoa 1.0.18, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, proc-macro2 1.0.106, quote 1.0.45, ref-cast 1.0.25, rustix 1.1.4, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_json 1.0.149, syn 2.0.117, thiserror 1.0.69, thiserror 2.0.18, unicode-ident 1.0.24, unsafe-libyaml 0.2.11, utf-8 0.7.6, x11 2.21.0, zbus-lockstep 0.5.2, zmij 1.0.21, zvariant_utils 3.4.0
+### adler2 2.0.1, allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-compat 0.2.5, async-executor 1.14.1, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atomic-waker 1.1.2, blocking 1.6.2, camino 1.2.4, cargo-platform 0.1.9, cargo_metadata 0.19.2, concurrent-queue 2.5.0, dyn-clone 1.0.20, endi 1.1.1, evdev 0.13.2, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, futures-lite 2.6.1, itoa 1.0.18, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, proc-macro2 1.0.106, quote 1.0.45, ref-cast 1.0.25, rustix 1.1.4, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_json 1.0.149, syn 2.0.117, thiserror 2.0.18, unicode-ident 1.0.24, unsafe-libyaml 0.2.11, x11 2.21.0, zbus-lockstep 0.5.2, zmij 1.0.21, zvariant_utils 3.4.0
 
 ```text
 Permission is hereby granted, free of charge, to any
@@ -1912,6 +1908,36 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### const-oid 0.10.3
+
+```text
+Copyright (c) 2020-2026 The RustCrypto Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
 ### cpufeatures 0.2.17, cpufeatures 0.3.0
 
 ```text
@@ -2769,7 +2795,38 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### dirs 5.0.1, dirs-sys 0.4.1
+### digest 0.11.3
+
+```text
+Copyright (c) 2017-2025 RustCrypto Developers
+Copyright (c) 2017 Artyom Pavlov
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+### dirs 7.0.0, dirs-sys 0.5.0
 
 ```text
 Copyright (c) 2018-2019 dirs-rs contributors
@@ -5786,36 +5843,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### ppv-lite86 0.2.21
-
-```text
-Copyright (c) 2019 The CryptoCorrosion Contributors
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-```
-
 ### quick-xml 0.39.4
 
 ```text
@@ -5870,7 +5897,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### rand 0.10.2, rand 0.8.6, rand_chacha 0.3.1, rand_core 0.6.4
+### rand 0.10.2
 
 ```text
 Copyrights in the Rand project are retained by their contributors. No
@@ -5887,7 +5914,7 @@ The Rand project includes code from the Rust project
 published under these same licenses.
 ```
 
-### rand 0.10.2, rand 0.8.6, rand_chacha 0.3.1, rand_core 0.6.4
+### rand 0.10.2
 
 ```text
 Copyright 2018 Developers of the Rand project
@@ -6644,7 +6671,40 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### sha1 0.10.6, sha2 0.10.9
+### sha1 0.11.0
+
+```text
+Copyright (c) 2016-2026 The RustCrypto Project Developers
+Copyright (c) 2016 Artyom Pavlov
+Copyright (c) 2009-2013 Mozilla Foundation
+Copyright (c) 2006-2009 Graydon Hoare
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+```
+
+### sha2 0.10.9
 
 ```text
 Copyright (c) 2006-2009 Graydon Hoare
@@ -7109,7 +7169,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### tokio-tungstenite 0.24.0
+### tokio-tungstenite 0.30.0
 
 ```text
 Copyright (c) 2017 Daniel Abramov
@@ -7214,7 +7274,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### tungstenite 0.24.0
+### tungstenite 0.30.0
 
 ```text
 Copyright (c) 2017 Alexey Galakhov

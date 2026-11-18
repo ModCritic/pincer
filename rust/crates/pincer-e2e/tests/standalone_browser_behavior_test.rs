@@ -595,7 +595,9 @@ fn harness_cdp_call_at_url(
                 .expect("connect harness browser websocket");
             socket
                 .send(Message::Text(
-                    serde_json::json!({"id": 1, "method": method, "params": params}).to_string(),
+                    serde_json::json!({"id": 1, "method": method, "params": params})
+                        .to_string()
+                        .into(),
                 ))
                 .await
                 .expect("send harness CDP command");
