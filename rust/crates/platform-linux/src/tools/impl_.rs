@@ -12280,12 +12280,15 @@ impl Tool for HotkeyTool {
             foreground_budget(1),
             move || -> anyhow::Result<KeyRoute> {
                 if crate::wayland::wayland_input_enabled() {
-                    // Native Wayland: route the modifier combo through wtype's
-                    // -M/-k/-m sequence — the closest equivalent to the X11
-                    // state-mask path. window_id is irrelevant once focused.
+                    // Native Wayland: the chord goes inside the exact-target
+                    // foreground guard that click, type_text and press_key use
+                    // (pid and window checked, prior focus restored).
                     let mut combo: Vec<String> = mods_for_wayland.clone();
                     combo.push(key_for_wayland.clone());
-                    return crate::wayland::hotkey(xid, &combo).map(|()| KeyRoute::Synthetic);
+                    return crate::wayland::with_target_foreground(pid, xid, || {
+                        crate::wayland::hotkey_focused(&combo)
+                    })
+                    .map(|()| KeyRoute::Synthetic);
                 }
                 let m: Vec<&str> = mods.iter().map(String::as_str).collect();
                 // foreground: activate the target first, then inject the accelerator
@@ -14897,15 +14900,17 @@ impl Tool for DragTool {
                     (from_x.round() as i32, from_y.round() as i32),
                     (to_x.round() as i32, to_y.round() as i32),
                 ));
+                // The exact-target foreground guard click uses.
                 tokio::task::spawn_blocking(move || {
-                    crate::wayland::drag(
-                        xid,
-                        (fxi, fyi),
-                        (txi, tyi),
-                        steps_u32,
-                        duration_ms,
-                        button,
-                    )
+                    crate::wayland::with_target_foreground(pid, xid, || {
+                        crate::wayland::drag_focused(
+                            (fxi, fyi),
+                            (txi, tyi),
+                            steps_u32,
+                            duration_ms,
+                            button,
+                        )
+                    })
                 })
             };
             let ((from_output_x, from_output_y), (to_output_x, to_output_y)) = wayland_points

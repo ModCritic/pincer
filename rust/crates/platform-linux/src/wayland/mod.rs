@@ -1689,10 +1689,11 @@ pub fn activate_window_for_input_target(
     )
 }
 
-/// Run a focus-bound keyboard transaction only after a compositor adapter has
-/// confirmed the exact PID/window pair, and restore the previously focused
-/// toplevel afterward. Global virtual-keyboard/libei input is refused when the
-/// compositor cannot provide this read-back contract.
+/// Run a focus-bound pointer or keyboard transaction only after a compositor
+/// adapter has confirmed the exact PID/window pair, and restore the previously
+/// focused toplevel afterward. Global virtual-pointer, virtual-keyboard and
+/// libei input is refused when the compositor cannot provide this read-back
+/// contract.
 pub fn with_target_foreground<T>(
     pid: u32,
     window_id: u64,
@@ -1716,7 +1717,7 @@ pub fn with_target_foreground<T>(
     }
     anyhow::bail!(
         "foreground_unavailable: no trusted Wayland compositor adapter can confirm exact \
-         target window {window_id} for pid {pid}; no global keyboard input was sent"
+         target window {window_id} for pid {pid}; no input was sent"
     )
 }
 
@@ -2128,13 +2129,15 @@ fn move_cursor_absolute_vptr(
     Ok(())
 }
 
-/// Press-drag-release on a native Wayland toplevel. Emits one button press at
-/// `(from_x, from_y)`, then `steps` interpolated motion events along the
-/// straight segment to `(to_x, to_y)`, then a release. Coordinates are
+/// Press-drag-release on a native Wayland toplevel already guarded by
+/// [`with_target_foreground`], like [`click_focused`]. Emits one button
+/// press at `from`, then `steps` interpolated motion events along the
+/// straight segment to `to`, then a release. Coordinates are
 /// output-relative; window-local coords need the nested cua-compositor
-/// injection socket (`CUA_INJECT_SOCKET`).
-pub fn drag(
-    window_id: u64,
+/// injection socket (`CUA_INJECT_SOCKET`). The libei route re-enters the
+/// exact foreground guard after its readiness wait, as click's does.
+#[cfg(feature = "portal-input")]
+pub fn drag_focused(
     from: (i32, i32),
     to: (i32, i32),
     steps: u32,
@@ -2143,24 +2146,27 @@ pub fn drag(
 ) -> anyhow::Result<()> {
     let ((from_x, from_y), (to_x, to_y)) = (from, to);
     with_libei_fallback(
-        || {
-            drag_vptr(
-                Some(window_id),
-                from_x,
-                from_y,
-                to_x,
-                to_y,
-                steps,
-                button,
-                None,
-            )
-        },
+        || drag_vptr(None, from_x, from_y, to_x, to_y, steps, button, None),
         || {
             libei_wait_pointer_ready()?;
-            activate_window_for_input(window_id)?;
-            libei_drag(from_x, from_y, to_x, to_y, steps, duration_ms, button)
+            let drag = || libei_drag(from_x, from_y, to_x, to_y, steps, duration_ms, button);
+            match current_foreground_target() {
+                Some((pid, window_id)) => with_target_foreground(pid, window_id, drag),
+                None => drag(),
+            }
         },
     )
+}
+
+#[cfg(not(feature = "portal-input"))]
+pub fn drag_focused(
+    from: (i32, i32),
+    to: (i32, i32),
+    steps: u32,
+    _duration_ms: u64,
+    button: u8,
+) -> anyhow::Result<()> {
+    drag_vptr(None, from.0, from.1, to.0, to.1, steps, button, None)
 }
 
 /// Drag through desktop-absolute points without activating a named toplevel.
@@ -4003,6 +4009,58 @@ mod tests {
             0,
             "a 1-pixel output has nowhere else"
         );
+    }
+
+    /// The source of one top-level item of `source`: from the last `start`
+    /// (earlier ones are quoted in tests) to the next closing brace at
+    /// column 0.
+    fn item_source<'a>(source: &'a str, start: &str) -> &'a str {
+        let rest = source
+            .rsplit_once(start)
+            .unwrap_or_else(|| panic!("{start} not found"))
+            .1;
+        rest.split_once("\n}\n")
+            .unwrap_or_else(|| panic!("{start} has no end"))
+            .0
+    }
+
+    /// Every window-addressed native Wayland pointer and keyboard tool
+    /// sends its input inside `with_target_foreground`, which checks the
+    /// exact pid and window with a compositor adapter, focuses it, restores
+    /// the prior focus and refuses when no adapter can prove the target.
+    /// `activate_window_for_input` (and the `hotkey` / `drag` / `click`
+    /// wrappers that call it) checks no pid and restores nothing.
+    /// double_click and right_click run click's own pipeline.
+    #[test]
+    fn native_wayland_input_tools_take_the_target_foreground_guard() {
+        let source = include_str!("../tools/impl_.rs");
+        for (tool, start) in [
+            ("click", "impl ClickTool {"),
+            ("type_text", "impl Tool for TypeTextTool {"),
+            ("press_key", "impl Tool for PressKeyTool {"),
+            ("hotkey", "impl Tool for HotkeyTool {"),
+            ("drag", "impl Tool for DragTool {"),
+        ] {
+            let body = item_source(source, start);
+            assert!(
+                body.contains("crate::wayland::with_target_foreground(pid, xid, ||"),
+                "{tool} must send native Wayland input inside with_target_foreground"
+            );
+            for unguarded in [
+                "activate_window_for_input",
+                "crate::wayland::click(",
+                "crate::wayland::hotkey(",
+                "crate::wayland::drag(",
+            ] {
+                assert!(
+                    !body.contains(unguarded),
+                    "{tool} reaches native Wayland input through {unguarded}"
+                );
+            }
+        }
+        let gesture = item_source(source, "async fn gesture_click(");
+        assert!(gesture.contains("click.click(args, kind).await"));
+        assert!(!gesture.contains("crate::wayland::click"));
     }
 
     use super::*;
