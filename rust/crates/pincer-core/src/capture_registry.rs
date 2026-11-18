@@ -1117,7 +1117,13 @@ static NEXT_RUNTIME_GENERATION: AtomicU64 = AtomicU64::new(1);
 pub struct CaptureService {
     runtime_generation: u64,
     registry: CaptureRegistry,
+    /// The generation of each live session. An entry is removed when its
+    /// session is retired, so the table holds live sessions only.
     session_generations: Mutex<HashMap<Arc<str>, u64>>,
+    /// The next generation to hand out, for any session. One counter for the
+    /// whole runtime means a session id that comes back after its entry was
+    /// removed never gets a generation it had before.
+    next_session_generation: AtomicU64,
 }
 
 impl CaptureService {
@@ -1138,6 +1144,7 @@ impl CaptureService {
             runtime_generation,
             registry: CaptureRegistry::with_clock(config, clock)?,
             session_generations: Mutex::new(HashMap::new()),
+            next_session_generation: AtomicU64::new(1),
         })
     }
 
@@ -1167,7 +1174,11 @@ impl CaptureService {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .entry(session_id.clone())
-            .or_insert(1);
+            .or_insert_with(|| {
+                self.next_session_generation
+                    .fetch_add(1, Ordering::Relaxed)
+                    .max(1)
+            });
         self.binding(session_id, generation)
     }
 
@@ -1264,6 +1275,10 @@ impl CaptureService {
             .map(|error| error.wire_code())
     }
 
+    /// Retire a session's captures and, when `binding` is the session's
+    /// current generation, drop the session from the generation table. The
+    /// next binding of that id takes a fresh generation from the runtime
+    /// counter, so a capture published under the retired one is refused.
     pub fn retire_session(&self, binding: &CaptureBinding) -> usize {
         let removed = self.registry.retire_session(binding);
         if binding.runtime_generation == self.runtime_generation {
@@ -1271,11 +1286,8 @@ impl CaptureService {
                 .session_generations
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let generation = generations
-                .entry(binding.session_id.clone())
-                .or_insert(binding.session_generation);
-            if *generation == binding.session_generation {
-                *generation = generation.saturating_add(1).max(1);
+            if generations.get(&binding.session_id) == Some(&binding.session_generation) {
+                generations.remove(&binding.session_id);
             }
         }
         removed
@@ -1291,7 +1303,22 @@ impl CaptureService {
     }
 
     pub fn retire_session_id(&self, session_id: &str) -> usize {
-        let Ok(binding) = self.current_binding(Arc::<str>::from(session_id)) else {
+        let session_id = Arc::<str>::from(session_id);
+        if session_id.trim().is_empty() {
+            return 0;
+        }
+        // A session that never bound a capture has nothing to retire and is
+        // given no entry: the session-end hook calls this for every session.
+        let generation = self
+            .session_generations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&session_id)
+            .copied();
+        let Some(generation) = generation else {
+            return 0;
+        };
+        let Ok(binding) = self.binding(session_id, generation) else {
             return 0;
         };
         self.retire_session(&binding)
@@ -1299,6 +1326,14 @@ impl CaptureService {
 
     pub fn retire_runtime(&self) -> usize {
         self.registry.retire_runtime(self.runtime_generation)
+    }
+
+    #[cfg(test)]
+    fn session_generation_count(&self) -> usize {
+        self.session_generations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len()
     }
 
     pub fn prune_expired(&self) -> PruneOutcome {
@@ -2021,6 +2056,42 @@ mod tests {
                 .binding_from_args(&serde_json::json!({"session": "public-forgery"}))
                 .unwrap_err(),
             CaptureStoreError::InvalidBinding
+        );
+    }
+
+    /// The per-session generation table holds live sessions only: an ended
+    /// session leaves no entry behind, and a session id that comes back
+    /// (an idle-reclaimed implicit session is recreated) gets a generation
+    /// it never had, so a capture of its earlier episode stays refused.
+    #[test]
+    fn ended_sessions_leave_no_generation_and_a_returning_session_gets_a_new_one() {
+        let service = CaptureService::new(config(4, 10_000)).unwrap();
+        for episode in 0..50 {
+            let session = format!("runtime/episode-{episode}");
+            service.current_binding(session.as_str()).unwrap();
+            service.retire_session_id(&session);
+        }
+        // The session-end hook retires every ending session, including one
+        // that never bound a capture.
+        service.retire_session_id("runtime/never-captured");
+        assert_eq!(service.session_generation_count(), 0);
+
+        let first = service.current_binding("runtime/returning").unwrap();
+        service.retire_session_id("runtime/returning");
+        let second = service.current_binding("runtime/returning").unwrap();
+        assert!(
+            second.session_generation() > first.session_generation(),
+            "{first:?} then {second:?}"
+        );
+        assert_eq!(service.session_generation_count(), 1);
+        // A stale retire (of the earlier episode) leaves the live one alone.
+        service.retire_session(&first);
+        assert_eq!(
+            service
+                .current_binding("runtime/returning")
+                .unwrap()
+                .session_generation(),
+            second.session_generation()
         );
     }
 

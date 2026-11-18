@@ -1182,6 +1182,9 @@ impl ToolRegistry {
         let session_end_hook =
             crate::session::register_scoped_session_end_hook(move |session_id| {
                 crate::agent_cursor::forget_input_origin(session_id);
+                // Every end path (end_session, the idle sweep, a closed
+                // connection) comes here, not only the end_session tool.
+                crate::desktop_capture_scale::forget_session(session_id);
                 if let Some(ownership) = weak_ownership.upgrade() {
                     ownership.release_session(session_id);
                 }
@@ -8081,5 +8084,73 @@ mod argument_shape_tests {
             detail.starts_with("argument height; accepted: "),
             "{detail}"
         );
+    }
+}
+
+#[cfg(test)]
+mod session_end_cleanup_tests {
+    use super::ToolRegistry;
+    use crate::session::{SessionClientKind, SessionEndReason, SessionTransport};
+    use serde_json::json;
+    use std::time::Duration;
+
+    fn scale_recorded(session: &str) -> bool {
+        crate::desktop_capture_scale::desktop_scale_factor(
+            &json!({"_session_id": session, "scope": "desktop"}),
+        )
+        .is_some()
+    }
+
+    fn record_scale(session: &str) {
+        crate::desktop_capture_scale::record_desktop_state(
+            &json!({"_session_id": session}),
+            Some(&json!({
+                "screenshot_width": 960, "screenshot_height": 540,
+                "screenshot_original_width": 1920, "screenshot_original_height": 1080
+            })),
+        );
+        assert!(scale_recorded(session), "{session}");
+    }
+
+    /// A session's desktop-capture scale goes when the session ends on any
+    /// path: an explicit end, the idle sweep, or its connection closing. It
+    /// used to be forgotten only by the end_session tool.
+    #[test]
+    fn every_session_end_path_forgets_the_desktop_capture_scale() {
+        let _registry = ToolRegistry::new();
+
+        let explicit = "scale-end-explicit:session";
+        record_scale(explicit);
+        crate::session::end_session(explicit);
+        assert!(!scale_recorded(explicit), "explicit end");
+
+        let idle = "scale-end-idle:session";
+        record_scale(idle);
+        crate::session::touch_session(idle);
+        assert_eq!(
+            crate::session::evict_idle_with_prefix(Duration::ZERO, "scale-end-idle:"),
+            vec![idle.to_owned()]
+        );
+        assert!(!scale_recorded(idle), "idle expiry");
+
+        let closed = "scale-end-closed:session";
+        let connection = "scale-end-closed:connection";
+        record_scale(closed);
+        drop(
+            crate::session::begin_session_dispatch(
+                closed,
+                None,
+                connection,
+                true,
+                SessionTransport::McpStdio,
+                SessionClientKind::Mcp,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            crate::session::end_sessions_for_owner(connection, SessionEndReason::ProcessExit),
+            1
+        );
+        assert!(!scale_recorded(closed), "connection close");
     }
 }

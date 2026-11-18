@@ -156,7 +156,13 @@ pub(crate) struct DriverRuntime {
     authorization_registry: Arc<SessionAuthorizationRegistry>,
     compatibility_context: Arc<EffectiveAuthorizationContext>,
     shutdown: AtomicBool,
-    last_activity: AtomicU64,
+    /// When this runtime was created: the zero of `last_activity_ms`.
+    created: std::time::Instant,
+    /// Milliseconds from `created` to the last admitted call, on the
+    /// monotonic clock. The recording idle stop reads it, so a change of the
+    /// wall clock (an NTP step, a manual change) can neither stop a recording
+    /// early nor keep an idle one running.
+    last_activity_ms: AtomicU64,
     /// Calls hold a read guard; shutdown takes the write guard after closing
     /// admission. Therefore shutdown is idempotent and does not return while a
     /// previously admitted operation is still executing.
@@ -205,7 +211,8 @@ impl DriverRuntime {
             authorization_registry,
             compatibility_context,
             shutdown: AtomicBool::new(false),
-            last_activity: AtomicU64::new(now_unix_secs()),
+            created: std::time::Instant::now(),
+            last_activity_ms: AtomicU64::new(0),
             lifecycle: tokio::sync::RwLock::new(()),
             lifecycle_maintenance: Mutex::new(None),
             activity_observer: options.activity_observer.clone(),
@@ -266,6 +273,23 @@ impl DriverRuntime {
         }
     }
 
+    /// Note an admitted call for the recording idle stop.
+    fn mark_activity(&self) {
+        let since_created = u64::try_from(self.created.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.last_activity_ms
+            .fetch_max(since_created, Ordering::Relaxed);
+    }
+
+    /// How long since the last admitted call (or since creation), on the
+    /// monotonic clock.
+    fn idle_for(&self) -> std::time::Duration {
+        self.created
+            .elapsed()
+            .saturating_sub(std::time::Duration::from_millis(
+                self.last_activity_ms.load(Ordering::Relaxed),
+            ))
+    }
+
     pub(crate) fn tools_list(&self) -> Option<Value> {
         self.is_running().then(|| self.registry.tools_list())
     }
@@ -320,7 +344,7 @@ impl DriverRuntime {
         if !self.is_running() {
             return None;
         }
-        self.last_activity.store(now_unix_secs(), Ordering::Relaxed);
+        self.mark_activity();
         let _operation = self.lifecycle.read().await;
         if !self.is_running() {
             return None;
@@ -501,13 +525,6 @@ fn configured_ttl(name: &str, fallback: u64) -> u64 {
         .unwrap_or(fallback)
 }
 
-fn now_unix_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
 fn spawn_lifecycle_maintenance(runtime: &Arc<DriverRuntime>) -> LifecycleMaintenance {
     let runtime = Arc::downgrade(runtime);
     let (shutdown, shutdown_rx) = std::sync::mpsc::channel();
@@ -543,7 +560,7 @@ fn spawn_lifecycle_maintenance(runtime: &Arc<DriverRuntime>) -> LifecycleMainten
                 "idle-TTL reclaimed runtime-owned sessions"
             );
         }
-        let idle = now_unix_secs().saturating_sub(runtime.last_activity.load(Ordering::Relaxed));
+        let idle = runtime.idle_for().as_secs();
         if idle >= recording_ttl && runtime.registry.recording.current_state().enabled {
             tracing::warn!("recording idle {idle}s ≥ {recording_ttl}s TTL; auto-stopping");
             let _ = runtime.registry.recording.stop_owner(None);
@@ -813,6 +830,27 @@ mod tests {
             "continuous authorized traffic must refresh the private idle clock"
         );
 
+        runtime.shutdown().await;
+    }
+
+    /// The recording idle stop measures idleness on the monotonic clock
+    /// from the runtime's last admitted call.
+    #[tokio::test]
+    async fn the_recording_idle_clock_is_monotonic_and_reset_by_calls() {
+        let _runtime_test = TEST_RUNTIME_LOCK.lock().await;
+        let runtime = DriverRuntime::create(standard_options()).unwrap();
+        std::thread::sleep(Duration::from_millis(40));
+        assert!(runtime.idle_for() >= Duration::from_millis(40));
+        let public = "runtime-recording-idle-clock";
+        runtime
+            .invoke("start_session", serde_json::json!({"session": public}))
+            .await
+            .unwrap();
+        assert!(runtime.idle_for() < Duration::from_millis(40));
+        runtime
+            .invoke("end_session", serde_json::json!({"session": public}))
+            .await
+            .unwrap();
         runtime.shutdown().await;
     }
 
