@@ -31,6 +31,10 @@ env:
   # zig compiles the C dependencies for the macOS type-check.
   ZIG_VERSION: 0.17.1
   ZIG_SHA256: 3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a
+  # cargo-deny's Linux release binary; the SHA-256 is the digest GitHub
+  # lists for that release asset.
+  CARGO_DENY_VERSION: 0.21.0
+  CARGO_DENY_SHA256: a2170b854ff697e79e39c4c538981c9c1bdd803addbae6719a4cb66b4585a903
 
 jobs:
   check:
@@ -80,6 +84,24 @@ jobs:
 
       - name: Third-party license list is current
         run: python3 scripts/third_party_licenses.py --check
+
+      - name: Install cargo-deny
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSL -o cargo-deny.tar.gz \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          echo "${CARGO_DENY_SHA256}  cargo-deny.tar.gz" | sha256sum -c -
+          mkdir cargo-deny
+          tar -xzf cargo-deny.tar.gz -C cargo-deny --strip-components=1
+          rm cargo-deny.tar.gz
+
+      # Licenses, RustSec advisories, duplicate versions (reported, not
+      # fatal) and crate sources, as rust/deny.toml sets them. A new
+      # advisory against a locked crate fails this step until the crate is
+      # updated or deny.toml ignores it with a reason.
+      - name: cargo deny check
+        run: |
+          "$RUNNER_TEMP/cargo-deny/cargo-deny" --locked check
 
       - name: Contract manifest is current
         run: cargo run --locked -p pincer-contract --bin pincer-contract-gen -- all --check

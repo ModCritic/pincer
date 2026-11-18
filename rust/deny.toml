@@ -1,0 +1,104 @@
+# cargo-deny configuration (written for cargo-deny 0.21). Run from rust/:
+#   cargo deny check
+# CI runs the same check. Each section below says what it enforces.
+
+[graph]
+# The targets Pincer builds for: the Linux binary and SDK, the Windows and
+# macOS builds the scripts and npm packages name, and the windows-gnu target
+# CI type-checks. Crates used only on other targets (redox, wasm, ...) are
+# not checked.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-pc-windows-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+[advisories]
+# RustSec advisories (vulnerabilities, unmaintained and unsound crates, yanked
+# versions) fail the check. Each ignore below is a crate a dependency pins with
+# no fixed release to move to; remove the entry when that changes.
+ignore = [
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml is unmaintained; it parses YAML permission policies through serde_yaml_ng, which has no release without it" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained; fontdue (cursor-overlay's label font) depends on it in every release" },
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.39 is pinned by wayland-scanner and zbus_xml (via atspi-common's zbus-lockstep); both parse only XML files shipped inside those crates, at compile time or in their own tests" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.39, as for RUSTSEC-2026-0194; Pincer has no NsReader over untrusted XML" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant was merged into zbus 6; atspi 0.30, ashpd 0.13 and keyring still use zbus 5" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names was merged into zbus 6; same zbus 5 pin as RUSTSEC-2026-0370" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive was merged into zbus 6; same zbus 5 pin as RUSTSEC-2026-0370" },
+    { id = "RUSTSEC-2026-0374", reason = "basic-toml is unmaintained; uniffi 0.31 (pinned for the generated bindings) depends on it" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained; regorus's time feature (Rego time.* builtins) depends on it" },
+    { id = "RUSTSEC-2026-0555", reason = "chrono-tz is unmaintained; regorus's time feature depends on it" },
+]
+
+[licenses]
+# The licenses of the crates that ship today (THIRD_PARTY_LICENSES.md). A
+# crate offering a choice passes when one of its options is listed.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "MIT-0",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.8
+# Other licenses are accepted only for the crates named here, so a new crate
+# under one of them fails the check until someone decides to add it.
+exceptions = [
+    # MPL-2.0, a file-level copyleft: the crates THIRD_PARTY_LICENSES.md lists
+    # under "MPL-2.0 crates", linked into the Linux binary.
+    { allow = ["MPL-2.0"], crate = "option-ext" },
+    { allow = ["MPL-2.0"], crate = "uniffi" },
+    { allow = ["MPL-2.0"], crate = "uniffi_core" },
+    { allow = ["MPL-2.0"], crate = "uniffi_pipeline" },
+    # MPL-2.0 crates that only run while building: uniffi's proc macros and
+    # binding generator, and cbindgen in pincer-bindgen. None is linked into
+    # pincer or pincer-sdk.
+    { allow = ["MPL-2.0"], crate = "cbindgen" },
+    { allow = ["MPL-2.0"], crate = "uniffi_bindgen" },
+    { allow = ["MPL-2.0"], crate = "uniffi_internal_macros" },
+    { allow = ["MPL-2.0"], crate = "uniffi_macros" },
+    { allow = ["MPL-2.0"], crate = "uniffi_meta" },
+    { allow = ["MPL-2.0"], crate = "uniffi_udl" },
+    # BSL-1.0 (Boost), a permissive license: clipboard-rs's Windows backend.
+    { allow = ["BSL-1.0"], crate = "clipboard-win" },
+    { allow = ["BSL-1.0"], crate = "error-code" },
+    { allow = ["BSL-1.0"], crate = "windows-win" },
+]
+
+[licenses.private]
+# Workspace crates are Pincer's own (MIT, from [workspace.package]).
+ignore = false
+registries = []
+
+[bans]
+# Duplicate versions are reported but do not fail the check: most come from
+# third-party crates' own version requirements.
+multiple-versions = "warn"
+# The only `*` requirements are path dependencies between workspace crates,
+# which cargo-deny counts as wildcards for crates not marked publish = false.
+wildcards = "allow"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+# Every crate comes from crates.io: no other registry and no git source.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
