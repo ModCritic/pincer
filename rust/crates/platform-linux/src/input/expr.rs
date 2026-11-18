@@ -441,7 +441,12 @@ impl<'a> Parser<'a> {
     }
 }
 
+// The table below holds meval's outputs as it printed them, so some match
+// std constants (FRAC_1_SQRT_2, PI, E). Writing them as the constants would
+// hide that they are recorded results, so clippy's approx_constant check is
+// off for these tests.
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
 
