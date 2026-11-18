@@ -124,8 +124,9 @@ unsafe extern "C" fn record_x_error(
 /// calls it, then the display's exit handler, whose default exits with
 /// status 1. Log why, and release the core pointer buttons Pincer pressed
 /// through XTest: the server keeps them down after the process is gone, and
-/// the session cleanup that would release them never runs. The release uses
-/// a connection of its own and gets at most a second, so a server that went
+/// the session cleanup that would release them never runs. The release goes
+/// through the held buttons' x11rb connection (see `held_xtest`), not the
+/// Xlib display that broke, and gets at most a second, so a server that went
 /// away or stopped answering cannot hold up the exit.
 unsafe extern "C" fn on_x_io_error(display: *mut x11::xlib::Display) -> c_int {
     // SAFETY: a field read on the display Xlib passes; no protocol request.

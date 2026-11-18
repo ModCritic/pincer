@@ -22,6 +22,7 @@ pub mod focus_guard;
 pub mod foreground;
 /// A press that leaves its button held, run under a time budget.
 pub(crate) mod held_press;
+mod held_xtest;
 /// Low-latency ordered input batches for one target (embedders).
 pub mod interactive;
 /// The one table of keyboard modifier names every route parses.
@@ -37,6 +38,8 @@ mod xdisplay;
 
 pub use focus_guard::{FocusGuardReport, FocusSnapshot, SameAppWindow};
 pub use foreground::{with_x11_foreground_opts, FocusAfter, ForegroundOptions, ForegroundReport};
+pub use held_xtest::{release_button_xtest_at_pointer, send_button_xtest_desktop};
+pub(crate) use held_xtest::{release_xtest_button_if_down, release_xtest_buttons_still_down};
 pub use mpx_keyboard::{
     real_keyboard_input_available, send_virtual_keyboard_key, send_virtual_keyboard_text,
     KeyboardDeliveryReport, MPX_UINPUT_PATH,
@@ -52,7 +55,7 @@ use std::ffi::{CStr, CString};
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::sleep;
 use std::time::Duration;
@@ -3909,112 +3912,20 @@ pub fn send_click_xtest_desktop_with_modifiers(
     Ok(())
 }
 
-/// Move the real X11 pointer to a screen-absolute desktop coordinate.
+/// Move the real X11 pointer to a screen-absolute desktop coordinate. While
+/// a held-button tool holds an XTest button, through that hold's connection
+/// (see [`held_xtest`]).
 pub fn send_move_xtest_desktop(x: i32, y: i32) -> Result<()> {
     use x11rb::protocol::xtest::ConnectionExt as _;
+    if let Some(moved) = held_xtest::move_while_held(x, y) {
+        return moved;
+    }
     let (conn, screen_num) = connect_x11_for_input()?;
     let root = conn.setup().roots[screen_num].root;
     conn.xtest_fake_input(MOTION_NOTIFY_EVENT, 0, 0, root, x as i16, y as i16, 0)?;
     conn.flush()?;
     let _ = conn.get_input_focus()?.reply();
     Ok(())
-}
-
-/// One edge of a held button on the real X11 pointer: move to the
-/// screen-absolute `(x, y)` when given, then press (`press`) or release
-/// `button` there via XTest. The foreground route of the held-button tools
-/// (mouse_button_down / mouse_drag / mouse_button_up); motion while the
-/// button is down is [`send_move_xtest_desktop`]. A faked press stays down
-/// on the core pointer after this short-lived connection closes, until a
-/// faked release: checked on Xvfb under KWin (2026-11-11), where a press, a
-/// motion and a release from three separate calls drew one GTK3 stroke.
-pub fn send_button_xtest_desktop(point: Option<(i32, i32)>, button: u8, press: bool) -> Result<()> {
-    use x11rb::protocol::xtest::ConnectionExt as _;
-    let (conn, screen_num) = connect_x11_for_input()?;
-    let root = conn.setup().roots[screen_num].root;
-    let (x, y) = match point {
-        Some((x, y)) => {
-            conn.xtest_fake_input(MOTION_NOTIFY_EVENT, 0, 0, root, x as i16, y as i16, 0)?;
-            (x, y)
-        }
-        None => {
-            let pointer = conn.query_pointer(root)?.reply()?;
-            (i32::from(pointer.root_x), i32::from(pointer.root_y))
-        }
-    };
-    let kind = if press {
-        BUTTON_PRESS_EVENT
-    } else {
-        BUTTON_RELEASE_EVENT
-    };
-    conn.xtest_fake_input(kind, button, 0, root, x as i16, y as i16, 0)?
-        .check()?;
-    note_xtest_button(button, press);
-    let _ = conn.get_input_focus()?.reply();
-    Ok(())
-}
-
-/// Buttons 1 to 7 that [`send_button_xtest_desktop`] pressed and nothing has
-/// released yet, one bit each. They are the core pointer's real buttons, and
-/// the X server keeps them down after this process ends.
-static XTEST_BUTTONS_DOWN: AtomicU8 = AtomicU8::new(0);
-
-fn note_xtest_button(button: u8, down: bool) {
-    let Some(bit) = (1..=7).contains(&button).then(|| 1u8 << (button - 1)) else {
-        return;
-    };
-    if down {
-        XTEST_BUTTONS_DOWN.fetch_or(bit, Ordering::SeqCst);
-    } else {
-        XTEST_BUTTONS_DOWN.fetch_and(!bit, Ordering::SeqCst);
-    }
-}
-
-/// Release XTest `button` where the pointer is when this process pressed it
-/// and has not released it; nothing otherwise. The undo for a held press
-/// that must not stay down (see [`held_press`]).
-pub(crate) fn release_xtest_button_if_down(button: u8) {
-    let down = (1..=7).contains(&button)
-        && XTEST_BUTTONS_DOWN.load(Ordering::SeqCst) & (1 << (button - 1)) != 0;
-    if down {
-        if let Err(error) = release_button_xtest_at_pointer(button) {
-            tracing::warn!("could not release XTest button {button}: {error:#}");
-        }
-    }
-}
-
-/// Release, where the pointer is, every XTest button this process pressed
-/// and has not released, on a connection of its own; the buttons released.
-/// For an exit that skips the session cleanup (see `xdisplay`).
-pub(crate) fn release_xtest_buttons_still_down() -> Vec<u8> {
-    let down = XTEST_BUTTONS_DOWN.load(Ordering::SeqCst);
-    (1..=7u8)
-        .filter(|button| down & (1 << (button - 1)) != 0)
-        .filter(|button| release_button_xtest_at_pointer(*button).is_ok())
-        .collect()
-}
-
-/// Release XTest `button` where the core pointer is now, without moving it,
-/// and return that screen point. For a held button whose window is gone:
-/// the release needs no window, and the button must not stay down.
-pub fn release_button_xtest_at_pointer(button: u8) -> Result<(i32, i32)> {
-    use x11rb::protocol::xtest::ConnectionExt as _;
-    let (conn, screen_num) = connect_x11_for_input()?;
-    let root = conn.setup().roots[screen_num].root;
-    let pointer = conn.query_pointer(root)?.reply()?;
-    conn.xtest_fake_input(
-        BUTTON_RELEASE_EVENT,
-        button,
-        0,
-        root,
-        pointer.root_x,
-        pointer.root_y,
-        0,
-    )?
-    .check()?;
-    note_xtest_button(button, false);
-    let _ = conn.get_input_focus()?.reply();
-    Ok((i32::from(pointer.root_x), i32::from(pointer.root_y)))
 }
 
 /// Scroll the window under a screen-absolute point via real XTest wheel-button

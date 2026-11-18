@@ -216,6 +216,82 @@ fn an_early_refusal_closes_its_display() {
     assert_child_passed(&output, MARKER);
 }
 
+/// A held XTest button keeps the connection that pressed it open until its
+/// release, and motion during the hold goes through that connection: on
+/// Xwayland the button is released about a second after the X client that
+/// pressed it disconnects (see `held_xtest`), so a press on a connection
+/// that closes when mouse_button_down returns was gone before mouse_drag.
+/// One more X client while a button is held, none once it is released.
+#[test]
+#[ignore = "starts its own Xvfb; run inside a sandbox"]
+fn a_held_xtest_button_keeps_its_connection_until_the_release() {
+    const MARKER: &str = "HELD_XTEST_BUTTON_KEPT_ITS_CONNECTION";
+    if in_child() {
+        use x11rb::connection::Connection as _;
+        use x11rb::protocol::xproto::{ConnectionExt as _, KeyButMask};
+        let (conn, screen_num) =
+            x11rb::rust_connection::RustConnection::connect(None).expect("connect counter");
+        let root = conn.setup().roots[screen_num].root;
+        let pointer = || {
+            conn.query_pointer(root)
+                .expect("QueryPointer request")
+                .reply()
+                .expect("QueryPointer reply")
+        };
+        let before = server_client_count(&conn);
+
+        super::send_button_xtest_desktop(Some((20, 20)), 1, true).expect("XTest press");
+        assert_eq!(
+            server_client_count(&conn),
+            before + 1,
+            "the press keeps its connection open while the button is held"
+        );
+        for (x, y) in [(40, 30), (60, 40), (80, 50)] {
+            super::send_move_xtest_desktop(x, y).expect("XTest motion");
+            assert_eq!(
+                server_client_count(&conn),
+                before + 1,
+                "motion during the hold goes through the hold's connection"
+            );
+        }
+        let held = pointer();
+        assert!(held.mask.contains(KeyButMask::BUTTON1), "the button is held");
+        assert_eq!((held.root_x, held.root_y), (80, 50), "and it moved");
+
+        super::send_button_xtest_desktop(Some((90, 60)), 1, false).expect("XTest release");
+        assert_eq!(
+            server_client_count(&conn),
+            before,
+            "the release closes the hold's connection"
+        );
+        assert!(!pointer().mask.contains(KeyButMask::BUTTON1));
+
+        // The undo of a press no call recorded (held_press) and the release
+        // of a hold whose window is gone close it too.
+        super::send_button_xtest_desktop(Some((20, 20)), 3, true).expect("XTest press");
+        assert_eq!(server_client_count(&conn), before + 1);
+        super::release_xtest_button_if_down(3);
+        assert_eq!(server_client_count(&conn), before);
+        assert!(!pointer().mask.contains(KeyButMask::BUTTON3));
+        super::send_button_xtest_desktop(Some((20, 20)), 1, true).expect("XTest press");
+        super::release_button_xtest_at_pointer(1).expect("XTest release at the pointer");
+        assert_eq!(server_client_count(&conn), before);
+        assert!(!pointer().mask.contains(KeyButMask::BUTTON1));
+
+        // Motion with no button held uses a connection of its own.
+        super::send_move_xtest_desktop(10, 10).expect("XTest motion");
+        assert_eq!(server_client_count(&conn), before);
+        println!("{MARKER}");
+        return;
+    }
+    let server = Server::start(XVFB_ARGS);
+    let output = run_child(
+        "input::xlib_live_tests::a_held_xtest_button_keeps_its_connection_until_the_release",
+        &server.display,
+    );
+    assert_child_passed(&output, MARKER);
+}
+
 fn which(name: &str) -> Option<PathBuf> {
     std::env::var_os("PATH")?
         .to_str()?
