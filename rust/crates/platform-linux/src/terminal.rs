@@ -1,7 +1,7 @@
 //! Terminal-emulator detection for the Linux `type_text` path.
 //!
 //! Linux already routes terminal typing through pty injection
-//! (`inject_terminal_input` in tools/impl_.rs), but that detection is
+//! (`inject_terminal_input` in tools/impl_/keyboard_route.rs), but that detection is
 //! gated on a process-name match. Terminals like Ghostty don't always
 //! resolve to a clean `process_name` (the binary is reported as
 //! `ghostty` but the WM_CLASS may be the user-facing name), and the
@@ -32,7 +32,7 @@ pub const TERMINAL_WM_CLASS_SUBSTRINGS: &[&str] = &[
 ];
 
 /// Process names (as returned by `process_name(pid)`) for known
-/// terminal emulators. `tools/impl_.rs::is_terminal_process` reads
+/// terminal emulators. `tools/impl_/keyboard_route.rs::is_terminal_process` reads
 /// it through `is_terminal_process_name`; this is the only list.
 pub const TERMINAL_PROCESS_NAMES: &[&str] = &[
     "alacritty",

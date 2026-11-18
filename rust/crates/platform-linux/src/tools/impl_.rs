@@ -1,4 +1,8 @@
 //! Real Linux tool implementations (compiled only on Linux).
+//!
+//! The modules split out of this file each start with `use super::*;` and
+//! are glob-imported back here, so they and the test modules declared at the
+//! end share one namespace, as they did when every tool lived in this file.
 
 use async_trait::async_trait;
 use pincer_contract::{
@@ -11,6 +15,7 @@ use pincer_core::{
     tool_args::{parse_legacy_click_input, parse_typed_input, parse_typed_projection, ArgsExt},
     window_target::{PidOnlyWindowTargetGuard, WindowTargetCandidate, WindowTargetCandidates},
 };
+use pincer_core::snapshot_store::ZoomContext;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
@@ -23,31 +28,34 @@ use crate::input::{
 use crate::input::modifier::is_modifier;
 use cursor_overlay::CursorRegistry;
 
+// State and helpers the tools share.
+mod coords;
+mod cursor_reveal;
+mod hyprland_route;
+mod input_common;
+mod keyboard_route;
+mod pointer_route;
+mod state;
+mod toolkit;
+mod window_target;
+
+// The tools: one module per tool or family of tools.
 mod capture_series;
 mod click;
 mod click_gestures;
 mod config;
-mod coords;
-mod cursor_reveal;
 mod cursor_tools;
 mod desktop;
 mod discovery;
 mod drag;
 mod held_button;
-mod hyprland_route;
-mod input_common;
-mod keyboard_route;
 mod keys;
 mod launch;
-mod pointer_route;
 mod scroll;
 mod set_value;
-mod state;
 mod text;
-mod toolkit;
 mod window_ops;
 mod window_state;
-mod window_target;
 mod zoom;
 
 use self::capture_series::*;
@@ -77,55 +85,10 @@ use self::window_state::*;
 use self::window_target::*;
 use self::zoom::*;
 
-#[cfg(test)]
-mod pid_window_resolver_tests;
-
-use pincer_core::snapshot_store::ZoomContext;
-
-#[cfg(test)]
-mod region_frame_tests;
-
-#[cfg(test)]
-mod list_windows_tests;
-
-#[cfg(test)]
-mod untrusted_text_tests;
-
-#[cfg(test)]
-mod megapixel_cap_tests;
-
-#[cfg(test)]
-mod get_window_state_actions_tests;
-
+// launch_app's child process and AppImage handling.
 mod appimage;
 mod launch_child;
 use launch_child::{LaunchExit, LaunchedChild};
-
-#[cfg(test)]
-mod launch_app_tests;
-#[cfg(test)]
-mod launch_scope_tests;
-
-#[cfg(test)]
-mod launch_resolution_tests;
-
-#[cfg(test)]
-mod pointer_argument_tests;
-
-#[cfg(test)]
-mod held_button_live_tests;
-
-#[cfg(test)]
-mod type_text_readback_tests;
-
-#[cfg(test)]
-mod click_delegation_tests;
-
-#[cfg(test)]
-mod press_key_tests;
-
-#[cfg(test)]
-mod set_value_tests;
 
 // ── registry ─────────────────────────────────────────────────────────────────
 
@@ -455,32 +418,54 @@ pub fn build_registry_with_provider(
 }
 
 #[cfg(test)]
+mod pid_window_resolver_tests;
+#[cfg(test)]
+mod region_frame_tests;
+#[cfg(test)]
+mod list_windows_tests;
+#[cfg(test)]
+mod untrusted_text_tests;
+#[cfg(test)]
+mod megapixel_cap_tests;
+#[cfg(test)]
+mod get_window_state_actions_tests;
+#[cfg(test)]
+mod launch_app_tests;
+#[cfg(test)]
+mod launch_scope_tests;
+#[cfg(test)]
+mod launch_resolution_tests;
+#[cfg(test)]
+mod pointer_argument_tests;
+#[cfg(test)]
+mod held_button_live_tests;
+#[cfg(test)]
+mod type_text_readback_tests;
+#[cfg(test)]
+mod click_delegation_tests;
+#[cfg(test)]
+mod press_key_tests;
+#[cfg(test)]
+mod set_value_tests;
+#[cfg(test)]
 mod click_button_schema_tests;
-
 #[cfg(test)]
 mod pid_window_target_tests;
-
 #[cfg(test)]
 mod session_cursor_target_tests;
-
 #[cfg(test)]
 mod display_only_tests;
 #[cfg(test)]
 mod since_screenshot_default_tests;
 #[cfg(test)]
 mod window_capture_dimension_tests;
-
 #[cfg(test)]
 mod desktop_capture_frame_tests;
-
 #[cfg(test)]
 mod background_budget_tests;
-
 #[cfg(test)]
 mod background_keyboard_route_tests;
-
 #[cfg(test)]
 mod visibility_tests;
-
 #[cfg(test)]
 mod result_wording_tests;

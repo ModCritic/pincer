@@ -76,8 +76,6 @@ pub(super) fn window_region_from_screenshot(
     }
 }
 
-// ── shared helpers ────────────────────────────────────────────────────────────
-
 /// Resolve an AT-SPI element's center in window-local coordinates.
 ///
 /// Returns `(xid, window_local_x, window_local_y)`.

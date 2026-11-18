@@ -57,7 +57,7 @@ pub(crate) fn is_gecko_process(pid: u32) -> bool {
 // One detection for every question "is this Chromium?": which programs
 // launch_app gives --force-renderer-accessibility, which processes the
 // browser tools classify as Chromium, and which processes the input tools
-// treat as Chromium embedders (impl_.rs adds the helper-process fingerprint
+// treat as Chromium embedders (tools/impl_/toolkit.rs adds the helper-process fingerprint
 // only a running process has).
 
 /// Words of a program name that name a Chromium-family product.
