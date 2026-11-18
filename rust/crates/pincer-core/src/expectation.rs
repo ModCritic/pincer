@@ -247,23 +247,23 @@ impl Tool for VerifyStateTool {
             Err(error) => return error,
         };
         if input.pid <= 0 {
-            return ToolResult::error("verify_state requires pid > 0");
+            return invalid_arguments("verify_state requires pid > 0");
         }
         if input.expect.is_empty() || input.expect.len() > MAX_PREDICATES {
-            return ToolResult::error("verify_state requires between 1 and 8 predicates");
+            return invalid_arguments("verify_state requires between 1 and 8 predicates");
         }
         if input.timeout_ms.is_some_and(|value| value > MAX_TIMEOUT_MS) {
-            return ToolResult::error("verify_state timeout_ms must be between 0 and 10000");
+            return invalid_arguments("verify_state timeout_ms must be between 0 and 10000");
         }
         if input
             .stable_samples
             .is_some_and(|value| !(1..=MAX_STABLE_SAMPLES).contains(&value))
         {
-            return ToolResult::error("verify_state stable_samples must be between 1 and 5");
+            return invalid_arguments("verify_state stable_samples must be between 1 and 5");
         }
         let timeout_ms = input.timeout_ms.unwrap_or(VERIFY_STATE_DEFAULT_TIMEOUT_MS);
         if timeout_ms == 0 && input.stable_samples.is_some_and(|samples| samples > 1) {
-            return ToolResult::error(
+            return invalid_arguments(
                 "verify_state timeout_ms=0 requires stable_samples=1 because only one sample is possible",
             );
         }
@@ -273,7 +273,7 @@ impl Tool for VerifyStateTool {
             input.stable_samples.unwrap_or(DEFAULT_STABLE_SAMPLES)
         };
         if let Some(error) = invalid_predicate_message(&input.expect) {
-            return ToolResult::error(error);
+            return invalid_arguments(error);
         }
         let include_elements = input
             .expect
@@ -349,6 +349,17 @@ impl Tool for VerifyStateTool {
         }
         result
     }
+}
+
+/// An argument the input type accepts but verify_state does not, with the
+/// same structured shape as dispatch's own `invalid_arguments`.
+fn invalid_arguments(detail: impl Into<String>) -> ToolResult {
+    let detail = detail.into();
+    ToolResult::error(detail.clone()).with_structured(json!({
+        "code": "invalid_arguments",
+        "tool": "verify_state",
+        "detail": detail,
+    }))
 }
 
 fn invalid_predicate_message(expect: &[StatePredicate]) -> Option<String> {
@@ -1231,6 +1242,49 @@ mod tests {
                     .collect(),
             })
         }
+    }
+
+    /// verify_state's own argument checks returned an error with no
+    /// structured `code`, unlike dispatch's invalid_arguments, so text mode
+    /// showed no code and run_steps could not classify the failure.
+    #[tokio::test]
+    async fn verify_tool_argument_errors_carry_a_stable_code() {
+        let provider = Arc::new(FakeProvider {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            snapshot: ObservationSnapshot {
+                window: Some(window()),
+                elements: None,
+                element_source_trusted: false,
+                elements_complete: false,
+            },
+        });
+        let tool = VerifyStateTool::new(provider.clone());
+        let window = json!([{"window": {"exists": true}}]);
+        for args in [
+            json!({"pid": 0, "window_id": 7, "expect": window}),
+            json!({"pid": 42, "window_id": 7, "expect": []}),
+            json!({"pid": 42, "window_id": 7, "expect": window, "timeout_ms": 10_001}),
+            json!({"pid": 42, "window_id": 7, "expect": window, "stable_samples": 9}),
+            json!({"pid": 42, "window_id": 7, "expect": window, "timeout_ms": 0, "stable_samples": 2}),
+            json!({"pid": 42, "window_id": 7, "expect": [
+                {"element": {"selector": {"role": "checkbox"}, "exists": false}}
+            ]}),
+        ] {
+            let result = tool.invoke(args.clone()).await;
+            assert_eq!(result.is_error, Some(true), "{args}");
+            let structured = result
+                .structured_content
+                .unwrap_or_else(|| panic!("no structured content for {args}"));
+            assert_eq!(structured["code"], "invalid_arguments", "{args}");
+            assert_eq!(structured["tool"], "verify_state", "{args}");
+            assert!(
+                structured["detail"]
+                    .as_str()
+                    .is_some_and(|detail| detail.starts_with("verify_state")),
+                "{structured}"
+            );
+        }
+        assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

@@ -321,6 +321,17 @@ impl ReplayTrajectoryTool {
 
 static REPLAY_DEF: OnceLock<ToolDef> = OnceLock::new();
 
+/// A replay that cannot start, with a stable `code` like dispatch's own
+/// refusals: `invalid_arguments` (no `dir`), `trajectory_not_found` (no such
+/// folder, or no turn folders in it) or `facility_unavailable`.
+fn replay_error(code: &str, detail: String) -> ToolResult {
+    ToolResult::error(detail.clone()).with_structured(json!({
+        "code": code,
+        "tool": "replay_trajectory",
+        "detail": detail,
+    }))
+}
+
 #[async_trait]
 impl Tool for ReplayTrajectoryTool {
     fn def(&self) -> &ToolDef {
@@ -384,7 +395,12 @@ impl Tool for ReplayTrajectoryTool {
         // Swift error wording 1:1.
         let dir_str = match args.get("dir").and_then(|v| v.as_str()) {
             Some(v) if !v.is_empty() => v.to_owned(),
-            _ => return ToolResult::error("Missing required string field `dir`."),
+            _ => {
+                return replay_error(
+                    "invalid_arguments",
+                    "Missing required string field `dir`.".into(),
+                )
+            }
         };
         use crate::tool_args::ArgsExt;
         let delay_ms = args.u64_or("delay_ms", 500).min(10_000);
@@ -406,10 +422,10 @@ impl Tool for ReplayTrajectoryTool {
         };
 
         if !dir.exists() {
-            return ToolResult::error(format!(
-                "Trajectory directory does not exist: {}",
-                dir.display()
-            ));
+            return replay_error(
+                "trajectory_not_found",
+                format!("Trajectory directory does not exist: {}", dir.display()),
+            );
         }
 
         // Collect and sort turn-NNNNN directories.
@@ -430,16 +446,19 @@ impl Tool for ReplayTrajectoryTool {
         turn_dirs.sort();
 
         if turn_dirs.is_empty() {
-            return ToolResult::error(format!(
-                "No turn-NNNNN folders found under {}",
-                dir.display()
-            ));
+            return replay_error(
+                "trajectory_not_found",
+                format!("No turn-NNNNN folders found under {}", dir.display()),
+            );
         }
 
         let registry = match self.registry.lock().unwrap().upgrade() {
             Some(r) => r,
             None => {
-                return ToolResult::error("Replay not available: registry not initialised yet.")
+                return replay_error(
+                    "facility_unavailable",
+                    "Replay not available: registry not initialised yet.".into(),
+                )
             }
         };
 
@@ -972,6 +991,38 @@ mod tests {
 
     fn press_key_turn() -> Value {
         json!({"tool": "press_key", "arguments": {"pid": 43, "window_id": 70, "key": "a"}})
+    }
+
+    /// replay_trajectory refused a missing, absent or empty `dir` with no
+    /// structured `code`, so text mode showed none and run_steps could not
+    /// classify the failure. (Through dispatch a missing `dir` is refused
+    /// earlier, by the protected-resource check, with its own code.)
+    #[tokio::test]
+    async fn replay_errors_carry_a_stable_code() {
+        let root = tempfile::tempdir().unwrap();
+        let empty = root.path().join("empty");
+        std::fs::create_dir(&empty).unwrap();
+        let missing = root.path().join("missing");
+        let trajectory = root.path().join("trajectory");
+        write_trajectory(&trajectory, &[press_key_turn()]);
+        // No registry behind the slot: the replay cannot run its turns.
+        let tool = ReplayTrajectoryTool::new(Arc::new(Mutex::new(std::sync::Weak::new())));
+        for (args, code) in [
+            (json!({}), "invalid_arguments"),
+            (json!({"dir": ""}), "invalid_arguments"),
+            (json!({"dir": missing}), "trajectory_not_found"),
+            (json!({"dir": empty}), "trajectory_not_found"),
+            (json!({"dir": trajectory}), "facility_unavailable"),
+        ] {
+            let result = tool.invoke(args.clone()).await;
+            assert_eq!(result.is_error, Some(true), "{args}");
+            let structured = result
+                .structured_content
+                .clone()
+                .unwrap_or_else(|| panic!("no structured content for {args}: {}", text(&result)));
+            assert_eq!(structured["code"], code, "{args}: {structured}");
+            assert_eq!(structured["tool"], "replay_trajectory", "{args}");
+        }
     }
 
     /// REPLAY-1: whoever writes a trajectory folder picks every turn's
