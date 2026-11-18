@@ -444,10 +444,24 @@ pub fn apply(
         None => body,
     };
     if cut {
+        // A Linux row whose field Pincer read only in part says `(N chars,
+        // the first M read ...)`: two numbers beside this header's 200, so
+        // the header says what M is.
+        let partial = if has_partial_read(&body)
+            || ["tree_markdown", "tree_diff"].iter().any(|key| {
+                structured
+                    .get(*key)
+                    .and_then(Value::as_str)
+                    .is_some_and(has_partial_read)
+            }) {
+            ", and `the first M read` in it says only M characters were read from the app"
+        } else {
+            ""
+        };
         header_extra.push_str(&format!(
             "\nvalues longer than {VALUE_PREVIEW_CHARS} characters show only their first \
-             {VALUE_PREVIEW_CHARS} (`...\" (N chars)` gives the whole length); full_output:true \
-             returns them whole"
+             {VALUE_PREVIEW_CHARS} (`...\" (N chars)` gives the whole length{partial}); \
+             full_output:true returns them whole"
         ));
     }
     rewrite_tree_block(content, &md, &header_extra, &body);
@@ -456,6 +470,15 @@ pub fn apply(
 
 /// Characters of a row's `value="..."` shown before it is cut.
 pub const VALUE_PREVIEW_CHARS: usize = 200;
+
+/// Whether a row in `md` carries a count the platform wrote for a value it
+/// read only in part (Linux: ` (24492 chars, the first 4096 read; ...)`).
+fn has_partial_read(md: &str) -> bool {
+    md.match_indices("\" (").any(|(at, _)| {
+        let rest = &md[at + 1..];
+        platform_count_len(rest).is_some_and(|len| rest[..len].contains(" chars, the first "))
+    })
+}
 
 /// Cut every `value="..."` longer than [`VALUE_PREVIEW_CHARS`] to its start
 /// plus `..." (N chars)`. A text area's value is its whole document: a
@@ -1854,6 +1877,38 @@ mod tests {
         );
         assert!(text_of(&content).contains(&doc));
         assert_eq!(s["tree_markdown"], md);
+    }
+
+    #[test]
+    fn the_header_explains_a_partial_read_beside_the_cut() {
+        // Round 10 (X11): the header said long values show their first 200
+        // characters while KWrite's row said "(24492 chars, the first 4096
+        // read; full_output reads it whole)", and a tester could not tell
+        // whether "read" meant fetched or shown.
+        let doc = "line\\n".repeat(700);
+        let md = format!(
+            "- [0] frame \"KWrite\" [actions=[]]\n  - [1] text \"f.txt\" value=\"{doc}...\" (24492 chars, the first 4096 read; full_output reads it whole) [actions=[]]\n  - [2] push button \"Save\" [actions=[Press]]"
+        );
+        let (mut content, mut s) = payload("s0000f201", &md);
+        apply(&opts(json!({})), &ctx(7201), &mut content, &mut s);
+        let text = text_of(&content);
+        assert!(
+            text.contains(&format!(
+                "values longer than {VALUE_PREVIEW_CHARS} characters show only their first \
+                 {VALUE_PREVIEW_CHARS} (`...\" (N chars)` gives the whole length, and `the \
+                 first M read` in it says only M characters were read from the app)"
+            )),
+            "{text}"
+        );
+        assert!(text.contains("(24492 chars, the first 4096 read"), "{text}");
+
+        // A long value the platform read whole keeps the short header.
+        let md = long_value_tree(&"y".repeat(500));
+        let (mut content, mut s) = payload("s0000f202", &md);
+        apply(&opts(json!({})), &ctx(7202), &mut content, &mut s);
+        let text = text_of(&content);
+        assert!(text.contains("gives the whole length); full_output"), "{text}");
+        assert!(!text.contains("first M read"), "{text}");
     }
 
     #[test]
