@@ -671,8 +671,10 @@ impl Tool for LaunchAppTool {
             description: "Start a Linux app and return its pid and windows, titles read once \
                 they stop changing (up to 1 s). The window manager may activate and raise the \
                 new window (KWin does for Qt and KDE apps such as KWrite and Dolphin; GTK apps \
-                stay behind an already active window); `active` says whether it did. Name the app with launch_path or \
-                name. To open files or URLs in that app, pass them in `urls` (or \
+                stay behind an already active window); `active` says whether it did. In \
+                XWayland mode (the default on a Wayland session) only X11 windows are seen: a \
+                native Wayland app returns its pid with no windows and `active` null, and the \
+                result says so. Name the app with launch_path or name. To open files or URLs in that app, pass them in `urls` (or \
                 `additional_arguments`): they are appended to its command line, for example \
                 {name:\"KWrite\", urls:[\"/path/notes.txt\"]}. `urls` without launch_path or \
                 name go to xdg-open, which opens each in its default app and returns no pid. \
@@ -975,6 +977,15 @@ impl Tool for LaunchAppTool {
                             }
                         }
                     }
+                    if let Some(note) = unlisted_window_note(
+                        resolved.pid,
+                        resolved.windows.is_empty(),
+                        crate::wayland::current_xwayland_mode_list_note(),
+                    ) {
+                        text.push_str(&note);
+                        structured["active"] = Value::Null;
+                        structured["note"] = json!(crate::wayland::XWAYLAND_MODE_LIST_NOTE);
+                    }
                     if active {
                         text.push_str(" The window manager made its window the active one.");
                     }
@@ -997,6 +1008,36 @@ impl Tool for LaunchAppTool {
             Err(e) => ToolResult::error(format!("Task error: {e}")),
         }
     }
+}
+
+/// What launch_app adds when the launched `pid` is running with no window
+/// listed, in XWayland mode on a Wayland session (`xwayland_note`, the
+/// list_windows note): only X11 windows are seen there, so a native Wayland
+/// app has none, and whether its window was raised is unknown.
+pub(super) fn unlisted_window_note(
+    pid: Option<u32>,
+    windows_empty: bool,
+    xwayland_note: Option<&str>,
+) -> Option<String> {
+    let pid = pid.filter(|_| windows_empty)?;
+    let note = xwayland_note?;
+    Some(format!(
+        " No window of pid {pid} is listed. {note} A native Wayland app's windows are left \
+         out here, so `active` is null (unknown)."
+    ))
+}
+
+#[cfg(test)]
+#[test]
+fn a_launch_without_listed_windows_says_why_in_xwayland_mode() {
+    let note = crate::wayland::XWAYLAND_MODE_LIST_NOTE;
+    let text = unlisted_window_note(Some(230), true, Some(note)).expect("XWayland mode");
+    assert!(text.contains("No window of pid 230 is listed."), "{text}");
+    assert!(text.contains(note), "{text}");
+    assert!(text.contains("`active` is null"), "{text}");
+    assert_eq!(unlisted_window_note(Some(230), false, Some(note)), None, "a window was listed");
+    assert_eq!(unlisted_window_note(None, true, Some(note)), None, "nothing is running");
+    assert_eq!(unlisted_window_note(Some(230), true, None), None, "X11 lists every window");
 }
 
 /// A `launch_app` hand-off timed out: the launcher exited cleanly with

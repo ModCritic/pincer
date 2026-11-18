@@ -425,8 +425,14 @@ driver selects a backend from compositor capabilities:
 
 Without `PINCER_ENABLE_WAYLAND=1`, Pincer runs in XWayland mode on a Wayland
 session: it sees and drives X11 (XWayland) clients only. `list_windows` omits
-native Wayland windows and ends with a line that says so. To reach an app in
-this mode, start it as an X11 client (Qt: `QT_QPA_PLATFORM=xcb`).
+native Wayland windows and ends with a line that says so; `launch_app` of a
+native Wayland app returns its pid with no windows and `active` null, and a
+pid-only action on it is refused with that reason. To reach an app in this
+mode, start it as an X11 client (Qt: `QT_QPA_PLATFORM=xcb`). Xwayland runs
+rootless there, so `get_desktop_state` has no pixels to capture: desktop-scope
+points come from `list_windows` bounds plus window-local offsets, and
+`get_cursor_position` reads the Xwayland pointer, which follows the real
+pointer only over X11 windows.
 
 Sway recording works through the wlroots recorder path and is exercised by the
 canonical harness runner. Portal-backed GNOME recording is still an evidence

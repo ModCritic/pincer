@@ -15,9 +15,13 @@ impl Tool for GetCursorPositionTool {
         GCP_DEF.get_or_init(|| ToolDef {
             name: "get_cursor_position".into(),
             description:
-                "Return the pointer position in desktop pixels (origin top-left). On Wayland \
-                 compositors other than Hyprland it is only the last position this process moved \
-                 the pointer to (`source: \"synthetic\"`)."
+                "Return the pointer position in desktop pixels (origin top-left). On X11 it \
+                 reads the X server's pointer (`source: \"x11\"`). In XWayland mode (the \
+                 default on a Wayland session) that is the Xwayland pointer, which follows the \
+                 real pointer only while it is over an X11 window. With the native Wayland \
+                 backend, Hyprland reports the real pointer (`source: \"compositor\"`); other \
+                 compositors give only the last position this process moved the pointer to \
+                 (`source: \"synthetic\"`)."
                     .into(),
             input_schema: json!({"type":"object","properties":{
                 "session": pincer_core::tool_schema::session_schema()
@@ -263,7 +267,7 @@ fn move_along_path_schema() -> Value {
     };
     json!({"type":"object","properties":{
         "session": pincer_core::tool_schema::session_schema(),
-        "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"\"window\" (default): window_id's get_window_state screenshot pixels; the window is raised first. \"desktop\": get_desktop_state pixels, no pid/window_id."},
+        "scope":{"type":"string","enum":["window","desktop"],"default":"window","description":"\"window\" (default): window_id's get_window_state screenshot pixels; the window is raised first. \"desktop\": desktop pixels, no pid/window_id: get_desktop_state pixels, or list_windows bounds plus window-local offsets (the source when get_desktop_state is unavailable, as in XWayland mode)."},
         "pid":{"type":"integer","description":"Target process ID. Required for window scope."},
         "window_id":{"type":"integer","description":"Target window ID. Required for window scope."},
         "start": point("First point [x, y] of `segments`."),
@@ -321,7 +325,9 @@ impl Tool for MoveAlongPathTool {
             name: "move_along_path".into(),
             description: "Move the real pointer along a path (segments, a polyline, or a \
                 parametric x(t), y(t)), optionally holding a button to draw or drag, or clicking \
-                at the end. On Wayland, only scope \"desktop\" without pid/window_id works."
+                at the end. With the native Wayland backend (PINCER_ENABLE_WAYLAND=1), only scope \
+                \"desktop\" without pid/window_id works; XWayland mode (the default on a Wayland \
+                session) takes both scopes, for X11 windows."
                 .into(),
             input_schema: move_along_path_schema(),
             read_only: false,
@@ -371,7 +377,8 @@ impl Tool for MoveAlongPathTool {
         if target.is_none() && !desktop_pixels {
             return move_along_path_refusal(
                 "window scope needs pid and window_id (window-local screenshot pixels); \
-                 pass scope \"desktop\" without them for get_desktop_state pixels",
+                 pass scope \"desktop\" without them for desktop pixels (get_desktop_state \
+                 pixels, or list_windows bounds plus window-local offsets)",
             );
         }
         let request = match path::PathRequest::from_args(&args) {

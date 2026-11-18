@@ -698,7 +698,11 @@ impl Tool for BringToFrontTool {
                  across several calls, such as a remote desktop session, or before \
                  reading the screenshot of a minimized window (its capture fails) or, \
                  with no compositing window manager running, of a covered one (its \
-                 capture shows the window over it). Wayland: activates through a \
+                 capture shows the window over it). In XWayland mode (the default on a \
+                 Wayland session) it raises X11 windows through _NET_ACTIVE_WINDOW as on \
+                 X11; native Wayland windows are not listed there, so a pid that has only \
+                 those is refused (window_target_not_found, with the reason). With the native \
+                 Wayland backend (PINCER_ENABLE_WAYLAND=1) it activates through a \
                  target-addressable compositor adapter (wlroots foreign-toplevel or the \
                  GNOME Shell helper) and refuses when the compositor offers no safe \
                  adapter."

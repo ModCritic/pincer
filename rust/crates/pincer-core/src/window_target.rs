@@ -89,6 +89,11 @@ pub type SnapshotWindowResolver = Arc<dyn Fn(i64, &str) -> Option<u64> + Send + 
 /// `SnapshotStore::pid_for_token`). `None` when the token is unknown.
 pub type TokenPidResolver = Arc<dyn Fn(&Value) -> Option<i32> + Send + Sync + 'static>;
 
+/// `pid` with no eligible window -> why, when the platform knows a reason
+/// beyond "it has none" (on Linux in XWayland mode, a running pid whose
+/// windows are native Wayland ones, which X11 enumeration cannot see).
+pub type PidNotFoundReason = Arc<dyn Fn(i64) -> Option<String> + Send + Sync + 'static>;
+
 /// Desktop-frame `x`/`y` of an action, when the call carries them.
 fn desktop_frame_point(args: &Value) -> Option<(f64, f64)> {
     let frame_is_desktop = args.get("coordinate_frame").and_then(Value::as_str) == Some("desktop")
@@ -111,6 +116,7 @@ pub struct PidOnlyWindowTargetGuard {
     fallback_resolver: Option<PidFallbackWindowResolver>,
     snapshot_resolver: Option<SnapshotWindowResolver>,
     token_pid_resolver: Option<TokenPidResolver>,
+    not_found_reason: Option<PidNotFoundReason>,
 }
 
 impl PidOnlyWindowTargetGuard {
@@ -122,7 +128,15 @@ impl PidOnlyWindowTargetGuard {
             fallback_resolver: None,
             snapshot_resolver: None,
             token_pid_resolver: None,
+            not_found_reason: None,
         }
+    }
+
+    /// Add the platform's reason to a `window_target_not_found` refusal,
+    /// in its text and as `reason`.
+    pub fn with_not_found_reason(mut self, reason: PidNotFoundReason) -> Self {
+        self.not_found_reason = Some(reason);
+        self
     }
 
     /// Take a missing `pid` from the call's `element_token`, so a token-only
@@ -248,15 +262,28 @@ impl Tool for PidOnlyWindowTargetGuard {
             }
         };
         match resolve_pid_window_target(candidates) {
-            PidWindowTargetResolution::NotFound => ToolResult::error(format!(
-                "No eligible top-level windows found for pid {pid}."
-            ))
-            .with_structured(serde_json::json!({
-                "code": "window_target_not_found",
-                "effect": "refused",
-                "pid": pid,
-                "candidates": []
-            })),
+            PidWindowTargetResolution::NotFound => {
+                let reason = match self.not_found_reason.clone() {
+                    Some(reason) => tokio::task::spawn_blocking(move || reason(pid))
+                        .await
+                        .ok()
+                        .flatten(),
+                    None => None,
+                };
+                let mut text = format!("No eligible top-level windows found for pid {pid}.");
+                let mut structured = serde_json::json!({
+                    "code": "window_target_not_found",
+                    "effect": "refused",
+                    "pid": pid,
+                    "candidates": []
+                });
+                if let Some(reason) = reason {
+                    text.push(' ');
+                    text.push_str(&reason);
+                    structured["reason"] = reason.into();
+                }
+                ToolResult::error(text).with_structured(structured)
+            }
             PidWindowTargetResolution::Resolved(candidate) => {
                 if let Some(object) = args.as_object_mut() {
                     object.insert("window_id".to_owned(), candidate.window_id.into());
@@ -567,6 +594,47 @@ mod tests {
             assert_eq!(calls.load(Ordering::SeqCst), 1);
             assert_eq!(result.structured_content.unwrap(), expected);
         }
+    }
+
+    #[tokio::test]
+    async fn a_pid_with_no_window_is_refused_with_the_platforms_reason() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let plain = PidOnlyWindowTargetGuard::new(
+            Box::new(EchoTool {
+                calls: calls.clone(),
+            }),
+            Arc::new(|_| Vec::new()),
+        );
+        let refused = plain.invoke(serde_json::json!({"pid": 7})).await;
+        assert_eq!(refused.is_error, Some(true));
+        let structured = refused.structured_content.unwrap();
+        assert_eq!(structured["code"], "window_target_not_found");
+        assert!(structured.get("reason").is_none(), "no reason without one");
+
+        let explained = PidOnlyWindowTargetGuard::new(
+            Box::new(EchoTool {
+                calls: calls.clone(),
+            }),
+            Arc::new(|_| Vec::new()),
+        )
+        .with_not_found_reason(Arc::new(|pid| {
+            (pid == 7).then(|| "pid 7 is running, but its windows are not listed.".to_owned())
+        }));
+        let refused = explained.invoke(serde_json::json!({"pid": 7})).await;
+        let text = format!("{:?}", refused.content);
+        assert!(
+            text.contains("No eligible top-level windows found for pid 7. pid 7 is running"),
+            "{text}"
+        );
+        let structured = refused.structured_content.unwrap();
+        assert_eq!(structured["code"], "window_target_not_found");
+        assert_eq!(
+            structured["reason"],
+            "pid 7 is running, but its windows are not listed."
+        );
+        let other = explained.invoke(serde_json::json!({"pid": 8})).await;
+        assert!(other.structured_content.unwrap().get("reason").is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "nothing reached the tool");
     }
 
     #[tokio::test]

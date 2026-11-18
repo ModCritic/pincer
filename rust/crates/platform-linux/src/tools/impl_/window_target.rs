@@ -115,8 +115,52 @@ pub(super) fn pid_window_guarded<T: Tool + 'static>(
             .with_point_resolver(point_resolver.clone())
             .with_fallback_resolver(fallback_resolver.clone())
             .with_snapshot_resolver(snapshot_resolver.clone())
-            .with_token_pid_resolver(token_pid_resolver.clone()),
+            .with_token_pid_resolver(token_pid_resolver.clone())
+            .with_not_found_reason(Arc::new(|pid| {
+                xwayland_unlisted_pid_reason(
+                    pid,
+                    crate::wayland::current_xwayland_mode_list_note(),
+                    |pid| std::path::Path::new(&format!("/proc/{pid}")).exists(),
+                )
+            })),
     )
+}
+
+/// Why a running `pid` has no window to target in XWayland mode on a
+/// Wayland session (`xwayland_note`, the list_windows note): only X11
+/// windows are listed there, so a native Wayland app looks windowless.
+/// `None` off XWayland mode, and for a pid that is not running.
+pub(super) fn xwayland_unlisted_pid_reason(
+    pid: i64,
+    xwayland_note: Option<&str>,
+    running: impl FnOnce(u32) -> bool,
+) -> Option<String> {
+    let note = xwayland_note?;
+    let pid = u32::try_from(pid).ok().filter(|&pid| running(pid))?;
+    Some(format!(
+        "pid {pid} is running but has no X11 window. {note} A native Wayland app's \
+         windows cannot be targeted in this mode."
+    ))
+}
+
+#[cfg(test)]
+#[test]
+fn a_running_pid_without_x11_windows_is_explained_in_xwayland_mode() {
+    let note = crate::wayland::XWAYLAND_MODE_LIST_NOTE;
+    let reason = xwayland_unlisted_pid_reason(230, Some(note), |pid| pid == 230)
+        .expect("XWayland mode, running pid");
+    assert!(reason.starts_with("pid 230 is running but has no X11 window. XWayland mode"));
+    assert!(reason.contains(note), "{reason}");
+    assert_eq!(
+        xwayland_unlisted_pid_reason(231, Some(note), |_| false),
+        None,
+        "a pid that is not running has no windows for the plain reason"
+    );
+    assert_eq!(
+        xwayland_unlisted_pid_reason(230, None, |_| true),
+        None,
+        "X11 sessions and the native Wayland backend list every window"
+    );
 }
 
 /// The pid an `element_token` was minted for, so a token-only action (no
