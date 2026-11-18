@@ -189,6 +189,7 @@ pub enum TelemetryCommand {
 
 /// Flags whose next token is a value (not a subcommand).
 /// We skip both the flag and its value when scanning for the subcommand.
+/// Each also works as `--flag=value`.
 const VALUE_FLAGS: &[&str] = &[
     "--cursor-theme",
     "--cursor-reduced-motion",
@@ -206,24 +207,97 @@ const VALUE_FLAGS: &[&str] = &[
     "--expected-pid",
     "--type",
     "--host-bundle-id",
-    "--pid",
-    "--strategy",
-    "--window-id",
     "--session",
-    "--profile-mode",
-    "--profile-name",
-    "--archive",
-    "--image",
-    "--capture",
-    // Experimental PiP preview — value flag for the optional geometry
-    // override (--experimental-pip itself is a bare flag and doesn't
-    // need to be listed here).
+    // Experimental PiP preview: value flag for the optional geometry
+    // override (--experimental-pip itself is a bare flag).
     "--experimental-pip-geometry",
     // `cursor motion` options.
     "--style",
     "--timing",
     "--effects",
+    // `recording render`.
+    "--scale",
+    // `cursor-theme build` and `preview`.
+    "--output",
+    // `skills install` refuses it with an explanation.
+    "--from",
 ];
+
+/// Flags without a value that some command reads. With [`VALUE_FLAGS`] this
+/// is every flag Pincer knows; [`unknown_flag_error`] refuses the rest.
+const BARE_FLAGS: &[&str] = &[
+    "--help",
+    "-h",
+    "--version",
+    "-V",
+    // `mcp` and `serve`.
+    "--direct",
+    "--embedded",
+    "--parent-liveness-stdio",
+    "--claude-code-computer-use-compat",
+    "--dangerously-bypass-approvals",
+    "--approve-capability-manifest",
+    "--approve-session-policy",
+    "--no-permissions-gate",
+    "--experimental-history",
+    // Cursor overlay and preview window, read by `cursor_overlay` and
+    // `pip_preview` from the whole command line.
+    "--no-overlay",
+    "--experimental-pip",
+    "--pip",
+    // Output and confirmation.
+    "--json",
+    "--pretty",
+    "-p",
+    "--yes",
+    "--all",
+    // `skills`.
+    "--force",
+    "--all-platforms",
+    // `recording render`.
+    "--no-zoom",
+    // `cursor-theme validate` and `build`.
+    "--development",
+];
+
+/// Why `args` cannot be run: an argument that looks like a flag no command
+/// reads, a bare flag given a `=value`, or a value flag with nothing after
+/// it. `None` when every flag is known. A negative number (`-1`) is a value,
+/// not a flag.
+fn unknown_flag_error(args: &[String]) -> Option<String> {
+    let looks_like_flag = |arg: &str| {
+        arg.len() > 1
+            && arg.starts_with('-')
+            && !arg[1..].starts_with(|character: char| character.is_ascii_digit() || character == '.')
+    };
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        index += 1;
+        if !looks_like_flag(arg) {
+            continue;
+        }
+        let (name, inline_value) = match arg.split_once('=') {
+            Some((name, value)) if name.starts_with("--") => (name, Some(value)),
+            _ => (arg, None),
+        };
+        if VALUE_FLAGS.contains(&name) {
+            if inline_value.is_none() {
+                if index == args.len() {
+                    return Some(format!("{name} needs a value"));
+                }
+                index += 1;
+            }
+        } else if BARE_FLAGS.contains(&name) {
+            if inline_value.is_some() {
+                return Some(format!("{name} takes no value"));
+            }
+        } else {
+            return Some(format!("unknown option {arg}"));
+        }
+    }
+    None
+}
 
 /// Authorization selectors are trusted-daemon startup inputs. Direct MCP
 /// accepts their environment-variable equivalents, while a daemon-backed MCP
@@ -302,8 +376,11 @@ pub(crate) fn version_line() -> String {
 /// subcommand to run.  Cursor-overlay flags are consumed by `CursorConfig`
 /// independently; we only care about the first non-`--` arg here.
 pub fn parse_command() -> Command {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    parse_command_from(std::env::args().skip(1).collect())
+}
 
+/// [`parse_command`] for `args` (argv without the program name).
+fn parse_command_from(args: Vec<String>) -> Command {
     // Handle --version / -V before any other parsing so they are never
     // silently stripped as "bare flags" and swallowed by MCP mode.
     if args.iter().any(|a| a == "--version" || a == "-V") {
@@ -480,6 +557,22 @@ pub fn parse_command() -> Command {
         std::process::exit(0);
     }
 
+    // A mistyped flag would otherwise be dropped and the command run as if
+    // it had not been given (`--no-overaly` starting an overlay, say). A
+    // removed command keeps its own explanation, whatever its old flags.
+    let removed_command = matches!(
+        positional_args(&args).first().copied(),
+        Some("update" | "check-update" | "channel")
+    );
+    if let Some(error) = unknown_flag_error(&args).filter(|_| !removed_command) {
+        eprintln!("pincer: {error}");
+        eprintln!(
+            "Usage: pincer [SUBCOMMAND] [OPTIONS]. Run `pincer --help` or \
+             `pincer <subcommand> --help` for the options."
+        );
+        process::exit(64);
+    }
+
     // Collect named flag values we care about.
     let screenshot_out_file = flag_value(&args, "--screenshot-out-file");
     let mcp_client = flag_value(&args, "--client");
@@ -629,7 +722,17 @@ pub fn parse_command() -> Command {
         }
         Some("recording") => {
             let subcommand = pos.next().unwrap_or("status").to_string();
-            let rest: Vec<String> = pos.map(str::to_owned).collect();
+            let mut rest: Vec<String> = pos.map(str::to_owned).collect();
+            if subcommand == "render" {
+                // `render` reads its own flags from its arguments, which
+                // otherwise hold only the positionals.
+                if args.iter().any(|arg| arg == "--no-zoom") {
+                    rest.push("--no-zoom".to_owned());
+                }
+                if let Some(scale) = flag_value(&args, "--scale") {
+                    rest.extend(["--scale".to_owned(), scale]);
+                }
+            }
             Command::Recording {
                 subcommand,
                 args: rest,
@@ -5090,6 +5193,63 @@ mod tests {
                 Some("/tmp/pincer.pid".to_owned())
             );
         }
+    }
+
+    #[test]
+    fn unknown_flags_are_named_and_known_ones_pass() {
+        for (argv, error) in [
+            (&["serve", "--no-overaly"][..], "unknown option --no-overaly"),
+            (&["mcp", "--sockt=/tmp/s"][..], "unknown option --sockt=/tmp/s"),
+            (&["-x", "status"][..], "unknown option -x"),
+            (&["status", "--"][..], "unknown option --"),
+            (&["status", "--json=yes"][..], "--json takes no value"),
+            (&["status", "--socket"][..], "--socket needs a value"),
+            // Removed upstream options that nothing read.
+            (&["call", "click", "--window-id", "7"][..], "unknown option --window-id"),
+        ] {
+            assert_eq!(
+                unknown_flag_error(&args(argv)).as_deref(),
+                Some(error),
+                "{argv:?}"
+            );
+        }
+        for argv in [
+            &["serve", "--socket", "/tmp/s", "--no-overlay", "--pid-file=/tmp/p"][..],
+            &["--glide-ms", "-1", "mcp", "--cursor-reduced-motion", "on"][..],
+            &["config", "set", "cursor.motion.glide_ms", "-250"][..],
+            &["cursor-theme", "build", "a.lottie", "--output", "b", "--development"][..],
+            &["recording", "render", "in", "out.mp4", "--scale", "1.5", "--no-zoom"][..],
+            &["skills", "install", "--force", "--all-platforms"][..],
+            &["history", "delete", "--yes", "--json"][..],
+            &["--embedded", "--parent-liveness-stdio", "serve", "--experimental-pip"][..],
+            &["revoke", "--session=abc"][..],
+        ] {
+            assert_eq!(unknown_flag_error(&args(argv)), None, "{argv:?}");
+        }
+    }
+
+    /// `recording render` documents `--scale` and `--no-zoom`; they reach the
+    /// renderer wherever they stand, and the scale value is not taken for
+    /// the input directory.
+    #[test]
+    fn recording_render_receives_its_flags() {
+        let command = parse_command_from(args(&[
+            "recording",
+            "render",
+            "--scale",
+            "3",
+            "in",
+            "out.mp4",
+            "--no-zoom",
+        ]));
+        let Command::Recording {
+            subcommand, args, ..
+        } = command
+        else {
+            panic!("not a recording command");
+        };
+        assert_eq!(subcommand, "render");
+        assert_eq!(args, ["in", "out.mp4", "--no-zoom", "--scale", "3"]);
     }
 
     #[test]
