@@ -4326,9 +4326,22 @@ async fn invoke_menu_hops<'a>(
                         }
                         let labels: Vec<String> =
                             entries.into_iter().map(|(label, _)| label).collect();
+                        // Below the menu bar, also name the bar's other
+                        // menus: the miss may be a wrong first guess.
+                        let menu_bar: Vec<String> = if depth > 0 {
+                            menu_level_labels(conn, pid, xid, None, None)
+                                .await
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|(label, _)| label)
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
                         anyhow::bail!(
-                            "{}",
-                            pincer_core::menu_label::missing_segment_message(depth, path, &labels)
+                            "{}{}",
+                            pincer_core::menu_label::missing_segment_message(depth, path, &labels),
+                            pincer_core::menu_label::other_menus_note(depth, path, &menu_bar)
                         );
                     }
                 }

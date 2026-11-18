@@ -75,9 +75,67 @@ pub fn missing_segment_message(depth: usize, path: &[String], labels: &[String])
     )
 }
 
+/// What a refusal for a segment below the menu bar adds: the menu bar's
+/// other menus, so a caller who guessed the wrong top-level menu (KWrite
+/// keeps Select All under Selection, not Edit) can aim the retry. Empty when
+/// the miss is in the menu bar itself, whose labels the refusal lists
+/// already, or when the bar lists no other titled menu.
+pub fn other_menus_note(depth: usize, path: &[String], menu_bar: &[String]) -> String {
+    if depth == 0 {
+        return String::new();
+    }
+    let first = path.first().map(String::as_str).unwrap_or_default();
+    let mut others: Vec<&str> = menu_bar
+        .iter()
+        .map(|label| label.trim())
+        .filter(|label| !label.is_empty() && !menu_label_matches(label, first))
+        .collect();
+    others.dedup();
+    if others.is_empty() {
+        return String::new();
+    }
+    let more = others.len().saturating_sub(MAX_LISTED_LABELS);
+    let listed = others
+        .iter()
+        .take(MAX_LISTED_LABELS)
+        .map(|label| format!("\"{}\"", inline_clipped(label, MAX_LABEL_CHARS)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = if more > 0 {
+        format!(" and {more} more")
+    } else {
+        String::new()
+    };
+    format!(". Other menus in the menu bar: {listed}{more}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_miss_below_the_menu_bar_names_the_other_menus() {
+        let path: Vec<String> = ["Edit", "Select All"].map(String::from).to_vec();
+        let bar: Vec<String> = ["File", "Edit", "", "Selection", "View"]
+            .map(String::from)
+            .to_vec();
+        let message = format!(
+            "{}{}",
+            missing_segment_message(1, &path, &["Undo".into(), "Redo".into()]),
+            other_menus_note(1, &path, &bar)
+        );
+        assert_eq!(
+            message,
+            "path segment 1 \"Select All\" was not found under \"Edit\". Items there: \"Undo\", \
+             \"Redo\". Other menus in the menu bar: \"File\", \"Selection\", \"View\""
+        );
+        assert_eq!(other_menus_note(0, &path, &bar), "", "the bar lists itself");
+        assert_eq!(
+            other_menus_note(1, &path, &["Edit".into()]),
+            "",
+            "no other menu to name"
+        );
+    }
 
     #[test]
     fn three_periods_and_the_ellipsis_match_each_other() {
