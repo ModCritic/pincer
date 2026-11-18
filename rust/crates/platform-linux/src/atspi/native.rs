@@ -7257,6 +7257,56 @@ pub fn option_names_ref(object_ref: &ObjectRef) -> Vec<String> {
     .unwrap_or_default()
 }
 
+/// The editable text field inside a snapshot-cached combo box, when it has
+/// one (an editable combo box: Qt's line edit, GTK's entry): the first
+/// child, or child of a child, in the Editable state. Such a combo box takes
+/// free text in that field; the combo box itself only picks an option.
+pub fn editable_text_child_ref(combo: &ObjectRef) -> Option<ObjectRef> {
+    bounded_for(
+        REF_ACTION_BUDGET,
+        async {
+            let shared = shared_connection().await?;
+            Ok(editable_descendant(shared.as_ref(), &raw_ref(combo), 2).await)
+        },
+        || Ok(None),
+    )
+    .ok()
+    .flatten()
+}
+
+/// The first descendant of `parent`, at most `depth` levels down (children
+/// first), in the Editable state.
+async fn editable_descendant(
+    conn: &AccessibilityConnection,
+    parent: &RawObjectRef,
+    depth: usize,
+) -> Option<ObjectRef> {
+    let mut level = vec![parent.clone()];
+    for _ in 0..depth {
+        let mut next = Vec::new();
+        for node in &level {
+            let Some(Ok(children)) = call(raw_children(conn.connection(), node)).await else {
+                continue;
+            };
+            for child in children.into_iter().take(OPTION_SCAN_CAP) {
+                let Some(Ok(acc)) = call(accessible_for(conn, &child)).await else {
+                    continue;
+                };
+                if matches!(call(acc.get_state()).await, Some(Ok(state)) if state.contains(State::Editable))
+                {
+                    return Some(ObjectRef {
+                        bus: child.name,
+                        path: child.path,
+                    });
+                }
+                next.push(child);
+            }
+        }
+        level = next;
+    }
+    None
+}
+
 /// The live accessible name of a snapshot-cached element. Qt names a
 /// non-editable combo box by its current text on Linux, even when the app set
 /// an accessible name (checked on Qt 6.12 with `setAccessibleName`,

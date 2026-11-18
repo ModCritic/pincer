@@ -214,6 +214,16 @@ pub(crate) fn cached_element(pid: u32, xid: u64, idx: usize) -> Option<CachedEle
     snapshot_for(pid, xid)?.get(&idx).cloned()
 }
 
+/// The index of the element of (pid, xid)'s last snapshot at D-Bus address
+/// `object_ref`, if that snapshot lists it.
+pub(crate) fn cached_index_of(pid: u32, xid: u64, object_ref: &ObjectRef) -> Option<usize> {
+    snapshot_for(pid, xid)?
+        .iter()
+        .filter(|(_, element)| element.object_ref.as_ref() == Some(object_ref))
+        .map(|(idx, _)| *idx)
+        .min()
+}
+
 /// D-Bus addresses of the cached elements of (pid, xid) with role `role`,
 /// in index order.
 pub(crate) fn cached_refs_with_role(pid: u32, xid: u64, role: &str) -> Vec<ObjectRef> {

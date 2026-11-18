@@ -16,14 +16,15 @@ impl Tool for SetValueTool {
         SV_DEF.get_or_init(|| ToolDef {
             name: "set_value".into(),
             description: "Set an element's value through AT-SPI EditableText or Value, else by \
-                typing into the field (see `value`).".into(),
+                typing into the field (see `value`). For free text in an editable combo box, \
+                set the text row inside it; the combo box row picks a popup option.".into(),
             input_schema: json!({
                 "type":"object","required":["value"],"properties":{
                     "session": pincer_core::tool_schema::session_schema(),
                     "pid":{"type":"integer","description":"Target process ID. Optional with element_token (the token carries the pid)."},
                     "window_id":{"type":"integer","description":"Omit when element_token is supplied (the token carries it)."},
                     "element_token": pincer_core::tool_schema::element_token_schema(),
-                    "value":{"type":"string","description":"New value. Written through AT-SPI EditableText/Value when the element exposes them; otherwise (GTK2 spin scales, VCL spin buttons) the field is clicked with the session's real pointer, its text selected and replaced through the virtual keyboard and committed with Tab, then read back. A combo box gets the option with this text (exact, else ignoring case), picked from its popup and read back."},
+                    "value":{"type":"string","description":"New value. Written through AT-SPI EditableText/Value when the element exposes them; otherwise (GTK2 spin scales, VCL spin buttons) the field is clicked with the session's real pointer, its text selected and replaced through the virtual keyboard and committed with Tab, then read back. A combo box gets the option with this text (exact, else ignoring case), picked from its popup and read back. For free text in an editable combo box (a text field with a drop-down), set the text row inside it: the combo box row picks a popup option."},
                     "delivery_mode": crate::input::delivery::delivery_mode_schema()
                 },"additionalProperties":false
             }),
@@ -112,6 +113,7 @@ impl Tool for SetValueTool {
                     idx,
                     value,
                     delivery.is_foreground(),
+                    &args,
                 )
                 .await;
             }
@@ -216,10 +218,146 @@ impl Tool for SetValueTool {
             Ok(Err(error)) if crate::atspi::native::is_no_such_option(&error) => {
                 no_such_option_result(idx, &error)
             }
+            Ok(Err(error)) if is_combo_popup_unavailable(&error) => {
+                combo_popup_unavailable_result(pid, xid, idx, &args, error).await
+            }
             Ok(Err(error)) => input_error_result(error),
             Err(error) => ToolResult::error(format!("Task error: {error}")),
         }
     }
+}
+
+/// A combo box's popup did not open, or listed no options, so nothing was
+/// picked.
+#[derive(Debug)]
+struct ComboPopupUnavailable(String);
+
+impl std::fmt::Display for ComboPopupUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ComboPopupUnavailable {}
+
+fn is_combo_popup_unavailable(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.is::<ComboPopupUnavailable>())
+}
+
+/// The text field inside an editable combo box: its row in the snapshot the
+/// call used (`None` when that snapshot does not list it), and that row's
+/// element_token.
+#[derive(Debug, PartialEq)]
+struct EditableComboField {
+    index: Option<usize>,
+    token: Option<String>,
+}
+
+/// set_value on a combo box whose popup did not open or listed nothing: the
+/// input error, plus, for an editable combo box, the text row that takes
+/// free text (a model that picked the combo box row for its label meant
+/// that field).
+async fn combo_popup_unavailable_result(
+    pid: u32,
+    xid: u64,
+    idx: usize,
+    args: &Value,
+    error: anyhow::Error,
+) -> ToolResult {
+    let combo_token = args
+        .get("element_token")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let field = tokio::task::spawn_blocking(move || {
+        let combo = crate::atspi::cached_object_ref(pid, xid, idx)?;
+        let text = crate::atspi::native::editable_text_child_ref(&combo)?;
+        let index = crate::atspi::snapshot::cached_index_of(pid, xid, &text);
+        Some(EditableComboField {
+            index,
+            token: index.and_then(|index| sibling_token(combo_token.as_deref()?, index)),
+        })
+    })
+    .await
+    .ok()
+    .flatten();
+    with_editable_combo_hint(input_error_result(error), field.as_ref())
+}
+
+/// The element_token of row `index` in the snapshot `token` comes from.
+fn sibling_token(token: &str, index: usize) -> Option<String> {
+    let (snapshot, _) = token.split_once(':')?;
+    Some(format!("{snapshot}:{index}"))
+}
+
+fn with_editable_combo_hint(
+    mut result: ToolResult,
+    field: Option<&EditableComboField>,
+) -> ToolResult {
+    let Some(field) = field else {
+        return result;
+    };
+    let hint = match (field.index, &field.token) {
+        (Some(index), Some(token)) => format!(
+            " This combo box is editable: free text goes into its text row [{index}] \
+             (element_token {token}); call set_value on that row. The combo box row only \
+             picks an option from its popup."
+        ),
+        (Some(index), None) => format!(
+            " This combo box is editable: free text goes into its text row [{index}]; call \
+             set_value on that row. The combo box row only picks an option from its popup."
+        ),
+        (None, _) => " This combo box is editable: free text goes into the text row inside \
+             it, which this snapshot does not list; read the window again with \
+             get_window_state and call set_value on that row."
+            .to_owned(),
+    };
+    if let Some(pincer_core::protocol::Content::Text { text, .. }) = result.content.first_mut() {
+        if !text.ends_with('.') {
+            text.push('.');
+        }
+        text.push_str(&hint);
+    }
+    let structured = result.structured_content.get_or_insert_with(|| json!({}));
+    structured["editable_text_row"] = json!({
+        "index": field.index,
+        "element_token": field.token,
+    });
+    result
+}
+
+#[cfg(test)]
+#[test]
+fn an_editable_combo_box_refusal_names_its_text_row() {
+    let refusal = || ToolResult::error("the combo box's popup did not open within 1.5s; nothing was selected");
+    let field = EditableComboField {
+        index: Some(13),
+        token: sibling_token("s00000007:12", 13),
+    };
+    assert_eq!(field.token.as_deref(), Some("s00000007:13"));
+    let result = with_editable_combo_hint(refusal(), Some(&field));
+    let text = format!("{:?}", result.content);
+    assert!(text.contains("nothing was selected. This combo box is editable"), "{text}");
+    assert!(
+        text.contains("text row [13] (element_token s00000007:13); call set_value on that row"),
+        "{text}"
+    );
+    let structured = result.structured_content.unwrap();
+    assert_eq!(structured["editable_text_row"]["element_token"], "s00000007:13");
+
+    let unlisted = with_editable_combo_hint(
+        refusal(),
+        Some(&EditableComboField {
+            index: None,
+            token: None,
+        }),
+    );
+    let text = format!("{:?}", unlisted.content);
+    assert!(text.contains("which this snapshot does not list"), "{text}");
+
+    let plain = with_editable_combo_hint(refusal(), None);
+    assert!(plain.structured_content.is_none(), "not an editable combo box");
 }
 
 /// `set_value` named an option the combo box or list does not have. The
@@ -311,7 +449,12 @@ fn pick_from_popup(
                 Ok(None) if std::time::Instant::now() < deadline => {
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
-                Ok(None) => anyhow::bail!("the combo box popup listed no options"),
+                Ok(None) => {
+                    return Err(ComboPopupUnavailable(
+                        "the combo box popup listed no options".to_owned(),
+                    )
+                    .into())
+                }
                 Err(error) => return Err(error),
             }
         }
@@ -513,10 +656,10 @@ fn pick_from_qt_popup(
                 guards.extend(guard.filter(|guard| guard.changed));
             }
             let popup = wait_for_new_popup(pid, &before).ok_or_else(|| {
-                anyhow::anyhow!(
+                anyhow::Error::new(ComboPopupUnavailable(format!(
                     "the combo box's popup did not open within {POPUP_OPTIONS_WAIT:?}; nothing \
                      was selected"
-                )
+                )))
             })?;
             let Some(rows) = wait_for_popup_rows(pid, popup.window) else {
                 close_qt_combo_popup(&combo, popup.window);
@@ -630,6 +773,7 @@ async fn qt_combo_set_value(
     idx: usize,
     value: String,
     foreground: bool,
+    args: &Value,
 ) -> ToolResult {
     let value_for_task = value.clone();
     let picked = spawn_blocking_bounded("set_value combo box", foreground_budget(0), move || {
@@ -650,6 +794,9 @@ async fn qt_combo_set_value(
             let code = text.split(':').next().unwrap_or_default().to_owned();
             return ToolResult::error(format!("set_value: {text}"))
                 .with_structured(json!({ "code": code, "effect": "none" }));
+        }
+        Ok(Err(error)) if is_combo_popup_unavailable(&error) => {
+            return combo_popup_unavailable_result(pid, xid, idx, args, error).await
         }
         Ok(Err(error)) => return input_error_result(error),
         Err(error) => return ToolResult::error(format!("Task error: {error}")),
