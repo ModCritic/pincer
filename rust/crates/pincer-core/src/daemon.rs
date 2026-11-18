@@ -380,6 +380,43 @@ pub fn is_daemon_listening(socket_path: &str) -> bool {
     }
 }
 
+/// What [`probe_daemon`] found at a daemon socket.
+#[cfg(unix)]
+#[derive(Debug)]
+pub enum DaemonProbe {
+    /// No connection could be made: nothing is at the path, a crashed
+    /// daemon's socket refuses connections, or this account may not connect.
+    NotListening,
+    /// A daemon answered the read-only `list` request.
+    Answered,
+    /// A process accepted the connection but gave no daemon answer. The text
+    /// says what happened instead, such as no reply within the timeout, a
+    /// closed connection, or a socket another account serves.
+    NoAnswer(String),
+}
+
+/// Ask whatever listens on `socket_path` for the read-only `list` request,
+/// waiting at most `timeout` for the answer. [`send_request`] waits up to 120
+/// seconds, which suits a tool call but not a check for a running daemon.
+#[cfg(unix)]
+pub fn probe_daemon(socket_path: &str, timeout: std::time::Duration) -> DaemonProbe {
+    let Ok(stream) = std::os::unix::net::UnixStream::connect(socket_path) else {
+        return DaemonProbe::NotListening;
+    };
+    let request = DaemonRequest {
+        method: "list".into(),
+        name: None,
+        args: None,
+        session_id: None,
+        observation_origin: None,
+        client_kind: None,
+    };
+    match exchange(stream, socket_path, &request, timeout) {
+        Ok(_) => DaemonProbe::Answered,
+        Err(error) => DaemonProbe::NoAnswer(format!("{error:#}")),
+    }
+}
+
 /// Send one newline-delimited request and read one response.
 ///
 /// On Unix the request is sent only after [`verify_daemon_peer`] confirms that
@@ -387,23 +424,39 @@ pub fn is_daemon_listening(socket_path: &str) -> bool {
 /// deadline so slow accessibility walks and large screenshots are supported.
 #[cfg(unix)]
 pub fn send_request(socket_path: &str, request: &DaemonRequest) -> anyhow::Result<DaemonResponse> {
+    let stream = std::os::unix::net::UnixStream::connect(socket_path)
+        .map_err(|error| anyhow::anyhow!("connect to {socket_path}: {error}"))?;
+    exchange(
+        stream,
+        socket_path,
+        request,
+        std::time::Duration::from_secs(120),
+    )
+}
+
+/// Send `request` on a connected daemon socket and read one response, giving
+/// up once `timeout` (above zero) has passed for the write or for the answer.
+#[cfg(unix)]
+fn exchange(
+    mut stream: std::os::unix::net::UnixStream,
+    socket_path: &str,
+    request: &DaemonRequest,
+    timeout: std::time::Duration,
+) -> anyhow::Result<DaemonResponse> {
     use std::io::Read;
-    use std::os::unix::net::UnixStream;
     use std::time::{Duration, Instant};
 
-    let mut stream = UnixStream::connect(socket_path)
-        .map_err(|error| anyhow::anyhow!("connect to {socket_path}: {error}"))?;
     // Send nothing to a socket another account is serving.
     verify_daemon_peer(&stream, socket_path)?;
-    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
-    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+    stream.set_write_timeout(Some(timeout.min(Duration::from_secs(5))))?;
+    stream.set_read_timeout(Some(timeout.min(Duration::from_secs(10))))?;
 
     let mut writer = stream.try_clone()?;
     let line = serde_json::to_string(request)? + "\n";
-    let write_deadline = Instant::now() + Duration::from_secs(120);
+    let write_deadline = Instant::now() + timeout;
     crate::socket_io::write_all_with_retry(&mut writer, line.as_bytes(), write_deadline)?;
 
-    let overall_deadline = Instant::now() + Duration::from_secs(120);
+    let overall_deadline = Instant::now() + timeout;
     let mut buffer = Vec::with_capacity(64 * 1024);
     let mut chunk = [0_u8; 64 * 1024];
     let response_line = loop {
@@ -425,7 +478,7 @@ pub fn send_request(socket_path: &str, request: &DaemonRequest) -> anyhow::Resul
             {
                 if Instant::now() >= overall_deadline {
                     anyhow::bail!(
-                        "timed out after 120s waiting for daemon response (received {} bytes so far)",
+                        "timed out after {timeout:?} waiting for daemon response (received {} bytes so far)",
                         buffer.len()
                     );
                 }

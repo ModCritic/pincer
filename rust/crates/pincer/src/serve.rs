@@ -2578,6 +2578,59 @@ pub async fn run_serve(
 
 // ── CLI helpers ───────────────────────────────────────────────────────────────
 
+/// How long `pincer serve` waits for a daemon already on its socket to answer
+/// before it reports what it found there.
+const EXISTING_DAEMON_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn already_running_message(socket_path: &str, pid_file_path: Option<&str>) -> String {
+    let pid_hint = pid_file_path
+        .and_then(read_pid_file)
+        .map(|pid| format!(" (pid {pid})"))
+        .unwrap_or_default();
+    format!("Pincer daemon is already running on {socket_path}{pid_hint}. Run `pincer stop` first.")
+}
+
+/// The message `pincer serve` exits with when something already holds
+/// `socket_path`, or `None` when nothing accepts a connection there. A socket
+/// that accepts but gives no daemon answer within `timeout` is refused too,
+/// with what happened instead, rather than waiting the 120 seconds a tool
+/// call may take.
+#[cfg(unix)]
+fn existing_daemon_refusal(
+    socket_path: &str,
+    pid_file_path: Option<&str>,
+    timeout: std::time::Duration,
+) -> Option<String> {
+    use pincer_core::daemon::DaemonProbe;
+    let found = match pincer_core::daemon::probe_daemon(socket_path, timeout) {
+        DaemonProbe::NotListening => return None,
+        DaemonProbe::Answered => return Some(already_running_message(socket_path, pid_file_path)),
+        DaemonProbe::NoAnswer(found) => found,
+    };
+    let owner = match pid_file_path {
+        Some(pid_file) => match read_pid_file(pid_file) {
+            Some(pid) => format!(" Its PID file {pid_file} names PID {pid}."),
+            None => format!(" Its PID file {pid_file} holds no PID."),
+        },
+        None => String::new(),
+    };
+    Some(format!(
+        "Something accepts connections on {socket_path} but gave no daemon answer: {found}. \
+         This daemon did not start.{owner} If that process is a hung Pincer daemon, end it; \
+         otherwise pass --socket <path> to use another socket."
+    ))
+}
+
+/// Windows: `WaitNamedPipeW` answers at once, so the probe needs no timeout.
+#[cfg(not(unix))]
+fn existing_daemon_refusal(
+    socket_path: &str,
+    pid_file_path: Option<&str>,
+    _timeout: std::time::Duration,
+) -> Option<String> {
+    is_daemon_listening(socket_path).then(|| already_running_message(socket_path, pid_file_path))
+}
+
 /// `pincer serve` implementation.
 pub fn run_serve_cmd(
     driver: std::sync::Arc<pincer_sdk::Pincer>,
@@ -2588,16 +2641,12 @@ pub fn run_serve_cmd(
     let pid_file_path = pid_file_path.map(str::to_owned);
 
     // Fail fast if another daemon is already running.
-    if is_daemon_listening(&socket_path) {
-        let pid_hint = pid_file_path
-            .as_deref()
-            .and_then(read_pid_file)
-            .map(|pid| format!(" (pid {pid})"))
-            .unwrap_or_default();
-        eprintln!(
-            "Pincer daemon is already running on {socket_path}{pid_hint}. \
-             Run `pincer stop` first."
-        );
+    if let Some(refusal) = existing_daemon_refusal(
+        &socket_path,
+        pid_file_path.as_deref(),
+        EXISTING_DAEMON_PROBE_TIMEOUT,
+    ) {
+        eprintln!("{refusal}");
         std::process::exit(1);
     }
 
@@ -2967,6 +3016,88 @@ mod socket_tests {
 
         assert!(!socket.exists());
         std::os::unix::net::UnixListener::bind(&socket).expect("bind after stale removal");
+    }
+
+    /// `pincer serve` against a socket that accepts but never answers must
+    /// say so within its probe timeout. It used to wait 120 seconds for the
+    /// answer, then start anyway.
+    #[test]
+    fn a_silent_listener_is_reported_within_the_probe_timeout() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("driver.sock");
+        let pid_file = directory.path().join("driver.pid");
+        std::fs::write(&pid_file, "4242").unwrap();
+        // Never accepted: connections still complete through the backlog.
+        let silent = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let (socket_path, pid_path) = (
+            socket.to_str().unwrap().to_owned(),
+            pid_file.to_str().unwrap().to_owned(),
+        );
+        std::thread::spawn(move || {
+            let _ = sender.send(super::existing_daemon_refusal(
+                &socket_path,
+                Some(&pid_path),
+                std::time::Duration::from_secs(1),
+            ));
+        });
+        let refusal = receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the already-running check was still waiting after 10 seconds");
+
+        let message = refusal.expect("a listening socket was not reported");
+        assert!(message.contains("timed out after 1s"), "{message}");
+        assert!(message.contains("PID 4242"), "{message}");
+        drop(silent);
+    }
+
+    /// A socket that answers like a daemon gets the usual refusal.
+    #[test]
+    fn an_answering_daemon_is_reported_as_running() {
+        use std::io::{BufRead as _, Write as _};
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("driver.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let daemon = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            (&stream)
+                .write_all(b"{\"ok\":true,\"result\":[]}\n")
+                .unwrap();
+            line
+        });
+
+        let message = super::existing_daemon_refusal(
+            socket.to_str().unwrap(),
+            None,
+            std::time::Duration::from_secs(5),
+        )
+        .expect("an answering daemon was not reported");
+
+        assert!(message.contains("already running"), "{message}");
+        assert!(daemon.join().unwrap().contains("\"list\""));
+    }
+
+    /// Nothing at the socket path, or a stale socket nobody accepts on, lets
+    /// `pincer serve` start.
+    #[test]
+    fn no_listener_means_no_refusal() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("driver.sock");
+        let timeout = std::time::Duration::from_secs(1);
+        assert_eq!(
+            super::existing_daemon_refusal(socket.to_str().unwrap(), None, timeout),
+            None
+        );
+        drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+        assert_eq!(
+            super::existing_daemon_refusal(socket.to_str().unwrap(), None, timeout),
+            None
+        );
     }
 
     /// A path that is not a socket is never deleted to make room.
