@@ -5,8 +5,9 @@
 //! 2. Persistent plain `XGetImage` via x11rb — still in-process
 //! 3. `import -window <xid> png:-` (ImageMagick compatibility fallback)
 //!
-//! Main-display capture keeps its own dispatch (Wayland cascade → ImageMagick →
-//! root `XGetImage`). Wayland-native per-window paths are not routed into XShm.
+//! Main-display capture on X11 reads the root window through the same three
+//! backends in the same order (the Wayland cascade keeps its own dispatch).
+//! Wayland-native per-window paths are not routed into XShm.
 //!
 //! x11rb MIT-SHM API (pinned 0.13.2):
 //! - https://docs.rs/x11rb/0.13.2/x11rb/protocol/shm/trait.ConnectionExt.html
@@ -62,26 +63,42 @@ fn capture_window_with_backends(
     xgetimage: impl FnOnce(u64) -> Result<CapturedImage>,
     imagemagick: impl FnOnce(u64) -> Result<CapturedImage>,
 ) -> Result<CapturedImage> {
-    let xshm_err = match xshm(xid) {
+    capture_with_backends(
+        "window",
+        || xshm(xid),
+        || xgetimage(xid),
+        || imagemagick(xid),
+    )
+}
+
+/// The cascade behind [`capture_window_with_backends`] and the desktop
+/// capture; `target` names what was captured in the final error.
+fn capture_with_backends(
+    target: &str,
+    xshm: impl FnOnce() -> Result<CapturedImage>,
+    xgetimage: impl FnOnce() -> Result<CapturedImage>,
+    imagemagick: impl FnOnce() -> Result<CapturedImage>,
+) -> Result<CapturedImage> {
+    let xshm_err = match xshm() {
         Ok(image) if !image.is_empty() => return Ok(image),
         Ok(_) => "XShm returned empty image".to_string(),
         Err(e) => format!("{e:#}"),
     };
 
-    let xgetimage_err = match xgetimage(xid) {
+    let xgetimage_err = match xgetimage() {
         Ok(image) if !image.is_empty() => return Ok(image),
         Ok(_) => "XGetImage returned empty image".to_string(),
         Err(e) => format!("{e:#}"),
     };
 
-    let imagemagick_err = match imagemagick(xid) {
+    let imagemagick_err = match imagemagick() {
         Ok(image) if !image.is_empty() => return Ok(image),
         Ok(_) => "ImageMagick returned empty image".to_string(),
         Err(e) => format!("{e:#}"),
     };
 
     Err(anyhow!(
-        "all Linux window capture backends failed\n- XShm: {xshm_err}\n- XGetImage: {xgetimage_err}\n- ImageMagick: {imagemagick_err}"
+        "all Linux {target} capture backends failed\n- XShm: {xshm_err}\n- XGetImage: {xgetimage_err}\n- ImageMagick: {imagemagick_err}"
     ))
 }
 
@@ -90,33 +107,23 @@ fn capture_window_with_backends(
 /// Given a window id the server no longer knows, ImageMagick falls back to
 /// its interactive `XSelectWindow`: it grabs the X server and waits for a
 /// mouse click that never comes, and every other X client on the display
-/// hangs with it until the process dies. Killing it releases the grab.
+/// hangs with it until the process dies. Killing it releases the grab. The
+/// desktop capture runs it under the capture lock, so it gets the same bound.
 const IMPORT_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn capture_via_import(xid: u64) -> Result<CapturedImage> {
     if !crate::x11::window_exists(xid) {
         bail!("window {xid} no longer exists");
     }
-    let child = Command::new("import")
-        .args(["-window", &xid.to_string(), "png:-"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| anyhow!("failed to launch ImageMagick import: {e}"))?;
-    let pid = child.id();
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
-    });
-    let out = match rx.recv_timeout(IMPORT_TIMEOUT) {
-        Ok(out) => out.map_err(|e| anyhow!("failed to wait for ImageMagick import: {e}"))?,
-        Err(_) => {
-            // SAFETY: plain libc call on a pid this process spawned and has not reaped.
-            unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
-            bail!("ImageMagick import did not exit within {IMPORT_TIMEOUT:?} and was killed");
-        }
-    };
+    run_import(&xid.to_string())
+}
+
+/// `import -window <window> png:-`, killed after [`IMPORT_TIMEOUT`].
+fn run_import(window: &str) -> Result<CapturedImage> {
+    let mut command = Command::new("import");
+    command.args(["-window", window, "png:-"]);
+    let out =
+        output_within(command, IMPORT_TIMEOUT).map_err(|e| anyhow!("ImageMagick import {e}"))?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let detail = stderr.trim().chars().take(512).collect::<String>();
@@ -126,6 +133,32 @@ fn capture_via_import(xid: u64) -> Result<CapturedImage> {
         bail!("ImageMagick import returned empty stdout");
     }
     Ok(CapturedImage::Png(out.stdout))
+}
+
+/// Run `command` with its output captured, killing it with SIGKILL when it
+/// has not exited after `timeout`. Errors read as the tail of a sentence
+/// that starts with the program's name.
+fn output_within(mut command: Command, timeout: Duration) -> Result<std::process::Output> {
+    let child = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| anyhow!("could not be launched: {e}"))?;
+    let pid = child.id();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(out) => out.map_err(|e| anyhow!("could not be waited for: {e}")),
+        Err(_) => {
+            // SAFETY: plain libc call on a pid this process spawned and whose
+            // waiting thread has not reaped it (it is still running).
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+            bail!("did not exit within {timeout:?} and was killed")
+        }
+    }
 }
 
 // ── shared pixel conversion ───────────────────────────────────────────────
@@ -1006,7 +1039,8 @@ impl XGetImageSession {
 ///   owns the complete GNOME helper → wlroots screencopy →
 ///   ext-image-copy-capture-v1 → portal Screenshot → X11 cascade. An
 ///   available GNOME helper's capture failure is terminal.
-/// - X11 / Wayland-disabled: ImageMagick `import` → x11rb `XGetImage`.
+/// - X11 / Wayland-disabled: the root window through MIT-SHM, then plain
+///   `XGetImage`, then ImageMagick `import` (killed after [`IMPORT_TIMEOUT`]).
 pub fn screenshot_display_bytes() -> Result<Vec<u8>> {
     screenshot_display_bytes_with_dispatch(
         crate::wayland::is_wayland(),
@@ -1049,45 +1083,38 @@ fn screenshot_display_image_x11() -> Result<CapturedImage> {
     if crate::x11::rootless_xwayland() {
         anyhow::bail!(crate::x11::ROOTLESS_XWAYLAND_CAPTURE);
     }
-    // Try `import -window root png:-` (ImageMagick).
-    let out = Command::new("import")
-        .args(["-window", "root", "png:-"])
-        .output();
-    if let Ok(o) = out {
-        if o.status.success() && !o.stdout.is_empty() {
-            return Ok(CapturedImage::Png(o.stdout));
-        }
-    }
-    // Fallback: x11rb XGetImage on the root window.
-    use x11rb::connection::Connection;
-    use x11rb::protocol::xproto::*;
-    use x11rb::rust_connection::RustConnection;
-    let (conn, screen_num) = RustConnection::connect(None)
+    let root = u64::from(root_window_with_pixels()?);
+    // In process first: these read the root in milliseconds. ImageMagick
+    // spawns a process that encodes a PNG (and can hang), and this runs
+    // under the capture lock, so it is only the last resort.
+    capture_with_backends(
+        "desktop",
+        || capture_via_xshm(root),
+        || capture_via_persistent_xgetimage(root),
+        || run_import("root"),
+    )
+}
+
+/// The root window of `DISPLAY`'s default screen, refused when it reports a
+/// 0x0 geometry.
+fn root_window_with_pixels() -> Result<u32> {
+    use x11rb::protocol::xproto::ConnectionExt as _;
+    let (conn, screen_num) = crate::x11::query_connection()
         .map_err(|e| anyhow::anyhow!("{e}{}", crate::no_display_hint()))?;
     let root = conn.setup().roots[screen_num].root;
-    // Get root geometry.
     let geom = conn.get_geometry(root)?.reply()?;
-    let w = geom.width as u32;
-    let h = geom.height as u32;
     // WSLg / headless XWayland quirk: the X server connects but the root
     // window reports a 0-px geometry until a real output is attached.
     // `get_image` with w/h == 0 yields an empty buffer that later decodes
     // to null/zero dimensions downstream. Fail with an actionable, typed
     // error instead of emitting a 0-px image. See issue #2005.
-    if w == 0 || h == 0 {
+    if geom.width == 0 || geom.height == 0 {
         anyhow::bail!(
             "X11 root window reports a 0x0 geometry — no usable display to capture.{}",
             crate::no_display_hint()
         );
     }
-    let img = conn
-        .get_image(ImageFormat::Z_PIXMAP, root, 0, 0, w as u16, h as u16, !0u32)?
-        .reply()?;
-    match img.depth {
-        32 | 24 => {}
-        _ => anyhow::bail!("Unsupported depth"),
-    }
-    root_bgrx_to_rgba(&img.data, w, h).map(CapturedImage::Rgba)
+    Ok(root)
 }
 
 /// Capture a rectangle of the root window (what is on the screen there,
@@ -1539,6 +1566,42 @@ mod tests {
     }
 
     #[test]
+    fn a_command_past_its_deadline_is_killed() {
+        let started = Instant::now();
+        let mut command = Command::new("sleep");
+        command.arg("30");
+        let err = output_within(command, Duration::from_millis(200)).expect_err("killed");
+        assert!(err.to_string().contains("was killed"), "{err:#}");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+
+        let mut command = Command::new("sh");
+        command.args(["-c", "printf done"]);
+        let out = output_within(command, Duration::from_secs(5)).expect("finished in time");
+        assert_eq!(out.stdout, b"done");
+    }
+
+    #[test]
+    fn the_desktop_cascade_names_the_desktop_in_its_error() {
+        let err = capture_with_backends(
+            "desktop",
+            || Err(anyhow!("shm transport disconnected")),
+            || Err(anyhow!("get-image bad drawable")),
+            || Err(anyhow!("import was killed")),
+        )
+        .expect_err("all failures must be returned");
+        let message = format!("{err:#}");
+        assert!(
+            message.starts_with("all Linux desktop capture backends failed"),
+            "{message}"
+        );
+        assert!(message.contains("import was killed"), "{message}");
+    }
+
+    #[test]
     fn capture_cascade_preserves_every_backend_error() {
         let err = capture_window_with_backends(
             42,
@@ -1620,6 +1683,78 @@ mod tests {
         fn drop(&mut self) {
             self.stop();
         }
+    }
+
+    /// Set in the child copy of the test binary that a live test runs.
+    const CAPTURE_LIVE_CHILD: &str = "PINCER_CAPTURE_LIVE_CHILD";
+
+    /// Desktop capture reads the root window in process before it tries
+    /// ImageMagick: an `import` that hangs (here a stand-in on `PATH` that
+    /// sleeps) must not hold up the capture. Runs its body in a child copy
+    /// of the test binary on a private Xvfb, with that `PATH`.
+    #[test]
+    #[ignore = "starts its own Xvfb; run inside a sandbox"]
+    fn desktop_capture_does_not_wait_on_a_hung_import() {
+        const MARKER: &str = "DESKTOP_CAPTURE_DID_NOT_WAIT";
+        if std::env::var_os(CAPTURE_LIVE_CHILD).is_some() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let started = Instant::now();
+            std::thread::spawn(move || {
+                let _ = tx.send(screenshot_display_image());
+            });
+            let image = rx
+                .recv_timeout(Duration::from_secs(8))
+                .expect("desktop capture still running after 8 s")
+                .expect("desktop capture");
+            assert_eq!(image.dimensions().expect("dimensions"), (640, 480));
+            println!("{MARKER} in {:?}", started.elapsed());
+            return;
+        }
+        let number = (140..200)
+            .find(|n| {
+                !std::path::Path::new(&format!("/tmp/.X{n}-lock")).exists()
+                    && !std::path::Path::new(&format!("/tmp/.X11-unix/X{n}")).exists()
+            })
+            .expect("a free X display number in 140..200");
+        let display = format!(":{number}");
+        let _server = XvfbServer::start(&display);
+        let bin = std::env::temp_dir().join(format!("pincer-hung-import-{}", std::process::id()));
+        std::fs::create_dir_all(&bin).expect("stand-in folder");
+        let import = bin.join("import");
+        std::fs::write(&import, "#!/bin/sh\nexec sleep 20\n").expect("write stand-in import");
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&import, std::fs::Permissions::from_mode(0o755))
+                .expect("make stand-in import executable");
+        }
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into())
+        );
+        let output = Command::new(std::env::current_exe().expect("test binary path"))
+            .args([
+                "capture::tests::desktop_capture_does_not_wait_on_a_hung_import",
+                "--exact",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CAPTURE_LIVE_CHILD, "1")
+            .env("DISPLAY", &display)
+            .env("PATH", path)
+            .env_remove("WAYLAND_DISPLAY")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("run the child test");
+        let _ = std::fs::remove_dir_all(&bin);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains(MARKER),
+            "child test failed ({}):\n--- stdout\n{stdout}\n--- stderr\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     fn create_live_fixture(display: &str, width: u16, height: u16) -> LiveFixture {
