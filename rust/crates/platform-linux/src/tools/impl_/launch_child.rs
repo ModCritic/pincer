@@ -443,49 +443,12 @@ pub(super) fn handoff_evidence(
 /// Most processes [`descendants`] lists for one launch.
 const DESCENDANTS_CAP: usize = 64;
 
-/// The processes `pid` has started that still exist, children first, read
-/// from `/proc/<pid>/task/<tid>/children`: every thread's for `pid` itself,
-/// the main thread's for the processes below it (a launch polls this while
-/// its app starts, and a browser's tree has hundreds of threads). A process
-/// that has exited is reparented away and no longer listed, so a launch
-/// records them while its launcher runs.
+/// The processes `pid` has started that still exist, children first (see
+/// [`crate::proc_fs::ProcessFacts`]). A process that has exited is
+/// reparented away and no longer listed, so a launch records them while its
+/// launcher runs.
 pub(super) fn descendants(pid: u32) -> Vec<u32> {
-    let mut found: Vec<u32> = Vec::new();
-    let mut next = 0;
-    let mut parent = Some(pid);
-    while let Some(current) = parent {
-        let lists: Vec<std::path::PathBuf> = if current == pid {
-            std::fs::read_dir(format!("/proc/{current}/task"))
-                .map(|tasks| {
-                    tasks
-                        .flatten()
-                        .map(|task| task.path().join("children"))
-                        .collect()
-                })
-                .unwrap_or_default()
-        } else {
-            vec![format!("/proc/{current}/task/{current}/children").into()]
-        };
-        for list in lists {
-            let Ok(children) = std::fs::read_to_string(list) else {
-                continue;
-            };
-            for child in children
-                .split_whitespace()
-                .filter_map(|child| child.parse::<u32>().ok())
-            {
-                if found.len() >= DESCENDANTS_CAP {
-                    return found;
-                }
-                if child != pid && !found.contains(&child) {
-                    found.push(child);
-                }
-            }
-        }
-        parent = found.get(next).copied();
-        next += 1;
-    }
-    found
+    crate::proc_fs::ProcessFacts::new().descendants(pid, DESCENDANTS_CAP)
 }
 
 #[cfg(test)]

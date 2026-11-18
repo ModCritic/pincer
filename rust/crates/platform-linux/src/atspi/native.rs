@@ -26,6 +26,7 @@ use atspi_connection::AccessibilityConnection;
 use pincer_core::menu_label::{menu_label_key, menu_label_matches};
 
 use super::{AtspiIdentity, AtspiNode};
+use crate::proc_fs::ProcessFacts;
 
 pub(crate) mod csd_origin;
 pub mod hit;
@@ -859,16 +860,6 @@ async fn app_for_pid<'a>(
     Ok(resolve_app_for_pid(conn, pid).await?.map(|r| r.app))
 }
 
-/// Best-effort executable/process name for `pid`, read from `/proc/<pid>/comm`
-/// (Linux only; falls back to `None` on any error, e.g. the process already
-/// exited or `/proc` is unavailable in a sandbox).
-fn process_name(pid: u32) -> Option<String> {
-    std::fs::read_to_string(format!("/proc/{pid}/comm"))
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
 async fn resolve_app_for_pid<'a>(
     conn: &'a AccessibilityConnection,
     pid: u32,
@@ -971,12 +962,12 @@ async fn resolve_app_for_pid<'a>(
             // application; accept it only when exactly one candidate shares
             // the target's process name, so an ambiguous match still
             // refuses rather than guessing.
-            let Some(target_name) = process_name(pid) else {
+            let Some(target_name) = ProcessFacts::command_name(pid) else {
                 return Ok(None);
             };
             let mut name_matches: Vec<(atspi::ObjectRefOwned, u32)> = Vec::new();
             for (child, cpid) in other_apps {
-                if process_name(cpid).as_deref() == Some(target_name.as_str()) {
+                if ProcessFacts::command_name(cpid).as_deref() == Some(target_name.as_str()) {
                     name_matches.push((child, cpid));
                 }
             }

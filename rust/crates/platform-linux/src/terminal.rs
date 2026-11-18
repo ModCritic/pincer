@@ -31,7 +31,7 @@ pub const TERMINAL_WM_CLASS_SUBSTRINGS: &[&str] = &[
     "xterm",
 ];
 
-/// Process names (as returned by `process_name(pid)`) for known
+/// Process names (as returned by `ProcessFacts::program_name(pid)`) for known
 /// terminal emulators. `tools/impl_/keyboard_route.rs::is_terminal_process` reads
 /// it through `is_terminal_process_name`; this is the only list.
 pub const TERMINAL_PROCESS_NAMES: &[&str] = &[

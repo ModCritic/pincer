@@ -3,6 +3,7 @@
 //! Each /proc/<pid>/status file contains Name:, Pid:, PPid: etc.
 //! /proc/<pid>/cmdline is the full command line (NUL-separated).
 
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::Path;
 
@@ -161,8 +162,278 @@ pub fn list_processes() -> Vec<ProcessInfo> {
     result
 }
 
+/// What /proc says about running processes, read as the questions come.
+///
+/// A process's children are the union of the kernel's per-thread lists,
+/// `/proc/<pid>/task/<tid>/children` (a child is listed under the thread
+/// that started it, so every thread's list is read). Reading those lists
+/// for a subtree costs far less than the status of every process: the input
+/// tools ask on every call, and with about 370 processes the status scan
+/// was some 740 file reads per key press. A kernel built without
+/// CONFIG_PROC_CHILDREN keeps no lists; then each process's parent is read
+/// once from every `/proc/<pid>/status`, into a table this value keeps for
+/// its later questions.
+#[derive(Default)]
+pub(crate) struct ProcessFacts {
+    by_parent: std::cell::OnceCell<HashMap<u32, Vec<u32>>>,
+}
+
+impl ProcessFacts {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    /// `pid`'s children; none when `pid` is gone.
+    pub(crate) fn children(&self, pid: u32) -> Vec<u32> {
+        match child_lists(pid) {
+            ChildLists::Read(children) => children,
+            ChildLists::Gone => Vec::new(),
+            ChildLists::Missing => self
+                .by_parent
+                .get_or_init(children_by_parent)
+                .get(&pid)
+                .cloned()
+                .unwrap_or_default(),
+        }
+    }
+
+    /// `pid`'s descendants, breadth first (children first), each once and
+    /// without `pid` itself, at most `cap` of them.
+    pub(crate) fn descendants(&self, pid: u32, cap: usize) -> Vec<u32> {
+        descendants_with(pid, cap, |current| self.children(current))
+    }
+
+    /// The program `pid` runs, as the file name of its argv[0], else its
+    /// [`command_name`](Self::command_name) (a kernel thread or a zombie has
+    /// no argv). The terminal check needs this name: the kernel's command
+    /// name stops at 15 bytes, so `gnome-terminal-server` shows there as
+    /// `gnome-terminal-`.
+    pub(crate) fn program_name(pid: u32) -> Option<String> {
+        let cmdline = fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+        let first = String::from_utf8_lossy(&cmdline)
+            .split('\0')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_owned();
+        if !first.is_empty() {
+            return Path::new(&first)
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .or(Some(first));
+        }
+        Self::command_name(pid)
+    }
+
+    /// The kernel's command name for `pid` (`/proc/<pid>/comm`, at most 15
+    /// bytes). For a script started through its `#!` line it is the script's
+    /// own name, where argv[0] names the interpreter (`python3`), so the
+    /// AT-SPI fallback that matches apps by process name uses this one.
+    pub(crate) fn command_name(pid: u32) -> Option<String> {
+        fs::read_to_string(format!("/proc/{pid}/comm"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+}
+
+/// What reading one process's child lists found.
+enum ChildLists {
+    Read(Vec<u32>),
+    /// The process (its task folder) does not exist.
+    Gone,
+    /// The kernel keeps no child lists.
+    Missing,
+}
+
+fn child_lists(pid: u32) -> ChildLists {
+    let Ok(tasks) = fs::read_dir(format!("/proc/{pid}/task")) else {
+        return ChildLists::Gone;
+    };
+    let mut children = Vec::new();
+    let mut read_any = false;
+    for task in tasks.flatten() {
+        match fs::read_to_string(task.path().join("children")) {
+            Ok(list) => {
+                read_any = true;
+                children.extend(
+                    list.split_whitespace()
+                        .filter_map(|kid| kid.parse::<u32>().ok()),
+                );
+            }
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {}
+            // A thread that exited between the listing and the read.
+            Err(_) if !task.path().exists() => {}
+            // The thread is there but its list is not: no CONFIG_PROC_CHILDREN.
+            Err(_) => return ChildLists::Missing,
+        }
+    }
+    if read_any {
+        ChildLists::Read(children)
+    } else if Path::new(&format!("/proc/{pid}")).exists() {
+        ChildLists::Missing
+    } else {
+        ChildLists::Gone
+    }
+}
+
+/// Every process's children, keyed by parent pid, from each
+/// `/proc/<pid>/status`.
+fn children_by_parent() -> HashMap<u32, Vec<u32>> {
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return HashMap::new();
+    };
+    children_table(entries.flatten().filter_map(|entry| {
+        let child = entry.file_name().to_string_lossy().parse::<u32>().ok()?;
+        let status = fs::read_to_string(format!("/proc/{child}/status")).ok()?;
+        let parent = status
+            .lines()
+            .find_map(|line| line.strip_prefix("PPid:"))?
+            .trim()
+            .parse::<u32>()
+            .ok()?;
+        Some((child, parent))
+    }))
+}
+
+/// `(child, parent)` pairs as children keyed by parent.
+fn children_table(pairs: impl IntoIterator<Item = (u32, u32)>) -> HashMap<u32, Vec<u32>> {
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (child, parent) in pairs {
+        children.entry(parent).or_default().push(child);
+    }
+    children
+}
+
+/// [`ProcessFacts::descendants`] over any child relation.
+fn descendants_with(root: u32, cap: usize, mut children: impl FnMut(u32) -> Vec<u32>) -> Vec<u32> {
+    let mut found = Vec::new();
+    let mut seen = HashSet::from([root]);
+    let mut queue = VecDeque::from([root]);
+    while let Some(current) = queue.pop_front() {
+        for child in children(current) {
+            if !seen.insert(child) {
+                continue;
+            }
+            if found.len() >= cap {
+                return found;
+            }
+            found.push(child);
+            queue.push_back(child);
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
+    use super::ProcessFacts;
+    use std::time::{Duration, Instant};
+
+    /// Breadth first, each process once (a pid listed twice, or a list that
+    /// leads back to the root, adds nothing), without the root, at most `cap`.
+    #[test]
+    fn descendants_are_breadth_first_unique_and_capped() {
+        let tree = std::collections::HashMap::from([
+            (1, vec![2, 3]),
+            (2, vec![4, 3]),
+            (3, vec![5]),
+            (4, vec![1]),
+        ]);
+        let children = |pid: u32| tree.get(&pid).cloned().unwrap_or_default();
+        assert_eq!(
+            super::descendants_with(1, usize::MAX, children),
+            [2, 3, 4, 5]
+        );
+        assert_eq!(super::descendants_with(1, 3, children), [2, 3, 4]);
+        assert!(super::descendants_with(1, 0, children).is_empty());
+        assert!(super::descendants_with(5, usize::MAX, children).is_empty());
+    }
+
+    /// The status table's family of a process holds only what descends from
+    /// it (this test moved here from browser_platform with its walk).
+    #[test]
+    fn process_family_contains_only_transitive_descendants() {
+        let table = super::children_table([(11, 10), (12, 11), (20, 1), (21, 20)]);
+        let children = |pid: u32| table.get(&pid).cloned().unwrap_or_default();
+        assert_eq!(super::descendants_with(10, usize::MAX, children), [11, 12]);
+    }
+
+    /// The kernel's child lists and the status table name the same child; a
+    /// process that is gone has none.
+    #[test]
+    fn a_live_child_is_listed_by_both_sources() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let (me, pid) = (std::process::id(), child.id());
+        let facts = ProcessFacts::new();
+        let listed = facts.children(me).contains(&pid);
+        let in_table = super::children_by_parent()
+            .get(&me)
+            .is_some_and(|children| children.contains(&pid));
+        let descends = facts.descendants(me, usize::MAX).contains(&pid);
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(
+            listed && in_table && descends,
+            "{listed} {in_table} {descends}"
+        );
+        assert!(facts.children(pid).is_empty());
+        assert!(facts.descendants(u32::MAX - 1, usize::MAX).is_empty());
+    }
+
+    /// argv[0] names a script's interpreter, the kernel's command name the
+    /// script itself (cut to 15 bytes); without an argv (a zombie) both are
+    /// the command name.
+    #[test]
+    fn program_and_command_names_of_a_script_and_a_zombie() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("script");
+        std::fs::write(&source, "#!/bin/sh\nsleep 30\nexit 0\n").unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script = dir.path().join("pincer-shebang-script");
+        crate::test_env::copy_executable(source.to_str().unwrap(), &script);
+        let mut running = std::process::Command::new(&script).spawn().unwrap();
+        let pid = running.id();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while ProcessFacts::command_name(pid).as_deref() != Some("pincer-shebang-")
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let names = (
+            ProcessFacts::program_name(pid),
+            ProcessFacts::command_name(pid),
+        );
+        let _ = running.kill();
+        let _ = running.wait();
+        assert_eq!(
+            names,
+            (Some("sh".to_owned()), Some("pincer-shebang-".to_owned()))
+        );
+
+        let mut done = std::process::Command::new("true").spawn().unwrap();
+        let zombie = done.id();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !std::fs::read_to_string(format!("/proc/{zombie}/status"))
+            .is_ok_and(|status| status.contains("State:\tZ"))
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let names = (
+            ProcessFacts::program_name(zombie),
+            ProcessFacts::command_name(zombie),
+        );
+        let _ = done.wait();
+        assert_eq!(names, (Some("true".to_owned()), Some("true".to_owned())));
+        assert_eq!(ProcessFacts::program_name(u32::MAX - 1), None);
+        assert_eq!(ProcessFacts::command_name(u32::MAX - 1), None);
+    }
+
     #[test]
     fn process_start_time_handles_spaces_in_comm() {
         let mut fields = vec!["S".to_owned()];

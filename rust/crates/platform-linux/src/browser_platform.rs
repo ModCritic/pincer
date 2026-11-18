@@ -1,6 +1,6 @@
 //! Linux identity and endpoint evidence for the first-class browser tools.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashSet;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -244,23 +244,6 @@ fn parse_proc_net_loopback_listeners(text: &str) -> Vec<(u16, u64)> {
         .collect()
 }
 
-fn descendant_pids(root: i64, relationships: impl IntoIterator<Item = (i64, i64)>) -> HashSet<i64> {
-    let mut children = HashMap::<i64, Vec<i64>>::new();
-    for (pid, parent) in relationships {
-        children.entry(parent).or_default().push(pid);
-    }
-    let mut family = HashSet::from([root]);
-    let mut pending = VecDeque::from([root]);
-    while let Some(parent) = pending.pop_front() {
-        for child in children.get(&parent).into_iter().flatten() {
-            if family.insert(*child) {
-                pending.push_back(*child);
-            }
-        }
-    }
-    family
-}
-
 fn process_family_pids(root: i64) -> Result<HashSet<i64>, BrowserRefusal> {
     if !std::path::Path::new(&format!("/proc/{root}")).exists() {
         return Err(refusal(
@@ -268,22 +251,14 @@ fn process_family_pids(root: i64) -> Result<HashSet<i64>, BrowserRefusal> {
             format!("browser process {root} is no longer available"),
         ));
     }
-    let relationships = std::fs::read_dir("/proc")
+    let mut family: HashSet<i64> = u32::try_from(root)
+        .map(|root| crate::proc_fs::ProcessFacts::new().descendants(root, usize::MAX))
+        .unwrap_or_default()
         .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let pid = entry.file_name().to_string_lossy().parse::<i64>().ok()?;
-            let status = std::fs::read_to_string(entry.path().join("status")).ok()?;
-            let parent = status
-                .lines()
-                .find_map(|line| line.strip_prefix("PPid:"))?
-                .trim()
-                .parse::<i64>()
-                .ok()?;
-            Some((pid, parent))
-        });
-    Ok(descendant_pids(root, relationships))
+        .map(i64::from)
+        .collect();
+    family.insert(root);
+    Ok(family)
 }
 
 fn socket_inodes_for_process_tree(pid: i64) -> Result<HashSet<u64>, BrowserRefusal> {
@@ -1550,14 +1525,6 @@ mod tests {
         assert_eq!(
             parse_proc_net_loopback_listeners(input),
             vec![(9222, 12345)]
-        );
-    }
-
-    #[test]
-    fn process_family_contains_only_transitive_descendants() {
-        assert_eq!(
-            descendant_pids(10, [(11, 10), (12, 11), (20, 1), (21, 20)]),
-            HashSet::from([10, 11, 12])
         );
     }
 

@@ -135,6 +135,74 @@ fn the_processes_a_launcher_started_are_listed_while_they_run() {
     assert!(descendants(u32::MAX - 1).is_empty());
 }
 
+/// Set in the child copy of the test binary that
+/// `a_process_a_descendant_started_from_a_second_thread_is_listed` runs.
+const SECOND_THREAD_CHILD: &str = "PINCER_TEST_SECOND_THREAD_CHILD";
+
+/// Helper, run only in that child copy: a second thread starts `sleep`,
+/// reports its pid and stays alive until the sleeper ends (a child is listed
+/// under the thread that started it while that thread runs).
+#[test]
+#[ignore = "helper: runs in a child copy of the test binary"]
+fn second_thread_starts_a_sleeper() {
+    if std::env::var_os(SECOND_THREAD_CHILD).is_none() {
+        return;
+    }
+    std::thread::spawn(|| {
+        let mut sleeper = Command::new("sleep").arg("30").spawn().unwrap();
+        // On its own line: libtest prints the test's name before its output.
+        println!("\nSLEEPER_PID={}", sleeper.id());
+        let _ = sleeper.wait();
+    })
+    .join()
+    .unwrap();
+}
+
+/// A launched app can start its helpers from a second thread (Electron
+/// does): the walk lists them, not only the children of each process's
+/// main thread.
+#[test]
+fn a_process_a_descendant_started_from_a_second_thread_is_listed() {
+    use std::io::BufRead as _;
+    let mut helper = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "tools::impl_::launch_child::tests::second_thread_starts_a_sleeper",
+            "--exact",
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(SECOND_THREAD_CHILD, "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let stdout = std::io::BufReader::new(helper.stdout.take().unwrap());
+    let sleeper: u32 = stdout
+        .lines()
+        .map_while(Result::ok)
+        .find_map(|line| line.split("SLEEPER_PID=").nth(1)?.trim().parse().ok())
+        .expect("the helper reports its sleeper");
+    // Not in the list of the helper's main thread: a walk that read only
+    // that list below the launcher missed it.
+    let helper_pid = helper.id();
+    let main_thread =
+        std::fs::read_to_string(format!("/proc/{helper_pid}/task/{helper_pid}/children"))
+            .unwrap_or_default();
+    assert!(!main_thread
+        .split_whitespace()
+        .any(|p| p == sleeper.to_string()));
+    let listed = descendants(std::process::id());
+    unsafe { libc::kill(sleeper as i32, libc::SIGTERM) };
+    let _ = helper.wait();
+    assert!(listed.contains(&helper_pid), "{listed:?}");
+    assert!(
+        listed.contains(&sleeper),
+        "{sleeper} missing from {listed:?}"
+    );
+}
+
 #[test]
 fn the_output_tail_keeps_the_last_whole_lines() {
     assert_eq!(output_tail_text(b"", false), "");

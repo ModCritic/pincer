@@ -646,80 +646,18 @@ fn background_keyboard_refusal_names_missing_atspi_bus() {
     }
 }
 
-fn process_name(pid: u32) -> Option<String> {
-    let cmdline = fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-    let first = String::from_utf8_lossy(&cmdline)
-        .split('\0')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_owned();
-    if !first.is_empty() {
-        return std::path::Path::new(&first)
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .or(Some(first));
-    }
-
-    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
-    status
-        .lines()
-        .find(|l| l.starts_with("Name:"))
-        .map(|l| l[5..].trim().to_owned())
-}
-
 pub(super) fn is_terminal_process(pid: u32) -> bool {
     // Canonical list lives in `crate::terminal::TERMINAL_PROCESS_NAMES`
     // — keeps the additive contract centralised. Adding a new terminal
     // here means appending one string in `crate::terminal`.
-    match process_name(pid).as_deref() {
+    match crate::proc_fs::ProcessFacts::program_name(pid).as_deref() {
         Some(name) => crate::terminal::is_terminal_process_name(name),
         None => false,
     }
 }
 
 fn terminal_descendant_ttys(pid: u32) -> Vec<PathBuf> {
-    let mut parent_to_children: std::collections::HashMap<u32, Vec<u32>> =
-        std::collections::HashMap::new();
-    let proc_dir = std::path::Path::new("/proc");
-    let entries = match fs::read_dir(proc_dir) {
-        Ok(entries) => entries,
-        Err(_) => return Vec::new(),
-    };
-
-    for entry in entries.flatten() {
-        let pid_str = entry.file_name();
-        let pid_str = pid_str.to_string_lossy();
-        let child_pid: u32 = match pid_str.parse() {
-            Ok(pid) => pid,
-            Err(_) => continue,
-        };
-        let status = match fs::read_to_string(proc_dir.join(&*pid_str).join("status")) {
-            Ok(status) => status,
-            Err(_) => continue,
-        };
-        let parent_pid = status
-            .lines()
-            .find(|l| l.starts_with("PPid:"))
-            .and_then(|l| l[5..].trim().parse::<u32>().ok());
-        if let Some(parent_pid) = parent_pid {
-            parent_to_children
-                .entry(parent_pid)
-                .or_default()
-                .push(child_pid);
-        }
-    }
-
-    let mut descendants = Vec::new();
-    let mut queue = std::collections::VecDeque::from([pid]);
-    while let Some(current) = queue.pop_front() {
-        if let Some(children) = parent_to_children.get(&current) {
-            for &child in children {
-                descendants.push(child);
-                queue.push_back(child);
-            }
-        }
-    }
+    let mut descendants = crate::proc_fs::ProcessFacts::new().descendants(pid, usize::MAX);
     descendants.sort_unstable();
 
     let mut ttys = Vec::new();
