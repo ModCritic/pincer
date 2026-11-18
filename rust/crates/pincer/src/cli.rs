@@ -459,8 +459,11 @@ fn parse_command_from(args: Vec<String>) -> Command {
         println!("                                      Revocation is deny-only and never needs a token.");
         println!();
         println!("mcp options:");
-        println!("  --direct                Own the runtime in this MCP process. On macOS this");
-        println!("                          deliberately attributes TCC to the invoking host.");
+        println!("  --direct                Own the runtime in this MCP process. On Linux and");
+        println!("                          Windows bare `pincer mcp` already does, unless the");
+        println!("                          Computer History preview is admitted (then it runs");
+        println!("                          through a daemon). On macOS this deliberately");
+        println!("                          attributes TCC to the invoking host.");
         println!("                          Mutually exclusive with --socket.");
         println!("  --embedded              Declare embedding-host mode (also:");
         println!("                          PINCER_EMBEDDED=1). Without --direct, the host");
@@ -478,7 +481,7 @@ fn parse_command_from(args: Vec<String>) -> Command {
         );
         println!("                          commands keep working.");
         println!();
-        println!("agent cursor overlay (serve only — needs the daemon UI runloop):");
+        println!("agent cursor overlay:");
         println!("  The overlay is ON by default: every MCP session automatically gets its own");
         println!(
             "  cursor (keyed by session id) that shows where the agent acts without moving the"
@@ -487,14 +490,21 @@ fn parse_command_from(args: Vec<String>) -> Command {
         println!(
             "  action snaps the cursor with a brief pulse on its first action instead of a long"
         );
-        println!("  glide, so it can be easy to miss — do a pixel click or move_cursor first");
-        println!("  for a visibly gliding demo. These flags tune the overlay on `serve`/`mcp`:");
-        println!("  --no-overlay            Disable the cursor overlay entirely for this daemon.");
+        println!("  glide, so it can be easy to miss; do a pixel click or move_cursor first");
+        println!("  for a visibly gliding demo. These flags tune the overlay of the process");
+        println!("  that owns the runtime:");
+        println!("  --no-overlay            Disable the cursor overlay entirely.");
         println!("  --cursor-theme <id>     Select an installed theme (default: pincer.default).");
         println!("  --cursor-reduced-motion <auto|on|off>");
         println!("                          Follow the OS setting, force stills, or allow motion.");
-        println!("  Set these on `pincer serve`; MCP and one-shot CLI processes are clients");
-        println!("  and do not own the daemon's overlay configuration or UI runloop.");
+        println!("  --glide-ms, --dwell-ms, --idle-hide-ms <ms>");
+        println!("                          Override the glide time, the pause after a click,");
+        println!("                          and how long an idle cursor stays visible.");
+        println!("  On Linux and Windows, bare `pincer mcp` owns its runtime, so these work on");
+        println!("  `pincer mcp` as well as on `pincer serve`. On macOS `pincer mcp` is a client");
+        println!("  of the app's daemon: set them on `pincer serve`. `pincer mcp --socket` and");
+        println!("  one-shot CLI commands are clients everywhere and leave a daemon's overlay");
+        println!("  as it is.");
         println!();
         println!("cursor-theme options (trusted local workflow):");
         println!("  pincer cursor-theme validate <source.lottie>");
@@ -1818,17 +1828,17 @@ pub fn build_manifest() -> serde_json::Value {
         // consumer can render uniformly.
         "subcommands": [
             { "name": "mcp",
-              "description": "Run the MCP stdio server: direct runtime on Windows/Linux, app-daemon proxy on macOS, or explicit service with --socket.",
+              "description": "Run the MCP stdio server: direct runtime on Windows and Linux (through a daemon when the Computer History preview is admitted), app-daemon proxy on macOS, or an explicit service with --socket.",
               "args": [
                   { "name": "--socket", "type": "string", "description": "Select an explicit daemon socket or named-pipe endpoint." },
                   { "name": "--direct", "type": "flag", "description": "Own the runtime in the MCP process; on macOS this explicitly accepts host TCC attribution. Mutually exclusive with --socket." },
-                  { "name": "--claude-code-computer-use-compat", "type": "flag", "description": "Select the Claude Code computer-use compat tool surface." },
+                  { "name": "--claude-code-computer-use-compat", "type": "flag", "description": "Has no effect; accepted so older setup commands keep working." },
                   { "name": "--embedded", "type": "flag", "description": "Declare embedding-host mode. Without --direct, requires the host's private service through --socket instead of auto-launching the standalone app." },
                   { "name": "--host-bundle-id", "type": "string", "description": "Advisory host bundle id label echoed in check_permissions output." },
                   { "name": "--grant", "type": "repeatable-string", "description": "Pre-authorize a residual standard-mode boundary for a newly launched runtime. Supported value: existing-profile." }
               ] },
             { "name": "serve",
-              "description": "Run the long-lived daemon — backs the proxy/auto-relaunch path on macOS and the autostart Session 1+ daemon on Windows.",
+              "description": "Run the long-lived daemon behind `pincer mcp --socket`, `pincer call` and the other daemon commands on Linux, macOS and Windows. On macOS it also backs the default `pincer mcp` proxy and its auto-relaunch; on Windows, the autostart Session 1+ daemon.",
               "args": [
                   { "name": "--socket", "type": "string", "description": "Override the listen socket path." },
                   { "name": "--permission-mode", "type": "string", "description": "Immutable daemon authorization mode: standard, bounded, or unrestricted." },
@@ -1838,9 +1848,9 @@ pub fn build_manifest() -> serde_json::Value {
                   { "name": "--approve-capability-manifest", "type": "flag", "description": "Trusted-launcher confirmation that the exact capability manifest was reviewed." },
                   { "name": "--session-policy", "type": "string", "description": "Deprecated alias for --capability-manifest." },
                   { "name": "--approve-session-policy", "type": "flag", "description": "Deprecated alias for --approve-capability-manifest." },
-                  { "name": "--no-permissions-gate", "type": "flag", "description": "Skip the macOS TCC first-launch gate." },
-                  { "name": "--claude-code-computer-use-compat", "type": "flag", "description": "Forwarded by the MCP proxy when the client asked for the compat surface." },
-                  { "name": "--embedded", "type": "flag", "description": "Run embedded inside a host app: inherit the host's TCC grants, never prompt or relaunch. Also PINCER_EMBEDDED=1." },
+                  { "name": "--no-permissions-gate", "type": "flag", "description": "Skip the macOS TCC first-launch gate. No effect on Linux and Windows." },
+                  { "name": "--claude-code-computer-use-compat", "type": "flag", "description": "Has no effect; `pincer mcp` still forwards it when it launches the daemon, so older setup commands keep working." },
+                  { "name": "--embedded", "type": "flag", "description": "Run embedded inside a host app (also PINCER_EMBEDDED=1): the host owns the socket path, and the daemon never replaces a file already there. On macOS it also inherits the host's TCC grants and never prompts or relaunches." },
                   { "name": "--host-bundle-id", "type": "string", "description": "Advisory host bundle id label echoed in check_permissions output." }
                   ,{ "name": "--experimental-history", "type": "flag", "description": "Admit the encrypted local Computer History early preview for this daemon launch." }
               ] },
@@ -1952,7 +1962,7 @@ pub fn build_manifest() -> serde_json::Value {
                   { "name": "--socket", "type": "string", "description": "Override the daemon socket path." }
               ] },
             { "name": "autostart",
-              "description": "Platform-native auto-start so `pincer serve` comes up on every logon.",
+              "description": "Windows: a logon Scheduled Task so `pincer serve` comes up at every logon. On macOS and Linux it only points at scripts/install-local.sh --autostart (a LaunchAgent or a systemd user unit).",
               "args": [ { "name": "subcommand", "type": "positional-string", "description": "enable | disable | status | kick" } ] },
             { "name": "skills",
               "description": "Manage the pincer agent skill pack (install / update / uninstall / status / path).",
@@ -3756,19 +3766,23 @@ fn cli_docs_literal() -> serde_json::Value {
             {
                 "name": "mcp",
                 "abstract": "Run the stdio MCP server.",
-                "discussion": "On Windows and Linux, bare pincer mcp owns its runtime directly and shuts it down on stdin EOF. On macOS it proxies to Pincer.app so desktop permissions retain the app identity. Pass --direct to make the macOS MCP process own the runtime and TCC attribution, or --socket to select an explicit daemon endpoint.",
+                "discussion": "On Windows and Linux, bare pincer mcp owns its runtime directly and shuts it down on stdin EOF; with the Computer History preview admitted it runs through a daemon instead. On macOS it proxies to Pincer.app so desktop permissions retain the app identity. Pass --direct to make the macOS MCP process own the runtime and TCC attribution, or --socket to select an explicit daemon endpoint. The cursor overlay options apply where mcp owns the runtime, on Windows and Linux; on macOS set them on pincer serve.",
                 "arguments": no_args,
                 "options": [
                     {"name":"socket","short_name":null,"help":"Select an explicit daemon socket or named-pipe endpoint.","type":"String","default_value":null,"is_optional":true},
                     {"name":"host-bundle-id","short_name":null,"help":"Advisory host bundle id label echoed in check_permissions output (embedded mode).","type":"String","default_value":null,"is_optional":true},
                     {"name":"cursor-theme","short_name":null,"help":"Select an installed cursor theme id.","type":"String","default_value":"pincer.default","is_optional":true},
                     {"name":"cursor-reduced-motion","short_name":null,"help":"Follow the OS setting, force still frames, or allow animation: auto, on, or off.","type":"String","default_value":"auto","is_optional":true},
+                    {"name":"glide-ms","short_name":null,"help":"Override the agent cursor glide duration, in milliseconds.","type":"Number","default_value":null,"is_optional":true},
+                    {"name":"dwell-ms","short_name":null,"help":"Override how long the agent cursor dwells after a click, in milliseconds.","type":"Number","default_value":null,"is_optional":true},
+                    {"name":"idle-hide-ms","short_name":null,"help":"Override how long an idle agent cursor stays visible, in milliseconds.","type":"Number","default_value":null,"is_optional":true},
                     {"name":"grant","short_name":null,"help":"Pre-authorize a residual standard-mode boundary for a newly launched runtime. Repeatable; supported value: existing-profile.","type":"String","default_value":null,"is_optional":true,"is_repeatable":true}
                 ],
                 "flags": [
                     {"name":"direct","short_name":null,"help":"Own the runtime in this MCP process; mutually exclusive with --socket.","default_value":false},
                     {"name":"claude-code-computer-use-compat","short_name":null,"help":"Accepted for older Claude Code setup snippets; there is no standalone screenshot tool; use get_window_state for window screenshots.","default_value":false},
-                    {"name":"embedded","short_name":null,"help":"Declare embedding-host mode. Without --direct, require the host's private service through --socket instead of auto-launching the standalone app.","default_value":false}
+                    {"name":"embedded","short_name":null,"help":"Declare embedding-host mode. Without --direct, require the host's private service through --socket instead of auto-launching the standalone app.","default_value":false},
+                    {"name":"no-overlay","short_name":null,"help":"Disable the agent cursor overlay of the runtime this process owns.","default_value":false}
                 ],
                 "subcommands": no_subcommands
             },
@@ -3826,13 +3840,13 @@ fn cli_docs_literal() -> serde_json::Value {
                     {"name":"experimental-pip-geometry","short_name":null,"help":"Size and optional top-left origin of the experimental preview window: WxH or WxH+X+Y (default 480x360, top-right of the main display).","type":"String","default_value":null,"is_optional":true}
                 ],
                 "flags": [
-                    {"name":"claude-code-computer-use-compat","short_name":null,"help":"Select the Claude Code computer-use compatibility surface (forwarded by `mcp` when it launches the daemon).","default_value":false},
+                    {"name":"claude-code-computer-use-compat","short_name":null,"help":"Has no effect; accepted (and forwarded by `mcp` when it launches the daemon) so older setup commands keep working.","default_value":false},
                     {"name":"experimental-pip","short_name":null,"help":"Show a small always-on-top window with the latest post-action screenshot and a one-line label (macOS only).","default_value":false},
                     {"name":"dangerously-bypass-approvals","short_name":null,"help":"Select unrestricted mode and acknowledge its risk.","default_value":false},
                     {"name":"approve-capability-manifest","short_name":null,"help":"Trusted-launcher confirmation that the exact capability manifest was reviewed.","default_value":false},
                     {"name":"approve-session-policy","short_name":null,"help":"Deprecated alias for approve-capability-manifest.","default_value":false},
-                    {"name":"no-permissions-gate","short_name":null,"help":"Skip the macOS first-launch permissions gate.","default_value":false},
-                    {"name":"embedded","short_name":null,"help":"Run embedded inside a host app: inherit the host's TCC grants, never prompt or relaunch. Also PINCER_EMBEDDED=1.","default_value":false},
+                    {"name":"no-permissions-gate","short_name":null,"help":"Skip the macOS first-launch permissions gate. No effect on Linux and Windows.","default_value":false},
+                    {"name":"embedded","short_name":null,"help":"Run embedded inside a host app (also PINCER_EMBEDDED=1): the host owns the socket path, and the daemon never replaces a file already there. On macOS it also inherits the host's TCC grants and never prompts or relaunches.","default_value":false},
                     {"name":"no-overlay","short_name":null,"help":"Disable the agent cursor overlay for this daemon.","default_value":false},
                     {"name":"experimental-history","short_name":null,"help":"Admit the encrypted local Computer History early preview for this daemon launch.","default_value":false}
                 ],

@@ -73,3 +73,58 @@ fn command_help_prints_the_named_commands_reference() {
     let serve = help(home.path(), &["serve", "--help"]);
     assert!(serve.contains("Usage: pincer serve [OPTIONS]"), "{serve}");
 }
+
+/// On Linux bare `pincer mcp` owns its runtime, overlay included, so the help
+/// must not send the overlay flags to `pincer serve` only, and must not call
+/// the compat flag a tool-surface switch: it has no effect.
+#[cfg(target_os = "linux")]
+#[test]
+fn help_describes_what_linux_does() {
+    let home = tempfile::tempdir().expect("temp home");
+    let top = help(home.path(), &["--help"]);
+    assert!(!top.contains("needs the daemon UI runloop"), "{top}");
+    assert!(
+        top.contains("On Linux and Windows, bare `pincer mcp` owns its runtime"),
+        "{top}"
+    );
+    assert!(top.contains("--glide-ms"), "{top}");
+
+    let mcp = help(home.path(), &["mcp", "--help"]);
+    for flag in ["--no-overlay", "--glide-ms", "--dwell-ms", "--idle-hide-ms"] {
+        assert!(mcp.contains(flag), "mcp --help lacks {flag}:\n{mcp}");
+    }
+    let serve = help(home.path(), &["serve", "--help"]);
+    assert!(!serve.contains("compatibility surface"), "{serve}");
+
+    let output = run(home.path(), &["manifest"]);
+    assert!(output.status.success());
+    let manifest: serde_json::Value = serde_json::from_slice(&output.stdout).expect("manifest");
+    let subcommand = |name: &str| {
+        manifest["subcommands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|command| command["name"] == name)
+            .unwrap_or_else(|| panic!("manifest lacks {name}"))
+            .clone()
+    };
+    for name in ["mcp", "serve"] {
+        let compat = subcommand(name)["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|arg| arg["name"] == "--claude-code-computer-use-compat")
+            .unwrap()["description"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(compat.contains("no effect"), "{name}: {compat}");
+    }
+    let serve = subcommand("serve")["description"].as_str().unwrap().to_owned();
+    assert!(serve.contains("Linux"), "{serve}");
+    let autostart = subcommand("autostart")["description"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(autostart.contains("Linux"), "{autostart}");
+}
