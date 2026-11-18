@@ -71,6 +71,20 @@ pub fn with_runtime_scope<T>(scope: String, action: impl FnOnce() -> T) -> T {
     action()
 }
 
+/// Run blocking work (a recording capture, a turn's file writes) on the
+/// blocking pool and wait for it without holding up this task's worker. A
+/// panic in `work` resumes here; `None` only when the runtime is shutting
+/// down and the work was not run.
+async fn on_blocking_pool<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    match tokio::task::spawn_blocking(work).await {
+        Ok(value) => Some(value),
+        Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+        Err(_) => None,
+    }
+}
+
 fn desktop_action_coordinator() -> &'static tokio::sync::Mutex<()> {
     static COORDINATOR: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
     COORDINATOR.get_or_init(|| tokio::sync::Mutex::new(()))
@@ -2294,8 +2308,9 @@ impl ToolRegistry {
             history.begin_action(resolved_name, &public_args, runtime_session.as_deref())
         });
 
-        // Reserve and capture the turn before dispatch so recorded evidence
-        // shows the application immediately before the action changed it.
+        // Capture the turn before dispatch so recorded evidence shows the
+        // application immediately before the action changed it, and number
+        // it under the input lock so turns follow the order actions run in.
         // Exclude session lifecycle calls, including one-shot CLI teardown.
         let should_record = !tool.def().read_only
             && !matches!(
@@ -2310,6 +2325,49 @@ impl ToolRegistry {
                     | "end_session"
             );
         let private_consent_turn = is_existing_profile_prepare(resolved_name, &args);
+        // The before screenshot and walk can take the walk's whole budget.
+        // They run on the blocking pool, so this task's worker stays free,
+        // and before the input lock, which coordinates input, not evidence:
+        // another runtime's action does not wait for them.
+        let planned_turn = if should_record {
+            // A capture-bound click whose capture is already unknown,
+            // expired, or superseded is refused by every platform adapter
+            // before dispatch. Do not walk the application for evidence of
+            // an action that cannot happen.
+            let predicted_refusal = (!private_consent_turn
+                && matches!(resolved_name, "click" | "double_click" | "right_click"))
+            .then(|| self.capture_service.predict_action_refusal(&args))
+            .flatten();
+            let recording = self.recording.clone();
+            let tool_name = resolved_name.to_owned();
+            let recording_args = recording_args.clone();
+            // Use the same trusted identities the recording owner was minted from.
+            let session = runtime_session.clone();
+            let transport = args
+                .get("_transport_session_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            on_blocking_pool(move || {
+                let caller = crate::recording::RecordingCaller {
+                    session: session.as_deref(),
+                    transport: transport.as_deref(),
+                };
+                let plan = recording.plan_turn(
+                    &tool_name,
+                    &recording_args,
+                    start_ms,
+                    caller,
+                    !private_consent_turn,
+                    predicted_refusal,
+                )?;
+                let before = plan.capture_before();
+                Some((plan, before))
+            })
+            .await
+            .flatten()
+        } else {
+            None
+        };
         let _desktop_action = if requires_desktop_coordination(
             resolved_name,
             &args,
@@ -2328,39 +2386,15 @@ impl ToolRegistry {
         } else {
             None
         };
-        let pending_turn = should_record
-            .then(|| {
-                // Use the same trusted identities the recording owner was minted from.
-                let caller = crate::recording::RecordingCaller {
-                    session: runtime_session.as_deref(),
-                    transport: args.get("_transport_session_id").and_then(Value::as_str),
-                };
-                if private_consent_turn {
-                    self.recording.begin_private_turn(
-                        resolved_name,
-                        &recording_args,
-                        start_ms,
-                        caller,
-                    )
-                } else {
-                    // A capture-bound click whose capture is already unknown,
-                    // expired, or superseded is refused by every platform
-                    // adapter before dispatch. Do not walk the application for
-                    // evidence of an action that cannot happen.
-                    let predicted_refusal =
-                        matches!(resolved_name, "click" | "double_click" | "right_click")
-                            .then(|| self.capture_service.predict_action_refusal(&args))
-                            .flatten();
-                    self.recording.begin_turn_with_refusal_hint(
-                        resolved_name,
-                        &recording_args,
-                        start_ms,
-                        caller,
-                        predicted_refusal,
-                    )
-                }
-            })
-            .flatten();
+        let pending_turn = match planned_turn {
+            Some((plan, before)) => {
+                let recording = self.recording.clone();
+                on_blocking_pool(move || recording.reserve_turn(plan, before))
+                    .await
+                    .flatten()
+            }
+            None => None,
+        };
 
         // Desktop pixels read off a capped get_desktop_state image are mapped
         // back to the uncapped capture before any platform interprets them.
@@ -2457,12 +2491,15 @@ impl ToolRegistry {
         // the public ActionResult projection deliberately replaces legacy
         // prose. Coordinate recovery and other internal diagnostics must not
         // depend on the narrowed MCP text surface.
-        let recording_result_text = result.content.iter().find_map(|content| {
-            if let Content::Text { text, .. } = content {
-                Some(text.clone())
-            } else {
-                None
-            }
+        // Only a recorded turn reads it, so only a recorded turn copies it.
+        let recording_result_text = pending_turn.as_ref().and_then(|_| {
+            result.content.iter().find_map(|content| {
+                if let Content::Text { text, .. } = content {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
         });
         if result.is_error != Some(true) && crate::action_record::is_action_tool(resolved_name) {
             if let Err(error) = publish_action_result(&mut result) {
@@ -2528,12 +2565,20 @@ impl ToolRegistry {
         // stream stays the actual user-action sequence (not the meta
         // start/stop frames).
         if let Some(pending_turn) = pending_turn {
-            self.recording.finish_turn_with_outcome(
-                pending_turn,
-                recording_result_text.as_deref().unwrap_or(""),
-                result.action_record.as_ref(),
-                result.is_error == Some(true),
-            );
+            // The after screenshot and walk, like the before ones, run on
+            // the blocking pool.
+            let recording = self.recording.clone();
+            let action_record = result.action_record.clone();
+            let result_is_error = result.is_error == Some(true);
+            on_blocking_pool(move || {
+                recording.finish_turn_with_outcome(
+                    pending_turn,
+                    recording_result_text.as_deref().unwrap_or(""),
+                    action_record.as_ref(),
+                    result_is_error,
+                )
+            })
+            .await;
         }
 
         // Experimental PiP push — only when --experimental-pip is on argv
@@ -2545,7 +2590,10 @@ impl ToolRegistry {
         if pip_hook::pip_enabled() && should_record && !private_consent_turn {
             let window_id = args.opt_u64("window_id");
             let pid = args.opt_i64("pid");
-            if let Some(png_bytes) = screenshot_for(window_id, pid) {
+            if let Some(png_bytes) = on_blocking_pool(move || screenshot_for(window_id, pid))
+                .await
+                .flatten()
+            {
                 let label = synthesize_action_label(name, &public_args);
                 pip_hook::push_pip_frame(pip_hook::PipHookFrame {
                     png_bytes,

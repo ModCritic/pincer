@@ -354,7 +354,7 @@ pub fn set_element_bounds_fn(
 }
 
 #[derive(Default)]
-struct TurnCapture {
+pub(crate) struct TurnCapture {
     state: StateCapture,
     screenshot: Option<Vec<u8>>,
     screenshot_classification: Option<&'static str>,
@@ -453,6 +453,45 @@ pub struct PendingTurn {
     dispatch_click: Option<Arc<DispatchClickScope>>,
     /// The element an `element_token` named, as [`recorded_element`] read it.
     element: Option<Value>,
+}
+
+/// A turn planned before dispatch, its number not yet reserved: what to
+/// capture and where. See [`RecordingSession::plan_turn`].
+pub(crate) struct TurnPlan {
+    generation: u64,
+    tool_name: String,
+    args: Value,
+    start_ms: u64,
+    window_id: Option<u64>,
+    pid: Option<i64>,
+    click_point: Option<(f64, f64)>,
+    capture_visual_state: bool,
+    state_budget: Option<StateCaptureBudget>,
+    predicted_refusal: Option<&'static str>,
+    element: Option<Value>,
+    /// What reserving the turn sets the held-button target to:
+    /// mouse_button_down's window, `None` for mouse_button_up.
+    holds: Option<Option<(i64, u64)>>,
+}
+
+impl TurnPlan {
+    /// The before screenshot and application state. Blocking: a walk can
+    /// take its whole budget, so the dispatcher runs this on the blocking
+    /// pool.
+    pub(crate) fn capture_before(&self) -> TurnCapture {
+        if !self.capture_visual_state {
+            return TurnCapture::privacy_suppressed();
+        }
+        capture_turn(
+            self.window_id,
+            self.pid,
+            match (self.state_budget, self.predicted_refusal) {
+                (None, _) => StatePlan::Skip(STATE_SKIPPED_DISABLED),
+                (Some(_), Some(_)) => StatePlan::Skip(STATE_SKIPPED_REFUSED),
+                (Some(budget), None) => StatePlan::Capture(budget),
+            },
+        )
+    }
 }
 
 /// Trusted identity of the call that may reserve a turn.
@@ -936,7 +975,9 @@ impl RecordingSession {
         self.begin_turn_with_capture(tool_name, args, start_ms, caller, false, None)
     }
 
-    /// Scope-check and reserve under one lock; ownerless recordings accept all callers.
+    /// Plan, capture and reserve in one call; ownerless recordings accept all
+    /// callers. The dispatcher runs the same three steps itself, with the
+    /// capture on the blocking pool before it takes the input lock.
     fn begin_turn_with_capture(
         &self,
         tool_name: &str,
@@ -946,10 +987,35 @@ impl RecordingSession {
         capture_visual_state: bool,
         predicted_refusal: Option<&'static str>,
     ) -> Option<PendingTurn> {
+        let plan = self.plan_turn(
+            tool_name,
+            args,
+            start_ms,
+            caller,
+            capture_visual_state,
+            predicted_refusal,
+        )?;
+        let before = plan.capture_before();
+        self.reserve_turn(plan, before)
+    }
+
+    /// The target and capture plan of a turn `caller` may record, with no
+    /// turn number reserved yet; `None` when recording is off or the caller
+    /// is outside its scope. Resolving an element's bounds can ask the
+    /// platform, so the dispatcher runs this on the blocking pool.
+    pub(crate) fn plan_turn(
+        &self,
+        tool_name: &str,
+        args: &Value,
+        start_ms: u64,
+        caller: RecordingCaller<'_>,
+        capture_visual_state: bool,
+        predicted_refusal: Option<&'static str>,
+    ) -> Option<TurnPlan> {
         use crate::tool_args::ArgsExt;
-        let (turn_dir, session_start_ms, generation, state_budget, held_target) = {
-            let mut inner = self.inner.lock().unwrap();
-            if !inner.enabled {
+        let (generation, state_budget, held_target) = {
+            let inner = self.inner.lock().unwrap();
+            if !inner.enabled || inner.output_dir.is_none() {
                 return None;
             }
             if let Some(owner) = inner.owner.as_deref() {
@@ -957,24 +1023,14 @@ impl RecordingSession {
                     return None;
                 }
             }
-            let out = inner.output_dir.clone()?;
-            let idx = inner.next_turn;
-            inner.next_turn += 1;
-            let held_target = inner.held_target;
-            match tool_name {
-                "mouse_button_down" => {
-                    inner.held_target = args.opt_i64("pid").zip(args.opt_u64("window_id"));
-                }
-                "mouse_button_up" => inner.held_target = None,
-                _ => {}
-            }
-            (
-                out.join(format!("turn-{idx:05}")),
-                inner.session_start_ms,
-                inner.generation,
-                inner.state_budget,
-                held_target,
-            )
+            (inner.generation, inner.state_budget, inner.held_target)
+        };
+        // The window a mouse_button_down holds the button over, set when its
+        // turn is reserved; mouse_button_up clears it.
+        let holds = match tool_name {
+            "mouse_button_down" => Some(args.opt_i64("pid").zip(args.opt_u64("window_id"))),
+            "mouse_button_up" => Some(None),
+            _ => None,
         };
 
         // Strip the daemon-injected `_session_id` (and any other reserved
@@ -1016,33 +1072,74 @@ impl RecordingSession {
             pid,
             self.pixel_point_fn.get(),
         );
-        let before = if capture_visual_state {
-            capture_turn(
-                window_id,
-                pid,
-                match (state_budget, predicted_refusal) {
-                    (None, _) => StatePlan::Skip(STATE_SKIPPED_DISABLED),
-                    (Some(_), Some(_)) => StatePlan::Skip(STATE_SKIPPED_REFUSED),
-                    (Some(budget), None) => StatePlan::Capture(budget),
-                },
-            )
-        } else {
-            TurnCapture::privacy_suppressed()
-        };
+        Some(TurnPlan {
+            generation,
+            tool_name: tool_name.to_owned(),
+            args,
+            start_ms,
+            window_id,
+            pid,
+            click_point,
+            capture_visual_state,
+            state_budget,
+            predicted_refusal,
+            element: recorded_element,
+            holds,
+        })
+    }
 
+    /// Number a planned turn, now that its before evidence is captured, and
+    /// write that evidence. The dispatcher calls this under the input lock,
+    /// so turn numbers follow the order the actions run in. `None` when the
+    /// recording stopped or restarted meanwhile.
+    pub(crate) fn reserve_turn(&self, plan: TurnPlan, before: TurnCapture) -> Option<PendingTurn> {
+        let TurnPlan {
+            generation,
+            tool_name,
+            args,
+            start_ms,
+            window_id,
+            pid,
+            click_point,
+            capture_visual_state,
+            state_budget,
+            predicted_refusal,
+            element,
+            holds,
+        } = plan;
         let mut inner = self.inner.lock().unwrap();
         if !inner.enabled || inner.generation != generation {
             return None;
         }
+        let out = inner.output_dir.clone()?;
+        let idx = inner.next_turn;
+        inner.next_turn += 1;
+        if let Some(held) = holds {
+            inner.held_target = held;
+        }
+        let turn_dir = out.join(format!("turn-{idx:05}"));
         if let Err(error) = write_phase_artifacts(&turn_dir, "before", &before) {
             inner.last_error = Some(error.to_string());
         }
+        let session_start_ms = inner.session_start_ms;
         drop(inner);
 
+        let dispatch_click = (capture_visual_state
+            && matches!(tool_name.as_str(), "click" | "double_click" | "right_click"))
+        .then(|| {
+            window_id.zip(pid).map(|(window_id, pid)| {
+                Arc::new(DispatchClickScope {
+                    window_id,
+                    pid,
+                    capture: Mutex::new(DispatchClickCapture::default()),
+                })
+            })
+        })
+        .flatten();
         Some(PendingTurn {
             generation,
             turn_dir,
-            tool_name: tool_name.to_owned(),
+            tool_name,
             args,
             start_ms,
             session_start_ms,
@@ -1053,20 +1150,8 @@ impl RecordingSession {
             state_budget,
             predicted_refusal,
             before,
-            dispatch_click: if capture_visual_state
-                && matches!(tool_name, "click" | "double_click" | "right_click")
-            {
-                window_id.zip(pid).map(|(window_id, pid)| {
-                    Arc::new(DispatchClickScope {
-                        window_id,
-                        pid,
-                        capture: Mutex::new(DispatchClickCapture::default()),
-                    })
-                })
-            } else {
-                None
-            },
-            element: recorded_element,
+            dispatch_click,
+            element,
         })
     }
 
