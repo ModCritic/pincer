@@ -4005,7 +4005,8 @@ mod tests {
     fn native_wayland_input_tools_take_the_target_foreground_guard() {
         let source = concat!(
             include_str!("../tools/impl_/click.rs"),
-            include_str!("../tools/impl_.rs"),
+            include_str!("../tools/impl_/text.rs"),
+            include_str!("../tools/impl_/keys.rs"),
             include_str!("../tools/impl_/scroll.rs"),
             include_str!("../tools/impl_/drag.rs"),
             include_str!("../tools/impl_/held_button.rs"),

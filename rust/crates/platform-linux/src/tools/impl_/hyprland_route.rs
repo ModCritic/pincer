@@ -423,7 +423,7 @@ fn isolated_background_routes_do_not_reprobe_availability_before_primary_fallbac
     // native branch. A second probe here could select primary-seat input.
     let source = concat!(
         include_str!("click.rs"),
-        include_str!("../impl_.rs"),
+        include_str!("text.rs"),
         include_str!("scroll.rs"),
         include_str!("click_gestures.rs"),
         include_str!("drag.rs"),
@@ -463,7 +463,7 @@ fn isolated_background_routes_do_not_reprobe_availability_before_primary_fallbac
 #[cfg(test)]
 #[test]
 fn type_text_routes_isolated_background_before_generic_wayland_refusal() {
-    let source = include_str!("../impl_.rs");
+    let source = concat!(include_str!("text.rs"), include_str!("keys.rs"));
     let invoke = source
         .rsplit_once("impl Tool for TypeTextTool {")
         .unwrap()
