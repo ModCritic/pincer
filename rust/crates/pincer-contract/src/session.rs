@@ -39,7 +39,7 @@ fn contract<I: ToolInput, O: ToolOutput>(
 fn start() -> ToolContract {
     contract::<StartSessionInput, StartSessionOutput>(
         "start_session",
-        "Optional: create or return a session before acting. For multi-call work, use a short `session` label and repeat it on every call; omitted, the connection's default session is used. Actions create or reuse a named session on their own, so call this only to set the initial cursor theme or motion, or to revive a name ended with end_session (ordinary actions never revive those). A session idle for 30 min ends, and its next call restarts it fresh. Idempotent.",
+        "Optional: create or return a session before acting. For multi-call work, use a short `session` label and repeat it on every call; omitted, the connection's default session is used. Actions create or reuse a named session on their own, so call this only to set the initial cursor theme or motion, or to revive a name ended with end_session (ordinary actions never revive those). A session idle for 30 min ends, and its next call restarts it fresh. Idempotent; `revived` is true when this call restarted an ended session, false when it was active or new.",
         &["session.lifecycle.start"],
         ToolAnnotations {
             read_only: false,
@@ -105,6 +105,21 @@ mod tests {
         assert!(description.contains("revive a name ended with end_session"));
         assert!(description.contains("ordinary actions never revive those"));
         assert!(description.contains("idle for 30 min ends, and its next call restarts it fresh"));
+    }
+
+    #[test]
+    fn start_description_names_the_revived_field() {
+        // Round 10 (X11): a tester got `revived: false` and had to guess
+        // what the field meant.
+        let description = start().description;
+        assert!(
+            description.contains("`revived` is true when this call restarted an ended session"),
+            "{description}"
+        );
+        assert!(
+            description.contains("false when it was active or new"),
+            "{description}"
+        );
     }
 
     #[test]

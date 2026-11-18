@@ -3911,7 +3911,7 @@
     },
     {
       "name": "start_session",
-      "description": "Optional: create or return a session before acting. For multi-call work, use a short `session` label and repeat it on every call; omitted, the connection's default session is used. Actions create or reuse a named session on their own, so call this only to set the initial cursor theme or motion, or to revive a name ended with end_session (ordinary actions never revive those). A session idle for 30 min ends, and its next call restarts it fresh. Idempotent.",
+      "description": "Optional: create or return a session before acting. For multi-call work, use a short `session` label and repeat it on every call; omitted, the connection's default session is used. Actions create or reuse a named session on their own, so call this only to set the initial cursor theme or motion, or to revive a name ended with end_session (ordinary actions never revive those). A session idle for 30 min ends, and its next call restarts it fresh. Idempotent; `revived` is true when this call restarted an ended session, false when it was active or new.",
       "platforms": [
         "macos",
         "windows",
