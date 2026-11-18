@@ -27,6 +27,7 @@ use pincer_core::menu_label::{menu_label_key, menu_label_matches};
 
 use super::{AtspiIdentity, AtspiNode};
 
+pub(crate) mod csd_origin;
 pub mod hit;
 pub(crate) mod hit_test;
 
@@ -5229,7 +5230,10 @@ pub fn element_bounds_ref(
             "web-content bounds need the document origin; re-walk"
         ));
     }
-    let offset = window_to_screen_offset(pid, xid, None);
+    // No frame accessible at hand: a client-side-decorated window uses the
+    // root its last snapshot measured, else the visible-frame assumption.
+    let offset = window_to_screen_offset(pid, xid, None)
+        .map(|window_offset| window_offset.resolve(pid, None));
     let coord = if offset.is_some() {
         CoordType::Window
     } else {
@@ -7624,7 +7628,7 @@ pub(crate) fn walk_bounds_usable(
 fn element_bounds_by_walk(pid: u32, xid: u64, idx: usize) -> Result<(i32, i32, u32, u32)> {
     // Synchronous X11 lookups stay on the caller's blocking thread, outside
     // the AT-SPI runtime.
-    let offset = window_to_screen_offset(pid, xid, None);
+    let window_offset = window_to_screen_offset(pid, xid, None);
     let display = (!crate::wayland::is_wayland())
         .then(x11_display_size)
         .flatten();
@@ -7632,10 +7636,22 @@ fn element_bounds_by_walk(pid: u32, xid: u64, idx: usize) -> Result<(i32, i32, u
         INDEX_RESOLVE_BUDGET,
         async {
             let conn = shared_connection().await?;
-            let visited = collect_visited_bounded(conn, pid, xid, None, None)
+            let Collected {
+                visited,
+                scoped_frame,
+                ..
+            } = collect_visited_bounded(conn, pid, xid, None, None)
                 .await?
-                .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?
-                .visited;
+                .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
+            // A client-side-decorated X11 window: measure where its toolkit
+            // puts Window (0, 0) from the frame accessible.
+            let offset = match window_offset {
+                Some(window_offset) if window_offset.csd.is_some() => {
+                    let frame = frame_window_extents(&visited, scoped_frame).await;
+                    Some(window_offset.resolve(pid, frame))
+                }
+                other => other.map(|window_offset| window_offset.offset),
+            };
             let web_document_origin = web_document_origin_for_visited(&visited, pid, xid, None)
                 .await
                 .unwrap_or((0, 0));
@@ -7838,72 +7854,59 @@ fn x11_top_level_geometry(xid: u64) -> Option<(i32, i32, i32, i32)> {
     ))
 }
 
-/// Read the GTK4 client-side-decoration shadow inset from the X11
-/// `_GTK_FRAME_EXTENTS` property (`CARDINAL[4]` = left, right, top, bottom).
-///
-/// A GTK4 window is an outer X11 window whose *visible content* starts `left`
-/// px in and `top` px down — the rest is the invisible CSD shadow. AT-SPI
-/// `CoordType::Window` coordinates are relative to that content origin, so
-/// reconstructing true screen coords needs this inset added to the X11 window
-/// origin. Returns `None` (treated as no inset, i.e. `(0,0)`) for non-GTK /
-/// server-side-decorated windows that don't set the property — which is also
-/// how we tell GTK4-CSD apart from everyone else.
-fn gtk_frame_extents(xid: u64) -> Option<(i32, i32)> {
-    use x11rb::protocol::xproto::*;
-
-    let (conn, _) = crate::x11::query_connection().ok()?;
-    // only_if_exists=true → atom is 0 when no client ever set the property.
-    let atom = conn
-        .intern_atom(true, b"_GTK_FRAME_EXTENTS")
-        .ok()?
-        .reply()
-        .ok()?
-        .atom;
-    if atom == 0 {
-        return None;
-    }
-    let reply = conn
-        .get_property(false, xid as u32, atom, AtomEnum::CARDINAL, 0, 4)
-        .ok()?
-        .reply()
-        .ok()?;
-    let vals: Vec<u32> = reply.value32()?.collect();
-    parse_gtk_frame_extents(&vals)
+/// The screen offset that turns an element's `CoordType::Window` extents
+/// into screen coordinates, and on X11 the client-side-decorated window it
+/// came from.
+#[derive(Clone, Copy, Debug)]
+struct WindowOffset {
+    /// Screen point of `Window` (0, 0) as assumed before any measurement:
+    /// the compositor origin on Wayland; on X11 the client window's origin
+    /// plus the `_GTK_FRAME_EXTENTS` inset.
+    offset: (i32, i32),
+    /// The X11 window behind `offset`. Its toolkit's real root is measured
+    /// per window with [`csd_origin::csd_window_offset`], which callers
+    /// that can read the frame accessible prefer over `offset`.
+    csd: Option<csd_origin::CsdWindow>,
 }
 
-/// Parse a `_GTK_FRAME_EXTENTS` `CARDINAL[4]` (`[left, right, top, bottom]`) into
-/// the `(left, top)` shadow inset. `None` when fewer than 4 values (property
-/// absent or malformed). Split out from [`gtk_frame_extents`] so the index
-/// mapping (left = `[0]`, top = `[2]`, *not* `[1]`/`[3]`) is unit-tested without
-/// an X server.
-fn parse_gtk_frame_extents(vals: &[u32]) -> Option<(i32, i32)> {
-    if vals.len() < 4 {
-        return None;
+impl WindowOffset {
+    fn fixed(offset: (i32, i32)) -> Self {
+        Self { offset, csd: None }
     }
-    Some((vals[0] as i32, vals[2] as i32))
+
+    /// The offset for an element of this window, measured from the frame
+    /// accessible's `Window` extents when given (see
+    /// [`csd_origin::csd_window_offset`]). Without a CSD window this is
+    /// `offset`, rebased by a negative renderer frame origin as before.
+    fn resolve(&self, pid: u32, frame_window: Option<(i32, i32, i32, i32)>) -> (i32, i32) {
+        match &self.csd {
+            Some(window) => csd_origin::csd_window_offset(pid, window, frame_window),
+            None => rebase_renderer_window_offset(
+                self.offset,
+                frame_window.map(|(x, y, _, _)| (x, y)),
+            ),
+        }
+    }
 }
 
 /// Additive screen-coordinate offset that turns an element's
-/// `CoordType::Window` extents into true screen coordinates:
-/// `screen = x11_window_origin + _GTK_FRAME_EXTENTS.(left,top) + window_xy`.
+/// `CoordType::Window` extents into true screen coordinates.
 ///
-/// AT-SPI `CoordType::Window` coords are relative to the toolkit's *content*
-/// toplevel. The content's screen position is the X11 window's root-relative
-/// origin plus the GTK4 CSD shadow inset (`_GTK_FRAME_EXTENTS`). This is
-/// deterministic and replaces the old frame-(0,0)-detection heuristic; it fixes
-/// GTK4, whose `CoordType::Screen` collapses *every* element to (0,0) so a
-/// constant offset could never separate them (GNOME/gtk a11y rework, issues
-/// #1564 / #1739) — `CoordType::Window` returns the distinct per-widget offsets
-/// instead.
+/// On X11 this applies only to windows that draw their own decorations and
+/// shadow (`_GTK_FRAME_EXTENTS`): GTK with a header bar, Firefox, Chromium
+/// and Electron. GTK4 needs it because its `CoordType::Screen` collapses
+/// *every* element to (0,0) (GNOME/gtk a11y rework, issues #1564 / #1739),
+/// and web content in these windows always takes it. Where `Window` (0, 0)
+/// lies differs by toolkit (the X window's corner, shadow included, or the
+/// visible frame's): `offset` assumes the visible frame, and callers that
+/// can read the frame accessible measure the real root per window through
+/// [`WindowOffset::resolve`].
 ///
-/// **Gated on `_GTK_FRAME_EXTENTS` presence**: only GTK toolkits set that
-/// property (for CSD), and only GTK's Screen extents are unreliable. Non-GTK
-/// toolkits (Qt, etc.) have no such property *and* report correct Screen
-/// extents, so we return `None` for them — callers keep the unchanged Screen
-/// path and the WINDOW reconstruction can never regress a toolkit that was
-/// already correct. Also returns `None` on native Wayland (clients may not
-/// query screen origins, by design) or when no X11 window resolves.
-fn window_to_screen_offset(pid: u32, xid: u64, title: Option<&str>) -> Option<(i32, i32)> {
+/// Windows without the property (Qt, server-decorated GTK) return `None`:
+/// their Screen extents are correct, and callers keep the Screen path. Also
+/// `None` on native Wayland without compositor geometry, or when no X11
+/// window resolves.
+fn window_to_screen_offset(pid: u32, xid: u64, title: Option<&str>) -> Option<WindowOffset> {
     if crate::wayland::is_wayland() {
         if crate::wayland::hyprland::is_session() {
             // Never promote toolkit-local coordinates or a stale PID origin
@@ -7913,7 +7916,7 @@ fn window_to_screen_offset(pid: u32, xid: u64, title: Option<&str>) -> Option<(i
             } else {
                 crate::wayland::hyprland::window_for_pid(pid)
             }?;
-            return (window.pid == pid).then_some((window.x, window.y));
+            return (window.pid == pid).then_some(WindowOffset::fixed((window.x, window.y)));
         }
         // Native Wayland: clients can't query a window's screen origin, and
         // AT-SPI CoordType::Screen collapses to (0,0) on Mutter. The bundled
@@ -7931,7 +7934,8 @@ fn window_to_screen_offset(pid: u32, xid: u64, title: Option<&str>) -> Option<(i
         return prefer_authoritative_wayland_origin(
             authoritative,
             crate::wayland::observed_window_origin(pid),
-        );
+        )
+        .map(WindowOffset::fixed);
     }
     // Resolve a usable window xid. `xid == 0` means "no hint" (get_element_bounds
     // has no window context); fall back to this pid's first window — the same
@@ -7942,11 +7946,14 @@ fn window_to_screen_offset(pid: u32, xid: u64, title: Option<&str>) -> Option<(i
     } else {
         crate::x11::list_windows(Some(pid)).first().map(|w| w.xid)?
     };
-    // `?` here is the GTK gate: no _GTK_FRAME_EXTENTS → non-GTK toolkit → keep
-    // the legacy Screen path (which those toolkits report correctly).
-    let (fl, ft) = gtk_frame_extents(win_xid)?;
-    let (ox, oy) = x11_window_origin(win_xid)?;
-    Some((ox + fl, oy + ft))
+    // `?` here is the gate: no _GTK_FRAME_EXTENTS, no client-side
+    // decorations; keep the Screen path (which those toolkits report
+    // correctly).
+    let window = csd_origin::CsdWindow::read(win_xid)?;
+    Some(WindowOffset {
+        offset: window.legacy_offset(),
+        csd: Some(window),
+    })
 }
 
 /// Resolve a native Wayland window origin from compositor-owned metadata.
@@ -8192,6 +8199,22 @@ fn scoped_component_nodes<'a, T>(
     })
 }
 
+/// `CoordType::Window` extents of the top-level accessible a walk is scoped
+/// to (the first window-role node with a Component when unscoped).
+async fn frame_window_extents(
+    visited: &[Visited<'_>],
+    scoped_frame: Option<usize>,
+) -> Option<(i32, i32, i32, i32)> {
+    let frame = visited.iter().find(|node| {
+        scoped_frame.is_none_or(|scope| node.frame_ordinal == scope)
+            && node.has_component
+            && is_window_role(&node.role)
+    })?;
+    let proxies = call(frame.acc.proxies()).await?.ok()?;
+    let component = call(proxies.component()).await?.ok()?;
+    call(component.get_extents(CoordType::Window)).await?.ok()
+}
+
 /// Screen-coordinate bounds for the exact visited sequence rendered into the
 /// current snapshot. Nodes without a usable Component interface, or whose
 /// extents query fails/times out, are omitted rather than borrowing another
@@ -8200,10 +8223,11 @@ fn scoped_component_nodes<'a, T>(
 /// GTK4 caveat: GTK4's AT-SPI bridge returns `GetExtents(Screen)` as `(0,0)`
 /// for every element (issue #1564 / the #1739 a11y rework), so a screen query
 /// is useless. Instead we query `CoordType::Window` (which GTK4 *does* report
-/// correctly, per-widget) and add a deterministic screen offset — the X11
-/// window origin plus the GTK4 CSD shadow inset from `_GTK_FRAME_EXTENTS` (see
-/// [`window_to_screen_offset`]). For GTK3/Qt the inset is absent, so the
-/// offset is just the X11 origin and the result matches the old screen path.
+/// correctly, per-widget) and add a screen offset: for a window with
+/// client-side decorations (`_GTK_FRAME_EXTENTS`), the X11 window origin plus
+/// wherever this window's toolkit puts `Window` (0, 0), measured from the
+/// frame accessible (see [`WindowOffset::resolve`]). Windows without the
+/// property (Qt, server-decorated GTK) keep the Screen path.
 ///
 /// Returns `(element_index, x, y, width, height)` tuples.
 async fn element_bounds_for_visited(
@@ -8227,10 +8251,11 @@ async fn element_bounds_for_visited(
     // un-timed blocking round-trip; still route both through `bounded_blocking`
     // so this single call site can't stall the walk past its budget (#42).
     let window_title_owned = window_title.map(str::to_owned);
-    let offset =
+    let window_offset =
         bounded_blocking(move || window_to_screen_offset(pid, xid, window_title_owned.as_deref()))
             .await
             .flatten();
+    let offset = window_offset.map(|window_offset| window_offset.offset);
     if crate::wayland::is_wayland()
         && crate::wayland::hyprland::is_session()
         && (offset.is_none() || scoped_frame.is_none())
@@ -8287,33 +8312,14 @@ async fn element_bounds_for_visited(
     } else {
         None
     };
-    // Renderer bridges can expose Window coordinates relative to an internal
-    // frame whose origin is not (0,0) (Chromium commonly reports a negative
-    // title-bar offset). Normalize that frame to the compositor window origin
-    // before adding the screen offset. Native GTK reports (0,0), so this is a
-    // no-op there.
-    let window_frame_origin = if offset.is_some() {
-        let frame = visited.iter().find(|node| {
-            scoped_frame.is_none_or(|scope| node.frame_ordinal == scope)
-                && node.has_component
-                && is_window_role(&node.role)
-        });
-        if let Some(frame) = frame {
-            match call(frame.acc.proxies()).await {
-                Some(Ok(proxies)) => match call(proxies.component()).await {
-                    Some(Ok(component)) => {
-                        match call(component.get_extents(CoordType::Window)).await {
-                            Some(Ok((x, y, _, _))) => Some((x, y)),
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                },
-                _ => None,
-            }
-        } else {
-            None
-        }
+    // The frame accessible's own Window extents. On X11 they say where this
+    // window's toolkit puts Window (0, 0) (see `WindowOffset::resolve`).
+    // Renderer bridges can also expose Window coordinates relative to an
+    // internal frame whose origin is not (0,0) (Chromium commonly reports a
+    // negative title-bar offset); `resolve` normalizes that frame to the
+    // compositor window origin. Native GTK reports (0,0), a no-op there.
+    let window_frame_extents = if offset.is_some() {
+        frame_window_extents(visited, scoped_frame).await
     } else {
         None
     };
@@ -8325,12 +8331,14 @@ async fn element_bounds_for_visited(
     } else {
         None
     };
-    let (offset_x, offset_y) = rebase_renderer_window_offset(
-        offset.or(screen_rebase).unwrap_or((0, 0)),
-        window_frame_origin,
-    );
-    if let Some((ox, oy)) = offset {
-        dlog!("element bounds: WINDOW coords + screen offset ({ox},{oy})");
+    let (offset_x, offset_y) = match window_offset {
+        Some(window_offset) => window_offset.resolve(pid, window_frame_extents),
+        None => screen_rebase.unwrap_or((0, 0)),
+    };
+    if offset.is_some() {
+        dlog!(
+            "element bounds: WINDOW coords + screen offset ({offset_x},{offset_y}) (frame window extents {window_frame_extents:?})"
+        );
     } else if let Some((ox, oy)) = screen_rebase {
         dlog!("element bounds: SCREEN coords + X11 frame rebase ({ox},{oy})");
     }
@@ -8911,7 +8919,6 @@ mod frame_correlation_tests {
 
 #[cfg(test)]
 mod coord_tests {
-    use super::parse_gtk_frame_extents;
     use super::OP_DEADLINE;
     use super::{
         activation_index, before_snapshot_deadline, bounded_blocking,
@@ -9586,23 +9593,6 @@ mod coord_tests {
         assert!(!is_passive_role("button"));
         assert!(!is_passive_role("push button"));
         assert!(!is_passive_role("text box")); // editable display is a real target
-    }
-
-    #[test]
-    fn frame_extents_maps_left_and_top_not_right_or_bottom() {
-        // _GTK_FRAME_EXTENTS = [left, right, top, bottom]; we need (left, top).
-        assert_eq!(parse_gtk_frame_extents(&[61, 61, 55, 67]), Some((61, 55)));
-        // Asymmetric values prove we don't accidentally read right([1])/bottom([3]).
-        assert_eq!(parse_gtk_frame_extents(&[10, 20, 30, 40]), Some((10, 30)));
-        // Maximized GTK4 window: zero inset, but property present.
-        assert_eq!(parse_gtk_frame_extents(&[0, 0, 0, 0]), Some((0, 0)));
-    }
-
-    #[test]
-    fn frame_extents_absent_or_short_is_none() {
-        assert_eq!(parse_gtk_frame_extents(&[]), None);
-        assert_eq!(parse_gtk_frame_extents(&[61, 61]), None);
-        assert_eq!(parse_gtk_frame_extents(&[61, 61, 55]), None);
     }
 
     #[test]
