@@ -681,12 +681,16 @@ fn secure_local_socket(socket_path: &str) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("secure local daemon socket {socket_path}: {e}"))
 }
 
+/// Make way for the daemon socket at `socket_path` before binding it.
+/// `pid_file_path` is named when a live daemon already holds the socket.
 #[cfg(unix)]
-fn prepare_embedded_socket_path(socket_path: &str, embedded: bool) -> anyhow::Result<()> {
+fn prepare_socket_path(
+    socket_path: &str,
+    embedded: bool,
+    pid_file_path: Option<&str>,
+) -> anyhow::Result<()> {
     if !embedded {
-        // Preserve the legacy standalone stale-socket recovery behavior.
-        let _ = std::fs::remove_file(socket_path);
-        return Ok(());
+        return remove_stale_socket(socket_path, pid_file_path);
     }
     match std::fs::symlink_metadata(socket_path) {
         Ok(_) => anyhow::bail!(
@@ -694,6 +698,57 @@ fn prepare_embedded_socket_path(socket_path: &str, embedded: bool) -> anyhow::Re
         ),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
+    }
+}
+
+/// Remove the socket a crashed daemon left at `socket_path`, so this daemon
+/// can bind it. Connect first: a socket that still accepts belongs to a live
+/// daemon, and unlinking it would orphan that daemon (it keeps running, but
+/// no client can reach it again), so that is refused, naming `pid_file_path`.
+/// Only a socket that refuses the connection is removed, and only if it is
+/// still the same file, so two daemons starting together cannot remove each
+/// other's fresh socket. A path that is not a socket is never removed.
+#[cfg(unix)]
+fn remove_stale_socket(socket_path: &str, pid_file_path: Option<&str>) -> anyhow::Result<()> {
+    use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
+    let metadata = match std::fs::symlink_metadata(socket_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => anyhow::bail!("inspect daemon socket path {socket_path}: {error}"),
+    };
+    if !metadata.file_type().is_socket() {
+        anyhow::bail!(
+            "{socket_path} exists and is not a socket, so it was left alone; remove it or \
+             pass --socket <path>"
+        );
+    }
+    let identity = SocketIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    };
+    match std::os::unix::net::UnixStream::connect(socket_path) {
+        Ok(_) => {
+            let owner = match pid_file_path {
+                Some(pid_file) => match read_pid_file(pid_file) {
+                    Some(pid) => format!(" (PID {pid}, from its PID file {pid_file})"),
+                    None => format!(" (its PID file {pid_file} holds no PID)"),
+                },
+                None => String::new(),
+            };
+            anyhow::bail!(
+                "another Pincer daemon is already listening on {socket_path}{owner}. Stop it \
+                 with `pincer stop --socket {socket_path}` first, or pass --socket <path> to \
+                 start a second daemon"
+            )
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+            remove_owned_socket(socket_path, identity);
+            Ok(())
+        }
+        Err(error) => anyhow::bail!(
+            "cannot tell whether a daemon still listens on {socket_path} ({error}), so it was \
+             left alone; stop that daemon or pass --socket <path>"
+        ),
     }
 }
 
@@ -1210,7 +1265,8 @@ async fn run_serve_with_signals(
     let embedded = pincer_core::embedded_mode();
     // Embedded endpoints are host-owned. The daemon must never unlink an
     // arbitrary pre-existing path between the host's safety check and bind.
-    prepare_embedded_socket_path(socket_path, embedded)?;
+    // A standalone daemon removes only a stale socket, never a live one.
+    prepare_socket_path(socket_path, embedded, pid_file_path)?;
 
     // Bind the optional HTTP transports before the daemon socket, so a port
     // that cannot be bound fails startup with no socket or PID file left
@@ -2861,6 +2917,64 @@ mod socket_tests {
 
         assert!(socket.exists());
         drop(first);
+    }
+
+    /// A second `pincer serve` on the socket of a daemon that still listens
+    /// must leave that socket alone; unlinking it orphaned the first daemon.
+    #[test]
+    fn a_live_daemon_socket_is_never_removed() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("driver.sock");
+        let pid_file = directory.path().join("driver.pid");
+        std::fs::write(&pid_file, "4242").unwrap();
+        let live = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+
+        let result = super::prepare_socket_path(
+            socket.to_str().unwrap(),
+            false,
+            Some(pid_file.to_str().unwrap()),
+        );
+
+        let message = format!("{:#}", result.expect_err("a live socket was taken over"));
+        assert!(message.contains("already listening"), "{message}");
+        assert!(message.contains(pid_file.to_str().unwrap()), "{message}");
+        assert!(message.contains("PID 4242"), "{message}");
+        assert!(socket.exists(), "the live daemon's socket was removed");
+        std::os::unix::net::UnixStream::connect(&socket).expect("the first daemon still answers");
+        drop(live);
+    }
+
+    /// A socket nobody listens on any more (a crashed daemon) is removed, so
+    /// the new daemon can bind it.
+    #[test]
+    fn a_stale_socket_is_removed() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("driver.sock");
+        drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+        assert!(socket.exists(), "dropping a listener leaves its path");
+
+        super::prepare_socket_path(socket.to_str().unwrap(), false, None)
+            .expect("a stale socket is replaced");
+
+        assert!(!socket.exists());
+        std::os::unix::net::UnixListener::bind(&socket).expect("bind after stale removal");
+    }
+
+    /// A path that is not a socket is never deleted to make room.
+    #[test]
+    fn a_path_that_is_not_a_socket_is_kept() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("driver.sock");
+        std::fs::write(&socket, "notes").unwrap();
+
+        let message = format!(
+            "{:#}",
+            super::prepare_socket_path(socket.to_str().unwrap(), false, None)
+                .expect_err("a regular file was taken for a stale socket")
+        );
+
+        assert!(message.contains("not a socket"), "{message}");
+        assert_eq!(std::fs::read_to_string(&socket).unwrap(), "notes");
     }
 }
 
