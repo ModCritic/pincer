@@ -1,6 +1,6 @@
 # Pincer: Linux
 
-Start with `pincer doctor` in the graphical user's session. X11,
+Start with `health_report` (or `pincer doctor`) in the graphical user's session. X11,
 XWayland, and native Wayland expose different capture and input facilities;
 successful discovery does not prove either input delivery or window capture.
 Use [WORKFLOW.md](WORKFLOW.md) for exact targets and verification and
@@ -117,9 +117,9 @@ session first, and refuses with `screenshot_context_missing` otherwise, so
 entirely, so `get_window_state` and `zoom` return an image the reader never sees.
 The loop still closes for most questions, and none of this needs a vision model:
 `verify_state` proves state and returns a real `satisfied` / `unsatisfied` /
-`unknown` verdict; an out-of-band read such as
-`xprop -root _NET_ACTIVE_WINDOW` proves which window holds focus; and scanning the
-written capture for colour transitions (PIL or equivalent) proves coarse layout.
+`unknown` verdict; `list_windows` shows which window is in front (highest
+`z_index`); and, where the client reads files, scanning a saved capture for
+colour transitions proves coarse layout.
 What none of them prove is that a specific small control was activated. For that
 use an app that exposes a usable accessibility tree.
 
@@ -341,9 +341,9 @@ common headless cases. Two things must still be true:
 1. **An accessibility bus must be running** in that session, and
    **`toolkit-accessibility` must be on**: pincer advertises a screen
    reader at startup to flip it, but a session with no a11y bus at all
-   (`/usr/libexec/at-spi-bus-launcher`) can't expose a tree. `pincer
-doctor` probes `org.a11y.Bus` for real (not just "is there a bus?"),
-   and the `health_report` tool's hint says which of the two is missing.
+   (`/usr/libexec/at-spi-bus-launcher`) can't expose a tree. `health_report`
+   (or `pincer doctor`) probes `org.a11y.Bus` for real (not just "is there a
+   bus?"), and its hint says which of the two is missing.
 2. The daemon must run **as the desktop user** (so it can read that user's
    session-process environ and the `/run/user/<uid>/bus` socket). Running the
    daemon as root against a user session is the Linux analogue of the Windows
@@ -488,18 +488,18 @@ use the equivalent non-keypad key, instead of retrying the same call.
 
 If a tool call surprises you on Linux:
 
-1. `pincer doctor`: reports the display server (X11 / Wayland), the X11
-   connection, and **whether `org.a11y.Bus` actually answers on the session
-   bus** (not just "is there a bus"). The `health_report` tool adds the
-   `DBUS_SESSION_BUS_ADDRESS` and `toolkit-accessibility` hints.
+1. `health_report` (or `pincer doctor`): reports the display server (X11 /
+   Wayland), the X11 connection, and **whether `org.a11y.Bus` actually answers
+   on the session bus** (not just "is there a bus"), with a hint on
+   `DBUS_SESSION_BUS_ADDRESS` or `toolkit-accessibility`.
 2. Check `XDG_SESSION_TYPE`: X11 still has toolkit-specific delivery limits; `wayland`
    needs `PINCER_ENABLE_WAYLAND=1` for the native backend,
    else XWayland.
 3. **Empty AT-SPI tree** (`get_window_state` returns `degraded:true`): in
    order of likelihood: (a) the daemon isn't on the desktop session bus
    (headless / container / `runuser` / root-against-user-session; see
-   _AT-SPI needs the session bus_ above; doctor will say
-   `DBUS_SESSION_BUS_ADDRESS unset`); (b) the a11y bridge is off
+   _AT-SPI needs the session bus_ above; `health_report` will say
+   `DBUS_SESSION_BUS_ADDRESS is unset`); (b) the a11y bridge is off
    (`gsettings set org.gnome.desktop.interface toolkit-accessibility true`);
    (c) GTK4 / Qt6 / Chromium populate lazily: re-snapshot after an
    interaction or an AX-enable settle.

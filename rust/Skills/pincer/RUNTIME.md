@@ -13,7 +13,7 @@ pincer describe click
 
 Check the resolved executable as well as the version; an installation may have intentional wrappers or multiple products. Preserve them. The client's version alone does not identify an already-running daemon. If the service is mismatched or missing, inspect its existing owner before starting or restarting anything.
 
-Use the advertised `tools/list` contract over MCP. Tool names are `snake_case`; CLI management commands are `kebab-case`. Inspect only unfamiliar tools instead of loading every schema. Descriptions may lag implementation: capability discovery proves advertised shape, while fresh application state proves behavior.
+Over MCP, use the advertised `tools/list` contract, and `health_report` in place of `doctor`. Tool names are `snake_case`; CLI management commands are `kebab-case`. Inspect only unfamiliar tools instead of loading every schema. Descriptions may lag implementation: capability discovery proves advertised shape, while fresh application state proves behavior.
 
 | Client                                     | State ownership                                                                      |
 | ------------------------------------------ | ------------------------------------------------------------------------------------ |
@@ -118,7 +118,7 @@ grant, caller identity, or bearer credential.
 
 Keep the agent overlay visible while controlling pointer or keyboard input. Cursor-bearing and keyboard actions re-show it automatically. The overlay indicates activity, not proof that input landed.
 
-On Linux, ordinary `move_cursor({x,y})` moves only this synthetic cursor. The real-pointer tools, `move_cursor` with `scope:"desktop"` and `move_along_path` (which also brings a targeted window to front), must not be used unless the user asked for real-pointer control; inspect `describe move_cursor` and `describe move_along_path` for their target forms.
+On Linux, ordinary `move_cursor({x,y})` moves only this synthetic cursor. The real-pointer tools, `move_cursor` with `scope:"desktop"` and `move_along_path` (which also brings a targeted window to front), must not be used unless the user asked for real-pointer control; their schemas in `tools/list` give their target forms.
 
 Pixel `click` already animates the cursor. Do not precede it with `move_cursor` at the same point: that adds a second glide. Use `move_cursor` to indicate a location without clicking or seed the cursor before accessibility actions.
 

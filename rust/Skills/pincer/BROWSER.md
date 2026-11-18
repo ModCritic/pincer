@@ -441,12 +441,8 @@ browser_type
 the page requires per-character key events. Both modes insert at the current
 selection. When a field already contains text, pass `"replace":true` to select
 its complete value first. Passing an empty `text` with `replace:true` clears
-the field while preserving normal input events. Inspect the live schema when
-in doubt:
-
-```bash
-pincer describe browser_type
-```
+the field while preserving normal input events. Inspect the live schema
+(`browser_type` in `tools/list`) when in doubt.
 
 The driver revalidates the binding and ref, verifies editability and focus
 ownership, and reports requested versus delivered characters. Snapshot again

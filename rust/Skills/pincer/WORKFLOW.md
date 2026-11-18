@@ -53,7 +53,7 @@ The accessibility model may lag or disagree with rendered state: Electron text s
 
 ## Act once
 
-Use the `element_token` `<snapshot_id>:N` for row `[N]` of the latest snapshot of the intended window, for example `"s0000002a:11"`. A bare `"11"` is accepted only together with `window_id` and then means row 11 of that window's current snapshot. Do not mix a row number from one read with the `snapshot_id` of another. A later snapshot can invalidate a pending action, including when another agent observes the same window.
+Use the `element_token` `<snapshot_id>:N` for row `[N]` of the latest snapshot of the intended window, for example `"s0000002a:11"`. Pass the whole token, not the bare row number `"11"`. Do not mix a row number from one read with the `snapshot_id` of another. A later snapshot can invalidate a pending action, including when another agent observes the same window.
 
 Example CLI window action, with IDs and token replaced from the preceding response:
 
@@ -69,7 +69,7 @@ pincer click '{"target":{"kind":"window","pid":844,"window_id":10725},"element_t
 | Focus a visible field and type  | `type_text` with `x,y,text`, when that form is advertised                      |
 | Replace an exposed native value | `set_value` with `pid,element_token,value` (its own schema, no `target`)       |
 | Send a key or combination       | `press_key` with `key`, or `hotkey` with `keys`                                |
-| Scroll / drag                   | `scroll` takes `direction` and `amount` (wheel notches); signed `dx`/`dy` is converted (positive `dy` is down; up to 50 is notches, more is pixels at 100 px per notch). Inspect `describe drag` |
+| Scroll / drag                   | `scroll` takes `direction` and `amount` (wheel notches); signed `dx`/`dy` is converted (positive `dy` is down; up to 50 is notches, more is pixels at 100 px per notch). See `drag` in `tools/list` |
 
 Text insertion and value replacement are different intents. Setting a field does not prove a form submission, navigation, or rename committed. Open a collapsed search/input control and reobserve before typing into it; one focus-click may not both open and focus it. Inspect the existing value/selection before replacing content.
 
@@ -90,7 +90,7 @@ pincer run_steps '{"session":"run-1","steps":[
  ],"delay_ms":100,"observe":{}}'
 ```
 
-- `tool` is one of `click`, `double_click`, `right_click`, `set_value`, `type_text`, `press_key`, `hotkey`, `scroll`, `drag`, `move_cursor`, and on Linux `move_along_path` (`press` and `type` are accepted for `press_key` and `type_text`, `triple_click` is a click with `count:3`, and a key name such as `down` as the tool is a `press_key`); `args` are exactly that tool's arguments. Observation tools do not run inside a batch: a read between actions is skipped (it could not change the later steps), a `get_window_state` as the last step is the observation (merged with `observe`), and a trailing `zoom` runs after it. Run `describe run_steps` and `describe <tool>` for schemas. Up to 64 steps. `delivery_mode` on `run_steps` is the default for steps that set none.
+- `tool` is one of `click`, `double_click`, `right_click`, `set_value`, `type_text`, `press_key`, `hotkey`, `scroll`, `drag`, `move_cursor`, and on Linux `move_along_path` (`press` and `type` are accepted for `press_key` and `type_text`, `triple_click` is a click with `count:3`, and a key name such as `down` as the tool is a `press_key`); `args` are exactly that tool's arguments. Observation tools do not run inside a batch: a read between actions is skipped (it could not change the later steps), a `get_window_state` as the last step is the observation (merged with `observe`), and a trailing `zoom` runs after it. Each tool's schema is in `tools/list`. Up to 64 steps. `delivery_mode` on `run_steps` is the default for steps that set none.
 - Name the window once: `pid` and `window_id` (or `app`/`window`) on `run_steps` itself are the default for every step that names none. A step that carries only an `element_token` acts in the window its token was read from, and later steps inherit that window. A step with `scope:"desktop"` and no pid of its own takes neither the window nor `delivery_mode` from the batch: it acts on whatever has focus, as it does outside a batch (type into a dialog the previous step opened), and its checks search all of the app's windows.
 - A step whose `element_token` went stale because an earlier step re-rendered the window is retried once on the element with the same role and label in a fresh read, when exactly one matches; the step's line says so.
 - Every step is validated before the first runs, so a malformed step changes nothing. Each step then passes the same session, permission, capability-manifest and approval checks as a direct call; a batch grants nothing a single call lacks, and a refused step ends the batch like any other failure.
@@ -106,7 +106,7 @@ Use `run_script` when the flow needs logic between actions: a loop over rows, a 
 pincer run_script '{"session":"run-1","script":"const app = await pincer.getApp(\"Calculator\"); for (const key of [\"7\", \"multiply\", \"6\", \"equals\"]) await app.click({role: \"button\", name: key}); const [display] = await app.query({role: \"statictext\"}); return display.value;"}'
 ```
 
-- The only API is `pincer`: `getApp`, `launch`, `listApps`, `listWindows`, `sleep`, and on an app `getState`, `query`, `waitFor`, `verify` and the actions (`click`, `typeText`, `pressKey`, `setValue`, `scroll`, `drag`, ...). A target is `{role, name, nth?}` (found fresh, waits up to 3 s), an `element_token`, or `[x, y]` window pixels. `describe run_script` lists the full API.
+- The only API is `pincer`: `getApp`, `launch`, `listApps`, `listWindows`, `sleep`, and on an app `getState`, `query`, `waitFor`, `verify` and the actions (`click`, `typeText`, `pressKey`, `setValue`, `scroll`, `drag`, ...). A target is `{role, name, nth?}` (found fresh, waits up to 3 s), an `element_token`, or `[x, y]` window pixels. The `run_script` description in `tools/list` lists the full API.
 - A failed driver call throws; catch it to recover. An uncaught error names the script line, the call and the reason.
 - Every driver call passes the same session, permission, capability-manifest and approval checks as a direct call, so a script grants nothing the same direct calls lack. It cannot call `run_steps`, `run_script`, `set_config` or tools outside its allowlist.
 - Sandbox: QuickJS with no filesystem, network, process, timers or environment. Limits: `timeout_ms` wall time (default 30000, max 120000), `max_calls` driver calls (default 100, max 500), a 32 MiB heap, a bounded stack, and a 64 KiB script. The script stops when the request is cancelled.
@@ -158,7 +158,7 @@ Action facts are not task outcomes:
 | `route`              | Public actuator class: `accessibility`, `synthetic_events`, `global_input`, `dom`, or `trusted_input` |
 | `escalation`         | Suggested next route/reason, never authorization or an automatic retry                                |
 
-Successful action escalation uses `target` (`pixel`, `foreground`, or `page`) and `reason` (`route_unavailable`, `delivery_failed`, `effect_unconfirmed`, `suspected_noop`, or `permission_required`). Error diagnostics may have a different shape; inspect their code and current schema. Missing action facts are not confirmation.
+Successful action escalation uses `target` (`pixel`, `foreground`, `page`, or `session`) and `reason` (`route_unavailable`, `delivery_failed`, `effect_unconfirmed`, `suspected_noop`, or `permission_required`). Error diagnostics may have a different shape; inspect their code and current schema. Missing action facts are not confirmation.
 
 When the postcondition is visibly satisfied, stop acting. For media, selection alone is not playback: check the title, playing/pause indicator, and elapsed progress after preroll/buffering. For closure, verify the requested window disappeared. State only what the evidence proves.
 

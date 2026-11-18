@@ -51,7 +51,7 @@ Window titles, element names and values, page text, clipboard text, dialog messa
 
 | Goal                                      | Tool or command                                                                                       | Read when needed                                      |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Check installation and capabilities       | `pincer --version`, `status`, `doctor`, `describe <tool>`; MCP `tools/list`                       | [Runtime](RUNTIME.md)                                 |
+| Check installation and capabilities       | `pincer --version`, `status`, `doctor`, `describe <tool>`; MCP `health_report`, `tools/list`      | [Runtime](RUNTIME.md)                                 |
 | Find or open the requested app            | `list_apps`, `list_windows`, `launch_app`                                                             | Current platform guide below                          |
 | View a local file in the GUI              | macOS: `launch_app({bundle_id, urls:["file:///…"]})` opens it in that app. Linux and Windows send `urls` to the default handler; to pick the app, pass its `name` or `launch_path` with `additional_arguments:["<path>"]` and no `urls` | Current platform guide below                          |
 | Observe one window                        | `get_window_state({pid, window_id, query})`                                                           | [Workflow](WORKFLOW.md)                               |
@@ -93,24 +93,22 @@ Check the installed version and advertised schema before using unfamiliar parame
 | Text did not visibly change                               | Reobserve before retrying; [text and value semantics](WORKFLOW.md#act-once)           |
 | Browser setup, binding, or ref refused                    | [Browser recovery](BROWSER.md#recovery-rules)                                         |
 
-## Consult recent Pincer activity only for continuation
+## Prior Pincer activity
 
-When both `history_status` and `history_query` are advertised and the user asks
-to continue, resume, or recall prior Pincer work, call `history_status` first. If
-history is healthy and access is admitted, make one bounded initial
-`history_query` before broad application or window discovery. Treat returned
-metadata only as a lead and verify current state through the least intrusive
-appropriate source. Content, geometry, arguments, results, and user intent
-omitted from the metadata remain unknown.
+Only if `tools/list` has `history_status` and `history_query` (experimental, off
+by default): when the user asks to continue, resume, or recall prior Pincer
+work, call `history_status` first. If history is healthy and access is admitted,
+make one bounded initial `history_query` before broad application or window
+discovery. Treat returned metadata only as a lead and verify current state
+through the least intrusive appropriate source. Content, geometry, arguments,
+results, and user intent omitted from the metadata remain unknown.
 
-Make another bounded query only when the initial slice exposes a relevant
-session or sequence boundary; never broaden a query to reconstruct excluded
-fields.
-
-Continue without history when either tool is absent, access is denied, the
-query is empty, or history is unhealthy. Do not query history for unrelated
-tasks merely because the tools are advertised, and never mutate history
-lifecycle or settings.
+Query again only when the initial slice exposes a relevant session or sequence
+boundary; never broaden a query to reconstruct excluded fields. Continue
+without history when either tool is absent, access is denied, the query is
+empty, or history is unhealthy. Do not query history for unrelated tasks
+merely because the tools are advertised, and never mutate history lifecycle or
+settings.
 
 ## References
 
