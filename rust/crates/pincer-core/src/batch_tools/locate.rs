@@ -455,6 +455,17 @@ impl Miss {
         }
     }
 
+    /// The request was cancelled while this lookup waited.
+    fn cancelled() -> Self {
+        Self::new(
+            crate::request_control::CANCELLED_CODE,
+            format!(
+                "stopped waiting: {}",
+                crate::request_control::describe_cancel()
+            ),
+        )
+    }
+
     /// Whether polling again can change the answer. A refused or failed
     /// read, or an ambiguous match, will not fix itself, and retrying a
     /// refused read would only repeat the refusal.
@@ -876,6 +887,9 @@ impl<'a> Locator<'a> {
                         }
                         return Err(miss);
                     }
+                    if crate::request_control::is_cancelled() {
+                        return Err(Miss::cancelled());
+                    }
                     tokio::time::sleep(POLL_INTERVAL).await;
                 }
             }
@@ -1017,6 +1031,9 @@ impl<'a> Locator<'a> {
                             started.elapsed().as_millis()
                         );
                         return Err(miss);
+                    }
+                    if crate::request_control::is_cancelled() {
+                        return Err(Miss::cancelled());
                     }
                     tokio::time::sleep(POLL_INTERVAL).await;
                 }

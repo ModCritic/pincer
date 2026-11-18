@@ -470,12 +470,29 @@ impl Tool for ReplayTrajectoryTool {
         let mut skipped_turns: Vec<String> = Vec::new();
         let mut refused_turns: Vec<(String, String)> = Vec::new();
         let mut refound = 0u32;
+        // Why the replay stopped before a turn, which turn, and how many
+        // turn folders did not run.
+        let mut stopped: Option<(String, String, usize)> = None;
+        let mut cancelled = false;
+        let planned = turn_dirs.len();
 
-        for turn_dir in &turn_dirs {
+        for (position, turn_dir) in turn_dirs.iter().enumerate() {
             let turn_name = turn_dir
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "?".to_owned());
+            if crate::request_control::is_cancelled() {
+                cancelled = true;
+                stopped = Some((
+                    turn_name,
+                    crate::request_control::describe_cancel(),
+                    turn_dirs.len() - position,
+                ));
+                break;
+            }
+            crate::request_control::report_progress(position as f64, Some(planned as f64), || {
+                format!("turn {} of {planned}: {}", position + 1, shown_name(&turn_name))
+            });
 
             let action_path = turn_dir.join("action.json");
             let (tool_name, mut tool_args, recorded_error, element) = match parse_action_json(&action_path) {
@@ -588,8 +605,16 @@ impl Tool for ReplayTrajectoryTool {
             }
 
             if delay_ms > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(delay_ms)) => {}
+                    _ = crate::request_control::cancelled() => {}
+                }
             }
+        }
+        if stopped.is_none() {
+            crate::request_control::report_progress(planned as f64, Some(planned as f64), || {
+                format!("{planned} of {planned} turns")
+            });
         }
 
         let dir_name = dir
@@ -617,6 +642,12 @@ impl Tool for ReplayTrajectoryTool {
             summary_text.push_str(&format!(
                 "\n{refound} turn(s) acted on their recorded element found again by its role and \
                  label, not by the recorded element_token."
+            ));
+        }
+        if let Some((turn, reason, not_run)) = &stopped {
+            summary_text.push_str(&format!(
+                "\nStopped before {}: {reason}; {not_run} turn folder(s) did not run.",
+                shown_name(turn)
             ));
         }
         if skipped > 0 {
@@ -651,10 +682,22 @@ impl Tool for ReplayTrajectoryTool {
             "refused": refused,
             "stop_on_error": stop_on_error,
             "refound": refound,
+            "stopped_early": stopped.is_some(),
             "turns": turns_json,
         });
         if let Some((turn, tool, error)) = first_failure {
             structured["first_failure"] = json!({ "turn": turn, "tool": tool, "error": error });
+        }
+        if let Some((turn, reason, not_run)) = stopped {
+            structured["stop_reason"] = json!(reason);
+            structured["stopped_before"] = json!(turn);
+            structured["not_run"] = json!(not_run);
+        }
+        if cancelled {
+            // The turns before the cancel took effect; say so as an error
+            // with a stable code, like the other long tools.
+            structured["code"] = json!(crate::request_control::CANCELLED_CODE);
+            return ToolResult::error(summary_text).with_structured(structured);
         }
 
         ToolResult::text(summary_text).with_structured(structured)
@@ -1257,5 +1300,85 @@ mod tests {
         assert_ne!(again.is_error, Some(true));
         assert_eq!(again.structured_content.as_ref().unwrap()["stopped"], false);
         assert!(format!("{:?}", again.content).contains("nothing to stop"));
+    }
+
+    /// A press_key fake that runs `effect` and answers with `text`.
+    struct Scripted {
+        def: ToolDef,
+        text: String,
+        effect: fn(),
+    }
+
+    #[async_trait]
+    impl Tool for Scripted {
+        fn def(&self) -> &ToolDef {
+            &self.def
+        }
+
+        async fn invoke(&self, _args: Value) -> ToolResult {
+            (self.effect)();
+            ToolResult::text(self.text.clone())
+        }
+    }
+
+    fn scripted_registry(text: String, effect: fn()) -> Arc<ToolRegistry> {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(Scripted {
+            def: ToolDef {
+                name: "press_key".into(),
+                description: "fake".into(),
+                input_schema: json!({"type": "object"}),
+                read_only: false,
+                destructive: false,
+                idempotent: false,
+                open_world: false,
+            },
+            text,
+            effect,
+        }));
+        registry.register_recording_tools();
+        let registry = Arc::new(registry);
+        registry.init_self_weak();
+        registry
+    }
+
+    /// A cancelled request stops the replay before its next turn, with a
+    /// cancelled result; progress counts turns.
+    #[tokio::test]
+    async fn a_cancelled_request_stops_the_replay() {
+        use crate::request_control::{CancelToken, Progress, RequestControl};
+        // The first turn's tool cancels the request it runs in.
+        let registry = scripted_registry("pressed".into(), || {
+            crate::request_control::current_cancel_token()
+                .expect("the replay runs in a request")
+                .cancel("test cancel");
+        });
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("trajectory");
+        write_trajectory(&dir, &vec![press_key_turn(); 3]);
+        let progress = Arc::new(Mutex::new(Vec::new()));
+        let control = RequestControl::new(CancelToken::new()).with_progress({
+            let progress = progress.clone();
+            Arc::new(move |update: Progress| progress.lock().unwrap().push(update.message))
+        });
+        let started = std::time::Instant::now();
+        let result = control
+            .scope(registry.invoke("replay_trajectory", json!({"dir": dir, "delay_ms": 5000})))
+            .await;
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "the delay held the cancel up"
+        );
+        assert_eq!(result.is_error, Some(true), "{}", text(&result));
+        let structured = result.structured_content.clone().unwrap();
+        assert_eq!(structured["code"], "cancelled");
+        assert_eq!(structured["attempted"], 1);
+        assert_eq!(structured["not_run"], 2);
+        assert!(
+            text(&result).contains("Stopped before turn-00002: cancelled (test cancel)"),
+            "{}",
+            text(&result)
+        );
+        assert_eq!(*progress.lock().unwrap(), vec!["turn 1 of 3: turn-00001"]);
     }
 }

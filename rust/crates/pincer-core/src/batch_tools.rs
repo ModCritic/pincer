@@ -395,6 +395,7 @@ enum Phase {
     Action,
     Expect,
     Budget,
+    Cancelled,
 }
 
 impl Phase {
@@ -405,6 +406,7 @@ impl Phase {
             Phase::Action => "action",
             Phase::Expect => "expect",
             Phase::Budget => "time_budget",
+            Phase::Cancelled => "cancelled",
         }
     }
 }
@@ -666,11 +668,33 @@ impl Plan {
         // even without `observe`, so the caller can act without another read.
         let mut recovery: Option<Recovery> = None;
 
+        let mut cancelled = false;
         for (index, step) in self.steps.into_iter().enumerate() {
             if index > 0 && !self.delay.is_zero() {
-                tokio::time::sleep(self.delay).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(self.delay) => {}
+                    _ = crate::request_control::cancelled() => {}
+                }
             }
-            let outcome = if started.elapsed() >= Duration::from_millis(MAX_BATCH_MS) {
+            crate::request_control::report_progress(index as f64, Some(total as f64), || {
+                format!("step {} of {total}: {}", index + 1, step.label())
+            });
+            let outcome = if crate::request_control::is_cancelled() {
+                // A cancelled request runs no further step; the step under
+                // way when it came has finished.
+                cancelled = true;
+                failure(
+                    index,
+                    step.label(),
+                    Phase::Cancelled,
+                    crate::request_control::CANCELLED_CODE,
+                    format!(
+                        "the batch was {} before this step",
+                        crate::request_control::describe_cancel()
+                    ),
+                    json!({}),
+                )
+            } else if started.elapsed() >= Duration::from_millis(MAX_BATCH_MS) {
                 failure(
                     index,
                     step.label(),
@@ -709,6 +733,11 @@ impl Plan {
         }
 
         let executed = reports.len();
+        if failed_step.is_none() {
+            crate::request_control::report_progress(total as f64, Some(total as f64), || {
+                format!("{total} of {total} steps ok")
+            });
+        }
         let mut structured = json!({
             "ok": failed_step.is_none(),
             "total": total,
@@ -716,8 +745,17 @@ impl Plan {
             "failed_step": failed_step,
             "steps": reports,
         });
+        if cancelled {
+            structured["code"] = json!(crate::request_control::CANCELLED_CODE);
+        }
         let header = match failed_step {
             None => format!("run_steps: {total}/{total} steps ok"),
+            Some(index) if cancelled => format!(
+                "run_steps: {} before step {} of {total}; {index} step(s) ran, {} not run",
+                crate::request_control::describe_cancel(),
+                index + 1,
+                total - index
+            ),
             Some(index) => format!(
                 "run_steps: step {} of {total} (steps[{index}]) failed; {index} step(s) ran \
                  before it, {} not run",
@@ -730,7 +768,13 @@ impl Plan {
         // One observation at the end, also after a failure so the caller can
         // see where the app was left.
         let mut observation_content = Vec::new();
-        let observe = match (self.observe, recovery) {
+        // A cancelled batch ends without its reads.
+        let (observe, recovery, tail_reads) = if cancelled {
+            (None, None, Vec::new())
+        } else {
+            (self.observe, recovery, self.tail_reads)
+        };
+        let observe = match (observe, recovery) {
             (Some(mut args), Some(recovery)) => {
                 // The window to recover in replaces the step's own window.
                 lines.push(format!("recovery read: {}", recovery.why));
@@ -817,7 +861,7 @@ impl Plan {
 
         let mut tail_content = Vec::new();
         let mut tail_reports = Vec::new();
-        for (tool, mut args) in self.tail_reads {
+        for (tool, mut args) in tail_reads {
             fill_observed_window(&mut args, last_window.as_ref());
             let result = registry.invoke(tool, args).await;
             let ok = result.is_error != Some(true);

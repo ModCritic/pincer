@@ -360,15 +360,47 @@ async fn run(registry: &ToolRegistry, request: Request) -> ToolResult {
 
     let mut api = Api::new(registry, request.session.clone(), deadline);
     let mut log: Vec<CallRecord> = Vec::new();
-    let hard_stop = deadline + SHUTDOWN_GRACE;
+    let mut hard_stop = deadline + SHUTDOWN_GRACE;
+    // A cancelled request sets the engine's cancel flag: its interrupt
+    // handler stops the script, and a driver call that only reads or waits
+    // is dropped. An action already under way finishes first.
+    let request_cancelled = crate::request_control::cancelled();
+    tokio::pin!(request_cancelled);
+    let mut cancel_seen = false;
+    let mut ops_done = 0u32;
     let outcome = loop {
         tokio::select! {
             Some(call) = call_rx.recv() => {
+                if crate::request_control::is_cancelled() {
+                    cancel.store(true, Ordering::SeqCst);
+                    let _ = call.reply.send(Err(HostError::new("the script was cancelled", "cancelled")));
+                    continue;
+                }
                 let call_started = Instant::now();
-                let result = match tokio::time::timeout_at(deadline.into(), api.dispatch(&call.op, call.args)).await {
+                let dispatch = tokio::time::timeout_at(deadline.into(), api.dispatch(&call.op, call.args));
+                let dispatched = if interruptible(&call.op) {
+                    tokio::select! {
+                        dispatched = dispatch => dispatched,
+                        _ = crate::request_control::cancelled() => {
+                            cancel.store(true, Ordering::SeqCst);
+                            Ok(Err(HostError::new("the script was cancelled", "cancelled")))
+                        }
+                    }
+                } else {
+                    dispatch.await
+                };
+                let result = match dispatched {
                     Ok(result) => result,
                     Err(_) => Err(HostError::new("the script's wall-time limit was reached", "timeout")),
                 };
+                ops_done += 1;
+                crate::request_control::report_progress(f64::from(ops_done), None, || {
+                    if call.number > 0 {
+                        format!("driver call {}: {}", call.number, clip(&one_line(&call.op), 60))
+                    } else {
+                        clip(&one_line(&call.op), 60)
+                    }
+                });
                 if call.number > 0 {
                     log.push(CallRecord {
                         number: call.number,
@@ -385,11 +417,47 @@ async fn run(registry: &ToolRegistry, request: Request) -> ToolResult {
                 let _ = call.reply.send(result);
             }
             outcome = &mut done_rx => break outcome.ok(),
+            _ = &mut request_cancelled, if !cancel_seen => {
+                // Keep answering the engine's calls (with errors) until it
+                // stops, but not for longer than the grace period.
+                cancel_seen = true;
+                cancel.store(true, Ordering::SeqCst);
+                hard_stop = hard_stop.min(Instant::now() + SHUTDOWN_GRACE);
+            }
             _ = tokio::time::sleep_until(hard_stop.into()) => {
                 cancel.store(true, Ordering::SeqCst);
                 break tokio::time::timeout(SHUTDOWN_GRACE, &mut done_rx).await.ok().and_then(Result::ok);
             }
         }
+    };
+    let outcome = if crate::request_control::is_cancelled() {
+        // Name why the request was cancelled.
+        let reason = format!("the script was {}", crate::request_control::describe_cancel());
+        Some(match outcome {
+            Some(mut outcome) => {
+                if let Err(failure) = &mut outcome.result {
+                    if failure.kind == FailureKind::Cancelled {
+                        failure.message = reason;
+                    }
+                }
+                outcome
+            }
+            None => engine::Outcome {
+                result: Err(engine::Failure {
+                    kind: FailureKind::Cancelled,
+                    message: format!("{reason}; its engine did not stop and was abandoned"),
+                    line: None,
+                    op: None,
+                    code: None,
+                    call: None,
+                }),
+                console: Vec::new(),
+                console_truncated: false,
+                calls: log.len() as u32,
+            },
+        })
+    } else {
+        outcome
     };
     render(
         outcome,
@@ -398,6 +466,12 @@ async fn run(registry: &ToolRegistry, request: Request) -> ToolResult {
         started.elapsed(),
         request.max_calls,
     )
+}
+
+/// Whether a cancelled request may drop `op` mid-way: everything but the
+/// actions and launch_app, which only read or wait.
+fn interruptible(op: &str) -> bool {
+    !BATCHABLE_TOOLS.contains(&op) && op != "launch_app"
 }
 
 /// Executes the script's operations through the registry.
@@ -807,6 +881,9 @@ fn render(
         }
         Err(failure) => {
             structured["ok"] = json!(false);
+            if failure.kind == FailureKind::Cancelled {
+                structured["code"] = json!(crate::request_control::CANCELLED_CODE);
+            }
             // A failed driver call the script did not catch: say which call.
             let failed_call = failure
                 .call

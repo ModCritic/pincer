@@ -424,6 +424,61 @@ async fn dropping_the_request_cancels_the_script() {
     );
 }
 
+/// A cancelled request (MCP notifications/cancelled, stdin EOF) stops a
+/// script that is sleeping, with a cancelled result naming the reason, and
+/// each driver op reports progress.
+#[tokio::test]
+async fn a_cancelled_request_stops_the_script_with_a_cancelled_result() {
+    use crate::request_control::{CancelToken, Progress, RequestControl};
+    let harness = Harness::new();
+    let token = CancelToken::new();
+    let progress = Arc::new(Mutex::new(Vec::new()));
+    let control = RequestControl::new(token.clone()).with_progress({
+        let progress = progress.clone();
+        Arc::new(move |update: Progress| progress.lock().unwrap().push(update.message))
+    });
+    let canceller = tokio::spawn({
+        let token = token.clone();
+        async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            token.cancel("the client cancelled the request");
+        }
+    });
+    let started = Instant::now();
+    let result = control
+        .scope(harness.run_with(json!({
+            "script": "await pincer.call('list_apps', {}); await pincer.sleep(60000); \
+                       await pincer.call('press_key', {pid: 42, key: 'a'}); return 'late';",
+            "timeout_ms": 90000,
+        })))
+        .await;
+    canceller.await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(result.is_error, Some(true));
+    let structured = structured(&result);
+    assert_eq!(structured["code"], "cancelled", "{}", text(&result));
+    assert_eq!(structured["error"]["kind"], "cancelled");
+    assert!(
+        text(&result).contains(
+            "ERROR (cancelled): the script was cancelled (the client cancelled the request)"
+        ),
+        "{}",
+        text(&result)
+    );
+    assert!(
+        harness.calls("press_key").is_empty(),
+        "nothing ran after the cancel"
+    );
+    assert_eq!(
+        progress.lock().unwrap().first().map(String::as_str),
+        Some("driver call 1: list_apps")
+    );
+}
+
 #[tokio::test]
 async fn bad_requests_are_rejected_before_running() {
     let harness = Harness::new();

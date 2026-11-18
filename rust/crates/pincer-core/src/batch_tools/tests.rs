@@ -192,6 +192,64 @@ async fn runs_steps_in_order_and_reports_each() {
     assert_eq!(harness.hits("get_window_state"), 0, "no observe, no read");
 }
 
+/// A cancelled request runs no further step and skips the end
+/// observation; the delay between steps does not hold the cancel up.
+#[tokio::test]
+async fn a_cancelled_request_runs_no_further_step() {
+    use crate::request_control::{CancelToken, Progress, RequestControl};
+    let harness = Harness::new();
+    let token = CancelToken::new();
+    let progress = Arc::new(Mutex::new(Vec::new()));
+    let control = RequestControl::new(token.clone()).with_progress({
+        let progress = progress.clone();
+        Arc::new(move |update: Progress| progress.lock().unwrap().push(update.message))
+    });
+    let canceller = tokio::spawn({
+        let token = token.clone();
+        async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            token.cancel("the MCP client closed stdin");
+        }
+    });
+    let started = std::time::Instant::now();
+    let result = control
+        .scope(harness.run(json!({
+            "steps": [
+                {"tool": "press_key", "args": {"pid": 42, "key": "a"}},
+                {"tool": "press_key", "args": {"pid": 42, "key": "b"}},
+                {"tool": "press_key", "args": {"pid": 42, "key": "c"}},
+            ],
+            "delay_ms": 2000,
+            "observe": {"pid": 42, "window_id": 7},
+        })))
+        .await;
+    canceller.await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_millis(1500),
+        "the delay held the cancel up: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(harness.hits("press_key"), 1, "{}", text(&result));
+    assert_eq!(harness.hits("get_window_state"), 0, "no end observation");
+    let structured = result.structured_content.clone().unwrap();
+    assert_eq!(structured["code"], "cancelled");
+    assert_eq!(structured["failed_step"], 1);
+    assert_eq!(structured["steps"][1]["phase"], "cancelled");
+    assert!(
+        text(&result).starts_with(
+            "run_steps: cancelled (the MCP client closed stdin) before step 2 of 3; \
+             1 step(s) ran, 2 not run"
+        ),
+        "{}",
+        text(&result)
+    );
+    assert_eq!(
+        progress.lock().unwrap().first().map(String::as_str),
+        Some("step 1 of 3: press_key")
+    );
+}
+
 #[tokio::test]
 async fn stops_at_the_first_failure_and_still_observes() {
     let harness = Harness::new();

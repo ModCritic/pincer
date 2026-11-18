@@ -729,7 +729,13 @@ pub async fn run(request: SeriesRequest, source: Arc<dyn FrameSource>) -> ToolRe
         let now = tokio::time::Instant::now();
         let late = index > 0 && offset > request.offsets_ms[index - 1] && now > due;
         if now < due {
-            tokio::time::sleep_until(due).await;
+            tokio::select! {
+                _ = tokio::time::sleep_until(due) => {}
+                _ = crate::request_control::cancelled() => {}
+            }
+        }
+        if crate::request_control::is_cancelled() {
+            return cancelled_result(&request, source.as_ref(), &records, index);
         }
         let record = FrameRecord {
             index,
@@ -797,6 +803,9 @@ pub async fn run(request: SeriesRequest, source: Arc<dyn FrameSource>) -> ToolRe
             previous = Some(image);
         }
         records.push(outcome.record);
+        crate::request_control::report_progress((index + 1) as f64, Some(total as f64), || {
+            format!("frame {} of {total}", index + 1)
+        });
         if let Some(bytes) = outcome.inline {
             inline.push((index, bytes));
             if inline.len() > request.max_inline_images {
@@ -942,6 +951,31 @@ fn changed_frames_hint(request: &SeriesRequest, records: &[FrameRecord]) -> Opti
              \"changed\" keeps only the frames that differ."
         )
     })
+}
+
+/// The request was cancelled before frame `index` was taken: an error
+/// result with `code: "cancelled"` and the frames taken before it. Files
+/// already written stay; inline images are dropped.
+fn cancelled_result(
+    request: &SeriesRequest,
+    source: &dyn FrameSource,
+    records: &[FrameRecord],
+    index: usize,
+) -> ToolResult {
+    let reason = crate::request_control::describe_cancel();
+    let mut lines = vec![format!(
+        "capture_series: {reason} before frame {} of {}",
+        index + 1,
+        request.offsets_ms.len()
+    )];
+    if !records.is_empty() {
+        lines.push(summary_header(request, source, records));
+        lines.extend(records.iter().map(FrameRecord::line));
+    }
+    let stop_reason = format!("{reason} before frame {}", index + 1);
+    let mut value = structured(request, source, records, Some(&stop_reason));
+    value["code"] = json!(crate::request_control::CANCELLED_CODE);
+    ToolResult::error(lines.join("\n")).with_structured(value)
 }
 
 fn failure(
@@ -1817,5 +1851,46 @@ mod tests {
         assert_eq!(structured["code"], "capture_failed");
         assert_eq!(structured["failed_frame"], 2);
         assert_eq!(structured["frames"].as_array().unwrap().len(), 1);
+    }
+
+    /// A cancelled request stops the series before its next frame and says
+    /// so, with the frames taken before it; progress counts frames.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_cancelled_request_stops_before_the_next_frame() {
+        use crate::request_control::{CancelToken, Progress, RequestControl};
+        let token = CancelToken::new();
+        let progress = Arc::new(Mutex::new(Vec::new()));
+        let control = RequestControl::new(token.clone()).with_progress({
+            let progress = progress.clone();
+            let token = token.clone();
+            Arc::new(move |update: Progress| {
+                progress.lock().unwrap().push(update.progress);
+                if update.progress == 2.0 {
+                    token.cancel("test cancel");
+                }
+            })
+        });
+        let source = FakeSource::new(vec![solid(1); 4], Duration::ZERO);
+        // Five minutes before the third frame: only a cancel ends this soon.
+        let request =
+            SeriesRequest::parse(&json!({"offsets_ms": [0, 10, 300_000, 300_010]})).unwrap();
+        let started = std::time::Instant::now();
+        let result = control.scope(run(request, source)).await;
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the wait was not cut short"
+        );
+        assert_eq!(result.is_error, Some(true));
+        let structured = structured_of(&result);
+        assert_eq!(structured["code"], "cancelled", "{structured}");
+        assert_eq!(structured["frame_count"], 2, "{structured}");
+        assert_eq!(structured["stopped_early"], true);
+        assert!(
+            text_of(&result)
+                .starts_with("capture_series: cancelled (test cancel) before frame 3 of 4"),
+            "{}",
+            text_of(&result)
+        );
+        assert_eq!(*progress.lock().unwrap(), vec![1.0, 2.0]);
     }
 }
