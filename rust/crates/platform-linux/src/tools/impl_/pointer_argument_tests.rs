@@ -226,3 +226,29 @@ fn an_accessible_action_that_left_its_menu_open_says_so() {
     assert_eq!(v["effect"], "unverifiable");
     assert_eq!(v["popup_closed"], false);
 }
+
+/// Desktop-frame points on native Wayland map through the window's Wayland
+/// geometry (the source `wayland::window_local_to_output` maps back with),
+/// never through X11, which does not know a native window id. No usable
+/// geometry refuses the mapping.
+#[test]
+fn desktop_points_on_native_wayland_use_the_wayland_geometry() {
+    let mut asked = None;
+    let local = desktop_to_window_local_in(true, 7, (500.0, 300.0), |xid| {
+        asked = Some(xid);
+        Some((100, 50, 800, 600))
+    })
+    .expect("mapped through the Wayland geometry");
+    assert_eq!(local, (400.0, 250.0));
+    assert_eq!(asked, Some(7));
+    for missing in [None, Some((100, 50, 0, 600))] {
+        let error = desktop_to_window_local_in(true, 7, (500.0, 300.0), |_| missing)
+            .expect_err("no usable geometry");
+        assert!(
+            error
+                .to_string()
+                .contains("No Wayland geometry for window 7"),
+            "{error}"
+        );
+    }
+}

@@ -4184,7 +4184,34 @@ fn desktop_frame_requested(args: &Value) -> bool {
 /// Convert desktop (screen) coordinates to `xid`'s window-local frame so the
 /// rest of the pointer pipeline (which is window-local by contract) is reused.
 fn desktop_to_window_local(xid: u64, x: f64, y: f64) -> anyhow::Result<(f64, f64)> {
-    let (ox, oy) = window_local_to_screen(xid, 0.0, 0.0)?;
+    desktop_to_window_local_in(
+        crate::wayland::wayland_input_enabled(),
+        xid,
+        (x, y),
+        crate::wayland::window_geometry,
+    )
+}
+
+/// [`desktop_to_window_local`] with the backend and the Wayland geometry
+/// source passed in. A native Wayland window id is no X11 window: its
+/// origin comes from the geometry `wayland::window_local_to_output` maps the
+/// point back to the output with.
+fn desktop_to_window_local_in(
+    wayland: bool,
+    xid: u64,
+    (x, y): (f64, f64),
+    wayland_geometry: impl FnOnce(u64) -> Option<(i32, i32, u32, u32)>,
+) -> anyhow::Result<(f64, f64)> {
+    let (ox, oy) = if wayland {
+        match wayland_geometry(xid) {
+            Some((wx, wy, width, height)) if width > 0 && height > 0 => {
+                (f64::from(wx), f64::from(wy))
+            }
+            _ => anyhow::bail!("No Wayland geometry for window {xid}"),
+        }
+    } else {
+        window_local_to_screen(xid, 0.0, 0.0)?
+    };
     Ok((x - ox, y - oy))
 }
 
