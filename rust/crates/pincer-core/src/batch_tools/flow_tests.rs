@@ -23,6 +23,9 @@ struct Ui {
     /// Reads left before the "Finish" button appears on screen 2.
     finish_delay_reads: u32,
     snapshot: u32,
+    /// Reads that published a snapshot (every read but an observation-only
+    /// one).
+    publishes: u32,
     /// Element labels of the latest read, by element index.
     last_labels: Vec<(String, String)>,
     /// The window of each current snapshot, as a platform snapshot store
@@ -109,32 +112,42 @@ impl Tool for Fake {
             })),
             "get_window_state" => {
                 let window_id = args["window_id"].as_u64().unwrap_or(7);
-                ui.snapshot += 1;
+                // As the platforms do, an observation-only read publishes no
+                // snapshot: no tokens, and the current ones stay valid.
+                let observation = args["_observation_only"] == json!(true);
+                if !observation {
+                    ui.snapshot += 1;
+                    ui.publishes += 1;
+                }
                 let snapshot = ui.snapshot;
-                ui.snapshot_windows.retain(|(_, window)| *window != window_id);
-                ui.snapshot_windows
-                    .push((format!("s{snapshot:08x}"), window_id));
+                if !observation {
+                    ui.snapshot_windows.retain(|(_, window)| *window != window_id);
+                    ui.snapshot_windows
+                        .push((format!("s{snapshot:08x}"), window_id));
+                    ui.last_labels.clear();
+                }
                 let rows = ui.elements(window_id);
                 let mut markdown = String::from("- [0] AXWindow \"Demo\"\n");
                 let mut elements = Vec::new();
-                ui.last_labels.clear();
                 for (offset, (role, label, value)) in rows.iter().enumerate() {
                     let index = offset + 1;
                     markdown.push_str(&format!("  - [{index}] {role} \"{label}\"\n"));
                     let mut element = json!({
                         "element_index": index,
-                        "element_token": format!("s{snapshot:08x}:{index}"),
                         "role": role,
                         "depth": 1,
                         "label": label,
                         "frame": {"x": 0, "y": 0, "w": 10, "h": 10},
                     });
+                    if !observation {
+                        element["element_token"] = json!(format!("s{snapshot:08x}:{index}"));
+                        ui.last_labels
+                            .push((format!("s{snapshot:08x}:{index}"), label.clone()));
+                    }
                     if let Some(value) = value.as_ref().filter(|value| !value.is_empty()) {
                         element["value"] = json!(value);
                     }
                     elements.push(element);
-                    ui.last_labels
-                        .push((format!("s{snapshot:08x}:{index}"), label.clone()));
                 }
                 if ui.screen == 1 && window_id == 7 {
                     markdown.push_str("  - AXStaticText \"Step 2 of 2\"\n");
@@ -142,14 +155,17 @@ impl Tool for Fake {
                 if window_id == 7 && !ui.page.is_empty() {
                     let area = rows.len() + 1;
                     markdown.push_str(&format!("  - [{area}] AXWebArea \"Inbox\"\n"));
-                    elements.push(json!({
+                    let mut web_area = json!({
                         "element_index": area,
-                        "element_token": format!("s{snapshot:08x}:{area}"),
                         "role": "AXWebArea",
                         "depth": 1,
                         "label": "Inbox",
                         "frame": {"x": 0, "y": 0, "w": 10, "h": 10},
-                    }));
+                    });
+                    if !observation {
+                        web_area["element_token"] = json!(format!("s{snapshot:08x}:{area}"));
+                    }
+                    elements.push(web_area);
                     let page = ui.page.clone();
                     let mut index = area;
                     for (role, label) in page {
@@ -159,27 +175,34 @@ impl Tool for Fake {
                         }
                         index += 1;
                         markdown.push_str(&format!("    - [{index}] {role} \"{label}\"\n"));
-                        elements.push(json!({
+                        let mut element = json!({
                             "element_index": index,
-                            "element_token": format!("s{snapshot:08x}:{index}"),
                             "role": role,
                             "depth": 2,
                             "label": label,
                             "in_web_content": true,
                             "parent_index": area,
                             "frame": {"x": 0, "y": 0, "w": 10, "h": 10},
-                        }));
-                        ui.last_labels
-                            .push((format!("s{snapshot:08x}:{index}"), label.clone()));
+                        });
+                        if !observation {
+                            element["element_token"] =
+                                json!(format!("s{snapshot:08x}:{index}"));
+                            ui.last_labels
+                                .push((format!("s{snapshot:08x}:{index}"), label.clone()));
+                        }
+                        elements.push(element);
                     }
                 }
-                ToolResult::text(markdown.clone()).with_structured(json!({
+                let mut structured = json!({
                     "pid": 42,
                     "window_id": window_id,
-                    "snapshot_id": format!("s{snapshot:08x}"),
                     "elements": elements,
                     "tree_markdown": markdown,
-                }))
+                });
+                if !observation {
+                    structured["snapshot_id"] = json!(format!("s{snapshot:08x}"));
+                }
+                ToolResult::text(markdown.clone()).with_structured(structured)
             }
             "click" | "set_value" => {
                 let token = args["element_token"].as_str().unwrap_or_default();
@@ -422,6 +445,97 @@ async fn a_named_target_that_appears_late_is_waited_for() {
         .await;
     assert_ne!(result.is_error, Some(true), "{}", text(&result));
     assert_eq!(harness.calls("click").len(), 1);
+}
+
+/// A check polls without publishing a snapshot, so a token from the
+/// caller's own read still acts after a wait on the same window. Each poll
+/// used to publish one, which left the token stale.
+#[tokio::test]
+async fn polling_checks_leave_the_callers_tokens_current() {
+    let harness = Harness::new();
+    {
+        let mut ui = harness.ui.lock().unwrap();
+        ui.screen = 1;
+        // "Finish" shows on the fourth read: the caller's read, then the
+        // third poll of the check.
+        ui.finish_delay_reads = 3;
+    }
+    let read = harness
+        .registry
+        .invoke("get_window_state", json!({"pid": 42, "window_id": 7}))
+        .await;
+    let back = read.structured_content.unwrap()["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["label"] == "Back")
+        .unwrap()["element_token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let published = harness.ui.lock().unwrap().publishes;
+
+    let result = harness
+        .run(json!({"pid": 42, "window_id": 7, "steps": [
+            {"press_key": {"key": "tab"}, "expect": {"role": "button", "name": "Finish"}},
+            {"click": {"element_token": back}}
+        ]}))
+        .await;
+
+    assert_ne!(result.is_error, Some(true), "{}", text(&result));
+    let clicks = harness.calls("click");
+    assert_eq!(clicks.len(), 1, "{}", text(&result));
+    assert_eq!(clicks[0]["element_token"], json!(back));
+    assert!(harness.ui.lock().unwrap().dialog_open, "the click acted");
+    assert_eq!(
+        harness.ui.lock().unwrap().publishes,
+        published,
+        "the check's reads published snapshots"
+    );
+    // The caller's read, then three polls by the check. Its first read of
+    // the window went through the dispatch (which gives it the session
+    // key); the later polls went to the platform tool directly.
+    let reads = harness.calls("get_window_state");
+    assert_eq!(reads.len(), 4);
+    assert!(reads[1..]
+        .iter()
+        .all(|args| args["_observation_only"] == json!(true)));
+    assert!(reads[1].get("_session_id").is_some(), "{}", reads[1]);
+    assert!(
+        reads[2..]
+            .iter()
+            .all(|args| args.get("_session_id").is_none()),
+        "{reads:?}"
+    );
+}
+
+/// A cancel stops a check's polling at once, not after its next pause.
+#[tokio::test]
+async fn a_cancel_cuts_a_check_poll_short() {
+    use crate::request_control::{CancelToken, RequestControl};
+    let harness = Harness::new();
+    let token = CancelToken::new();
+    tokio::spawn({
+        let token = token.clone();
+        async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            token.cancel("the client cancelled the request");
+        }
+    });
+    let started = std::time::Instant::now();
+    let result = RequestControl::new(token)
+        .scope(harness.run(json!({"steps": [
+            {"wait_for": {"app": "Demo", "role": "button", "name": "Never", "timeout_ms": 5000}}
+        ]})))
+        .await;
+    let elapsed = started.elapsed();
+    assert_eq!(result.is_error, Some(true), "{}", text(&result));
+    assert_eq!(
+        result.structured_content.unwrap()["steps"][0]["code"],
+        "cancelled"
+    );
+    // The pause between polls is 250 ms; the cancel came 100 ms in.
+    assert!(elapsed < Duration::from_millis(220), "{elapsed:?}");
 }
 
 #[tokio::test]

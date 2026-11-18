@@ -10,6 +10,12 @@
 //! Lookup reads ask for `full_output`, which the `since` snapshot memory does
 //! not remember, so they never become the baseline of the caller's next
 //! `since:"latest"` diff.
+//!
+//! Only a lookup that returns an element to act on publishes a snapshot (its
+//! token comes from it). A check's polls are observation-only reads: they
+//! publish nothing, so they never make stale a token the batch holds, and
+//! after the first read of a window in a batch they go to the platform tool
+//! directly instead of through the whole dispatch again.
 
 use std::time::{Duration, Instant};
 
@@ -420,6 +426,26 @@ pub(crate) struct Read {
     pub markdown: String,
 }
 
+impl Read {
+    /// The elements and tree of a get_window_state payload, moved out of it.
+    fn from_state(window: &Window, mut state: Value) -> Self {
+        let mut take = |key: &str| state.as_object_mut().and_then(|object| object.remove(key));
+        let elements = match take("elements") {
+            Some(Value::Array(elements)) => elements,
+            _ => Vec::new(),
+        };
+        let markdown = match take("tree_markdown") {
+            Some(Value::String(markdown)) => markdown,
+            _ => String::new(),
+        };
+        Self {
+            window: window.clone(),
+            elements,
+            markdown,
+        }
+    }
+}
+
 /// An element found by description.
 #[derive(Clone, Debug)]
 pub(crate) struct Found {
@@ -543,6 +569,10 @@ pub(crate) struct Locator<'a> {
     /// observation can say a diff is against the batch's own read rather
     /// than one the caller made.
     baseline_ids: std::sync::Mutex<Vec<String>>,
+    /// Windows a read of which this batch's dispatch admitted (session,
+    /// policy and approval checks passed). A check's later polls of them
+    /// skip the dispatch.
+    admitted: std::sync::Mutex<std::collections::HashSet<(i64, u64)>>,
 }
 
 impl<'a> Locator<'a> {
@@ -554,6 +584,7 @@ impl<'a> Locator<'a> {
             baseline_max_elements: None,
             baselined: Default::default(),
             baseline_ids: Default::default(),
+            admitted: Default::default(),
         }
     }
 
@@ -580,10 +611,7 @@ impl<'a> Locator<'a> {
 
     async fn call(&self, tool: &str, args: Value) -> Result<Value, String> {
         let result = self.registry.invoke(tool, self.with_session(args)).await;
-        if result.is_error == Some(true) {
-            return Err(format!("{tool}: {}", first_text(&result)));
-        }
-        Ok(result.structured_content.unwrap_or(Value::Null))
+        structured_or_error(tool, result)
     }
 
     /// Resolve a spec to one window. With only `app` or `pid`, the app's
@@ -788,9 +816,10 @@ impl<'a> Locator<'a> {
             .unwrap_or_default()
     }
 
-    /// One fresh accessibility read. It refreshes the window's element
-    /// tokens, so the tokens it returns are the ones to act with.
-    pub async fn read(&self, window: &Window) -> Result<Read, Miss> {
+    /// The first lookup of each window in a batch that ends with a default
+    /// `observe` also makes one plain read, the baseline of that observation
+    /// (see `baseline_max_elements`).
+    async fn take_baseline(&self, window: &Window) {
         if let Some(max_elements) = self.baseline_max_elements {
             let first = self
                 .baselined
@@ -834,34 +863,60 @@ impl<'a> Locator<'a> {
                 }
             }
         }
+    }
+
+    fn admit(&self, window: &Window) {
+        self.admitted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((window.pid, window.window_id));
+    }
+
+    fn is_admitted(&self, window: &Window) -> bool {
+        self.admitted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&(window.pid, window.window_id))
+    }
+
+    /// One fresh accessibility read. It refreshes the window's element
+    /// tokens, so the tokens it returns are the ones to act with.
+    pub async fn read(&self, window: &Window) -> Result<Read, Miss> {
+        self.take_baseline(window).await;
         let state = self
-            .call(
-                "get_window_state",
-                json!({
-                    "pid": window.pid,
-                    "window_id": window.window_id,
-                    "full_output": true,
-                    "include_screenshot": false,
-                }),
-            )
+            .call("get_window_state", lookup_read_args(window))
             .await
             .map_err(|error| Miss::new("read_failed", error).in_window(window))?;
-        let elements = state
-            .get("elements")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let markdown = state
-            .get("tree_markdown")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        remember_tokens(window, &elements);
-        Ok(Read {
-            window: window.clone(),
-            elements,
-            markdown,
-        })
+        self.admit(window);
+        let read = Read::from_state(window, state);
+        remember_tokens(window, &read.elements);
+        Ok(read)
+    }
+
+    /// One fresh accessibility read for a check: the same tree and elements
+    /// as [`Self::read`], but it publishes no snapshot, so it leaves every
+    /// element token current, and its elements carry no tokens.
+    async fn observe(&self, window: &Window) -> Result<Read, Miss> {
+        self.take_baseline(window).await;
+        let mut args = lookup_read_args(window);
+        let result = if self.is_admitted(window) {
+            // A platform gives a window's first read a longer cold-start
+            // walk budget until it holds a snapshot of the window. These
+            // reads publish none, so they name the budget a read after the
+            // first one had when every read published.
+            args["timeout_ms"] = json!(crate::tool_schema::TIMEOUT_MS_DEFAULT);
+            self.registry
+                .observation_read_of_admitted_window(args)
+                .await
+        } else {
+            self.registry
+                .invoke_observation_read(self.with_session(args))
+                .await
+        };
+        let state = structured_or_error("get_window_state", result)
+            .map_err(|error| Miss::new("read_failed", error).in_window(window))?;
+        self.admit(window);
+        Ok(Read::from_state(window, state))
     }
 
     /// Find exactly one element, waiting up to `timeout` for it to appear.
@@ -890,7 +945,7 @@ impl<'a> Locator<'a> {
                     if crate::request_control::is_cancelled() {
                         return Err(Miss::cancelled());
                     }
-                    tokio::time::sleep(POLL_INTERVAL).await;
+                    poll_pause().await;
                 }
             }
         }
@@ -903,6 +958,9 @@ impl<'a> Locator<'a> {
         let windows = self.search_windows(spec).await?;
         let mut best_miss: Option<(usize, Miss)> = None;
         for window in &windows {
+            if crate::request_control::is_cancelled() {
+                return Err(Miss::cancelled());
+            }
             let read = self.read(window).await?;
             match pick(&read, element) {
                 Ok(found) => return Ok(found),
@@ -955,7 +1013,10 @@ impl<'a> Locator<'a> {
         let mut best_miss: Option<(usize, Miss)> = None;
         let mut held_on_page: Option<Checked> = None;
         for window in &windows {
-            let read = match self.read(window).await {
+            if crate::request_control::is_cancelled() {
+                return Err(Miss::cancelled());
+            }
+            let read = match self.observe(window).await {
                 Ok(read) => read,
                 // A window that closed between the lookup and the read has
                 // no elements left.
@@ -1035,11 +1096,38 @@ impl<'a> Locator<'a> {
                     if crate::request_control::is_cancelled() {
                         return Err(Miss::cancelled());
                     }
-                    tokio::time::sleep(POLL_INTERVAL).await;
+                    poll_pause().await;
                 }
             }
         }
     }
+}
+
+/// The wait between two polls, cut short when the request is cancelled.
+async fn poll_pause() {
+    tokio::select! {
+        _ = tokio::time::sleep(POLL_INTERVAL) => {}
+        _ = crate::request_control::cancelled() => {}
+    }
+}
+
+/// Arguments of a lookup read of `window`: the whole tree (the platform's
+/// full node budget and whole values), no screenshot.
+fn lookup_read_args(window: &Window) -> Value {
+    json!({
+        "pid": window.pid,
+        "window_id": window.window_id,
+        "full_output": true,
+        "include_screenshot": false,
+    })
+}
+
+/// A read's structured payload, or `tool: <first line>` when it failed.
+fn structured_or_error(tool: &str, result: ToolResult) -> Result<Value, String> {
+    if result.is_error == Some(true) {
+        return Err(format!("{tool}: {}", first_text(&result)));
+    }
+    Ok(result.structured_content.unwrap_or(Value::Null))
 }
 
 /// Elements of a read that match `spec`. Exact name matches win over

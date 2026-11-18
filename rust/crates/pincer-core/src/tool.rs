@@ -1048,6 +1048,10 @@ pub struct TrustedInvocationEvidence {
     /// [`ToolRegistry::invoke_with_native_window_pixels`]). Never read from
     /// arguments: only that in-process entry point sets it.
     native_window_pixels: bool,
+    /// The call is an observation-only read that publishes no snapshot (see
+    /// [`ToolRegistry::invoke_observation_read`]). Never read from arguments
+    /// and never inherited by a nested call.
+    observation_only: bool,
 }
 
 impl TrustedInvocationEvidence {
@@ -1123,8 +1127,18 @@ impl TrustedInvocationEvidence {
                 Value::Bool(true),
             );
         }
+        if self.observation_only {
+            arguments.insert(OBSERVATION_ONLY_ARG.to_owned(), Value::Bool(true));
+        }
     }
 }
+
+/// Reserved argument of a `get_window_state` read that publishes no snapshot
+/// and changes no capture state: the platforms walk the tree and return it
+/// without element tokens.
+const OBSERVATION_ONLY_ARG: &str = "_observation_only";
+/// The tool [`ToolRegistry::invoke_observation_read`] reads with.
+const OBSERVE_TOOL_NAME: &str = "get_window_state";
 
 /// Thread-safe collection of all registered tools.
 pub struct ToolRegistry {
@@ -1514,7 +1528,7 @@ impl ToolRegistry {
 
     /// Invoke a tool by name and (if recording is enabled) write its result to disk.
     pub async fn invoke(&self, name: &str, args: Value) -> ToolResult {
-        self.invoke_in_process(name, args, false).await
+        self.invoke_in_process(name, args, false, false).await
     }
 
     /// Invoke for a trusted in-process host whose window-relative pixel
@@ -1535,7 +1549,42 @@ impl ToolRegistry {
     /// inherit it. MCP, the CLI, the SDK ABI and the wire therefore cannot
     /// reach it.
     pub async fn invoke_with_native_window_pixels(&self, name: &str, args: Value) -> ToolResult {
-        self.invoke_in_process(name, args, true).await
+        self.invoke_in_process(name, args, true, false).await
+    }
+
+    /// A `get_window_state` read for a run_steps or run_script check: the
+    /// same dispatch, session, policy and approval checks as any read, but
+    /// it publishes no snapshot, so the element tokens the batch holds stay
+    /// current, and its elements carry no tokens.
+    pub(crate) async fn invoke_observation_read(&self, args: Value) -> ToolResult {
+        self.invoke_in_process(OBSERVE_TOOL_NAME, args, false, true)
+            .await
+    }
+
+    /// [`Self::invoke_observation_read`] of a window this batch's dispatch
+    /// already admitted a read of: the platform tool is called directly,
+    /// without a second pass through policy and approval, as verify_state
+    /// polls under its one admission. A revoked or suspended authorization,
+    /// or a call outside any dispatch, still takes the full path, which
+    /// refuses it.
+    pub(crate) async fn observation_read_of_admitted_window(&self, args: Value) -> ToolResult {
+        let admitted = DISPATCH_AUTHORIZATION_CONTEXT
+            .try_with(|context| {
+                !context.is_revoked()
+                    && !crate::session::is_runtime_scope_suspended(&context.runtime_scope_key())
+            })
+            .unwrap_or(false);
+        let Some(tool) = self.tools.get(OBSERVE_TOOL_NAME).filter(|_| admitted) else {
+            return self.invoke_observation_read(args).await;
+        };
+        let mut args = args;
+        crate::tool_args::sanitize_reserved_args(&mut args);
+        if let Some(arguments) = args.as_object_mut() {
+            // An observation-only read uses no session state.
+            arguments.remove("session");
+            arguments.insert(OBSERVATION_ONLY_ARG.to_owned(), Value::Bool(true));
+        }
+        tool.invoke(args).await
     }
 
     async fn invoke_in_process(
@@ -1543,6 +1592,7 @@ impl ToolRegistry {
         name: &str,
         args: Value,
         native_window_pixels: bool,
+        observation_only: bool,
     ) -> ToolResult {
         if let Ok(context) = DISPATCH_AUTHORIZATION_CONTEXT.try_with(Arc::clone) {
             let mut args = args;
@@ -1551,6 +1601,7 @@ impl ToolRegistry {
                 .unwrap_or_default();
             // Only the outermost in-process call vouches for its pixels.
             evidence.native_window_pixels = native_window_pixels;
+            evidence.observation_only = observation_only;
             crate::tool_args::sanitize_reserved_args(&mut args);
             if let Some(bound_session) = context.public_session() {
                 let Some(arguments) = args.as_object_mut() else {
@@ -1589,6 +1640,7 @@ impl ToolRegistry {
         };
         let evidence = TrustedInvocationEvidence {
             native_window_pixels,
+            observation_only,
             ..TrustedInvocationEvidence::default()
         };
         self.invoke_with_context_and_evidence(name, args, context, evidence)
