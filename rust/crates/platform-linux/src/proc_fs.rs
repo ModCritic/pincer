@@ -398,8 +398,12 @@ mod tests {
         crate::test_env::copy_executable(source.to_str().unwrap(), &script);
         let mut running = std::process::Command::new(&script).spawn().unwrap();
         let pid = running.id();
+        // execve sets comm before it writes the new argument list, so for a
+        // moment comm is the script's name while cmdline is still empty.
+        // Wait for both, or the read can land in that gap under load.
         let deadline = Instant::now() + Duration::from_secs(10);
-        while ProcessFacts::command_name(pid).as_deref() != Some("pincer-shebang-")
+        while (ProcessFacts::command_name(pid).as_deref() != Some("pincer-shebang-")
+            || std::fs::read(format!("/proc/{pid}/cmdline")).map_or(true, |c| c.is_empty()))
             && Instant::now() < deadline
         {
             std::thread::sleep(Duration::from_millis(10));
