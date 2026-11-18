@@ -1104,15 +1104,27 @@ pub fn write_result_from_env(result: &CaseResult) -> io::Result<()> {
     append_json_line(&PathBuf::from(path), result)
 }
 
+/// Whether a case can reach an X server or a Wayland compositor. One with
+/// neither has nothing to drive, so it is left to fail on its own.
+#[cfg(target_os = "linux")]
+fn case_reaches_a_display(
+    display: Option<&std::ffi::OsStr>,
+    wayland: Option<&std::ffi::OsStr>,
+) -> bool {
+    display.is_some() || wayland.is_some()
+}
+
 /// Execute one declared E2E cell, persist its typed result even when the body
 /// panics, and preserve Cargo's failing-test signal.
 pub fn execute_case(case: CaseSpec, test: impl FnOnce(&mut Evidence) -> Observation) -> CaseResult {
-    // In an X11 session a case drives the X server DISPLAY names: refuse
-    // unless that is a throwaway server (see `throwaway_display`).
+    // A case drives the X server or Wayland compositor its environment
+    // names: refuse unless each is a throwaway one (see `throwaway_display`).
     #[cfg(target_os = "linux")]
-    let _display = (std::env::var_os("DISPLAY").is_some()
-        && std::env::var_os("WAYLAND_DISPLAY").is_none())
-    .then(crate::throwaway_display::throwaway_display);
+    let _session = case_reaches_a_display(
+        std::env::var_os("DISPLAY").as_deref(),
+        std::env::var_os("WAYLAND_DISPLAY").as_deref(),
+    )
+    .then(crate::throwaway_display::throwaway_session);
     write_declaration_from_env(&case).expect("write E2E case declaration");
     let started = Instant::now();
     let mut evidence = Evidence::default();
@@ -1902,6 +1914,20 @@ fn read_json_value(path: &Path) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A case run in a Wayland session drives that compositor, so it is
+    /// checked like a case in an X11 session.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_case_in_a_wayland_session_is_checked_too() {
+        use std::ffi::OsStr;
+        let x11 = Some(OsStr::new(":0"));
+        let wayland = Some(OsStr::new("wayland-0"));
+        assert!(case_reaches_a_display(x11, None));
+        assert!(case_reaches_a_display(None, wayland));
+        assert!(case_reaches_a_display(x11, wayland));
+        assert!(!case_reaches_a_display(None, None));
+    }
 
     fn semantic_click_fixture() -> Value {
         serde_json::json!({

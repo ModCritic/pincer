@@ -7,6 +7,7 @@ use std::fs;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use pincer_testkit::throwaway_display::throwaway_session;
 use pincer_testkit::RawDriver;
 
 const OVERLAY_THREAD: &str = "pincer-overlay-wl";
@@ -90,6 +91,7 @@ fn assert_idle_tick_bound(pid: u32, tid: u32, window: Duration, bound: u64) {
 #[test]
 #[ignore]
 fn no_overlay_flag_never_starts_wayland_overlay_thread() {
+    let _session = throwaway_session();
     // Outside native Wayland the thread can never start, so its absence would
     // pass for an unrelated reason. The Linux runner records an X11 limitation.
     assert!(
@@ -121,6 +123,7 @@ fn no_overlay_flag_never_starts_wayland_overlay_thread() {
 #[test]
 #[ignore]
 fn wayland_overlay_quiesces_and_recovers_after_capture_and_cursor_activity() {
+    let _session = throwaway_session();
     let Some(mut driver) = RawDriver::spawn_with_overlay_and_env(&[
         ("PINCER_PERMISSION_MODE", "unrestricted"),
         ("PINCER_DANGEROUSLY_BYPASS_APPROVALS", "1"),

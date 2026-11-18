@@ -459,6 +459,8 @@ fn key_references() -> Vec<String> {
 #[test]
 #[ignore = "requires an installed local product, native credential store, GUI fixture, and daemon"]
 fn encrypted_history_survives_restart_and_cryptographically_purges() {
+    #[cfg(target_os = "linux")]
+    let _session = pincer_testkit::throwaway_display::throwaway_session();
     let started_at = Instant::now();
     let pure_wayland = cfg!(target_os = "linux")
         && std::env::var_os("WAYLAND_DISPLAY").is_some()

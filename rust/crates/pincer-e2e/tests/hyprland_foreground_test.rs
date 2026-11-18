@@ -17,6 +17,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use pincer_testkit::throwaway_display::{throwaway_session, ThrowawaySession};
 use pincer_testkit::{spawn_in_job, workspace_root, Driver, McpDriver, ToolResponse};
 use serde_json::{json, Value};
 
@@ -213,17 +214,21 @@ fn foreground_drag_focus_loss_does_not_release_into_same_client_sibling() {
     drag_focus_loss(true);
 }
 
-fn native_preflight() {
+/// Checks the environment and holds the throwaway-session guard (the test
+/// drives the compositor it runs in) until the returned value drops.
+fn native_preflight() -> ThrowawaySession {
+    let session = throwaway_session();
     assert!(std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some());
     assert_eq!(std::env::var("PINCER_ENABLE_WAYLAND").as_deref(), Ok("1"));
     assert_eq!(
         std::env::var("PINCER_E2E_UNRESTRICTED_GUI").as_deref(),
         Ok("1")
     );
+    session
 }
 
 fn drag_focus_loss(same_client: bool) {
-    native_preflight();
+    let _session = native_preflight();
     let evidence_root = std::env::var_os("PINCER_E2E_RECORDINGS_ROOT");
     let journals = if let Some(root) = &evidence_root {
         tempfile::Builder::new()
@@ -419,7 +424,7 @@ fn last_state(journal: &[Value]) -> &Value {
 #[test]
 #[ignore = "requires disposable native Hyprland, GTK3, Wayland development tools and protocol XML"]
 fn foreground_action_refused_while_independent_virtual_pointer_holds_primary_grab() {
-    native_preflight();
+    let _session = native_preflight();
     let root = std::env::var_os("PINCER_E2E_RECORDINGS_ROOT");
     let dir = if let Some(root) = &root {
         tempfile::Builder::new()

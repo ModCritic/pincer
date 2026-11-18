@@ -6,11 +6,14 @@
 //!
 //! * A test that starts its own server ([`PrivateXvfb`]) always runs.
 //! * A test that drives a server it did not start runs only when
-//!   `PINCER_TEST_THROWAWAY_DISPLAY` names every display it can reach:
-//!   `DISPLAY`, and `WAYLAND_DISPLAY` too when that is set (a comma-separated
-//!   list, for example `:93`). `rust/scripts/ci-x11-tests.sh` sets it for the
-//!   servers it starts; a sandbox harness sets it for its own. Anything else
-//!   panics with [`throwaway_display`]'s message.
+//!   `PINCER_TEST_THROWAWAY_DISPLAY` names every display it can reach (a
+//!   comma-separated list, for example `:93` or `:93,wayland-1`). An X11 test
+//!   calls [`throwaway_display`]: `DISPLAY` must be set and named, and
+//!   `WAYLAND_DISPLAY` too when that is set. A test that may drive a Wayland
+//!   compositor calls [`throwaway_session`]: either variable will do, and
+//!   each one set must be named. `rust/scripts/ci-x11-tests.sh` sets it for
+//!   the servers it starts; a sandbox harness sets it for its own. Anything
+//!   else panics with a message saying how to run the test.
 //!
 //! Tests in one process that read or change the display variables hold
 //! [`display_env_lock`], so a test that points `DISPLAY` at its own server
@@ -41,25 +44,38 @@ pub fn display_env_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Why a test may not drive the displays named by `display` and `wayland`
-/// when `allowed` is the value of [`THROWAWAY_DISPLAY_ENV`], or `None` when
-/// it may.
+/// Why an X11 test may not drive the displays named by `display` and
+/// `wayland` when `allowed` is the value of [`THROWAWAY_DISPLAY_ENV`], or
+/// `None` when it may.
 pub fn refusal(
+    display: Option<&OsStr>,
+    wayland: Option<&OsStr>,
+    allowed: Option<&OsStr>,
+) -> Option<String> {
+    if display.filter(|value| !value.is_empty()).is_none() {
+        return Some("DISPLAY is not set".to_owned());
+    }
+    session_refusal(display, wayland, allowed)
+}
+
+/// [`refusal`] for a test that may drive a Wayland compositor: `DISPLAY`
+/// need not be set, as long as one of the two is.
+pub fn session_refusal(
     display: Option<&OsStr>,
     wayland: Option<&OsStr>,
     allowed: Option<&OsStr>,
 ) -> Option<String> {
     let display = display.filter(|value| !value.is_empty());
     let wayland = wayland.filter(|value| !value.is_empty());
-    let Some(display) = display else {
-        return Some("DISPLAY is not set".to_owned());
-    };
+    if display.is_none() && wayland.is_none() {
+        return Some("neither DISPLAY nor WAYLAND_DISPLAY is set".to_owned());
+    }
     let allowed: Vec<&str> = allowed
         .and_then(OsStr::to_str)
         .map(|list| list.split(',').map(str::trim).collect())
         .unwrap_or_default();
     let mut unlisted = Vec::new();
-    for (name, value) in [("DISPLAY", Some(display)), ("WAYLAND_DISPLAY", wayland)] {
+    for (name, value) in [("DISPLAY", display), ("WAYLAND_DISPLAY", wayland)] {
         let Some(value) = value else { continue };
         if !value.to_str().is_some_and(|value| allowed.contains(&value)) {
             unlisted.push(format!("{name}={}", value.to_string_lossy()));
@@ -107,6 +123,32 @@ pub fn throwaway_display() -> ThrowawayDisplay {
             .expect("a UTF-8 DISPLAY"),
         _lock: lock,
     }
+}
+
+/// The displays a test may drive, with [`display_env_lock`] held until it
+/// drops.
+pub struct ThrowawaySession {
+    _lock: MutexGuard<'static, ()>,
+}
+
+/// For a test that may drive a Wayland compositor as well as an X server:
+/// returns if the rule in the module documentation lets it drive every
+/// display its environment names. Panics otherwise, saying how to run it.
+pub fn throwaway_session() -> ThrowawaySession {
+    let lock = display_env_lock();
+    if let Some(reason) = session_refusal(
+        std::env::var_os("DISPLAY").as_deref(),
+        std::env::var_os("WAYLAND_DISPLAY").as_deref(),
+        std::env::var_os(THROWAWAY_DISPLAY_ENV).as_deref(),
+    ) {
+        panic!(
+            "refusing to drive this desktop session ({reason}): this test creates windows \
+             and sends input to it, which beside a desktop session is your own screen. Run \
+             it in a throwaway compositor or X server and set {THROWAWAY_DISPLAY_ENV} to \
+             its WAYLAND_DISPLAY and DISPLAY values, comma-separated (whichever are set)."
+        );
+    }
+    ThrowawaySession { _lock: lock }
 }
 
 /// `DISPLAY` pointed at another server, and `WAYLAND_DISPLAY` hidden, for
@@ -275,7 +317,7 @@ fn stop_child(child: &mut Child) {
 
 #[cfg(test)]
 mod tests {
-    use super::refusal;
+    use super::{refusal, session_refusal};
     use std::ffi::OsStr;
 
     fn check(display: Option<&str>, wayland: Option<&str>, allowed: Option<&str>) -> bool {
@@ -300,5 +342,41 @@ mod tests {
         assert!(!check(Some(":93"), Some("wayland-0"), Some(":93")));
         assert!(!check(None, None, Some(":93")));
         assert!(!check(Some(""), None, Some("")));
+    }
+
+    fn check_session(display: Option<&str>, wayland: Option<&str>, allowed: Option<&str>) -> bool {
+        session_refusal(
+            display.map(OsStr::new),
+            wayland.map(OsStr::new),
+            allowed.map(OsStr::new),
+        )
+        .is_none()
+    }
+
+    #[test]
+    fn a_wayland_session_needs_every_reachable_display_named() {
+        assert!(check_session(
+            None,
+            Some("wayland-test"),
+            Some("wayland-test")
+        ));
+        assert!(check_session(Some(":93"), None, Some(":93")));
+        assert!(check_session(
+            Some(":5"),
+            Some("wayland-test"),
+            Some(":5,wayland-test")
+        ));
+        // The developer's Wayland session, with or without XWayland.
+        assert!(!check_session(None, Some("wayland-0"), None));
+        assert!(!check_session(None, Some("wayland-0"), Some(":93")));
+        assert!(!check_session(
+            Some(":0"),
+            Some("wayland-test"),
+            Some("wayland-test")
+        ));
+        assert!(!check_session(Some(":93"), Some("wayland-0"), Some(":93")));
+        // No display at all is not a throwaway one.
+        assert!(!check_session(None, None, Some("wayland-test")));
+        assert!(!check_session(Some(""), Some(""), Some("")));
     }
 }

@@ -66,6 +66,7 @@ fn snapshot(driver: &mut McpDriver, target: TargetWindow) -> ToolResponse {
 #[test]
 #[ignore = "requires disposable native Hyprland, GTK3 fixture, and exact-candidate Driver"]
 fn native_window_capture_and_background_ax_keep_exact_identity() {
+    let _session = pincer_testkit::throwaway_display::throwaway_session();
     assert!(std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some());
     assert_eq!(std::env::var("PINCER_ENABLE_WAYLAND").as_deref(), Ok("1"));
     let mut driver = McpDriver::spawn_named_with_overlay("hyprland-native-observation")

@@ -4483,6 +4483,8 @@ mod tests {
     #[test]
     #[ignore = "requires a focused native Wayland surface and wtype"]
     fn standalone_modifiers_reach_wayland_keyboard() {
+        // Types into the focused surface: refuse unless the session is a throwaway.
+        let _session = crate::throwaway_display::throwaway_session();
         for key in ["meta", "ctrl", "alt", "shift"] {
             press_key_focused(key).unwrap_or_else(|error| panic!("{key}: {error}"));
             press_key_focused("escape").expect("input remains usable after a modifier tap");

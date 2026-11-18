@@ -206,6 +206,8 @@ fn extract_last_video_frame(
 }
 
 fn run_preflight() {
+    #[cfg(target_os = "linux")]
+    let _session = pincer_testkit::throwaway_display::throwaway_session();
     let expected_sha = std::env::var("PINCER_E2E_SOURCE_SHA").ok();
     if let Some(expected_sha) = expected_sha.as_deref() {
         assert!(

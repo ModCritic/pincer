@@ -2137,6 +2137,8 @@ fn embedded_browser_case(spec: &HostSpec) -> CaseSpec {
 #[test]
 #[ignore]
 fn embedded_browser_routes_are_exact_or_refused() {
+    #[cfg(target_os = "linux")]
+    let _session = pincer_testkit::throwaway_display::throwaway_session();
     let mut failure = None;
     let mut selected = 0usize;
     for spec in embedded_browser_specs() {
@@ -2170,6 +2172,8 @@ fn embedded_browser_routes_are_exact_or_refused() {
 #[test]
 #[ignore]
 fn shared_web_action_matrix_is_state_verified() {
+    #[cfg(target_os = "linux")]
+    let _session = pincer_testkit::throwaway_display::throwaway_session();
     let mut failure = None;
     let mut selected = 0usize;
     for spec in host_specs() {
