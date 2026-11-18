@@ -543,12 +543,10 @@ fn deliver(
         let core_before = core_focus(display);
         let released_stuck = release_stuck_virtual_input(cursor_id, display, ids, &device);
         select_raw_key_events(display, slave_keyboard_id)?;
-        // A BadWindow/BadMatch from XISetFocus (target unmapped meanwhile) must
-        // surface as an error, not take the daemon down through Xlib's default
-        // handler.
-        let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
-        // XISetFocus reports async BadWindow/BadMatch (window not viewable)
-        // through the error handler, so a stale GetFocus is the real signal.
+        // XISetFocus reports async BadWindow/BadMatch (target unmapped or not
+        // viewable) through the process's X error handler, which records it
+        // instead of exiting (see `xdisplay`), so a stale GetFocus is the
+        // real signal and surfaces below as an error.
         // Retry once — a freshly mapped/raised toplevel can miss the first set.
         let mut focus_taken = false;
         for attempt in 0..2 {
@@ -564,7 +562,6 @@ fn deliver(
                 sleep(Duration::from_millis(30));
             }
         }
-        unsafe { x11::xlib::XSetErrorHandler(previous_handler) };
         if !focus_taken {
             bail!(
                 "virtual master keyboard could not take focus on window 0x{target_window:x} \

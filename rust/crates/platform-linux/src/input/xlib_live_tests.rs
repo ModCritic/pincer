@@ -80,7 +80,13 @@ fn in_child() -> bool {
 /// of the test binary on `display`.
 fn run_child(name: &str, display: &str) -> Output {
     Command::new(std::env::current_exe().expect("test binary path"))
-        .args([name, "--exact", "--ignored", "--nocapture", "--test-threads=1"])
+        .args([
+            name,
+            "--exact",
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
         .env(CHILD_ENV, "1")
         .env("DISPLAY", display)
         .stdin(Stdio::null())
@@ -126,6 +132,86 @@ fn server_client_count(conn: &x11rb::rust_connection::RustConnection) -> usize {
         .len()
 }
 
+/// A window id that was valid a moment ago and is destroyed now.
+fn destroyed_window(display: *mut x11::xlib::Display) -> x11::xlib::Window {
+    unsafe {
+        let root = x11::xlib::XDefaultRootWindow(display);
+        let window = x11::xlib::XCreateSimpleWindow(display, root, 0, 0, 10, 10, 0, 0, 0);
+        x11::xlib::XDestroyWindow(display, window);
+        x11::xlib::XSync(display, 0);
+        window
+    }
+}
+
+/// A BadWindow on one of the input routes' Xlib displays (here: mapping a
+/// window that was just destroyed) must not end the process. libX11's
+/// default error handler prints the error and calls `exit(1)`. The error is
+/// recorded on its own display, also when several threads hit errors at
+/// once.
+#[test]
+#[ignore = "starts its own Xvfb; run inside a sandbox"]
+fn an_x_error_does_not_end_the_process() {
+    const MARKER: &str = "XLIB_CHILD_SURVIVED_BAD_WINDOW";
+    if in_child() {
+        let xdisplay = super::open_display().expect("open the test display");
+        let display = xdisplay.as_ptr();
+        let window = destroyed_window(display);
+        assert_eq!(
+            xdisplay.take_error(),
+            None,
+            "no error before the bad request"
+        );
+        unsafe { x11::xlib::XMapWindow(display, window) };
+        let (error, count) = xdisplay.take_error().expect("the BadWindow is recorded");
+        // BadWindow is 3, X_MapWindow is request 8.
+        assert_eq!(
+            (
+                error.error_code,
+                error.request_code,
+                error.resource_id,
+                count
+            ),
+            (3, 8, window, 1),
+            "{error}"
+        );
+
+        // remove_master_pointer never had an error handler around it: an
+        // XIRemoveMaster for a device the server does not have answers
+        // BadDevice.
+        super::remove_master_pointer(display, 250).expect("the request is sent");
+        assert!(
+            xdisplay.take_error().is_some(),
+            "XIRemoveMaster on a missing device reports an error"
+        );
+
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    let xdisplay = super::open_display().expect("open a thread's display");
+                    let display = xdisplay.as_ptr();
+                    let window = destroyed_window(display);
+                    for _ in 0..25 {
+                        unsafe { x11::xlib::XMapWindow(display, window) };
+                        unsafe { x11::xlib::XSync(display, 0) };
+                    }
+                    xdisplay.take_error().map(|(_, count)| count)
+                })
+            })
+            .collect();
+        for thread in threads {
+            assert_eq!(thread.join().expect("thread ran"), Some(25));
+        }
+        println!("{MARKER}");
+        return;
+    }
+    let server = Server::start(Path::new("Xvfb"));
+    let output = run_child(
+        "input::xlib_live_tests::an_x_error_does_not_end_the_process",
+        &server.display,
+    );
+    assert_child_passed(&output, MARKER);
+}
+
 /// The MPX click refuses an Xtigervnc server right after it opens its Xlib
 /// display; that early return must still close the display. The server
 /// here is Xvfb copied to a file named `Xtigervnc`, which is what the
@@ -155,7 +241,8 @@ fn an_early_refusal_closes_its_display() {
         }
         let after = server_client_count(&conn);
         assert_eq!(
-            after, before,
+            after,
+            before,
             "the refused clicks left {} X connection(s) open",
             after.saturating_sub(before)
         );

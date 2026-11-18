@@ -24,12 +24,12 @@ pub mod interactive;
 pub mod modifier;
 mod mpx_keyboard;
 mod mpx_owner;
-mod xdisplay;
 /// Path sampling and timing for `move_along_path`.
 pub mod path;
 /// One-shot targeted pointer/keyboard delivery with explicit
 /// auto/background/foreground semantics (embedders).
 pub mod targeted;
+mod xdisplay;
 
 pub use focus_guard::{FocusGuardReport, FocusSnapshot, SameAppWindow};
 pub use foreground::{with_x11_foreground_opts, FocusAfter, ForegroundOptions, ForegroundReport};
@@ -717,9 +717,8 @@ fn ensure_master_pointer_for_session(
         }
         let pointer_id = pointer_id
             .ok_or_else(|| anyhow!("failed to locate created master pointer for '{cursor_id}'"))?;
-        let keyboard_id = keyboard_id.ok_or_else(|| {
-            anyhow!("failed to locate created master keyboard for '{cursor_id}'")
-        })?;
+        let keyboard_id = keyboard_id
+            .ok_or_else(|| anyhow!("failed to locate created master keyboard for '{cursor_id}'"))?;
         let slave_pointer_id = wait_for_slave_id(
             dpy,
             &device_name,
@@ -781,10 +780,7 @@ pub fn forget_master_pointer(cursor_id: &str) {
 
 /// Remove the master pointer (and its paired keyboard) whose device name is
 /// `pointer_name`, if the server has one.
-fn remove_master_pointer_named(
-    display: *mut x11::xlib::Display,
-    pointer_name: &str,
-) -> Result<()> {
+fn remove_master_pointer_named(display: *mut x11::xlib::Display, pointer_name: &str) -> Result<()> {
     let found = xi2_query_devices(display)?
         .into_iter()
         .find(|(_, use_, name)| *use_ == x11::xinput2::XIMasterPointer && name == pointer_name);
@@ -1044,9 +1040,7 @@ fn warp_master_pointer(
 /// on the virtual master is what reaches it (and there is no WM focus to steal).
 fn is_override_redirect(display: *mut x11::xlib::Display, window: x11::xlib::Window) -> bool {
     let mut attrs: x11::xlib::XWindowAttributes = unsafe { std::mem::zeroed() };
-    let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
     let rc = unsafe { x11::xlib::XGetWindowAttributes(display, window, &mut attrs) };
-    unsafe { x11::xlib::XSetErrorHandler(previous_handler) };
     rc != 0 && attrs.override_redirect != 0
 }
 
@@ -1073,7 +1067,6 @@ fn root_child_of(
     window: x11::xlib::Window,
 ) -> Option<x11::xlib::Window> {
     let root = unsafe { x11::xlib::XDefaultRootWindow(display) };
-    let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
     let mut current = window;
     let mut result = None;
     for _ in 0..64 {
@@ -1102,10 +1095,6 @@ fn root_child_of(
             break;
         }
         current = parent;
-    }
-    unsafe {
-        x11::xlib::XSync(display, 0);
-        x11::xlib::XSetErrorHandler(previous_handler);
     }
     result
 }
@@ -1150,7 +1139,6 @@ fn virtual_master_input_state(
     let mut buttons = x11::xinput2::XIButtonState::default();
     let mut mods = x11::xinput2::XIModifierState::default();
     let mut group = x11::xinput2::XIModifierState::default();
-    let prev = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
     let rc = unsafe {
         x11::xinput2::XIQueryPointer(
             display,
@@ -1167,7 +1155,6 @@ fn virtual_master_input_state(
             &mut group,
         )
     };
-    unsafe { x11::xlib::XSetErrorHandler(prev) };
     let mut held = Vec::new();
     if rc != 0 && !buttons.mask.is_null() && buttons.mask_len > 0 {
         let mask = unsafe { std::slice::from_raw_parts(buttons.mask, buttons.mask_len as usize) };
@@ -1225,10 +1212,8 @@ fn release_stuck_virtual_input(
         // A locked/latched modifier on the virtual master (CapsLock leaked
         // from an interrupted chord) would shift every later character.
         unsafe {
-            let prev = x11::xlib::XSetErrorHandler(Some(ignore_x_error));
             x11::xlib::XkbLockModifiers(display, ids.keyboard_id as u32, 0xff, 0);
             x11::xlib::XkbLatchModifiers(display, ids.keyboard_id as u32, 0xff, 0);
-            x11::xlib::XSetErrorHandler(prev);
         }
         released.push(format!(
             "locked/latched modifiers (0x{:x}/0x{:x})",
@@ -1246,7 +1231,6 @@ fn release_stuck_virtual_input(
 /// Release a device frozen by a synchronous grab; harmless when not frozen.
 fn thaw_device(display: *mut x11::xlib::Display, device_id: i32) {
     unsafe {
-        let prev = x11::xlib::XSetErrorHandler(Some(ignore_x_error));
         x11::xinput2::XIAllowEvents(
             display,
             device_id,
@@ -1254,7 +1238,6 @@ fn thaw_device(display: *mut x11::xlib::Display, device_id: i32) {
             x11::xlib::CurrentTime,
         );
         x11::xlib::XSync(display, 0);
-        x11::xlib::XSetErrorHandler(prev);
     }
 }
 
@@ -1403,14 +1386,12 @@ pub fn with_x11_foreground_unobserved<T>(
 /// headless display.
 pub fn x11_activate_window_persistent(xid: u64) -> Result<Option<u64>> {
     // Called directly from the tool layer (bring_to_front / foreground
-    // activation), not through `send_virtual_pointer_*`/`deliver`, so without
-    // this guard its `XSetErrorHandler` swap below can race theirs: whichever
-    // thread restores its saved "previous" handler last can clobber the
-    // other's still-in-flight `ignore_x_error` installation, briefly leaving
-    // the process default handler active (which can abort the process on an
-    // unrelated async X11 error) — or vice versa. `MPX_OP_LOCK` is a leaf
-    // lock here (this function calls nothing that itself takes it), so no
-    // reentrancy risk.
+    // activation). The MPX lock was taken here for an X error handler swap
+    // that no longer exists (the handler is permanent, see `xdisplay`); it
+    // still keeps this activation from landing in the middle of an MPX
+    // gesture, which saves and restores the focus around itself.
+    // `MPX_OP_LOCK` is a leaf lock here (this function calls nothing that
+    // itself takes it), so no reentrancy risk.
     let _op = mpx_op_guard("x11_activate_window_persistent");
     let Ok(xdisplay) = open_display() else {
         bail!(
@@ -1430,15 +1411,18 @@ pub fn x11_activate_window_persistent(xid: u64) -> Result<Option<u64>> {
         // activation must establish input focus too, just like the bounded
         // foreground rung above, or `bring_to_front` can report success while
         // keyboard focus remains on the previous window.
-        let previous_handler = x11::xlib::XSetErrorHandler(Some(ignore_x_error));
         x11::xlib::XSetInputFocus(
             display,
             xid as x11::xlib::Window,
             x11::xlib::RevertToParent,
             x11::xlib::CurrentTime,
         );
-        x11::xlib::XSync(display, 0);
-        x11::xlib::XSetErrorHandler(previous_handler);
+    }
+    // A window that closed meanwhile answers BadWindow or BadMatch: the
+    // activation was best-effort before and stays so; the caller reads the
+    // focus that resulted.
+    if let Some((error, count)) = xdisplay.take_error() {
+        tracing::debug!(xid, %error, count, "X error while activating a window");
     }
     Ok(prior)
 }
@@ -1873,7 +1857,6 @@ fn window_screen_bounds(
     display: *mut x11::xlib::Display,
     window: x11::xlib::Window,
 ) -> Option<(i32, i32, u32, u32)> {
-    let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
     let mut root: x11::xlib::Window = 0;
     let (mut gx, mut gy) = (0i32, 0i32);
     let (mut width, mut height, mut border, mut depth) = (0u32, 0u32, 0u32, 0u32);
@@ -1903,10 +1886,6 @@ fn window_screen_bounds(
             result = Some((dx, dy, width, height));
         }
     }
-    unsafe {
-        x11::xlib::XSync(display, 0);
-        x11::xlib::XSetErrorHandler(previous_handler);
-    }
     result
 }
 
@@ -1931,12 +1910,7 @@ fn could_be_popup(attrs: &x11::xlib::XWindowAttributes) -> bool {
 /// Describe a mapped override-redirect root child as a [`PopupWindow`].
 fn popup_info(display: *mut x11::xlib::Display, child: x11::xlib::Window) -> Option<PopupWindow> {
     let mut attrs: x11::xlib::XWindowAttributes = unsafe { std::mem::zeroed() };
-    let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
     let rc = unsafe { x11::xlib::XGetWindowAttributes(display, child, &mut attrs) };
-    unsafe {
-        x11::xlib::XSync(display, 0);
-        x11::xlib::XSetErrorHandler(previous_handler);
-    }
     if rc == 0 || !could_be_popup(&attrs) {
         return None;
     }
@@ -2036,7 +2010,6 @@ fn window_type_is_one_of(
     let mut nitems: std::os::raw::c_ulong = 0;
     let mut bytes_after: std::os::raw::c_ulong = 0;
     let mut prop: *mut std::os::raw::c_uchar = ptr::null_mut();
-    let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
     let rc = unsafe {
         x11::xlib::XGetWindowProperty(
             display,
@@ -2053,10 +2026,6 @@ fn window_type_is_one_of(
             &mut prop,
         )
     };
-    unsafe {
-        x11::xlib::XSync(display, 0);
-        x11::xlib::XSetErrorHandler(previous_handler);
-    }
     let mut result = false;
     if rc == 0 && !prop.is_null() {
         if actual_format == 32 && nitems > 0 {
@@ -2117,7 +2086,6 @@ pub fn core_focus_owner_pid() -> Option<u32> {
         let mut qroot: x11::xlib::Window = 0;
         let mut children: *mut x11::xlib::Window = ptr::null_mut();
         let mut n: std::os::raw::c_uint = 0;
-        let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
         let rc = unsafe {
             x11::xlib::XQueryTree(
                 display,
@@ -2128,10 +2096,6 @@ pub fn core_focus_owner_pid() -> Option<u32> {
                 &mut n,
             )
         };
-        unsafe {
-            x11::xlib::XSync(display, 0);
-            x11::xlib::XSetErrorHandler(previous_handler);
-        }
         if !children.is_null() {
             unsafe { x11::xlib::XFree(children as *mut _) };
         }
@@ -2531,7 +2495,6 @@ fn window_title_for_report(display: *mut x11::xlib::Display, window: x11::xlib::
         }
         None
     }
-    let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
     let mut title = name_of(display, window);
     if title.is_none() {
         title = window_children(display, window)
@@ -2539,15 +2502,11 @@ fn window_title_for_report(display: *mut x11::xlib::Display, window: x11::xlib::
             .rev()
             .find_map(|kid| name_of(display, kid));
     }
-    unsafe {
-        x11::xlib::XSync(display, 0);
-        x11::xlib::XSetErrorHandler(previous_handler);
-    }
     title.unwrap_or_default()
 }
 
-/// Direct children of `window` (empty on error). Caller installs the error
-/// handler.
+/// Direct children of `window` (empty on error, which the process's X error
+/// handler records instead of exiting; see `xdisplay`).
 fn window_children(
     display: *mut x11::xlib::Display,
     window: x11::xlib::Window,
@@ -2578,7 +2537,7 @@ fn window_children(
 /// that names a pid, at most three levels down. KWin nests the client in a
 /// wrapper inside the frame (frame, wrapper, client; checked with `xwininfo
 /// -tree` under KWin on X11, 2026-11-11), so the direct children alone miss
-/// it. Caller installs the error handler.
+/// it.
 fn client_below(display: *mut x11::xlib::Display, frame: x11::xlib::Window) -> Option<u64> {
     let mut level = vec![frame];
     for _ in 0..3 {
@@ -2624,14 +2583,9 @@ fn occluding_window(
     let frame = root_child_of(display, window);
     match (under, frame) {
         (Some(under), Some(frame)) if under != frame && !is_override_redirect(display, under) => {
-            let previous_handler = unsafe { x11::xlib::XSetErrorHandler(Some(ignore_x_error)) };
             let covering_client = client_below(display, under);
             let covering_pid = crate::x11::window_pid(under)
                 .or_else(|| covering_client.and_then(crate::x11::window_pid));
-            unsafe {
-                x11::xlib::XSync(display, 0);
-                x11::xlib::XSetErrorHandler(previous_handler);
-            }
             let target_pid = crate::x11::window_pid(window);
             let title = window_title_for_report(display, covering_client.unwrap_or(under));
             // The app's own window (a dialog, a file chooser) sits over the
@@ -3005,13 +2959,6 @@ fn save_focus_state(display: *mut x11::xlib::Display) -> SavedFocus {
     }
 }
 
-unsafe extern "C" fn ignore_x_error(
-    _display: *mut x11::xlib::Display,
-    _event: *mut x11::xlib::XErrorEvent,
-) -> std::os::raw::c_int {
-    0
-}
-
 fn restore_focus_state(display: *mut x11::xlib::Display, saved: &SavedFocus) {
     // Let the release/focus events from the drag settle before reading the
     // post-drag state, so we don't race the WM's own focus update.
@@ -3064,7 +3011,6 @@ fn restore_focus_state(display: *mut x11::xlib::Display, saved: &SavedFocus) {
                 if attempt >= 2 {
                     if let Some(now_win) = now {
                         unsafe {
-                            let prev_handler = x11::xlib::XSetErrorHandler(Some(ignore_x_error));
                             x11::xlib::XSetInputFocus(
                                 display,
                                 now_win,
@@ -3072,7 +3018,6 @@ fn restore_focus_state(display: *mut x11::xlib::Display, saved: &SavedFocus) {
                                 x11::xlib::CurrentTime,
                             );
                             x11::xlib::XSync(display, 0);
-                            x11::xlib::XSetErrorHandler(prev_handler);
                         }
                         sleep(Duration::from_millis(100));
                     }
@@ -3088,9 +3033,8 @@ fn restore_focus_state(display: *mut x11::xlib::Display, saved: &SavedFocus) {
     }
 
     // No EWMH WM (bare X / minimal WM): restore the core input focus
-    // directly. The saved window may have been destroyed meanwhile, and
-    // Xlib's default error handler exits the process on BadWindow, so the
-    // restore runs under a scoped ignore-errors handler.
+    // directly. The saved window may have been destroyed meanwhile; its
+    // BadWindow goes to the process's recording X error handler.
     if saved.core_focus == 0 {
         return;
     }
@@ -3101,7 +3045,6 @@ fn restore_focus_state(display: *mut x11::xlib::Display, saved: &SavedFocus) {
         if now_focus == saved.core_focus {
             return;
         }
-        let prev_handler = x11::xlib::XSetErrorHandler(Some(ignore_x_error));
         x11::xlib::XSetInputFocus(
             display,
             saved.core_focus,
@@ -3109,7 +3052,6 @@ fn restore_focus_state(display: *mut x11::xlib::Display, saved: &SavedFocus) {
             x11::xlib::CurrentTime,
         );
         x11::xlib::XSync(display, 0);
-        x11::xlib::XSetErrorHandler(prev_handler);
     }
 }
 
@@ -5093,14 +5035,13 @@ mod path_tests {
     };
     use x11rb::protocol::xproto::{EventMask, KeyButMask};
 
-    /// Regression for the `XSetErrorHandler` swap race: every caller that
-    /// could swap the process-global X11 error handler while an MPX
-    /// operation is mid-swap (`send_virtual_pointer_*`, `deliver`, and now
-    /// `x11_activate_window_persistent`) must take `MPX_OP_LOCK` first. This
-    /// doesn't touch X11 (no display in CI), but proves the lock itself is
-    /// exclusive and not reentrant-by-accident: a second `mpx_op_guard` call
-    /// blocks until the first is dropped, exactly the property the handler
-    /// swap needs to be race-free.
+    /// Every MPX operation (`send_virtual_pointer_*`, `deliver`,
+    /// `x11_activate_window_persistent`, the idle reaper) takes
+    /// `MPX_OP_LOCK` first, so a master pair is never torn down or
+    /// refocused while another call is using it. This doesn't touch X11 (no
+    /// display in CI), but proves the lock itself is exclusive and not
+    /// reentrant-by-accident: a second `mpx_op_guard` call blocks until the
+    /// first is dropped.
     #[test]
     fn mpx_op_guard_is_mutually_exclusive() {
         use std::sync::atomic::{AtomicBool, Ordering};
