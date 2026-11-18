@@ -255,9 +255,10 @@ screenshots of the desktop or one window in one call (`count` frames
 `interval_ms` apart, or `offsets_ms`), and `return_frames:"changed"` keeps
 only the frames that differ. Use it to prove playback, an animation, or a
 slow state change instead of polling with repeated reads. `get_desktop_state`
-takes a `region` in full-size desktop pixels for a closer look at part of the
-screen; its `capture_id` maps the cropped pixels back for the next desktop
-action.
+takes a `region` in the pixels of the last desktop image it returned
+(`native_pixels:true` for full-size desktop pixels) for a closer look at part
+of the screen; its `capture_id` maps the cropped pixels back for the next
+desktop action.
 
 **Cross-application drops.** A pointer action whose point lies over another
 application's window (a drag dropped onto VLC) reports that window's title
