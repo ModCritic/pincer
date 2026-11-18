@@ -15,6 +15,8 @@
 //!   down (Lifecycle, Shutdown: close stdin, wait for the exit, then
 //!   SIGTERM), and a scripted client may close it right after its last
 //!   request. SIGTERM cancels what is still running;
+//! - a line that is not UTF-8 gets a JSON-RPC parse error (-32700, id null),
+//!   like malformed JSON, and reading goes on;
 //! - a read error or a failed write (nobody left to read the answers)
 //!   cancels every request not yet answered: a waiting `tools/call` does
 //!   not start, and a running long tool stops at its next step;
@@ -318,11 +320,13 @@ pub(crate) async fn read_requests<R>(
 where
     R: AsyncBufRead + Unpin,
 {
-    let mut line = String::new();
+    let mut line = Vec::new();
     loop {
         line.clear();
+        // Bytes, not `read_line`: that fails the whole read on a line that is
+        // not UTF-8, which ended the server.
         let read = tokio::select! {
-            read = reader.read_line(&mut line) => read,
+            read = reader.read_until(b'\n', &mut line) => read,
             _ = stop.cancelled() => return Ok(()),
         };
         let read = match read {
@@ -337,7 +341,20 @@ where
             // answered; dropping `jobs` lets the executor end after it.
             return Ok(());
         }
-        let trimmed = line.trim();
+        // MCP messages are UTF-8 (Transports). A line that is not gets the
+        // same parse error as malformed JSON, and reading goes on.
+        let Ok(text) = std::str::from_utf8(&line) else {
+            error!("stdin line is not UTF-8");
+            if jobs
+                .send(Job::Reply(Response::parse_error()))
+                .await
+                .is_err()
+            {
+                return Ok(());
+            }
+            continue;
+        };
+        let trimmed = text.trim();
         if trimmed.is_empty() {
             continue;
         }
@@ -734,6 +751,31 @@ mod tests {
             *harness.observed.lock().unwrap(),
             vec!["steady finished".to_owned(), "steady finished".to_owned()]
         );
+    }
+
+    /// MCP messages are UTF-8 (Transports). A line that is not gets a parse
+    /// error with a null id, like malformed JSON, and the server reads on;
+    /// before, the first such byte ended the whole server.
+    #[tokio::test]
+    async fn a_line_that_is_not_utf8_gets_a_parse_error_and_reading_goes_on() {
+        let mut harness = initialized().await;
+        harness
+            .to_server
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"\xff\xfe\"}\n")
+            .await
+            .unwrap();
+        let reply = harness.next().await;
+        assert_eq!(reply["id"], Value::Null, "{reply}");
+        assert_eq!(reply["error"]["code"], -32700, "{reply}");
+        harness
+            .send(json!({"jsonrpc": "2.0", "id": 3, "method": "ping"}))
+            .await;
+        assert_eq!(
+            harness.next().await,
+            json!({"jsonrpc": "2.0", "id": 3, "result": {}})
+        );
+        drop(harness.to_server);
+        harness.server.await.unwrap().unwrap();
     }
 
     /// With nobody left to read the answers (the write to stdout fails),
