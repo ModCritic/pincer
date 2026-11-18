@@ -129,3 +129,7 @@ deny:
 Rego policies must expose a boolean rule at `data.pincer.policy.allow`. The input
 shape is `{ "server": "pincer", "tool": <name>, "arguments": <object> }`.
 Regorus evaluates policies inside the daemon; no OPA service is required.
+Pincer builds Regorus without its YAML support, so the `yaml.is_valid`,
+`yaml.marshal` and `yaml.unmarshal` builtins are not available. A call to one
+fails where it runs: in the check when the policy loads, which then fails, or
+in the tool call that reaches it, which is then refused.

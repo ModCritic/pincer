@@ -1201,6 +1201,39 @@ allow if {
         );
     }
 
+    /// regorus is built without its `yaml` feature (it pulled the deprecated
+    /// serde_yaml), so a yaml.* builtin fails where it is called: in the
+    /// check at load, or else in the tool call that reaches it.
+    #[cfg(feature = "rego")]
+    #[test]
+    fn rego_yaml_builtins_are_not_available() {
+        let load = |body: &str| {
+            let dir = tempdir().unwrap();
+            let path = dir.path().join("policy.rego");
+            let policy = format!("package pincer.policy\n\ndefault allow = false\n\n{body}\n");
+            fs::write(&path, policy).unwrap();
+            PolicyEngine::load(&path)
+        };
+        for (builtin, call) in [
+            ("yaml.is_valid", r#"yaml.is_valid("tool: click")"#),
+            ("yaml.marshal", r#"yaml.marshal({"tool": "click"}) != """#),
+            ("yaml.unmarshal", r#"yaml.unmarshal("tool: click").tool == input.tool"#),
+        ] {
+            let Err(error) = load(&format!("allow if {call}")) else {
+                panic!("a policy calling {builtin} loaded");
+            };
+            let error = format!("{error:#}");
+            assert!(error.contains(builtin), "{error}");
+
+            let guarded = format!("allow if {{\n    input.tool == \"click\"\n    {call}\n}}");
+            let policy = load(&guarded).unwrap().unwrap();
+            match policy.evaluate("click", &serde_json::json!({})) {
+                PolicyDecision::Error(message) => assert!(message.contains(builtin), "{message}"),
+                other => panic!("{builtin} in a click rule gave {other:?}"),
+            }
+        }
+    }
+
     #[test]
     fn explicitly_configured_missing_policy_fails_closed() {
         let dir = tempdir().unwrap();

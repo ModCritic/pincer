@@ -26,7 +26,30 @@ tracing = { workspace = true }
 async-trait = "0.1"
 serde_yaml_ng = "0.10"
 regex = { version = "1", optional = true }
-regorus = { version = "0.10.1", optional = true }
+# regorus's default features (full-opa, arc, rvm) minus `yaml`, which pulled
+# the deprecated serde_yaml. Policies cannot call the yaml.* builtins (see the
+# Permission Policies section of rust/README.md).
+regorus = { version = "0.10.1", optional = true, default-features = false, features = [
+    "arc",
+    "base64",
+    "base64url",
+    "cache",
+    "coverage",
+    "glob",
+    "graph",
+    "hex",
+    "http",
+    "jsonschema",
+    "net",
+    "opa-runtime",
+    "regex",
+    "rvm",
+    "semver",
+    "std",
+    "time",
+    "urlquery",
+    "uuid",
+] }
 # Used by the shared `image_utils` module — pure PNG/JPEG/resize/crosshair
 # helpers extracted from `platform-{macos,windows,linux}/src/capture.rs` so
 # all three platforms call the same code path.

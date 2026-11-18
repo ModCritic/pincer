@@ -242,7 +242,6 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | serde | 1.0.228 | MIT OR Apache-2.0 | MIT |
 | serde_core | 1.0.228 | MIT OR Apache-2.0 | MIT |
 | serde_json | 1.0.149 | MIT OR Apache-2.0 | MIT |
-| serde_yaml | 0.9.34+deprecated | MIT OR Apache-2.0 | MIT |
 | serde_yaml_ng | 0.10.0 | MIT | MIT |
 | sha1 | 0.10.6 | MIT OR Apache-2.0 | MIT |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | MIT |
@@ -330,7 +329,7 @@ crates.io at the versions listed; Pincer's own files are not affected.
 Each text below is copied from the crate's published package; the crates that
 ship an identical text are listed together above it.
 
-### adler2 2.0.1, allocator-api2 0.2.21, anyhow 1.0.102, async-channel 2.5.0, async-compat 0.2.5, async-executor 1.14.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atomic-waker 1.1.2, blocking 1.6.2, camino 1.2.4, cargo-platform 0.1.9, cargo_metadata 0.19.2, concurrent-queue 2.5.0, dyn-clone 1.0.20, endi 1.1.1, evdev 0.12.2, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, futures-lite 2.6.1, itoa 1.0.18, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, proc-macro2 1.0.106, quote 1.0.45, ref-cast 1.0.25, rustix 1.1.4, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_json 1.0.149, serde_yaml 0.9.34+deprecated, syn 2.0.117, thiserror 1.0.69, thiserror 2.0.18, unicode-ident 1.0.24, unsafe-libyaml 0.2.11, utf-8 0.7.6, x11 2.21.0, zbus-lockstep 0.5.2, zmij 1.0.21, zvariant_utils 3.4.0
+### adler2 2.0.1, allocator-api2 0.2.21, anyhow 1.0.102, async-channel 2.5.0, async-compat 0.2.5, async-executor 1.14.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atomic-waker 1.1.2, blocking 1.6.2, camino 1.2.4, cargo-platform 0.1.9, cargo_metadata 0.19.2, concurrent-queue 2.5.0, dyn-clone 1.0.20, endi 1.1.1, evdev 0.12.2, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, futures-lite 2.6.1, itoa 1.0.18, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, proc-macro2 1.0.106, quote 1.0.45, ref-cast 1.0.25, rustix 1.1.4, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_json 1.0.149, syn 2.0.117, thiserror 1.0.69, thiserror 2.0.18, unicode-ident 1.0.24, unsafe-libyaml 0.2.11, utf-8 0.7.6, x11 2.21.0, zbus-lockstep 0.5.2, zmij 1.0.21, zvariant_utils 3.4.0
 
 ```text
 Permission is hereby granted, free of charge, to any
