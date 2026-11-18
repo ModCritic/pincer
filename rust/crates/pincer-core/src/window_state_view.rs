@@ -81,7 +81,7 @@ pub fn schema_properties() -> Value {
         },
         "since": {
             "type": "string",
-            "description": "`snapshot_id` of an earlier read of this window, or \"latest\" (its last read with the same query/max_elements/max_depth). Use it on every re-read after acting. Returns only changes: `+` added, `~` changed, `-` removed rows (old ids), or `no change`; unlisted rows keep their [N] unless a `reindexed:` line says otherwise. Falls back to a full read if the snapshot is unknown, expired, from another window, or read with a different query/max_elements/max_depth (`since_status` says which). Use the new snapshot_id in element_tokens."
+            "description": "`snapshot_id` of an earlier read of this window, or \"latest\" (its last read with the same query/max_elements/max_depth). Use it on every re-read after acting. Returns only changes: `+` added, `~` changed, `-` removed rows (old ids), or `no change` (rows only: a move or resize changes only window_bounds); unlisted rows keep their [N] unless a `reindexed:` line says otherwise. Falls back to a full read if the snapshot is unknown, expired, from another window, or read with a different query/max_elements/max_depth (`since_status` says which). Use the new snapshot_id in element_tokens."
         },
         "verbose": {
             "type": "boolean",
