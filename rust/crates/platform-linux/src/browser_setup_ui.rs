@@ -104,12 +104,16 @@ fn setup_not_ready_message(descriptor: &BrowserSetupDescriptor) -> String {
     )
 }
 
+/// Window ids come from the backend list_windows uses, so the route follows
+/// the native Wayland switch, as in browser_platform. KDE and GNOME set
+/// `WAYLAND_DISPLAY` in the default XWayland mode too, where the ids are X11
+/// ones that no Wayland compositor adapter knows.
 fn with_target_foreground<T>(
     pid: u32,
     window_id: u64,
     body: impl FnOnce() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+    if crate::wayland::is_wayland() {
         if let Some(window) =
             crate::wayland::sway_ipc::window_for_id(window_id).filter(|window| window.pid == pid)
         {
@@ -124,7 +128,7 @@ fn with_target_foreground<T>(
 
 fn close_tab(pid: u32, window_id: u64) -> anyhow::Result<()> {
     with_target_foreground(pid, window_id, || {
-        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        if crate::wayland::is_wayland() {
             crate::wayland::hotkey_focused(&["ctrl".to_owned(), "w".to_owned()])
         } else {
             crate::input::send_key_xtest("w", &["ctrl"])
@@ -193,7 +197,7 @@ fn trusted_setup_navigation(
     window_id: u64,
     descriptor: &BrowserSetupDescriptor,
 ) -> anyhow::Result<()> {
-    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let wayland = crate::wayland::is_wayland();
 
     // A fresh tab, so the setup page never displaces a page the user was on.
     // `ctrl+l` then focuses the address field. Both are single letters, so
@@ -616,7 +620,7 @@ fn set_remote_debugging(
                         let center_y = y
                             .checked_add(i32::try_from(height / 2)?)
                             .ok_or_else(|| anyhow::anyhow!("checkbox center y overflowed"))?;
-                        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+                        if crate::wayland::is_wayland() {
                             // AT-SPI screen bounds are layout coordinates, as in
                             // browser_consent_ui's click_focused path, not
                             // desktop-frame points, so no frame conversion applies.
@@ -684,6 +688,30 @@ mod tests {
 
     fn descriptor() -> &'static BrowserSetupDescriptor {
         existing_profile_setup_descriptor(BrowserProduct::GoogleChrome).unwrap()
+    }
+
+    /// XWayland mode (the default on KDE and GNOME: WAYLAND_DISPLAY set, the
+    /// native backend off) lists X11 windows, so the approved window id is an
+    /// X11 one and its chords go through the X11 route, as everywhere else.
+    #[test]
+    fn xwayland_mode_focuses_the_approved_window_through_x11() {
+        let display = crate::test_env::xwayland_mode_display();
+        let mut ran = false;
+        let result = with_target_foreground(std::process::id(), 0x1234, || {
+            ran = true;
+            Ok(())
+        });
+        drop(display);
+        let error = format!("{:#}", result.expect_err("DISPLAY points at no server"));
+        assert!(!ran, "the body ran without a confirmed activation");
+        assert!(
+            !error.contains("Wayland") && !error.contains("GNOME Shell"),
+            "XWayland mode took the native Wayland route: {error}"
+        );
+        assert!(
+            crate::input::foreground::error_code(&anyhow::anyhow!(error.clone())).is_some(),
+            "{error}"
+        );
     }
 
     fn node(role: &str, name: &str, value: Option<&str>, actions: &[&str]) -> AtspiNode {

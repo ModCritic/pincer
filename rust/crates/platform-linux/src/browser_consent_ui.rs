@@ -175,12 +175,14 @@ fn prove_window_owner(pid: u32, window_id: u64) -> Result<(), BrowserRefusal> {
     Ok(())
 }
 
+/// The route follows the native Wayland switch, not `WAYLAND_DISPLAY`; see
+/// browser_setup_ui's `with_target_foreground`.
 fn with_target_foreground<T>(
     pid: u32,
     window_id: u64,
     body: impl FnOnce() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+    if crate::wayland::is_wayland() {
         crate::wayland::with_target_foreground(pid, window_id, body)
     } else {
         crate::input::with_x11_foreground(window_id, 80, body)
@@ -213,7 +215,7 @@ fn trusted_allow_click(pid: u32, window_id: u64) -> anyhow::Result<()> {
                 anyhow::anyhow!("the exact Chromium remote-debugging consent action became stale")
             })?;
         let (center_x, center_y) = exact_button_center(&tree.bounds, index)?;
-        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        if crate::wayland::is_wayland() {
             crate::wayland::click_focused(center_x, center_y, 1, 1)
         } else {
             crate::input::send_click_xtest_desktop(center_x, center_y, 1, 1)
@@ -364,6 +366,30 @@ pub async fn handle(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// XWayland mode (the default on KDE and GNOME: WAYLAND_DISPLAY set, the
+    /// native backend off) lists X11 windows, so the approved window id is an
+    /// X11 one and its chords go through the X11 route, as everywhere else.
+    #[test]
+    fn xwayland_mode_focuses_the_approved_window_through_x11() {
+        let display = crate::test_env::xwayland_mode_display();
+        let mut ran = false;
+        let result = with_target_foreground(std::process::id(), 0x1234, || {
+            ran = true;
+            Ok(())
+        });
+        drop(display);
+        let error = format!("{:#}", result.expect_err("DISPLAY points at no server"));
+        assert!(!ran, "the body ran without a confirmed activation");
+        assert!(
+            !error.contains("Wayland") && !error.contains("GNOME Shell"),
+            "XWayland mode took the native Wayland route: {error}"
+        );
+        assert!(
+            crate::input::foreground::error_code(&anyhow::anyhow!(error.clone())).is_some(),
+            "{error}"
+        );
+    }
 
     #[tokio::test]
     async fn expired_action_never_enters_native_helper() {
