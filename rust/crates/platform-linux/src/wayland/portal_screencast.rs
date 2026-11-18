@@ -149,9 +149,11 @@ fn capture_one_frame(pipewire_fd: i32, node_id: u32) -> anyhow::Result<Vec<u8>> 
 
     pw::init();
 
-    let mainloop = pw::main_loop::MainLoop::new(None)
+    // Reference-counted loop: the process and timer callbacks keep clones
+    // to quit it.
+    let mainloop = pw::main_loop::MainLoopRc::new(None)
         .map_err(|e| anyhow::anyhow!("pipewire MainLoop::new failed: {e}"))?;
-    let context = pw::context::Context::new(&mainloop)
+    let context = pw::context::ContextRc::new(&mainloop, None)
         .map_err(|e| anyhow::anyhow!("pipewire Context::new failed: {e}"))?;
 
     // dup the portal fd so the OwnedFd we hand to connect_fd has an
@@ -182,7 +184,7 @@ fn capture_one_frame(pipewire_fd: i32, node_id: u32) -> anyhow::Result<Vec<u8>> 
     let neg_format: Arc<Mutex<spa::param::video::VideoInfoRaw>> =
         Arc::new(Mutex::new(Default::default()));
 
-    let stream = pw::stream::Stream::new(
+    let stream = pw::stream::StreamBox::new(
         &core,
         "pincer-capture",
         properties! {

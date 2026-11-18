@@ -88,19 +88,17 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 # ashpd re-exports `url` transitively; declared explicitly so ashpd
 # version bumps cannot silently break the resolver.
 url = "2"
-# PipeWire client for the ScreenCast per-window capture path — dequeues
-# frames from the node id returned by `open_pipe_wire_remote`. Pinned to
-# 0.8 (last well-documented release; 0.10 had docs.rs build failures in
-# mid-2026). Needs libpipewire-0.3 headers at build time — gated behind
-# the `portal-capture` feature. libspa-sys 0.8 generates its bindings with
-# bindgen 0.69, which under libclang 23 turns the forward-declared
-# `struct spa_pod_builder` into an opaque struct, and libspa 0.8 then fails
-# to compile; with libclang 21 (LIBCLANG_PATH) it builds.
-pipewire = { version = "0.8", optional = true }
-# Companion to pipewire 0.8 — needed to construct the SPA_PARAM_EnumFormat
-# pod (SPA_VIDEO_FORMAT_BGRx at announced width/height) we hand to
-# `Stream::connect`. Same `portal-capture` gating as `pipewire`.
-libspa = { version = "0.8", optional = true }
+# PipeWire client for the ScreenCast per-window capture path: dequeues
+# frames from the node id returned by `open_pipe_wire_remote`. Needs the
+# libpipewire-0.3 and libspa-0.2 headers and libclang at build time, so it
+# is gated behind the `portal-capture` feature. pipewire-sys and libspa-sys
+# 0.10 generate their bindings with bindgen 0.72, which builds with libclang
+# 23 as well as 21 (0.8 used bindgen 0.69, which failed under libclang 23).
+pipewire = { version = "0.10", optional = true }
+# Companion to pipewire: builds the SPA_PARAM_EnumFormat pod (BGRx and
+# friends at the announced width and height) handed to `Stream::connect`.
+# Same `portal-capture` gating as `pipewire`.
+libspa = { version = "0.10", optional = true }
 # Pure-Rust libei/libeis bindings for the GNOME/KDE input path (handshake
 # → seat → device → pointer_absolute/button/scroll/keyboard/text). API is
 # documented as "incomplete and subject to change" — budget for churn on
@@ -151,7 +149,8 @@ portal-input = [
     "dep:xkbcommon",
 ]
 # PipeWire-backed per-window ScreenCast capture (wayland/portal_screencast.rs),
-# which needs the libpipewire-0.3 headers. Nothing in the driver calls it yet.
+# which needs the libpipewire-0.3 and libspa-0.2 headers and libclang for
+# bindgen. Nothing in the driver calls it yet.
 portal-capture = [
     "ashpd/screencast",
     "dep:pipewire",

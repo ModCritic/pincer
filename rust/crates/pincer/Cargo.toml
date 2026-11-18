@@ -51,8 +51,9 @@ platform-linux = { path = "../platform-linux" }
 default = []
 # Opt-in Wayland features, off in the default build (and so in the installed
 # binary): portal-input is GNOME/KDE foreground input through the portal and
-# libei; portal-capture is PipeWire window capture. Both need libclang 21 for
-# libspa's bindgen today (see platform-linux/Cargo.toml).
+# libei (pure Rust plus libxkbcommon); portal-capture is PipeWire window
+# capture, which needs the PipeWire headers and libclang (see
+# platform-linux/Cargo.toml).
 portal-input = ["platform-linux/portal-input"]
 portal-capture = ["platform-linux/portal-capture"]
 portal-libei = ["platform-linux/portal-libei"]
