@@ -82,6 +82,8 @@ async fn resume_trusted_connection(
     bind_trusted_connection(sdk, record.options, record.transport_session)
 }
 
+/// Only the Unix daemon keeps a set of connection tasks to reap.
+#[cfg(unix)]
 fn reap_finished_connections(connection_tasks: &mut tokio::task::JoinSet<()>) {
     while let Some(result) = connection_tasks.try_join_next() {
         if let Err(error) = result {
@@ -153,6 +155,9 @@ fn active_proxy_sessions() -> &'static Mutex<HashSet<String>> {
     ACTIVE_PROXY_SESSIONS.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+/// The Unix daemon clears the set at shutdown; the Windows daemon removes
+/// each session as its pipe closes.
+#[cfg(unix)]
 fn release_active_proxy_sessions() {
     if let Some(sessions) = ACTIVE_PROXY_SESSIONS.get() {
         let mut sessions = sessions.lock().unwrap();
@@ -361,6 +366,10 @@ pub fn default_socket_path_or_exit() -> String {
 /// exists, elevated/AppContainer pixel input uses an interactively launched
 /// High-IL daemon. See #1602 / the `pincer-uia` crate for the worker side.
 #[cfg(target_os = "windows")]
+#[allow(
+    dead_code,
+    reason = "reserved for the daemon-internal forwarding path described above"
+)]
 pub fn default_uia_pipe_path() -> String {
     if crate::bundle::is_local_installation() {
         r"\\.\pipe\pincer-local-uia".to_owned()
@@ -3453,7 +3462,7 @@ mod trusted_resume_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod connection_reaping_tests {
     use super::reap_finished_connections;
 
