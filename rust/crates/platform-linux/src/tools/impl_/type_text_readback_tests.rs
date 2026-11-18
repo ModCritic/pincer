@@ -124,3 +124,30 @@ fn a_read_back_escapes_quotes_and_invisible_characters() {
     assert!(text.contains(&format!("reads back {shown}")), "{text}");
     assert!(!text.contains('\u{2028}') && !text.contains('\u{202e}'), "{text}");
 }
+
+/// An Electron app named otherwise, before it starts a renderer, is a
+/// Chromium embedder by its executable: the read-back distrust applied only
+/// once a `--type=renderer` helper process ran below it.
+#[test]
+fn a_process_running_a_binary_beside_a_chromium_payload_is_a_chromium_embedder() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = dir.path().join("chat-app");
+    std::fs::copy("/bin/sh", &app).unwrap();
+    let mut plain = std::process::Command::new(&app)
+        .args(["-c", "sleep 30; exit 0"])
+        .spawn()
+        .unwrap();
+    let before = is_chromium_embedder(plain.id());
+    let _ = plain.kill();
+    let _ = plain.wait();
+    assert!(!before);
+    std::fs::write(dir.path().join("chrome_100_percent.pak"), b"pak").unwrap();
+    let mut electron = std::process::Command::new(&app)
+        .args(["-c", "sleep 30; exit 0"])
+        .spawn()
+        .unwrap();
+    let after = is_chromium_embedder(electron.id());
+    let _ = electron.kill();
+    let _ = electron.wait();
+    assert!(after);
+}

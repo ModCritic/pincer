@@ -143,15 +143,16 @@ async fn check_ax_capability() -> CheckEntry {
             };
         }
         let hint = if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() {
-            "DBUS_SESSION_BUS_ADDRESS is set but org.a11y.Bus has no owner — enable \
-             accessibility (`gsettings set org.gnome.desktop.interface \
-             toolkit-accessibility true`) and/or start the AT-SPI bus \
-             (`/usr/libexec/at-spi-bus-launcher`)."
+            format!(
+                "DBUS_SESSION_BUS_ADDRESS is set but org.a11y.Bus has no owner — {}.",
+                crate::a11y::no_bus_advice(crate::a11y::current_desktop().as_deref())
+            )
         } else {
             "DBUS_SESSION_BUS_ADDRESS is unset and none was auto-discovered, so there \
              is no session bus to reach AT-SPI on — start the daemon inside the desktop \
              session, or ensure a /run/user/<uid>/bus socket exists (the daemon adopts \
              it at startup)."
+                .to_owned()
         };
         return CheckEntry::fail(
             NAME_AX_CAPABILITY,

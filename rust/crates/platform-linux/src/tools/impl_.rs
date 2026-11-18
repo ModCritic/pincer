@@ -2265,17 +2265,18 @@ impl Tool for GetWindowStateTool {
                             ));
                     } else if count == 0 {
                         structured["degraded"] = json!(true);
-                        structured["degraded_reason"] = json!(
+                        structured["degraded_reason"] = json!(format!(
                             "atspi_tree_empty: the AT-SPI walk returned no actionable \
-                             elements. Common causes: the a11y bridge is off (enable \
-                             `gsettings set org.gnome.desktop.interface \
-                             toolkit-accessibility true`), the daemon is not on the \
+                             elements. Common causes: {}, the daemon is not on the \
                              desktop session bus (DBUS_SESSION_BUS_ADDRESS unreachable — \
                              run `pincer doctor`), or the window is a non-AX surface \
                              (canvas/WebGL/custom-drawn). Do not treat element data as \
                              authoritative — verify via the screenshot, and re-snapshot \
-                             after enabling a11y or if the app just launched."
-                        );
+                             after enabling a11y or if the app just launched.",
+                            crate::a11y::bridge_off_advice(
+                                crate::a11y::current_desktop().as_deref()
+                            )
+                        ));
                         // Point the agent at the next rung explicitly: an empty
                         // tree means element_index has nothing to bind to. The
                         // recommendation is session-dependent (X11 → px,
@@ -2910,12 +2911,18 @@ fn spawn_launch(executable: &std::path::Path, argv: &[String]) -> std::io::Resul
         // (`spawn_watched`) instead.
         .stdin(std::process::Stdio::null())
         // Enable accessibility for this child without toggling GNOME's global
-        // ScreenReaderEnabled setting (which can launch Orca). Native
-        // toolkits ignore these when they do not need them.
+        // ScreenReaderEnabled setting (which can launch Orca). Chromium and
+        // Electron read ACCESSIBILITY_ENABLED, GTK's bridge NO_AT_BRIDGE, and
+        // Firefox and Thunderbird GNOME_ACCESSIBILITY (the only one their
+        // libxul names). Checked in a sandbox: Firefox 159 started while
+        // the session's accessibility status was off published no AT-SPI
+        // application without it and its whole tree with it. Toolkits
+        // ignore the ones they do not read.
         .env("ACCESSIBILITY_ENABLED", "1")
+        .env("GNOME_ACCESSIBILITY", "1")
         .env("NO_AT_BRIDGE", "0");
     scrub_driver_environment(&mut launch);
-    if chromium_family_program(&prog)
+    if launch_gets_chromium_flags_for_command(executable, &words)
         && !rest
             .iter()
             .any(|arg| arg == "--force-renderer-accessibility")
@@ -3926,15 +3933,45 @@ fn resolve_launched_windows(
 #[cfg(test)]
 mod launch_resolution_tests;
 
-fn chromium_family_program(program: &str) -> bool {
-    let basename = std::path::Path::new(program)
+/// [`launch_gets_chromium_flags`] for a launch command `words` whose program
+/// resolved to `executable`. A command run through `env` (`env NAME=value
+/// program ...`, common in .desktop entries) is judged by the program `env`
+/// runs.
+fn launch_gets_chromium_flags_for_command(executable: &std::path::Path, words: &[String]) -> bool {
+    if executable.file_name().is_some_and(|name| name == "env") {
+        let mut rest = words.iter().skip(1);
+        while let Some(word) = rest.next() {
+            match word.as_str() {
+                "-u" | "--unset" | "-C" | "--chdir" => {
+                    rest.next();
+                }
+                // `env -S "program args"` splits a string: not followed.
+                "-S" | "--split-string" => return false,
+                _ if word.starts_with('-') || word.contains('=') => {}
+                _ => {
+                    return resolve_program(word)
+                        .is_some_and(|program| launch_gets_chromium_flags(&program, word))
+                }
+            }
+        }
+        return false;
+    }
+    launch_gets_chromium_flags(executable, words.first().map(String::as_str).unwrap_or(""))
+}
+
+/// Whether launch_app adds `--force-renderer-accessibility`: the program
+/// runs Chromium (a Chromium-family browser, or an Electron or CEF app), by
+/// the name it was launched as or by the executable it resolved to
+/// ([`crate::web_engine::is_chromium_executable`], which also reads a
+/// wrapper script such as /usr/bin/claude-desktop for the binary it execs).
+/// No other program gets Chromium's flags.
+fn launch_gets_chromium_flags(executable: &std::path::Path, program: &str) -> bool {
+    let name = std::path::Path::new(program)
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or(program)
-        .to_ascii_lowercase();
-    ["chrome", "chromium", "electron", "brave", "edge"]
-        .iter()
-        .any(|needle| basename.contains(needle))
+        .unwrap_or(program);
+    crate::web_engine::is_chromium_name(name)
+        || crate::web_engine::is_chromium_executable(executable)
 }
 
 // ── shared helpers ────────────────────────────────────────────────────────────
@@ -4761,21 +4798,26 @@ fn type_text_ax_result(pid: u32, text_len: usize, route: &str) -> ToolResult {
 /// [`type_text_ax_result`]).
 ///
 /// This is the Linux analogue of macOS `ElectronJs::is_electron` (which checks
-/// for a bundled Electron Framework). Linux has no bundle, so the signal is
-/// Chromium's multiprocess fingerprint: the embedder forks sandboxed helpers
-/// whose argv carries `--type=renderer` / `--type=zygote` / `--type=gpu-process`.
-/// Native GTK/Qt apps never spawn such helpers, so this is conservative (very
-/// low false-positive). The single-process fallback also matches the embedder's
-/// own argv. Reads `/proc`; cheap and only invoked on the rare AT-SPI confirm.
+/// for a bundled Electron Framework). Two signals, either one enough:
+/// - the process's executable, by the same detection launch_app and the
+///   browser tools use ([`crate::web_engine::is_chromium_process`]: a
+///   Chromium name, or Chromium's resource packs beside the binary), which
+///   holds before the app has started any helper;
+/// - Chromium's multiprocess fingerprint: the embedder forks sandboxed
+///   helpers whose argv carries `--type=renderer` / `--type=zygote` /
+///   `--type=gpu-process` (a single-process embedder carries it itself).
+///   Native GTK/Qt apps never spawn such helpers.
+///
+/// Reads `/proc` and stats a few files; cheap enough for every input call.
 fn is_chromium_embedder(pid: u32) -> bool {
     fn argv_is_chromium_helper(p: u32) -> bool {
         fs::read(format!("/proc/{p}/cmdline"))
             .map(|raw| crate::at_point_policy::cmdline_is_chromium_helper(&raw))
             .unwrap_or(false)
     }
-    // Single-process / the embedder itself carrying a Chromium switch, or a
-    // Chromium helper anywhere below it.
-    argv_is_chromium_helper(pid) || descendant_pids(pid).into_iter().any(argv_is_chromium_helper)
+    crate::web_engine::is_chromium_process(pid)
+        || argv_is_chromium_helper(pid)
+        || descendant_pids(pid).into_iter().any(argv_is_chromium_helper)
 }
 
 fn is_webkitgtk_embedder(pid: u32) -> bool {
@@ -17529,10 +17571,10 @@ impl Tool for CheckPermissionsTool {
              AT-SPI trees will be empty; start the daemon inside the desktop session"
                 .to_string()
         } else {
-            "❌ session bus present but org.a11y.Bus has no owner — enable accessibility \
-             (gsettings set org.gnome.desktop.interface toolkit-accessibility true) / \
-             start at-spi-bus-launcher"
-                .to_string()
+            format!(
+                "❌ session bus present but org.a11y.Bus has no owner — {}",
+                crate::a11y::no_bus_advice(crate::a11y::current_desktop().as_deref())
+            )
         };
         let status_text = format!(
             "X11 display: {}\nWayland: {}\nAT-SPI (D-Bus): {}\nXSendEvent injection: {}",

@@ -241,6 +241,10 @@ async fn launched_programs_do_not_inherit_pincer_variables() {
     let env = std::fs::read_to_string(&marker).unwrap();
     assert!(!env.contains(&variable), "{env}");
     assert!(env.contains("ACCESSIBILITY_ENABLED=1"), "{env}");
+    // Firefox and Thunderbird switch their accessibility on only for this
+    // variable (or the session-wide status); without it a launched Firefox
+    // had no tree.
+    assert!(env.contains("GNOME_ACCESSIBILITY=1"), "{env}");
 }
 
 struct PathGuard(Option<std::ffi::OsString>);

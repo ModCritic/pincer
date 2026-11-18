@@ -500,8 +500,12 @@ If a tool call surprises you on Linux:
    order of likelihood: (a) the daemon isn't on the desktop session bus
    (headless / container / `runuser` / root-against-user-session; see
    _AT-SPI needs the session bus_ above; `health_report` will say
-   `DBUS_SESSION_BUS_ADDRESS is unset`); (b) the a11y bridge is off
-   (`gsettings set org.gnome.desktop.interface toolkit-accessibility true`);
+   `DBUS_SESSION_BUS_ADDRESS is unset`); (b) the a11y bridge is off (on
+   GNOME-family desktops
+   `gsettings set org.gnome.desktop.interface toolkit-accessibility true`;
+   on KDE nothing needs switching on, but a Chromium or Electron app needs
+   `--force-renderer-accessibility`: restart it with `launch_app`, which
+   adds it; the `degraded_reason` gives the advice for the current desktop);
    (c) GTK4 / Qt6 / Chromium populate lazily: re-snapshot after an
    interaction or an AX-enable settle.
 

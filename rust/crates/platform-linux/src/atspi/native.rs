@@ -1440,13 +1440,7 @@ async fn resolve_window_frame(
         let windows = crate::wayland::hyprland::list_windows().ok()?;
         let owned: Vec<_> = windows.iter().filter(|window| window.pid == pid).collect();
         let target = owned.iter().position(|window| window.address == xid)?;
-        let chromium = std::fs::read_link(format!("/proc/{pid}/exe"))
-            .ok()
-            .and_then(|path| {
-                path.file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-            })
-            .is_some_and(|name| crate::browser_platform::is_chromium_identity(&name));
+        let chromium = crate::web_engine::is_chromium_process(pid);
         let mut frames = Vec::new();
         for (ordinal, oref) in seeds.iter().enumerate() {
             let acc = call(accessible_for(conn, oref)).await?.ok()?;

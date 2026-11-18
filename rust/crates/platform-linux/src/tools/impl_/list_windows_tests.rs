@@ -161,8 +161,43 @@ fn an_exec_line_with_quotes_is_escaped_in_its_quoted_value() {
 
 #[test]
 fn chromium_launch_detection_uses_executable_basename() {
-    assert!(chromium_family_program("/usr/bin/google-chrome-stable"));
-    assert!(chromium_family_program("PincerTestHarness.Electron"));
-    assert!(chromium_family_program("chromium-browser"));
-    assert!(!chromium_family_program("/usr/bin/gnome-text-editor"));
+    let gets = |program: &str| launch_gets_chromium_flags(std::path::Path::new(program), program);
+    assert!(gets("/usr/bin/google-chrome-stable"));
+    assert!(gets("PincerTestHarness.Electron"));
+    assert!(gets("chromium-browser"));
+    assert!(!gets("/usr/bin/gnome-text-editor"));
+    // Words, not substrings: neither of these is Edge.
+    assert!(!gets("/usr/games/hedgewars"));
+    assert!(!gets("knowledge-base"));
+}
+
+/// /usr/bin/claude-desktop and /usr/bin/discord are shell scripts that exec
+/// an Electron binary. Named otherwise, they were launched without
+/// --force-renderer-accessibility.
+#[test]
+fn a_wrapper_script_for_an_electron_app_gets_chromium_flags() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let install = root.path().join("lib/chat");
+    std::fs::create_dir_all(&install).unwrap();
+    let binary = install.join("chat");
+    std::fs::write(&binary, b"\x7fELF").unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(install.join("chrome_100_percent.pak"), b"pak").unwrap();
+    std::fs::create_dir_all(root.path().join("bin")).unwrap();
+    let wrapper = root.path().join("bin/chat");
+    std::fs::write(
+        &wrapper,
+        format!("#!/bin/sh\nexec {} \"$@\"\n", binary.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(launch_gets_chromium_flags(&wrapper, "chat"));
+    // A launch through `env` checks the program env runs.
+    assert!(launch_gets_chromium_flags_for_command(
+        std::path::Path::new("/usr/bin/env"),
+        &["env".to_owned(), "CHAT_MODE=1".to_owned(), wrapper.display().to_string()],
+    ));
+    // A plain shell script is not Chromium.
+    assert!(!launch_gets_chromium_flags(std::path::Path::new("/bin/sh"), "sh"));
 }

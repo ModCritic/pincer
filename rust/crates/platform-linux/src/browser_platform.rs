@@ -85,18 +85,14 @@ fn run_existing_profile_cleanup<T: Send + 'static>(
         })
 }
 
-pub(crate) fn is_chromium_identity(name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    let products = [
-        "chrome", "chromium", "electron", "brave", "edge", "msedge", "vivaldi", "opera", "arc",
-        "thorium", "iridium", "yandex",
-    ];
-    name.split(|ch: char| !ch.is_ascii_alphanumeric())
-        .any(|token| products.contains(&token))
-}
-
-fn is_chromium(name: &str) -> bool {
-    is_chromium_identity(name)
+/// Whether a process runs Chromium, by its executable (`/proc/<pid>/exe`)
+/// when that can be read, else by its process name: the detection launch_app
+/// and the input tools use too ([`crate::web_engine`]).
+fn chromium_engine(executable: Option<&str>, process_name: &str) -> bool {
+    match executable {
+        Some(path) => crate::web_engine::is_chromium_executable(std::path::Path::new(path)),
+        None => crate::web_engine::is_chromium_name(process_name),
+    }
 }
 
 fn browser_product(identity: &str) -> BrowserProduct {
@@ -616,10 +612,9 @@ impl BrowserPlatform for LinuxBrowserPlatform {
                 format!("browser process {pid} is no longer available"),
             )
         })?;
-        let identity = executable
-            .filter(|path| !path.is_empty())
-            .unwrap_or_else(|| process.name.clone());
-        let chromium = is_chromium(&identity);
+        let executable = executable.filter(|path| !path.is_empty());
+        let chromium = chromium_engine(executable.as_deref(), &process.name);
+        let identity = executable.unwrap_or_else(|| process.name.clone());
         let gecko = is_firefox(&identity);
         let product_kind = browser_product(&identity);
         Ok(BrowserClassification {
@@ -1568,13 +1563,30 @@ mod tests {
 
     #[test]
     fn classifier_covers_embedded_and_standalone_chromium() {
-        assert!(is_chromium("PincerTestHarness.Electron"));
-        assert!(is_chromium("chromium-browser"));
-        assert!(is_chromium("msedge --remote-debugging-port=9222"));
-        assert!(is_chromium("/opt/microsoft/msedge/msedge"));
-        assert!(!is_chromium("firefox"));
-        assert!(!is_chromium("search-worker"));
-        assert!(!is_chromium("ledger-service"));
+        assert!(chromium_engine(None, "PincerTestHarness.Electron"));
+        assert!(chromium_engine(None, "chromium-browser"));
+        assert!(chromium_engine(None, "msedge --remote-debugging-port=9222"));
+        assert!(chromium_engine(Some("/opt/microsoft/msedge/msedge"), "msedge"));
+        assert!(!chromium_engine(None, "firefox"));
+        assert!(!chromium_engine(None, "search-worker"));
+        assert!(!chromium_engine(None, "ledger-service"));
+    }
+
+    /// An Electron app whose binary is named otherwise (Discord, Claude
+    /// Desktop) was not classified as Chromium.
+    #[test]
+    fn an_electron_app_named_otherwise_is_chromium() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Discord");
+        std::fs::write(&app, b"\x7fELF").unwrap();
+        std::fs::write(dir.path().join("chrome_100_percent.pak"), b"pak").unwrap();
+        assert!(chromium_engine(app.to_str(), "Discord"));
+        assert!(!chromium_engine(Some("/usr/lib/firefox/firefox"), "firefox"));
+        // Without the executable, the process name decides.
+        assert!(chromium_engine(None, "chromium"));
+        assert!(!chromium_engine(None, "Discord"));
+        // A folder named like a browser does not make its programs one.
+        assert!(!chromium_engine(Some("/home/user/chrome-tools/notes"), "notes"));
     }
 
     #[test]

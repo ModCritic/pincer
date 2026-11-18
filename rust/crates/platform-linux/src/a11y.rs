@@ -61,11 +61,7 @@ pub fn ensure_chromium_accessibility_enabled() {
         let mode = advertise_mode_from(
             std::env::var_os("PINCER_DISABLE_A11Y_ADVERTISE").is_some(),
             std::env::var("PINCER_A11Y_ADVERTISE_MODE").ok().as_deref(),
-            std::env::var("XDG_CURRENT_DESKTOP")
-                .or_else(|_| std::env::var("XDG_SESSION_DESKTOP"))
-                .or_else(|_| std::env::var("DESKTOP_SESSION"))
-                .ok()
-                .as_deref(),
+            current_desktop().as_deref(),
         );
         if mode == AdvertiseMode::None {
             tracing::debug!(
@@ -176,6 +172,75 @@ fn desktop_default_mode(desktop: Option<&str>) -> AdvertiseMode {
     }
 }
 
+/// The gsettings switch the AT-SPI bus launcher reports as `IsEnabled`.
+const GSETTINGS_ACCESSIBILITY: &str =
+    "`gsettings set org.gnome.desktop.interface toolkit-accessibility true`";
+
+/// Whether `desktop` (`XDG_CURRENT_DESKTOP`, a colon-separated list) names
+/// KDE Plasma.
+fn is_kde(desktop: Option<&str>) -> bool {
+    desktop.is_some_and(|desktop| {
+        desktop
+            .split([':', ';'])
+            .any(|part| part.trim().eq_ignore_ascii_case("kde"))
+    })
+}
+
+/// The session's desktop, as [`ensure_chromium_accessibility_enabled`]
+/// reads it.
+pub fn current_desktop() -> Option<String> {
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .or_else(|_| std::env::var("XDG_SESSION_DESKTOP"))
+        .or_else(|_| std::env::var("DESKTOP_SESSION"))
+        .ok()
+}
+
+/// How to switch an application's accessibility bridge on, for a window
+/// whose AT-SPI tree came back empty, on the desktop `desktop`
+/// (`XDG_CURRENT_DESKTOP`).
+///
+/// GNOME-family desktops keep the switch in gsettings, and the AT-SPI bus
+/// launcher reports that key as `IsEnabled` (at-spi2-core 2.62 reads
+/// `org.gnome.desktop.interface toolkit-accessibility`). KDE's own settings
+/// have no such switch (its Accessibility page offers only a screen reader,
+/// which needs Orca), and none is needed there. Checked in a KWin X11 slot
+/// with at-spi2-core 2.62: the bus reports `IsEnabled` while Pincer runs
+/// (its AT-SPI event listener is enough, even with
+/// `PINCER_A11Y_ADVERTISE_MODE=none`), and KWrite (Qt 6) and Firefox 159
+/// started before that published their trees once it did, without a
+/// restart. Chromium 156 did not: with `IsEnabled` on it published an
+/// application with no web document until it was started with
+/// `--force-renderer-accessibility`, which launch_app adds.
+pub fn bridge_off_advice(desktop: Option<&str>) -> String {
+    if is_kde(desktop) {
+        "the app's a11y bridge is off (on KDE nothing needs switching on: Qt and Firefox apps \
+         turn theirs on once the AT-SPI bus reports IsEnabled, which it does while Pincer \
+         runs; a Chromium or Electron app also needs --force-renderer-accessibility, so \
+         restart it with launch_app, which adds it)"
+            .to_owned()
+    } else {
+        format!("the a11y bridge is off (enable {GSETTINGS_ACCESSIBILITY})")
+    }
+}
+
+/// How to get an accessibility bus when `org.a11y.Bus` has no owner on
+/// the session bus, on the desktop `desktop`. GNOME and Unity autostart the
+/// bus launcher only while the gsettings switch is on; elsewhere D-Bus
+/// starts it on demand from at-spi2-core's `org.a11y.Bus` service file.
+pub fn no_bus_advice(desktop: Option<&str>) -> String {
+    if is_kde(desktop) {
+        "start the AT-SPI bus: D-Bus starts it on demand from at-spi2-core's org.a11y.Bus \
+         service, so check that at-spi2-core is installed, or run its at-spi-bus-launcher \
+         (`/usr/lib/at-spi-bus-launcher` or `/usr/libexec/at-spi-bus-launcher`)"
+            .to_owned()
+    } else {
+        format!(
+            "enable accessibility ({GSETTINGS_ACCESSIBILITY}) and/or start the AT-SPI bus \
+             (`/usr/libexec/at-spi-bus-launcher`)"
+        )
+    }
+}
+
 /// Read a boolean status property, treating an unreadable property as unset so
 /// the caller falls through to writing it.
 async fn is_flag_set(status: &zbus::Proxy<'_>, property: &str) -> bool {
@@ -247,6 +312,33 @@ mod tests {
             advertise_mode_from(false, Some("none"), Some("KDE")),
             AdvertiseMode::None
         );
+    }
+
+    /// The empty-tree hint told KDE users to run a GNOME gsettings command.
+    #[test]
+    fn kde_gets_kde_advice_for_an_empty_tree() {
+        for desktop in ["KDE", "kde", "ubuntu:KDE"] {
+            let advice = super::bridge_off_advice(Some(desktop));
+            assert!(!advice.contains("gsettings"), "{desktop}: {advice}");
+            assert!(advice.contains("IsEnabled"), "{advice}");
+            assert!(advice.contains("--force-renderer-accessibility"), "{advice}");
+            assert!(advice.contains("restart it with launch_app"), "{advice}");
+            let no_bus = super::no_bus_advice(Some(desktop));
+            assert!(!no_bus.contains("gsettings"), "{desktop}: {no_bus}");
+            assert!(no_bus.contains("at-spi2-core"), "{no_bus}");
+        }
+    }
+
+    #[test]
+    fn other_desktops_keep_the_gsettings_switch() {
+        for desktop in [Some("GNOME"), Some("ubuntu:GNOME"), Some("XFCE"), None] {
+            let advice = super::bridge_off_advice(desktop);
+            assert!(
+                advice.contains("gsettings set org.gnome.desktop.interface toolkit-accessibility true"),
+                "{desktop:?}: {advice}"
+            );
+            assert!(super::no_bus_advice(desktop).contains("gsettings"), "{desktop:?}");
+        }
     }
 
     #[test]
