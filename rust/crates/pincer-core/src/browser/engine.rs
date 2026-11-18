@@ -248,7 +248,9 @@ fn endpoint_access_class(
         )),
         BrowserProcessRole::Unknown => Err(refuse(
             BrowserRefusalCode::BrowserRouteUnavailable,
-            "the browser process role is ambiguous, so endpoint access cannot be authorized",
+            "this process runs a Chromium engine but is not a known browser or Electron \
+             product, so the browser tools will not attach to it; read and act on its window \
+             with get_window_state and the desktop tools instead",
         )),
     }
 }
@@ -3086,12 +3088,11 @@ mod tests {
                 .code,
             BrowserRefusalCode::BrowserWrongTargetRefused
         );
-        assert_eq!(
-            endpoint_access_class(false, false, BrowserProcessRole::Unknown)
-                .unwrap_err()
-                .code,
-            BrowserRefusalCode::BrowserRouteUnavailable
-        );
+        let unknown = endpoint_access_class(false, false, BrowserProcessRole::Unknown).unwrap_err();
+        assert_eq!(unknown.code, BrowserRefusalCode::BrowserRouteUnavailable);
+        // An Electron app named otherwise (a chat client, a desktop app) lands
+        // here: the refusal names the route that does work for it.
+        assert!(unknown.message.contains("get_window_state"), "{}", unknown.message);
     }
 
     #[test]
