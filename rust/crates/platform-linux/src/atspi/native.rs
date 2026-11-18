@@ -39,8 +39,7 @@ const OP_TIMEOUT: Duration = Duration::from_secs(25);
 /// Startup may run before `serve` binds its socket or MCP reads stdin. A
 /// reachable but wedged accessibility bus must not hold either entry point
 /// forever. The worker is deliberately left running after this readiness
-/// budget so a late registry reply can still establish the process-lifetime
-/// listener.
+/// budget so a late registry reply can still establish the shared listener.
 const LISTENER_STARTUP_TIMEOUT: Duration = Duration::from_secs(3);
 
 tokio::task_local! {
@@ -180,6 +179,12 @@ macro_rules! dlog {
     };
 }
 
+// After `dlog!`, which it uses.
+pub(crate) mod live;
+
+pub(crate) use live::shared_connection;
+use live::focus_log;
+
 /// Shared multi-threaded Tokio runtime for the blocking AT-SPI entry points.
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
@@ -192,107 +197,6 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-static SHARED_CONNECTION: tokio::sync::OnceCell<AccessibilityConnection> =
-    tokio::sync::OnceCell::const_new();
-
-/// Keep one AT-SPI connection and registry registration alive for the daemon
-/// lifetime. WebKitGTK only publishes its WebProcess accessibility subtree
-/// while the registry reports an interested listener.
-async fn shared_connection() -> Result<&'static AccessibilityConnection> {
-    SHARED_CONNECTION
-        .get_or_try_init(|| async {
-            let conn = AccessibilityConnection::new()
-                .await
-                .map_err(|error| anyhow!("AT-SPI connect failed: {error}"))?;
-            if let Err(error) = conn.add_registry_event::<atspi::ObjectEvents>().await {
-                dlog!("AT-SPI object-event registration failed: {error}");
-            }
-            // Subscribe to focus changes so `focused_is_editable` / typing can
-            // find the focused widget in O(1) instead of walking the tree.
-            if let Err(error) = conn
-                .register_event::<atspi::events::object::StateChangedEvent>()
-                .await
-            {
-                dlog!("AT-SPI state-changed subscription failed: {error}");
-            }
-            // Grids (LibreOffice Calc) keep the focus on the table and report
-            // the current cell as its active descendant.
-            if let Err(error) = conn
-                .register_event::<atspi::events::object::ActiveDescendantChangedEvent>()
-                .await
-            {
-                dlog!("AT-SPI active-descendant subscription failed: {error}");
-            }
-            Ok(conn)
-        })
-        .await
-        .inspect(|conn| {
-            static TRACKER: OnceLock<()> = OnceLock::new();
-            TRACKER.get_or_init(|| spawn_focus_tracker(conn));
-        })
-}
-
-/// Object path of the accessible that most recently reported `focused=true`,
-/// keyed by the emitting application's bus name. Maintained by
-/// [`spawn_focus_tracker`]; consulted by the focus-aware typing paths.
-fn focus_map() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
-    static MAP: OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
-        OnceLock::new();
-    MAP.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
-/// Object path of the active descendant most recently reported per bus
-/// (`object:active-descendant-changed`): the current cell of a focused grid.
-fn active_descendant_map() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
-    static MAP: OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
-        OnceLock::new();
-    MAP.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
-/// Record the focused-object path for `bus` from one `object:state-changed:focused` event.
-fn note_focus_event(bus: &str, path: &str, enabled: bool) {
-    let mut map = focus_map().lock().unwrap();
-    if enabled {
-        map.insert(bus.to_owned(), path.to_owned());
-    } else if map.get(bus).is_some_and(|current| current == path) {
-        map.remove(bus);
-    }
-}
-
-/// Consume the shared connection's event stream for the daemon lifetime,
-/// remembering the last focused accessible per application bus.
-fn spawn_focus_tracker(conn: &'static AccessibilityConnection) {
-    runtime().spawn(async move {
-        use futures_util::StreamExt;
-        let stream = conn.event_stream();
-        futures_util::pin_mut!(stream);
-        while let Some(event) = stream.next().await {
-            if let Ok(atspi::Event::Object(atspi::ObjectEvents::ActiveDescendantChanged(active))) =
-                &event
-            {
-                if let Some(bus) = active.item.name_as_str() {
-                    active_descendant_map()
-                        .lock()
-                        .unwrap()
-                        .insert(bus.to_owned(), active.descendant.path_as_str().to_owned());
-                }
-                continue;
-            }
-            let Ok(atspi::Event::Object(atspi::ObjectEvents::StateChanged(changed))) = event else {
-                continue;
-            };
-            if changed.state != State::Focused {
-                continue;
-            }
-            let Some(bus) = changed.item.name_as_str() else {
-                continue;
-            };
-            note_focus_event(bus, changed.item.path_as_str(), changed.enabled);
-        }
-        dlog!("AT-SPI focus tracker stream ended");
-    });
-}
-
 /// The accessible that currently holds keyboard focus inside `pid`'s
 /// application, resolved from the focus-event log (no tree walk). `None` when
 /// no focus event was seen for the app or the recorded object no longer
@@ -303,7 +207,7 @@ async fn focused_accessible_via_events<'a>(
 ) -> Option<(AccessibleProxy<'a>, ObjectRef)> {
     let app = app_for_pid(conn, pid).await.ok()??;
     let bus = app.inner().destination().to_string();
-    let path = focus_map().lock().unwrap().get(&bus).cloned()?;
+    let path = focus_log().lock().unwrap().focused(&bus)?.to_owned();
     let oref = RawObjectRef {
         name: bus.clone(),
         path: path.clone(),
@@ -317,8 +221,9 @@ async fn focused_accessible_via_events<'a>(
     Some((acc, ObjectRef { bus, path }))
 }
 
-/// Establish the process-lifetime listener before accessibility-aware apps are
-/// launched. Idempotent; later calls reuse the same connection.
+/// Establish the shared listener before accessibility-aware apps are
+/// launched. Idempotent: later calls reuse the live connection, which
+/// [`live`] reopens after the bus or the registry restarts.
 pub fn ensure_listener_active() -> Result<()> {
     wait_for_listener_startup(LISTENER_STARTUP_TIMEOUT, || {
         runtime().block_on(async { shared_connection().await.map(|_| ()) })
@@ -3256,8 +3161,11 @@ pub(super) fn walk_tree_bounded_with_timeout(
         // Backstop only: the walk observes `deadline` itself and returns its
         // partial result; this guards the few un-wrapped awaits.
         let backstop = deadline + Duration::from_millis(500);
+        // The walked nodes borrow the connection past this future, so the
+        // handle lives out here; it is opened inside the deadline.
+        let shared = tokio::sync::OnceCell::new();
         let walk = OP_DEADLINE.scope(deadline, async {
-            let conn = shared_connection().await?;
+            let conn = shared.get_or_try_init(shared_connection).await?.as_ref();
             let options = WalkOptions {
                 role_search,
                 text_read_chars,
@@ -3425,7 +3333,8 @@ fn list_windows_blocking(filter_pid: Option<u32>) -> Vec<crate::x11::WindowInfo>
     };
     runtime().block_on(async {
         let work = async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let zconn = conn.connection();
             let root = match call(conn.root_accessible_on_registry()).await {
                 Some(Ok(r)) => r,
@@ -3683,7 +3592,8 @@ pub fn type_into_editable(pid: u32, xid: u64, text: &str) -> Result<()> {
     bounded_for(
         INPUT_QUERY_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             // Focused editable known from the event log: write there directly.
             if let Some(true) = write_into_focused_editable(conn, pid, xid, text).await {
                 return Ok(());
@@ -3711,7 +3621,8 @@ pub fn type_into_editable_at(pid: u32, xid: u64, idx: usize, text: &str) -> Resu
     bounded_for(
         INDEX_RESOLVE_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let visited = collect_window_visited(conn, pid, xid)
                 .await?
                 .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
@@ -3759,7 +3670,8 @@ pub fn insert_text(pid: u32, xid: u64, text: &str) -> Result<bool> {
     bounded_for(
         INPUT_QUERY_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             if let Some(true) = write_into_focused_editable(conn, pid, xid, text).await {
                 return Ok(true);
             }
@@ -3885,7 +3797,8 @@ pub fn focused_is_editable(pid: u32, xid: u64) -> Result<Option<bool>> {
     bounded_for(
         INPUT_QUERY_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             // O(1) answer from the focus-event log when available.
             if let Some((acc, oref)) = focused_accessible_via_events(conn, pid).await {
                 if object_in_window(conn, pid, xid, &oref).await == Some(false) {
@@ -3913,7 +3826,8 @@ pub fn focused_control(pid: u32) -> Option<(String, String)> {
     bounded_for(
         Duration::from_millis(400),
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let Some((acc, focused_ref)) = focused_accessible_via_events(conn, pid).await else {
                 return Ok(None);
             };
@@ -3925,11 +3839,11 @@ pub fn focused_control(pid: u32) -> Option<(String, String)> {
             // cell is its active descendant (event log), else its selected
             // child.
             if role.eq_ignore_ascii_case("table") {
-                let active = active_descendant_map()
+                let active = focus_log()
                     .lock()
                     .unwrap()
-                    .get(&focused_ref.bus)
-                    .cloned();
+                    .active_descendant(&focused_ref.bus)
+                    .map(str::to_owned);
                 if let Some(path) = active {
                     let raw = RawObjectRef {
                         name: focused_ref.bus.clone(),
@@ -4333,7 +4247,8 @@ fn exact_menu_path_matches(visited: &[Visited<'_>], path: &[String]) -> Vec<usiz
 pub fn invoke_menu_path_in(pid: u32, xid: u64, path: &[String]) -> Result<MenuInvoked> {
     bounded(
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             // The first hop (the menu-bar entry), its action proxy and the
             // action index that opened its menu.
             let mut opener: Option<MenuOpener<'_>> = None;
@@ -5038,7 +4953,8 @@ pub fn perform_action_ref(object_ref: &ObjectRef) -> Result<(String, bool, bool)
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, role) = live_accessible(conn, object_ref).await?;
             let proxies = acc
                 .proxies()
@@ -5132,7 +5048,8 @@ pub fn cached_hit_live(object_ref: &ObjectRef) -> Option<CachedHitLive> {
     bounded_for(
         CACHED_HIT_CHECK_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, _role) = live_accessible(conn, object_ref).await?;
             let showing = match call(acc.get_state()).await {
                 Some(Ok(state)) => state.contains(State::Showing),
@@ -5190,7 +5107,8 @@ pub fn value_ranges(refs: &[ObjectRef]) -> Vec<Option<(f64, f64, f64)>> {
     bounded_for(
         CACHED_HIT_CHECK_BUDGET,
         async move {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let mut out = Vec::with_capacity(refs.len());
             for object_ref in &refs {
                 let range = async {
@@ -5246,7 +5164,8 @@ pub fn element_bounds_ref(
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, _) = live_accessible(conn, object_ref).await?;
             let proxies = match call(acc.proxies()).await {
                 Some(Ok(proxies)) => proxies,
@@ -5286,7 +5205,8 @@ pub fn element_showing_ref(object_ref: &ObjectRef) -> Result<bool> {
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, _) = live_accessible(conn, object_ref).await?;
             match call(acc.get_state()).await {
                 Some(Ok(state)) => Ok(is_showing_state(&state)),
@@ -5303,7 +5223,8 @@ pub fn focus_element_ref(object_ref: &ObjectRef) -> Result<bool> {
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, _) = live_accessible(conn, object_ref).await?;
             let proxies = acc
                 .proxies()
@@ -5339,7 +5260,8 @@ pub fn type_into_editable_ref(object_ref: &ObjectRef, text: &str) -> Result<()> 
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, _) = live_accessible(conn, object_ref).await?;
             let ifaces = match call(acc.get_interfaces()).await {
                 Some(Ok(ifaces)) => ifaces,
@@ -5502,7 +5424,8 @@ pub fn perform_action_at_point_in(
     bounded_for(
         INPUT_QUERY_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let Some(app) = app_for_pid(conn, pid).await? else {
                 return Ok(None);
             };
@@ -6362,7 +6285,8 @@ pub fn scroll_element(
     let acknowledged = std::cell::Cell::new(0);
     let result = bounded(
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let visited = collect_window_visited(conn, pid, xid)
                 .await?
                 .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
@@ -6547,7 +6471,8 @@ pub fn focus_element(pid: u32, xid: u64, idx: usize) -> Result<bool> {
     bounded_for(
         INDEX_RESOLVE_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let visited = collect_window_visited(conn, pid, xid)
                 .await?
                 .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
@@ -6624,7 +6549,8 @@ pub fn perform_action_at_point(
     bounded_for(
         INPUT_QUERY_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             // Only window `xid`'s elements: a window-local point compared with
             // every window's frames can hit another window's control that sits
             // at the same window coordinates (the main window under a dialog).
@@ -6762,7 +6688,8 @@ pub fn perform_action_at_screen_point(
     bounded_for(
         INPUT_QUERY_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let Collected {
                 visited,
                 scoped_frame,
@@ -6972,7 +6899,8 @@ pub fn set_value(pid: u32, xid: u64, idx: usize, value: &str) -> Result<()> {
     bounded_for(
         INDEX_RESOLVE_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let visited = collect_window_visited(conn, pid, xid)
                 .await?
                 .ok_or_else(|| anyhow!("no AT-SPI application for pid {pid}"))?;
@@ -7002,7 +6930,8 @@ pub fn set_value_ref(object_ref: &ObjectRef, value: &str) -> Result<()> {
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, _) = live_accessible(conn, object_ref).await?;
             let ifaces = match call(acc.get_interfaces()).await {
                 Some(Ok(ifaces)) => ifaces,
@@ -7186,7 +7115,8 @@ pub fn select_option_ref(object_ref: &ObjectRef, value: &str) -> Result<OptionPi
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, _) = live_accessible(conn, object_ref).await?;
             let ifaces = match call(acc.get_interfaces()).await {
                 Some(Ok(ifaces)) => ifaces,
@@ -7236,7 +7166,8 @@ pub fn activate_option_ref(object_ref: &ObjectRef, value: &str) -> Result<Option
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             live_accessible(conn, object_ref).await?;
             let options = list_options(conn, &raw_ref(object_ref)).await;
             if options.is_empty() {
@@ -7286,7 +7217,8 @@ pub fn options_showing_ref(object_ref: &ObjectRef) -> bool {
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             for option in list_options(conn, &raw_ref(object_ref)).await {
                 if let Some(Ok(acc)) = call(accessible_for(conn, &option.oref)).await {
                     if let Some(Ok(state)) = call(acc.get_state()).await {
@@ -7321,7 +7253,8 @@ pub fn option_names_ref(object_ref: &ObjectRef) -> Vec<String> {
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             Ok(list_options(conn, &raw_ref(object_ref))
                 .await
                 .into_iter()
@@ -7342,7 +7275,8 @@ pub fn name_ref(object_ref: &ObjectRef) -> Result<String> {
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, _) = live_accessible(conn, object_ref).await?;
             match call(acc.name()).await {
                 Some(Ok(name)) => Ok(name),
@@ -7360,7 +7294,8 @@ pub fn is_qt_application(pid: u32) -> bool {
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             match app_for_pid(conn, pid).await? {
                 Some(app) => Ok(is_collection_toolkit_app(&app).await),
                 None => Ok(false),
@@ -7401,7 +7336,8 @@ pub fn qt_popup_items(pid: u32, popup_xid: u64) -> Result<Option<PopupItems>> {
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let Some(ResolvedApp { app, children }) = resolve_app_for_pid(conn, pid).await? else {
                 return Ok(None);
             };
@@ -7482,7 +7418,8 @@ pub fn is_password_ref(object_ref: &ObjectRef) -> bool {
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, _) = live_accessible(conn, object_ref).await?;
             Ok(matches!(
                 call(acc.get_role()).await,
@@ -7525,7 +7462,8 @@ pub fn read_text_around_caret(
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, _) = live_accessible(conn, object_ref).await?;
             let Some(Ok(proxies)) = call(acc.proxies()).await else {
                 return Ok(None);
@@ -7560,7 +7498,8 @@ pub fn read_value_ref(object_ref: &ObjectRef) -> Result<Option<String>> {
     bounded_for(
         REF_ACTION_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let (acc, _) = live_accessible(conn, object_ref).await?;
             let ifaces = match call(acc.get_interfaces()).await {
                 Some(Ok(ifaces)) => ifaces,
@@ -7635,7 +7574,8 @@ fn element_bounds_by_walk(pid: u32, xid: u64, idx: usize) -> Result<(i32, i32, u
     bounded_for(
         INDEX_RESOLVE_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let Collected {
                 visited,
                 scoped_frame,
@@ -7730,7 +7670,8 @@ pub fn get_element_bounds_for_window(
     bounded_for(
         INDEX_RESOLVE_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let Collected {
                 visited,
                 scoped_frame,
@@ -9814,29 +9755,6 @@ mod budget_tests {
         assert!(!first_application_walk(u32::MAX));
         assert!(first_application_walk(u32::MAX - 1));
         assert!(!first_application_walk(u32::MAX - 1));
-    }
-
-    #[test]
-    fn focus_log_tracks_latest_focused_object_per_bus_and_clears_on_blur() {
-        let bus = ":9.test-focus-log";
-        note_focus_event(bus, "/a", true);
-        assert_eq!(
-            focus_map().lock().unwrap().get(bus).map(String::as_str),
-            Some("/a")
-        );
-        note_focus_event(bus, "/b", true);
-        assert_eq!(
-            focus_map().lock().unwrap().get(bus).map(String::as_str),
-            Some("/b")
-        );
-        // A blur for a stale object must not erase the newer focus.
-        note_focus_event(bus, "/a", false);
-        assert_eq!(
-            focus_map().lock().unwrap().get(bus).map(String::as_str),
-            Some("/b")
-        );
-        note_focus_event(bus, "/b", false);
-        assert!(focus_map().lock().unwrap().get(bus).is_none());
     }
 
     #[test]

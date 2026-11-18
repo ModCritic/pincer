@@ -175,7 +175,8 @@ pub fn point_ownership(
     let result: Result<PointOwnership> = bounded_for(
         INPUT_QUERY_BUDGET,
         async {
-            let conn = shared_connection().await?;
+            let shared = shared_connection().await?;
+            let conn = shared.as_ref();
             let Some(app) = app_for_pid(conn, pid).await? else {
                 return Ok(PointOwnership::Unknown);
             };

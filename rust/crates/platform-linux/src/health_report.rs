@@ -95,10 +95,13 @@ async fn check_ax_capability() -> CheckEntry {
             .unwrap_or(false);
         if bus_ok {
             return match tokio::task::spawn_blocking(probe_atspi_registry).await {
-                Ok(Ok(_)) => CheckEntry::pass(
+                Ok(Ok(answer)) => CheckEntry::pass(
                     NAME_AX_CAPABILITY,
-                    "Wayland session: org.a11y.Bus reachable on the session bus and the AT-SPI \
-                     registry answers; AT-SPI inspection will work.",
+                    format!(
+                        "Wayland session: org.a11y.Bus reachable on the session bus and the \
+                         AT-SPI registry answers{}; AT-SPI inspection will work.",
+                        answer.over()
+                    ),
                 ),
                 Ok(Err(why)) => registry_failure("Wayland session: org.a11y.Bus reachable", &why),
                 Err(error) => registry_failure("Wayland session: org.a11y.Bus reachable", &error.to_string()),
@@ -127,10 +130,13 @@ async fn check_ax_capability() -> CheckEntry {
             .unwrap_or(false);
         if a11y_ok {
             return match tokio::task::spawn_blocking(probe_atspi_registry).await {
-                Ok(Ok(_)) => CheckEntry::pass(
+                Ok(Ok(answer)) => CheckEntry::pass(
                     NAME_AX_CAPABILITY,
-                    "X11 reachable, org.a11y.Bus is on the session bus and the AT-SPI registry \
-                     answers; AT-SPI inspection + XSendEvent input will work.",
+                    format!(
+                        "X11 reachable, org.a11y.Bus is on the session bus and the AT-SPI \
+                         registry answers{}; AT-SPI inspection + XSendEvent input will work.",
+                        answer.over()
+                    ),
                 ),
                 Ok(Err(why)) => registry_failure(
                     "X11 reachable and org.a11y.Bus is on the session bus",
@@ -474,6 +480,31 @@ pub(crate) fn probe_a11y_bus() -> bool {
 /// How long [`probe_atspi_registry`] waits for the registry.
 const REGISTRY_PROBE_BUDGET: std::time::Duration = std::time::Duration::from_millis(2500);
 
+/// What the registry probe found, and over which connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RegistryAnswer {
+    /// Applications the registry's root lists.
+    pub applications: usize,
+    /// `Some` when the answer came over the connection the tools use
+    /// (`Some(true)`: it was dead and was reopened for this probe); `None`
+    /// over a connection of the probe's own.
+    pub live_reconnected: Option<bool>,
+}
+
+impl RegistryAnswer {
+    /// Words for the check's detail after "the AT-SPI registry answers".
+    fn over(&self) -> &'static str {
+        match self.live_reconnected {
+            Some(false) => " on the AT-SPI connection Pincer's tools use",
+            Some(true) => {
+                " on the AT-SPI connection Pincer's tools use, which was dead and was \
+                 reopened"
+            }
+            None => "",
+        }
+    }
+}
+
 /// Whether the AT-SPI registry answers: the number of applications its root
 /// lists, read the way a window read starts. `org.a11y.Bus` can have an
 /// owner while no registry runs, and then every window read comes back
@@ -481,7 +512,18 @@ const REGISTRY_PROBE_BUDGET: std::time::Duration = std::time::Duration::from_mil
 /// at-spi2-registryd could not open the display, while both diagnostics
 /// passed). On a desktop the accessibility bus starts the registry for this
 /// call when it is not running yet.
-pub(crate) fn probe_atspi_registry() -> Result<usize, String> {
+///
+/// A process that has opened the shared AT-SPI connection (a running server)
+/// is asked over that connection, which is reopened when it is dead: a fresh
+/// connection of the probe's own said OK while every tool call used a dead
+/// one. A one-shot diagnostic opens its own, so it registers no listener.
+pub(crate) fn probe_atspi_registry() -> Result<RegistryAnswer, String> {
+    if let Some(live) = crate::atspi::native::live::probe_live_registry(REGISTRY_PROBE_BUDGET) {
+        return live.map(|live| RegistryAnswer {
+            applications: live.applications,
+            live_reconnected: Some(live.reconnected),
+        });
+    }
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -499,7 +541,10 @@ pub(crate) fn probe_atspi_registry() -> Result<usize, String> {
                 .get_children()
                 .await
                 .map_err(|error| format!("it did not list its applications: {error}"))?;
-            Ok(apps.len())
+            Ok(RegistryAnswer {
+                applications: apps.len(),
+                live_reconnected: None,
+            })
         })
         .await
         .map_err(|_| {
