@@ -11091,9 +11091,10 @@ impl Tool for PressKeyTool {
                 the host has one (X11 with a writable /dev/uinput, not KDE Plasma). Elsewhere it \
                 is a synthetic X key event: GTK apps drop those, so a GTK target is refused with \
                 background_unavailable, and Qt apps act on them only while their window is the \
-                active one. On KDE Plasma X11, XWayland and Wayland use delivery_mode \
-                \"foreground\" for keys; to enter text, type_text with element_token works in \
-                the background.".into(),
+                active one, so on KDE Plasma X11, XWayland and Wayland a background key can be \
+                refused or have no effect. To enter text, type_text with element_token works in \
+                the background. delivery_mode \"foreground\" takes over the user's screen: use it \
+                only with the user's leave, after a background refusal.".into(),
             input_schema: json!({
                 "type":"object","required":["key"],"properties":{
                     "session": pincer_core::tool_schema::session_schema(),
@@ -11600,13 +11601,14 @@ impl Tool for HotkeyTool {
                 where the host has one (X11 with a writable /dev/uinput, not KDE Plasma), and the \
                 target need not be frontmost. Elsewhere it is synthetic X key events: GTK apps \
                 drop those, so a GTK target is refused with background_unavailable, and Qt apps \
-                act on them only while their window is the active one. On KDE Plasma X11, \
-                XWayland and Wayland use delivery_mode \"foreground\". Window-manager chords \
-                cannot reach the WM that way: alt+F4 on a window target closes that window \
-                through the WM (_NET_CLOSE_WINDOW, effect confirmed when it unmaps); super+*, \
-                alt+tab, ctrl+alt+* and other WM bindings are refused with code \
-                wm_chord_unavailable: use bring_to_front, list_windows, kill_app or \
-                delivery_mode \"foreground\" instead.".into(),
+                act on them only while their window is the active one, so on KDE Plasma X11, \
+                XWayland and Wayland a background chord can be refused or have no effect. \
+                delivery_mode \"foreground\" takes over the user's screen: use it only with the \
+                user's leave, after a background refusal. Window-manager chords cannot reach the \
+                WM in the background: alt+F4 on a window target closes that window through the \
+                WM (_NET_CLOSE_WINDOW, effect confirmed when it unmaps); super+*, alt+tab, \
+                ctrl+alt+* and other WM bindings are refused with code wm_chord_unavailable: use \
+                bring_to_front, list_windows or kill_app instead.".into(),
             input_schema: json!({
                 "type":"object","required":["keys"],"properties":{
                     "session": pincer_core::tool_schema::session_schema(),
@@ -15501,6 +15503,23 @@ async fn parallel_drag_inject(state: &ToolState, args: &Value) -> ToolResult {
     }
 }
 
+/// Why parallel_mouse_drag cannot run on this host, or `None` when it can:
+/// the cua-compositor socket runs it on Wayland; elsewhere it needs the MPX
+/// real-pointer route (`real_pointer_unavailable`, only probed on X11).
+fn parallel_drag_unavailable_reason(
+    inject_mode: bool,
+    wayland: bool,
+    real_pointer_unavailable: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    if inject_mode {
+        return None;
+    }
+    if wayland {
+        return Some("native Wayland without the cua-compositor inject socket".to_owned());
+    }
+    real_pointer_unavailable()
+}
+
 /// Window pixels per caller pixel for one parallel_mouse_drag item: 1 with
 /// `native_pixels` (or a trusted caller's native window pixels), else the
 /// scale of this session's latest get_window_state screenshot of the window
@@ -15550,9 +15569,8 @@ impl Tool for ParallelMouseDragTool {
             name: "parallel_mouse_drag".into(),
             description: "Run two or more mouse drags at the same time, each on its own virtual \
                 pointer (an X11 MPX master pointer backed by a Linux uinput device): each item \
-                presses once, moves along its whole path and releases once. Needs that uinput \
-                device, which is unavailable on KDE Plasma X11, XWayland, Xvfb and wherever \
-                /dev/uinput cannot be opened; the call is then refused (uinput_unavailable) and \
+                presses once, moves along its whole path and releases once. Offered only on \
+                hosts where that device works; if it is refused anyway (uinput_unavailable), \
                 there is no foreground fallback: draw the strokes one at a time with drag. Each \
                 item names its window by window_id alone (no pid) and needs its own session, \
                 different from the other items'. Coordinates are pixels of that window's latest \
@@ -19464,9 +19482,20 @@ pub fn build_registry_with_provider(
         },
         &pid_window_candidates,
     ));
-    r.register(Box::new(ParallelMouseDragTool {
-        state: state.clone(),
-    }));
+    // Offered only where it can run: every call is refused elsewhere (KDE
+    // Plasma X11, XWayland, Xvfb, no /dev/uinput, native Wayland without
+    // the cua-compositor socket), and it has no foreground fallback. The
+    // probe opens no device.
+    match parallel_drag_unavailable_reason(
+        crate::wayland::is_inject_mode(),
+        crate::wayland::is_wayland(),
+        crate::input::real_pointer_unavailable_reason,
+    ) {
+        None => r.register(Box::new(ParallelMouseDragTool {
+            state: state.clone(),
+        })),
+        Some(reason) => tracing::debug!("parallel_mouse_drag not offered: {reason}"),
+    }
     r.register(pid_window_guarded(
         TypeTextTool {
             state: state.clone(),

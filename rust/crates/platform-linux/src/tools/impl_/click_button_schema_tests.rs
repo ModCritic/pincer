@@ -115,3 +115,32 @@ fn only_the_windowless_desktop_form_takes_the_screen_branch() {
     ));
     assert!(!super::windowless_desktop_scope(&json!({"x": 1, "y": 2})));
 }
+
+#[test]
+fn parallel_drag_is_offered_only_where_it_can_run() {
+    use super::parallel_drag_unavailable_reason;
+    let never = || -> Option<String> { panic!("the X11 probe must not run here") };
+    // The cua-compositor socket runs it; native Wayland without it cannot.
+    assert_eq!(parallel_drag_unavailable_reason(true, true, never), None);
+    assert!(parallel_drag_unavailable_reason(false, true, never).is_some());
+    // On X11 the real-pointer probe decides.
+    assert_eq!(parallel_drag_unavailable_reason(false, false, || None), None);
+    assert_eq!(
+        parallel_drag_unavailable_reason(false, false, || Some("Xvfb".to_owned())),
+        Some("Xvfb".to_owned())
+    );
+}
+
+/// Registration follows the host probe (it used to register everywhere, so
+/// every call on KDE Plasma X11, XWayland or Xvfb was a refusal).
+#[test]
+fn parallel_drag_registration_follows_the_host_probe() {
+    let registry = super::build_registry_with_provider(false, None);
+    let can_run = super::parallel_drag_unavailable_reason(
+        crate::wayland::is_inject_mode(),
+        crate::wayland::is_wayland(),
+        crate::input::real_pointer_unavailable_reason,
+    )
+    .is_none();
+    assert_eq!(registry.get_def("parallel_mouse_drag").is_some(), can_run);
+}

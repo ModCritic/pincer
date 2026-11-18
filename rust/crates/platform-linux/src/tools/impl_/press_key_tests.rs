@@ -105,3 +105,24 @@ fn wm_chords_read_every_super_and_alt_spelling() {
     );
     assert_eq!(wm_chord_kind("s", &mods(&["ctrl"])), None);
 }
+
+/// LINUX.md: foreground delivery is a takeover that is never selected
+/// automatically. press_key and hotkey told KDE hosts to use it for keys.
+#[test]
+fn key_tools_do_not_send_callers_to_foreground_on_their_own() {
+    use pincer_core::tool::Tool;
+    let state = super::ToolState::new();
+    let press = super::PressKeyTool {
+        state: state.clone(),
+    };
+    let hotkey = super::HotkeyTool { state };
+    for def in [press.def(), hotkey.def()] {
+        let text = &def.description;
+        assert!(
+            !text.contains("Wayland use delivery_mode"),
+            "{}: {text}",
+            def.name
+        );
+        assert!(text.contains("only with the user's leave"), "{}: {text}", def.name);
+    }
+}
