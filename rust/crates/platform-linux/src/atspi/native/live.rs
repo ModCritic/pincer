@@ -142,6 +142,12 @@ async fn open_listening_connection() -> Result<AccessibilityConnection> {
     let conn = AccessibilityConnection::new()
         .await
         .map_err(|error| anyhow!("AT-SPI connect failed: {error}"))?;
+    // at-spi2-core 2.62 writes the user's toolkit-accessibility setting when
+    // the first listener registers; read it first and put it back after.
+    let before = tokio::task::spawn_blocking(crate::a11y::before_listener_registers)
+        .await
+        .ok()
+        .flatten();
     if let Err(error) = conn.add_registry_event::<atspi::ObjectEvents>().await {
         dlog!("AT-SPI object-event registration failed: {error}");
     }
@@ -160,6 +166,9 @@ async fn open_listening_connection() -> Result<AccessibilityConnection> {
         .await
     {
         dlog!("AT-SPI active-descendant subscription failed: {error}");
+    }
+    if let Some(before) = before {
+        let _ = tokio::task::spawn_blocking(move || crate::a11y::listener_registered(before)).await;
     }
     Ok(conn)
 }

@@ -163,6 +163,10 @@ pub(crate) struct DriverRuntime {
     lifecycle: tokio::sync::RwLock<()>,
     lifecycle_maintenance: Mutex<Option<LifecycleMaintenance>>,
     activity_observer: Option<Arc<dyn DriverActivityObserver>>,
+    /// This runtime advertised accessibility to the session; shutdown puts
+    /// back the settings that advertisement changed.
+    #[cfg(target_os = "linux")]
+    holds_session_accessibility: AtomicBool,
 }
 
 struct LifecycleMaintenance {
@@ -205,6 +209,10 @@ impl DriverRuntime {
             lifecycle: tokio::sync::RwLock::new(()),
             lifecycle_maintenance: Mutex::new(None),
             activity_observer: options.activity_observer.clone(),
+            #[cfg(target_os = "linux")]
+            holds_session_accessibility: AtomicBool::new(linux_advertises_accessibility(
+                options.prepare_desktop_environment,
+            )),
         });
         *runtime.lifecycle_maintenance.lock().unwrap() =
             Some(spawn_lifecycle_maintenance(&runtime));
@@ -238,6 +246,15 @@ impl DriverRuntime {
         );
         let recording = self.registry.recording.clone();
         let _ = tokio::task::spawn_blocking(move || recording.stop_owner(None)).await;
+        #[cfg(target_os = "linux")]
+        if self
+            .holds_session_accessibility
+            .swap(false, Ordering::AcqRel)
+        {
+            let _ =
+                tokio::task::spawn_blocking(platform_linux::a11y::release_session_accessibility)
+                    .await;
+        }
     }
 
     fn stop_lifecycle_maintenance(&self) {
@@ -651,12 +668,21 @@ fn configure_windows_runtime() {
     ));
 }
 
+/// Whether a Linux runtime built with `prepare_desktop_environment`
+/// advertises accessibility to the session (and so holds the settings that
+/// advertisement may change until it shuts down).
+#[cfg(target_os = "linux")]
+fn linux_advertises_accessibility(prepare_desktop_environment: bool) -> bool {
+    prepare_desktop_environment
+        && std::env::var_os("NO_AT_BRIDGE").as_deref() != Some(std::ffi::OsStr::new("1"))
+}
+
 #[cfg(target_os = "linux")]
 fn configure_linux_runtime(prepare_desktop_environment: bool) {
     if prepare_desktop_environment {
         platform_linux::xauth::ensure_xauthority_discovered();
         platform_linux::session_bus::ensure_session_bus_discovered();
-        if std::env::var_os("NO_AT_BRIDGE").as_deref() != Some(std::ffi::OsStr::new("1")) {
+        if linux_advertises_accessibility(prepare_desktop_environment) {
             platform_linux::a11y::ensure_chromium_accessibility_enabled();
             if let Err(error) = platform_linux::atspi::ensure_listener_active() {
                 tracing::warn!("could not activate the persistent AT-SPI listener: {error}");
