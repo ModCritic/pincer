@@ -308,3 +308,57 @@ fn uinput_failure_has_a_stable_structured_code() {
         Some(crate::input::UINPUT_UNAVAILABLE_CODE)
     );
 }
+
+/// Merge a background focus-guard report into a finished tool result: the
+/// structured `focus_changed` / `focus_restored` / `grab_held_by` fields plus
+/// one sentence of text when anything moved.
+pub(super) fn attach_focus_guard(
+    result: ToolResult,
+    report: Option<&crate::input::FocusGuardReport>,
+) -> ToolResult {
+    attach_focus_guard_opts(result, report, true)
+}
+
+/// [`attach_focus_guard`] for a result that already names the open popup
+/// (`describe_popup: false` leaves the guard's popup sentence out).
+pub(super) fn attach_focus_guard_opts(
+    mut result: ToolResult,
+    report: Option<&crate::input::FocusGuardReport>,
+    describe_popup: bool,
+) -> ToolResult {
+    let Some(report) = report else {
+        return result;
+    };
+    let summary = report.summary_with_popup(describe_popup);
+    if !summary.is_empty() {
+        result.content.push(pincer_core::protocol::Content::text(
+            summary.trim().to_owned(),
+        ));
+    }
+    let mut structured = result
+        .structured_content
+        .take()
+        .unwrap_or_else(|| json!({}));
+    for (key, value) in report.to_json().as_object().into_iter().flatten() {
+        structured[key] = value.clone();
+    }
+    if let Some(item) = report.evidence_item() {
+        push_evidence(&mut structured, item);
+    }
+    result.structured_content = Some(structured);
+    result
+}
+
+pub(super) fn unavailable_wayland_focused_input_background(
+    delivery: crate::input::delivery::DeliveryMode,
+    focus_free_inject_supported: bool,
+) -> Option<ToolResult> {
+    (crate::wayland::wayland_input_enabled()
+        && !(focus_free_inject_supported && crate::wayland::is_inject_mode())
+        && !delivery.is_foreground())
+    .then(|| {
+        crate::input::delivery::background_unavailable_error(
+            crate::input::delivery::BackgroundUnavailable::FocusedInputOnly,
+        )
+    })
+}
