@@ -45,14 +45,14 @@ jobs:
         with:
           persist-credentials: false
 
-      # x11 (xlib, xinput, xtest) links libX11, libXi and libXtst through
-      # pkg-config; libxcb comes with libx11-dev. zbus, x11rb and wayland are
+      # x11 (xlib, xinput) links libX11 and libXi through pkg-config; libxcb
+      # comes with libx11-dev. zbus, x11rb (XTest included) and wayland are
       # pure Rust. mingw-w64 is the C compiler for the Windows check.
       - name: Install system packages
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            pkg-config libx11-dev libxi-dev libxtst-dev mingw-w64
+            pkg-config libx11-dev libxi-dev mingw-w64
 
       - name: Install the Rust toolchain from rust-toolchain.toml
         run: |
@@ -151,7 +151,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            pkg-config libx11-dev libxi-dev libxtst-dev \
+            pkg-config libx11-dev libxi-dev \
             xvfb dbus at-spi2-core gnome-keyring imagemagick
 
       - name: Install the Rust toolchain from rust-toolchain.toml
