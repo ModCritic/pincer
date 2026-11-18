@@ -421,7 +421,14 @@ fn isolated_background_routes_do_not_reprobe_availability_before_primary_fallbac
     // Structural regression for the availability-loss race: each tool keeps
     // the decision that bypassed background refusal until its returning
     // native branch. A second probe here could select primary-seat input.
-    let source = include_str!("../impl_.rs");
+    let source = concat!(
+        include_str!("click.rs"),
+        include_str!("../impl_.rs"),
+        include_str!("scroll.rs"),
+        include_str!("click_gestures.rs"),
+        include_str!("drag.rs"),
+        include_str!("held_button.rs"),
+    );
     for (start, end) in [
         ("impl Tool for ClickTool {", "impl Tool for TypeTextTool {"),
         (

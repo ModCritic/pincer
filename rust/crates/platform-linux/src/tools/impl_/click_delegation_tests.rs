@@ -16,7 +16,7 @@ fn gesture_kinds_send_their_button_and_count() {
 /// No second pointer pipeline: both tools hand the call to click's.
 #[test]
 fn double_and_right_click_delegate_to_click() {
-    let source = include_str!("../impl_.rs");
+    let source = include_str!("click_gestures.rs");
     for (tool, kind) in [
         ("impl Tool for DoubleClickTool {", "ClickKind::Double"),
         ("impl Tool for RightClickTool {", "ClickKind::Right"),

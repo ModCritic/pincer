@@ -4003,7 +4003,13 @@ mod tests {
     /// double_click and right_click run click's own pipeline.
     #[test]
     fn native_wayland_input_tools_take_the_target_foreground_guard() {
-        let source = include_str!("../tools/impl_.rs");
+        let source = concat!(
+            include_str!("../tools/impl_/click.rs"),
+            include_str!("../tools/impl_.rs"),
+            include_str!("../tools/impl_/scroll.rs"),
+            include_str!("../tools/impl_/drag.rs"),
+            include_str!("../tools/impl_/held_button.rs"),
+        );
         for (tool, start) in [
             ("click", "impl ClickTool {"),
             ("type_text", "impl Tool for TypeTextTool {"),

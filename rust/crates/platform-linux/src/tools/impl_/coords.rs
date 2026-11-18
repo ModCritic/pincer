@@ -525,7 +525,11 @@ async fn window_point_resolver_maps_each_frame_and_refuses_first() {
 #[cfg(test)]
 #[test]
 fn pointer_tools_compute_the_native_refusal_before_resolving_points() {
-    let source = include_str!("../impl_.rs");
+    let source = concat!(
+        include_str!("click.rs"),
+        include_str!("scroll.rs"),
+        include_str!("drag.rs"),
+    );
     for (start, tool) in [
         ("    async fn click(", "click"),
         ("impl Tool for DragTool {", "drag"),
