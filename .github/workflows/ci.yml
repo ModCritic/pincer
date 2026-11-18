@@ -1,6 +1,8 @@
-# Headless checks for the Rust workspace in rust/. Nothing here needs a
-# display: tests that drive a desktop are #[ignore]d and stay off. Every
-# command was run locally before it went in.
+# Checks for the Rust workspace in rust/. The check job needs no display:
+# tests that drive a desktop are #[ignore]d there. The x11 job runs the
+# ignored tests that need an X server, a session bus, AT-SPI or a Secret
+# Service against private ones scripts/ci-x11-tests.sh starts. Every command
+# was run locally before it went in.
 name: CI
 
 on:
@@ -128,3 +130,45 @@ jobs:
 
       - name: cargo check for macOS (aarch64-apple-darwin)
         run: ZIG="$RUNNER_TEMP/zig/zig" scripts/check-macos.sh --locked
+
+  x11:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Build: pkg-config and the X11 libraries, as in the check job. Run:
+      # Xvfb, a session bus (dbus), the accessibility bus and its registry
+      # (at-spi2-core), a Secret Service (gnome-keyring), and ImageMagick's
+      # import, the pixel oracle of one capture test.
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libx11-dev libxi-dev libxtst-dev \
+            xvfb dbus at-spi2-core gnome-keyring imagemagick
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --no-self-update
+          rustc --version
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust -> target
+
+      - name: Fetch crates
+        run: cargo fetch --locked
+
+      - name: Build the tests
+        run: CI_X11_BUILD_ONLY=1 scripts/ci-x11-tests.sh
+
+      - name: Ignored X11, D-Bus, AT-SPI and Secret Service tests
+        run: scripts/ci-x11-tests.sh
