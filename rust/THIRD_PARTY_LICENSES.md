@@ -30,14 +30,14 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | ahash | 0.8.12 | MIT OR Apache-2.0 | MIT |
 | aho-corasick | 1.1.4 | Unlicense OR MIT | MIT |
 | allocator-api2 | 0.2.21 | MIT OR Apache-2.0 | MIT |
-| anyhow | 1.0.102 | MIT OR Apache-2.0 | MIT |
+| anyhow | 1.0.104 | MIT OR Apache-2.0 | MIT |
 | arrayref | 0.3.9 | BSD-2-Clause | BSD-2-Clause |
 | arrayvec | 0.7.6 | MIT OR Apache-2.0 | MIT |
 | ashpd | 0.13.11 | MIT | MIT |
 | async-broadcast | 0.7.2 | MIT OR Apache-2.0 | MIT |
 | async-channel | 2.5.0 | Apache-2.0 OR MIT | MIT |
 | async-compat | 0.2.5 | Apache-2.0 OR MIT | MIT |
-| async-executor | 1.14.0 | Apache-2.0 OR MIT | MIT |
+| async-executor | 1.14.1 | Apache-2.0 OR MIT | MIT |
 | async-io | 2.6.0 | Apache-2.0 OR MIT | MIT |
 | async-lock | 3.4.2 | Apache-2.0 OR MIT | MIT |
 | async-process | 2.5.0 | Apache-2.0 OR MIT | MIT |
@@ -69,7 +69,7 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | cargo_metadata | 0.19.2 | MIT | MIT |
 | cbc | 0.1.2 | MIT OR Apache-2.0 | MIT |
 | cfg-if | 1.0.4 | MIT OR Apache-2.0 | MIT |
-| chacha20 | 0.10.1 | MIT OR Apache-2.0 | MIT |
+| chacha20 | 0.10.2 | MIT OR Apache-2.0 | MIT |
 | chacha20poly1305 | 0.11.0 | Apache-2.0 OR MIT | MIT |
 | chrono | 0.4.45 | MIT OR Apache-2.0 | MIT |
 | chrono-tz | 0.10.4 | MIT OR Apache-2.0 | MIT |
@@ -90,7 +90,7 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | crossbeam-utils | 0.8.21 | MIT OR Apache-2.0 | MIT |
 | crypto-common | 0.1.7 | MIT OR Apache-2.0 | MIT |
 | crypto-common | 0.2.2 | MIT OR Apache-2.0 | MIT |
-| ctutils | 0.4.2 | Apache-2.0 OR MIT | MIT |
+| ctutils | 0.4.8 | Apache-2.0 OR MIT | MIT |
 | data-encoding | 2.11.0 | MIT | MIT |
 | deranged | 0.5.8 | MIT OR Apache-2.0 | MIT |
 | digest | 0.10.7 | MIT OR Apache-2.0 | MIT |
@@ -173,7 +173,7 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | lru | 0.18.1 | MIT | MIT |
 | matchers | 0.2.0 | MIT | MIT |
 | memchr | 2.8.0 | Unlicense OR MIT | MIT |
-| memmap2 | 0.9.10 | MIT OR Apache-2.0 | MIT |
+| memmap2 | 0.9.12 | MIT OR Apache-2.0 | MIT |
 | micromap | 0.3.0 | MIT | MIT |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | MIT |
 | mio | 1.2.0 | MIT | MIT |
@@ -267,7 +267,7 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | tiny-skia | 0.11.4 | BSD-3-Clause | BSD-3-Clause |
 | tiny-skia-path | 0.11.4 | BSD-3-Clause | BSD-3-Clause |
 | tinystr | 0.8.3 | Unicode-3.0 | Unicode-3.0 |
-| tokio | 1.52.1 | MIT | MIT |
+| tokio | 1.54.1 | MIT | MIT |
 | tokio-tungstenite | 0.24.0 | MIT | MIT |
 | tracing | 0.1.44 | MIT | MIT |
 | tracing-core | 0.1.36 | MIT | MIT |
@@ -310,13 +310,13 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | zbus_xml | 5.1.1 | MIT | MIT |
 | zerocopy | 0.8.48 | BSD-2-Clause OR Apache-2.0 OR MIT | MIT |
 | zerofrom | 0.1.8 | Unicode-3.0 | Unicode-3.0 |
-| zeroize | 1.8.2 | Apache-2.0 OR MIT | MIT |
+| zeroize | 1.9.2 | Apache-2.0 OR MIT | MIT |
 | zerotrie | 0.2.4 | Unicode-3.0 | Unicode-3.0 |
 | zerovec | 0.11.6 | Unicode-3.0 | Unicode-3.0 |
 | zmij | 1.0.21 | MIT | MIT |
-| zstd | 0.13.3 | MIT | MIT |
-| zstd-safe | 7.2.4 | MIT OR Apache-2.0 | MIT |
-| zstd-sys | 2.0.16+zstd.1.5.7 | MIT/Apache-2.0 | MIT |
+| zstd | 0.13.5 | BSD-3-Clause | BSD-3-Clause |
+| zstd-safe | 7.4.1 | BSD-3-Clause | BSD-3-Clause |
+| zstd-sys | 2.1.3+zstd.1.5.7 | BSD-3-Clause AND BSD-2-Clause | BSD-3-Clause AND BSD-2-Clause |
 | zune-core | 0.5.1 | MIT OR Apache-2.0 OR Zlib | MIT |
 | zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib | MIT |
 | zvariant | 5.12.0 | MIT | MIT |
@@ -327,7 +327,7 @@ crates.io at the versions listed; Pincer's own files are not affected.
 Each text below is copied from the crate's published package; the crates that
 ship an identical text are listed together above it.
 
-### adler2 2.0.1, allocator-api2 0.2.21, anyhow 1.0.102, async-channel 2.5.0, async-compat 0.2.5, async-executor 1.14.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atomic-waker 1.1.2, blocking 1.6.2, camino 1.2.4, cargo-platform 0.1.9, cargo_metadata 0.19.2, concurrent-queue 2.5.0, dyn-clone 1.0.20, endi 1.1.1, evdev 0.13.2, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, futures-lite 2.6.1, itoa 1.0.18, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, proc-macro2 1.0.106, quote 1.0.45, ref-cast 1.0.25, rustix 1.1.4, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_json 1.0.149, syn 2.0.117, thiserror 1.0.69, thiserror 2.0.18, unicode-ident 1.0.24, unsafe-libyaml 0.2.11, utf-8 0.7.6, x11 2.21.0, zbus-lockstep 0.5.2, zmij 1.0.21, zvariant_utils 3.4.0
+### adler2 2.0.1, allocator-api2 0.2.21, anyhow 1.0.104, async-channel 2.5.0, async-compat 0.2.5, async-executor 1.14.1, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atomic-waker 1.1.2, blocking 1.6.2, camino 1.2.4, cargo-platform 0.1.9, cargo_metadata 0.19.2, concurrent-queue 2.5.0, dyn-clone 1.0.20, endi 1.1.1, evdev 0.13.2, event-listener 5.4.1, event-listener-strategy 0.5.4, fastrand 2.4.1, futures-lite 2.6.1, itoa 1.0.18, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, proc-macro2 1.0.106, quote 1.0.45, ref-cast 1.0.25, rustix 1.1.4, semver 1.0.28, serde 1.0.228, serde_core 1.0.228, serde_json 1.0.149, syn 2.0.117, thiserror 1.0.69, thiserror 2.0.18, unicode-ident 1.0.24, unsafe-libyaml 0.2.11, utf-8 0.7.6, x11 2.21.0, zbus-lockstep 0.5.2, zmij 1.0.21, zvariant_utils 3.4.0
 
 ```text
 Permission is hereby granted, free of charge, to any
@@ -1059,7 +1059,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### chacha20 0.10.1, chacha20poly1305 0.11.0
+### chacha20 0.10.2, chacha20poly1305 0.11.0
 
 ```text
 Copyright (c) 2019-2026 The RustCrypto Project Developers
@@ -2658,7 +2658,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### ctutils 0.4.2
+### ctutils 0.4.8
 
 ```text
 Copyright (c) 2025-2026 The RustCrypto Project Developers
@@ -4278,7 +4278,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### memmap2 0.9.10
+### memmap2 0.9.12
 
 ```text
 Copyright (c) 2020 Yevhenii Reizner
@@ -7083,7 +7083,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### tokio 1.52.1
+### tokio 1.54.1
 
 ```text
 MIT License
@@ -7794,52 +7794,141 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### zeroize 1.8.2
+### zeroize 1.9.2
 
 ```text
-MIT License
+Copyright (c) 2018-2026 The RustCrypto Project Developers
 
-Copyright (c) 2018-2021 The RustCrypto Project Developers
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 ```
 
-### zstd 0.13.3, zstd-safe 7.2.4, zstd-sys 2.0.16+zstd.1.5.7
+### zstd 0.13.5, zstd-safe 7.4.1, zstd-sys 2.1.3+zstd.1.5.7
 
 ```text
-The MIT License (MIT)
-Copyright (c) 2016 Alexandre Bury
+BSD 3-Clause License
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+Copyright (c) 2026, Alexandre Bury
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### zstd-safe 7.2.4, zstd-sys 2.0.16+zstd.1.5.7
+### zstd-sys 2.1.3+zstd.1.5.7
 
 ```text
-MIT or Apache-2.0
+The decoders for legacy formats, in zstd/lib/legacy/, include code under the
+2-clause BSD license:
+
+BSD 2-Clause License
+
+Copyright (C) 2013-2016, Yann Collet.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+    * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### zstd-sys 2.0.16+zstd.1.5.7 (zstd/COPYING)
+### zstd-sys 2.1.3+zstd.1.5.7
+
+```text
+The auto-generated bindings are under the 3-clause BSD license:
+
+BSD License
+
+For Zstandard software
+
+Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+ * Neither the name Facebook, nor Meta, nor the names of its contributors may
+   be used to endorse or promote products derived from this software without
+   specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### zstd-sys 2.1.3+zstd.1.5.7 (zstd/COPYING)
 
 ```text
 GNU GENERAL PUBLIC LICENSE
@@ -8183,7 +8272,7 @@ library.  If this is what you want to do, use the GNU Lesser General
 Public License instead of this License.
 ```
 
-### zstd-sys 2.0.16+zstd.1.5.7 (zstd/LICENSE)
+### zstd-sys 2.1.3+zstd.1.5.7 (zstd/LICENSE)
 
 ```text
 BSD License
