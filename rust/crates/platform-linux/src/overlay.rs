@@ -1430,7 +1430,7 @@ fn run_overlay_thread(cfg: CursorConfig, rx: std::sync::mpsc::Receiver<OverlayMs
     // Belt and braces for servers whose root reads are unreliable even for
     // the visual chosen above: `resolve_backdrop` stops treating a readback
     // mismatch as proof of a repaint.
-    let readback_untrusted = !x11_visual_readback_reliable(
+    let readback_untrusted = readback_untrusted_after_probe(x11_visual_readback_reliable(
         &conn,
         root,
         visual_id,
@@ -1438,8 +1438,7 @@ fn run_overlay_thread(cfg: CursorConfig, rx: std::sync::mpsc::Receiver<OverlayMs
         colormap,
         scr_w as u16,
         scr_h as u16,
-    )
-    .unwrap_or(false);
+    ));
 
     // Create the overlay window.
     let win = conn.generate_id().unwrap();
@@ -1541,12 +1540,6 @@ fn run_overlay_thread(cfg: CursorConfig, rx: std::sync::mpsc::Receiver<OverlayMs
         readback_untrusted,
         ..X11BackdropCache::default()
     };
-    if readback_untrusted {
-        tracing::warn!(
-            "X11 overlay: root reads cannot see this window's own pixels; \
-             save-unders will be served without readback confirmation"
-        );
-    }
     // Arrivals resolve callers waiting for the destination frame to be visible,
     // so they are held back across a deferred paint instead of firing early.
     let mut pending_arrivals: Vec<CursorKey> = Vec::new();
@@ -2658,9 +2651,12 @@ fn read_root_backdrops(
 /// shape, upload the strip, read it back off the root twice (immediately,
 /// and again after the server has had time to reprocess the damage),
 /// destroy. The round trip through `get_image` orders the reply after the
-/// map and upload on this connection, so no separate sync is needed. Errors
-/// report as unreliable: a server that cannot service this exchange cannot
-/// service the per-frame paint either.
+/// map and upload on this connection, so no separate sync is needed. An
+/// error counts as unreliable: a server that cannot service this exchange
+/// cannot service the per-frame paint either.
+///
+/// [`readback_untrusted_after_probe`] turns the result into the backdrop
+/// cache's `readback_untrusted` and logs it.
 fn x11_visual_readback_reliable(
     conn: &impl x11rb::connection::Connection,
     root: u32,
@@ -2778,6 +2774,97 @@ fn x11_visual_readback_reliable(
     conn.destroy_window(win).ok();
     conn.flush().ok();
     probe
+}
+
+/// `readback_untrusted` for the backdrop cache from the startup readback
+/// probe, logged. A server whose root reads miss the overlay's pixels is an
+/// ordinary server the overlay handles, so that is info; only a probe that
+/// failed outright is a warning, and it names the error.
+fn readback_untrusted_after_probe(probe: anyhow::Result<bool>) -> bool {
+    match probe {
+        Ok(true) => false,
+        Ok(false) => {
+            tracing::info!(
+                "X11 overlay: root reads do not show this window's own pixels on this \
+                 server; save-unders will be served without readback confirmation"
+            );
+            true
+        }
+        Err(error) => {
+            tracing::warn!(
+                "X11 overlay: the root readback probe failed ({error:#}); save-unders will \
+                 be served without readback confirmation"
+            );
+            true
+        }
+    }
+}
+
+#[cfg(test)]
+mod readback_probe_log_tests {
+    use super::readback_untrusted_after_probe;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+        type Writer = Captured;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// `readback_untrusted` and everything logged while deciding it.
+    fn logged(probe: anyhow::Result<bool>) -> (bool, String) {
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(captured.clone())
+            .with_max_level(tracing::Level::TRACE)
+            .finish();
+        let untrusted =
+            tracing::subscriber::with_default(subscriber, || readback_untrusted_after_probe(probe));
+        let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        (untrusted, log)
+    }
+
+    /// Root reads that cannot see the overlay's pixels are what every
+    /// compositing desktop gives, so saying so on each start is not a warning.
+    #[test]
+    fn an_unreliable_readback_is_reported_below_warn() {
+        let (untrusted, log) = logged(Ok(false));
+        assert!(untrusted);
+        assert!(!log.contains("WARN"), "{log}");
+        assert!(log.contains("INFO"), "{log}");
+    }
+
+    /// A probe that fails says why, instead of passing for an unreliable read.
+    #[test]
+    fn a_failed_probe_is_a_warning_that_names_its_error() {
+        let (untrusted, log) = logged(Err(anyhow::anyhow!("get_image: BadMatch")));
+        assert!(untrusted);
+        assert!(log.contains("WARN"), "{log}");
+        assert!(log.contains("get_image: BadMatch"), "{log}");
+    }
+
+    #[test]
+    fn a_reliable_readback_is_trusted_without_a_warning() {
+        let (untrusted, log) = logged(Ok(true));
+        assert!(!untrusted);
+        assert!(!log.contains("WARN"), "{log}");
+    }
 }
 
 /// A composited tile: its bounds, the opaque pixels to upload, the tile-local
