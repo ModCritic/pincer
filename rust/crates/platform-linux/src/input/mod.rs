@@ -16,6 +16,8 @@
 /// Shared `delivery_mode` contract (background|foreground) — mirrors macOS
 /// `tools::DeliveryMode` and Windows `input::delivery`.
 pub mod delivery;
+/// The arithmetic expressions of `move_along_path` and `parallel_mouse_drag`.
+mod expr;
 pub mod focus_guard;
 pub mod foreground;
 /// A press that leaves its button held, run under a time budget.
@@ -92,22 +94,21 @@ fn path_cumulative(path: &[(i32, i32)]) -> (Vec<f64>, f64) {
     (cum, total)
 }
 
-/// Compile `expr` into a function of its one free variable `var`, with
-/// meval's built-in constants and functions (+ - * / ^, sin/cos/tan, sqrt,
-/// abs, exp, ln, pi, e, ...). `label` names the expression in errors, so
+/// Compile `expr` into a function of its one free variable `var`, with the
+/// constants and functions listed in input/expr.rs (+ - * / % ^, sin/cos/tan,
+/// sqrt, abs, exp, ln, pi, e, ...). `label` names the expression in errors, so
 /// `parallel_mouse_drag`'s `fn` (variable `x`) and `move_along_path`'s
 /// parametric `x`/`y` (variable `t`) share one evaluator.
 pub fn compile_expression(label: &str, expr: &str, var: &str) -> Result<impl Fn(f64) -> f64> {
-    let parsed: meval::Expr = expr
-        .parse()
-        .map_err(|e| anyhow!("invalid {label} '{expr}': {e}"))?;
-    parsed
-        .bind(var)
-        .map_err(|e| anyhow!("{label} must be in terms of {var}: {e}"))
+    match expr::compile(expr, var) {
+        Ok(compiled) => Ok(move |v| compiled.eval(v)),
+        Err(e) if e.is_syntax() => Err(anyhow!("invalid {label} '{expr}': {e}")),
+        Err(e) => Err(anyhow!("{label} must be in terms of {var}: {e}")),
+    }
 }
 
 /// Sample `y = f(x)` over `[x_from, x_to]` into `samples` window-local
-/// waypoints. Evaluated with meval (sin/cos/^/etc.); non-finite outputs
+/// waypoints. Evaluated by [`compile_expression`]; non-finite outputs
 /// (ln of a negative, 1/0, …) are dropped. Errors on a bad expression or
 /// fewer than 2 finite points.
 pub fn sample_function(

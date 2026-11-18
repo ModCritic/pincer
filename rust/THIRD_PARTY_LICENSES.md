@@ -113,7 +113,6 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | fixedbitset | 0.5.7 | MIT OR Apache-2.0 | MIT |
 | flate2 | 1.1.9 | MIT OR Apache-2.0 | MIT |
 | fluent-uri | 0.4.1 | MIT | MIT |
-| fnv | 1.0.7 | Apache-2.0 / MIT | MIT |
 | foldhash | 0.1.5 | Zlib | Zlib |
 | foldhash | 0.2.0 | Zlib | Zlib |
 | fontdue | 0.9.3 | MIT OR Apache-2.0 OR Zlib | MIT |
@@ -177,14 +176,12 @@ crates.io at the versions listed; Pincer's own files are not affected.
 | memchr | 2.8.0 | Unlicense OR MIT | MIT |
 | memmap2 | 0.9.10 | MIT OR Apache-2.0 | MIT |
 | memoffset | 0.6.5 | MIT | MIT |
-| meval | 0.2.0 | Unlicense/MIT | MIT |
 | micromap | 0.3.0 | MIT | MIT |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | MIT |
 | mio | 1.2.0 | MIT | MIT |
 | moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 | Apache-2.0 |
 | msvc_spectre_libs | 0.1.3 | MIT OR Apache-2.0 | MIT |
 | nix | 0.23.2 | MIT | MIT |
-| nom | 1.2.4 | MIT | MIT |
 | nom | 8.0.0 | MIT | MIT |
 | nu-ansi-term | 0.50.3 | MIT | MIT |
 | num | 0.4.3 | MIT OR Apache-2.0 | MIT |
@@ -486,7 +483,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### aho-corasick 1.1.4, byteorder 1.5.0, byteorder-lite 0.1.0, globset 0.4.19, memchr 2.8.0, meval 0.2.0
+### aho-corasick 1.1.4, byteorder 1.5.0, byteorder-lite 0.1.0, globset 0.4.19, memchr 2.8.0
 
 ```text
 This is free and unencumbered software released into the public domain.
@@ -3087,36 +3084,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### fnv 1.0.7
-
-```text
-Copyright (c) 2017 Contributors
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-```
-
 ### foldhash 0.1.5, foldhash 0.2.0
 
 ```text
@@ -4369,33 +4336,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### meval 0.2.0
-
-```text
-Copyright (c) 2015 Norbert Pozar
-
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-```
-
 ### micromap 0.3.0
 
 ```text
@@ -4790,31 +4730,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-```
-
-### nom 1.2.4
-
-```text
-Copyright (c) 2015 Geoffroy Couprie
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the
-"Software"), to deal in the Software without restriction, including
-without limitation the rights to use, copy, modify, merge, publish,
-distribute, sublicense, and/or sell copies of the Software, and to
-permit persons to whom the Software is furnished to do so, subject to
-the following conditions:
-
-The above copyright notice and this permission notice shall be
-included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 ### nom 8.0.0

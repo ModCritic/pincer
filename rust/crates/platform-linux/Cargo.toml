@@ -52,8 +52,6 @@ atspi = { version = "0.30", default-features = false, features = ["proxies", "wr
 # atspi-connection` shows no `p2p`.
 atspi-connection = { version = "0.14", default-features = false, features = ["wrappers"] }
 evdev = "0.12"
-# Math-expression evaluator for parallel_mouse_drag `fn` paths (y = f(x)).
-meval = "0.2"
 # Native Wayland backend (window enumeration via wlr-foreign-toplevel-management;
 # capture/input protocols added as those slices land). Pure-Rust client; used
 # when running under a Wayland compositor with no X11 (no DISPLAY).
