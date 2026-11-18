@@ -26,6 +26,7 @@ mod envelope_service;
 mod history_runtime;
 mod mcp_envelope;
 mod mcp_http;
+mod mcp_stdio;
 mod private_worker;
 mod proxy;
 mod responsibility;

@@ -26,7 +26,7 @@ use pincer_core::server::{
     StdioExecutionPath,
 };
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 use crate::serve::{
     is_daemon_listening, send_request, DaemonRequest, DaemonResponse, ToolObservationOrigin,
@@ -128,123 +128,166 @@ async fn serve_direct_stdio(
     signals: &mut crate::termination::TerminationSignals,
     terminated: &mut Option<&'static str>,
 ) -> anyhow::Result<()> {
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-    let mut reader = BufReader::new(stdin);
-    let mut writer = tokio::io::BufWriter::new(stdout);
-    let mut line = String::new();
-    let mut session_observed = false;
-    let mut protocol_session = ProtocolSession::default();
+    serve_direct_io(
+        sdk,
+        transport_session,
+        signals,
+        terminated,
+        BufReader::new(tokio::io::stdin()),
+        tokio::io::BufWriter::new(tokio::io::stdout()),
+    )
+    .await
+}
 
-    loop {
-        line.clear();
-        let read = tokio::select! {
-            read = reader.read_line(&mut line) => read?,
-            signal = signals.recv() => {
-                *terminated = Some(signal);
-                break;
-            }
-        };
-        if read == 0 {
-            break;
-        }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let response = match serde_json::from_str::<Request>(trimmed) {
-            Err(error) => {
-                error!("JSON parse error: {error}");
-                Response::parse_error()
-            }
-            Ok(request) if request.is_notification() => continue,
-            Ok(mut request) => {
-                let admission = protocol_session.validate(&request).and_then(|era| {
-                    if request.method == "tools/call" {
-                        mcp_wire::validate_tool_call_with(
-                            &request,
-                            request.id.clone().unwrap_or_default(),
-                            era,
-                            |name| mcp_wire::inventory_lists_tool(sdk.tools_list_ref(), name),
-                        )?;
-                    }
-                    Ok(era)
-                });
-                if let Err(response) = admission {
-                    writer
-                        .write_all(serde_json::to_string(&response)?.as_bytes())
-                        .await?;
-                    writer.write_all(b"\n").await?;
-                    writer.flush().await?;
+/// [`serve_direct_stdio`] over caller-provided I/O. Requests run one at a
+/// time in arrival order while [`crate::mcp_stdio::read_requests`] keeps
+/// reading: it answers `ping` at once and applies `notifications/cancelled`,
+/// and EOF cancels what is still running or waiting.
+async fn serve_direct_io<R, W>(
+    sdk: &Arc<crate::sdk_adapter::SdkAdapter>,
+    transport_session: &str,
+    signals: &mut crate::termination::TerminationSignals,
+    terminated: &mut Option<&'static str>,
+    reader: R,
+    writer: W,
+) -> anyhow::Result<()>
+where
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    use crate::mcp_stdio::{Job, Output};
+    let (output, lines) = Output::channel();
+    let (jobs_tx, mut jobs) = crate::mcp_stdio::job_queue();
+    let inflight = crate::mcp_stdio::InFlight::default();
+    let stop = pincer_core::request_control::CancelToken::new();
+    let mut protocol_session = ProtocolSession::default();
+    let reader = crate::mcp_stdio::read_requests(
+        reader,
+        |request| {
+            protocol_session.validate(request).and_then(|era| {
+                if request.method == "tools/call" {
+                    mcp_wire::validate_tool_call_with(
+                        request,
+                        request.id.clone().unwrap_or_default(),
+                        era,
+                        |name| mcp_wire::inventory_lists_tool(sdk.tools_list_ref(), name),
+                    )?;
+                }
+                Ok(era)
+            })
+        },
+        jobs_tx,
+        output.clone(),
+        inflight.clone(),
+        stop.clone(),
+    );
+    let executor = async {
+        let mut session_observed = false;
+        loop {
+            let job = tokio::select! {
+                job = jobs.recv() => job,
+                signal = signals.recv() => {
+                    *terminated = Some(signal);
+                    None
+                }
+            };
+            let Some(job) = job else { break };
+            let admitted = match job {
+                Job::Reply(response) => {
+                    output.send_response(&response);
                     continue;
                 }
-                apply_direct_session_identity(&mut request, transport_session);
-                let initialize_metadata = (!session_observed)
-                    .then(|| request.initialize_metadata())
-                    .flatten();
-                let session_context = request.tool_call().ok().and_then(|call| {
-                    sdk.begin_tool_call(
-                        &call.name,
-                        &call.args,
-                        pincer_core::session::SessionTransport::McpStdio,
-                        pincer_core::session::SessionClientKind::Mcp,
-                    )
-                });
-                let timer = tool_observation_timer(
-                    &request,
-                    |name| sdk.is_known_tool(name),
-                    StdioExecutionPath::DirectDaemon,
-                );
-                let id = request.id.clone().unwrap_or(serde_json::Value::Null);
-                let method = request.method.clone();
-                let handled = pincer_core::server::handle_request_with_transport_session(
+                Job::Run(admitted) => admitted,
+            };
+            let admitted = match admitted.not_started(&inflight) {
+                Ok(admitted) => admitted,
+                Err(reply) => {
+                    if let Some(reply) = reply {
+                        output.send_response(&reply);
+                    }
+                    continue;
+                }
+            };
+            let control = admitted.control(&output);
+            let (mut request, ticket) = admitted.into_parts();
+            apply_direct_session_identity(&mut request, transport_session);
+            let initialize_metadata = (!session_observed)
+                .then(|| request.initialize_metadata())
+                .flatten();
+            let session_context = request.tool_call().ok().and_then(|call| {
+                sdk.begin_tool_call(
+                    &call.name,
+                    &call.args,
+                    pincer_core::session::SessionTransport::McpStdio,
+                    pincer_core::session::SessionClientKind::Mcp,
+                )
+            });
+            let timer = tool_observation_timer(
+                &request,
+                |name| sdk.is_known_tool(name),
+                StdioExecutionPath::DirectDaemon,
+            );
+            let id = request.id.clone().unwrap_or(serde_json::Value::Null);
+            let method = request.method.clone();
+            let handled =
+                control.scope(pincer_core::server::handle_request_with_transport_session(
                     request,
                     id,
                     sdk.as_ref(),
                     transport_session,
-                );
-                let finished = crate::termination::finish_step(
-                    signals,
-                    terminated,
-                    "the request in progress",
-                    handled,
-                )
-                .await;
-                let response = match finished {
-                    Ok(response) => response,
-                    Err(error) => {
-                        warn!("{error}");
-                        break;
-                    }
-                };
-                if let Some(metadata) = initialize_metadata {
-                    observe_proxy_session_started(metadata);
-                    session_observed = true;
+                ));
+            let response = match finish_request(handled, signals, terminated, &inflight).await {
+                Ok(response) => response,
+                Err(error) => {
+                    warn!("{error}");
+                    break;
                 }
-                if let Some(timer) = timer {
-                    let outcome = timer.finish(&response);
-                    if let Some(context) = session_context {
-                        context.complete(&outcome);
-                    }
-                    observe_proxy_tool_completed(outcome);
-                }
-                // After the observation, so it reads the structured result.
-                pincer_core::mcp_text_results::for_client(&method, response)
+            };
+            if let Some(metadata) = initialize_metadata {
+                observe_proxy_session_started(metadata);
+                session_observed = true;
             }
-        };
-        let serialized = serde_json::to_string(&response).unwrap_or_else(|error| {
-            format!(
-                r#"{{"jsonrpc":"2.0","id":null,"error":{{"code":-32603,"message":"serialize error: {error}"}}}}"#
-            )
-        });
-        writer.write_all(serialized.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
-        writer.flush().await?;
-        if terminated.is_some() {
-            break;
+            if let Some(timer) = timer {
+                let outcome = timer.finish(&response);
+                if let Some(context) = session_context {
+                    context.complete(&outcome);
+                }
+                observe_proxy_tool_completed(outcome);
+            }
+            if let Some(response) = ticket.deliver(&inflight, response) {
+                // After the observation, so it reads the structured result.
+                output.send_response(&pincer_core::mcp_text_results::for_client(
+                    &method, response,
+                ));
+            }
+            if terminated.is_some() {
+                break;
+            }
         }
+        anyhow::Ok(())
+    };
+    crate::mcp_stdio::drive(writer, lines, reader, executor, &inflight, &stop).await
+}
+
+/// Await a request in progress. A termination signal that arrives first
+/// cancels every request in flight, so a long tool stops at its next step,
+/// and leaves the request [`crate::termination::CLEANUP_LIMIT`] to finish.
+async fn finish_request<T>(
+    work: impl std::future::Future<Output = T>,
+    signals: &mut crate::termination::TerminationSignals,
+    terminated: &mut Option<&'static str>,
+    inflight: &crate::mcp_stdio::InFlight,
+) -> anyhow::Result<T> {
+    tokio::pin!(work);
+    if terminated.is_none() {
+        let signal = tokio::select! {
+            output = &mut work => return Ok(output),
+            signal = signals.recv() => signal,
+        };
+        *terminated = Some(signal);
+        inflight.cancel_all(&format!("Pincer received {signal}"));
     }
-    Ok(())
+    crate::termination::finish_step(signals, terminated, "the request in progress", work).await
 }
 
 pub(crate) fn apply_direct_session_identity(request: &mut Request, transport_session: &str) {
@@ -394,9 +437,14 @@ async fn supervise_control_connection<T>(
 /// A clean reader EOF must return `Ok(())` promptly. The caller then drops the
 /// persistent control connection, allowing the daemon to reap the MCP session
 /// and its recording, preview, and overlay state (issue #2002).
+///
+/// Requests are forwarded one at a time in arrival order while
+/// [`crate::mcp_stdio::read_requests`] keeps reading stdin, as in direct mode;
+/// a cancelled call closes its side of the daemon connection (see
+/// [`forward_tool_call`]).
 async fn run_proxy_io<R, W>(
-    mut reader: R,
-    mut writer: W,
+    reader: R,
+    writer: W,
     socket_path: &str,
     cached_tools_list: &Arc<serde_json::Value>,
     session_id: &str,
@@ -406,124 +454,117 @@ where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let mut line = String::new();
-    let mut session_observed = false;
+    use crate::mcp_stdio::{Job, Output};
+    let (output, lines) = Output::channel();
+    let (jobs_tx, mut jobs) = crate::mcp_stdio::job_queue();
+    let inflight = crate::mcp_stdio::InFlight::default();
+    let stop = pincer_core::request_control::CancelToken::new();
     let mut protocol_session = ProtocolSession::default();
-
-    loop {
-        line.clear();
-        let n = reader.read_line(&mut line).await?;
-        if n == 0 {
-            break; // EOF — MCP client disconnected (stdin closed).
-        }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        debug!(raw = trimmed, "→ proxy request");
-
-        let response = match serde_json::from_str::<Request>(trimmed) {
-            Err(e) => {
-                error!("JSON parse error: {e}");
-                Response::parse_error()
-            }
-            Ok(req) if req.is_notification() => {
-                // Notifications are intentionally dropped by the stdio adapter.
-                continue;
-            }
-            Ok(req) => {
-                let admission = protocol_session.validate(&req).and_then(|era| {
-                    mcp_wire::validate_tool_call(
-                        &req,
-                        req.id.clone().unwrap_or_default(),
-                        era,
-                        cached_tools_list,
-                    )?;
-                    Ok(era)
-                });
-                if let Err(response) = admission {
-                    writer
-                        .write_all(serde_json::to_string(&response)?.as_bytes())
-                        .await?;
-                    writer.write_all(b"\n").await?;
-                    writer.flush().await?;
+    let reader = crate::mcp_stdio::read_requests(
+        reader,
+        |request| {
+            protocol_session.validate(request).and_then(|era| {
+                mcp_wire::validate_tool_call(
+                    request,
+                    request.id.clone().unwrap_or_default(),
+                    era,
+                    cached_tools_list,
+                )?;
+                Ok(era)
+            })
+        },
+        jobs_tx,
+        output.clone(),
+        inflight.clone(),
+        stop.clone(),
+    );
+    let executor = async {
+        let mut session_observed = false;
+        while let Some(job) = jobs.recv().await {
+            let admitted = match job {
+                Job::Reply(response) => {
+                    output.send_response(&response);
                     continue;
                 }
-                let initialize_metadata = (!session_observed)
-                    .then(|| req.initialize_metadata())
-                    .flatten();
-                let session_context = (!daemon_observes_tool_calls)
-                    .then(|| {
-                        req.tool_call().ok().and_then(|call| {
-                            let known_tool = proxy_knows_tool(cached_tools_list, &call.name);
-                            pincer_core::session::begin_tool_call(
-                                &call.name,
-                                &call.args,
-                                known_tool,
-                                pincer_core::session::SessionTransport::McpStdio,
-                                pincer_core::session::SessionClientKind::Mcp,
-                            )
-                        })
-                    })
-                    .flatten();
-                let tool_timer = (!daemon_observes_tool_calls)
-                    .then(|| {
-                        tool_observation_timer(
-                            &req,
-                            |name| proxy_knows_tool(cached_tools_list, name),
-                            StdioExecutionPath::DaemonProxy,
+                Job::Run(admitted) => admitted,
+            };
+            let admitted = match admitted.not_started(&inflight) {
+                Ok(admitted) => admitted,
+                Err(reply) => {
+                    if let Some(reply) = reply {
+                        output.send_response(&reply);
+                    }
+                    continue;
+                }
+            };
+            let control = admitted.control(&output);
+            let (req, ticket) = admitted.into_parts();
+            let initialize_metadata = (!session_observed)
+                .then(|| req.initialize_metadata())
+                .flatten();
+            let session_context = (!daemon_observes_tool_calls)
+                .then(|| {
+                    req.tool_call().ok().and_then(|call| {
+                        let known_tool = proxy_knows_tool(cached_tools_list, &call.name);
+                        pincer_core::session::begin_tool_call(
+                            &call.name,
+                            &call.args,
+                            known_tool,
+                            pincer_core::session::SessionTransport::McpStdio,
+                            pincer_core::session::SessionClientKind::Mcp,
                         )
                     })
-                    .flatten();
-                let id = req.id.clone().unwrap_or(serde_json::Value::Null);
-                let method = req.method.clone();
-                let response = handle_proxy_request(
+                })
+                .flatten();
+            let tool_timer = (!daemon_observes_tool_calls)
+                .then(|| {
+                    tool_observation_timer(
+                        &req,
+                        |name| proxy_knows_tool(cached_tools_list, name),
+                        StdioExecutionPath::DaemonProxy,
+                    )
+                })
+                .flatten();
+            let id = req.id.clone().unwrap_or(serde_json::Value::Null);
+            let method = req.method.clone();
+            let response = control
+                .scope(handle_proxy_request(
                     req,
                     id,
                     socket_path,
                     cached_tools_list,
                     session_id,
                     daemon_observes_tool_calls,
-                )
+                ))
                 .await;
-                if let Some(metadata) = initialize_metadata {
-                    observe_proxy_session_started(metadata);
-                    session_observed = true;
+            if let Some(metadata) = initialize_metadata {
+                observe_proxy_session_started(metadata);
+                session_observed = true;
+            }
+            if let Some(timer) = tool_timer {
+                let outcome = timer.finish(&response);
+                if let Some(context) = session_context {
+                    context.complete(&outcome);
                 }
-                if let Some(timer) = tool_timer {
-                    let outcome = timer.finish(&response);
-                    if let Some(context) = session_context {
-                        context.complete(&outcome);
-                    }
-                    observe_proxy_tool_completed(outcome);
-                }
+                observe_proxy_tool_completed(outcome);
+            }
+            if let Some(response) = ticket.deliver(&inflight, response) {
                 // After the observation, so it reads the structured result.
                 // The cached list keeps its schemas for the result boundary.
-                pincer_core::mcp_text_results::for_client(&method, response)
+                output.send_response(&pincer_core::mcp_text_results::for_client(
+                    &method, response,
+                ));
             }
-        };
-
-        let serialized = serde_json::to_string(&response).unwrap_or_else(|e| {
-            format!(
-                r#"{{"jsonrpc":"2.0","id":null,"error":{{"code":-32603,"message":"serialize error: {e}"}}}}"#
-            )
-        });
-        debug!(raw = %serialized, "← proxy response");
-
-        writer.write_all(serialized.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
-        writer.flush().await?;
-    }
-
-    // Reached on a clean stdin EOF (the `n == 0` break above) — the normal
-    // "MCP client disconnected" seam. Session teardown is NO LONGER done here:
-    // it's fully subsumed by the persistent control connection spawned at
-    // startup. On any proxy exit — graceful stdin EOF (this path), an I/O
-    // error propagated via `?`, OR a SIGKILL/crash — the kernel closes the
+        }
+        anyhow::Ok(())
+    };
+    // Session teardown is not done here on a clean stdin EOF. The persistent
+    // control connection opened at startup covers it: on any proxy exit
+    // (stdin EOF, an I/O error, SIGKILL or a crash) the kernel closes the
     // control socket, the daemon's reader hits EOF, and it fires
-    // `session_end(session_id)` once (idempotent). That single path reliably
-    // covers the ungraceful-death case the old best-effort exit hook missed.
-    Ok(())
+    // `session_end(session_id)` once (idempotent), which also covers the
+    // ungraceful deaths the old best-effort exit hook missed.
+    crate::mcp_stdio::drive(writer, lines, reader, executor, &inflight, &stop).await
 }
 
 fn proxy_knows_tool(cached_tools_list: &serde_json::Value, name: &str) -> bool {
@@ -1045,35 +1086,122 @@ async fn forward_tool_call(
         client_kind: None,
     };
 
-    // The daemon client is sync, so jump to a blocking thread to keep
-    // the tokio reactor responsive while the AX-heavy call (e.g.
-    // `screenshot`, `get_window_state`) does its thing on the daemon
-    // side.
-    let socket = socket_path.to_owned();
-    let blocking = tokio::task::spawn_blocking(move || send_request(&socket, &req)).await;
-
-    let resp = match blocking {
-        Err(join_err) => {
+    let resp = match exchange_call(socket_path, req).await {
+        Ok(resp) => resp,
+        Err(error) => {
             return Response::error(
                 id,
                 -32603,
-                format!("internal join error forwarding to daemon: {join_err}"),
+                format!("daemon transport error forwarding `{name}`: {error}"),
             );
         }
-        Ok(Err(e)) => {
-            return Response::error(
-                id,
-                -32603,
-                format!("daemon transport error forwarding `{name}`: {e}"),
-            );
-        }
-        Ok(Ok(r)) => r,
     };
 
     proxy_tool_result_response(
         id,
         daemon_response_to_tool_result(&name, resp, output_schema.as_ref()),
     )
+}
+
+/// How long the proxy waits for the daemon to say anything (a progress line
+/// or the response) before giving up on a call, as the blocking client's
+/// 120-second deadline did. Long tools that report progress keep the call
+/// alive past it.
+#[cfg(unix)]
+const DAEMON_SILENCE_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Send one `call` and read its response on a connection of its own.
+///
+/// The request opts in to two additive daemon behaviors (older daemons
+/// ignore the fields): `progress` lines before the response, which reach the
+/// MCP client as `notifications/progress`, and `cancel_on_close`. When the
+/// request is cancelled, the proxy shuts down its write side; the daemon
+/// sees end of input, cancels the call, and still answers, so the proxy
+/// waits for the tool to stop before forwarding the next request.
+#[cfg(unix)]
+async fn exchange_call(socket_path: &str, req: DaemonRequest) -> anyhow::Result<DaemonResponse> {
+    use tokio::net::UnixStream;
+    let stream = UnixStream::connect(socket_path)
+        .await
+        .map_err(|error| anyhow::anyhow!("connect to {socket_path}: {error}"))?;
+    // Send nothing to a socket another account is serving.
+    let credentials = stream.peer_cred()?;
+    pincer_core::daemon::verify_daemon_peer_uid(socket_path, credentials.uid())?;
+    let mut line = serde_json::to_value(&req)?;
+    line["progress"] = serde_json::Value::Bool(true);
+    line["cancel_on_close"] = serde_json::Value::Bool(true);
+    let line = serde_json::to_string(&line)? + "\n";
+    let (read_half, mut write_half) = stream.into_split();
+    tokio::time::timeout(DAEMON_SILENCE_LIMIT, write_half.write_all(line.as_bytes()))
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out sending the request to the daemon"))??;
+
+    let cancel = pincer_core::request_control::current_cancel_token().unwrap_or_default();
+    let mut reader = BufReader::new(read_half);
+    let mut buffer = Vec::with_capacity(64 * 1024);
+    let mut write_open = true;
+    loop {
+        let read = tokio::select! {
+            read = tokio::time::timeout(
+                DAEMON_SILENCE_LIMIT,
+                reader.read_until(b'\n', &mut buffer),
+            ) => read,
+            _ = cancel.cancelled(), if write_open => {
+                // read_until keeps what it read in `buffer`, so reading
+                // again resumes the same line.
+                write_open = false;
+                let _ = write_half.shutdown().await;
+                continue;
+            }
+        };
+        let read = read.map_err(|_| {
+            anyhow::anyhow!(
+                "timed out after {}s without a word from the daemon (received {} bytes so far)",
+                DAEMON_SILENCE_LIMIT.as_secs(),
+                buffer.len()
+            )
+        })??;
+        if read == 0 && buffer.is_empty() {
+            anyhow::bail!("daemon closed connection without response");
+        }
+        let text = String::from_utf8_lossy(&buffer).into_owned();
+        buffer.clear();
+        let value: serde_json::Value = serde_json::from_str(text.trim())?;
+        if let Some(progress) = value.get("progress").filter(|_| value.get("ok").is_none()) {
+            forward_daemon_progress(progress);
+            if read == 0 {
+                anyhow::bail!("daemon closed connection without response");
+            }
+            continue;
+        }
+        return Ok(serde_json::from_value(value)?);
+    }
+}
+
+#[cfg(not(unix))]
+async fn exchange_call(socket_path: &str, req: DaemonRequest) -> anyhow::Result<DaemonResponse> {
+    // The daemon client is sync, so jump to a blocking thread to keep
+    // the tokio reactor responsive while the call runs on the daemon side.
+    let socket = socket_path.to_owned();
+    tokio::task::spawn_blocking(move || send_request(&socket, &req))
+        .await
+        .map_err(|join_error| anyhow::anyhow!("internal join error: {join_error}"))?
+}
+
+/// Pass one daemon progress line on to the request's progress sink.
+#[cfg(unix)]
+fn forward_daemon_progress(progress: &serde_json::Value) {
+    let Some(value) = progress.get("progress").and_then(serde_json::Value::as_f64) else {
+        return;
+    };
+    let total = progress.get("total").and_then(serde_json::Value::as_f64);
+    pincer_core::request_control::report_progress(value, total, || {
+        progress
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .map(|message| pincer_core::untrusted_text::clip(message, 200).into_owned())
+            .unwrap_or_default()
+    });
 }
 
 /// Translate one `DaemonResponse` into the `CallTool.Result` the MCP client

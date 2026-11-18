@@ -563,6 +563,80 @@ async fn invoke_daemon_tool(
     ))
 }
 
+/// Additive options an MCP proxy sets on its `call` line. Other clients
+/// omit them and keep the one-line exchange.
+#[cfg(unix)]
+#[derive(Default, serde::Deserialize)]
+struct CallOptions {
+    /// Write `{"progress": {...}}` lines before the response.
+    #[serde(default)]
+    progress: bool,
+    /// End of input on this connection, before the response, cancels the
+    /// call. The response is still written.
+    #[serde(default)]
+    cancel_on_close: bool,
+}
+
+/// Run one `call` under a [`pincer_core::request_control::RequestControl`]:
+/// with `progress`, the tool's progress reports go out as lines while it
+/// runs; with `cancel_on_close`, the caller shutting down its side of the
+/// connection cancels the call, so a long tool stops at its next step. A
+/// pipelined next request also ends the watch, unread.
+#[cfg(unix)]
+async fn run_daemon_call<R, W>(
+    sdk: &std::sync::Arc<crate::sdk_adapter::SdkAdapter>,
+    req: DaemonRequest,
+    options: CallOptions,
+    reader: &mut R,
+    writer: &mut W,
+) -> DaemonResponse
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use pincer_core::request_control::{CancelToken, Progress, RequestControl};
+    use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
+    let cancel = CancelToken::new();
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let mut control = RequestControl::new(cancel.clone());
+    if options.progress {
+        control = control.with_progress(std::sync::Arc::new(move |update: Progress| {
+            let line = serde_json::json!({"progress": {
+                "progress": update.progress,
+                "total": update.total,
+                "message": update.message,
+            }});
+            let _ = progress_tx.send(line.to_string() + "\n");
+        }));
+    }
+    let call = control.scope(invoke_daemon_tool(sdk, req));
+    tokio::pin!(call);
+    let mut watching = options.cancel_on_close;
+    loop {
+        tokio::select! {
+            response = &mut call => {
+                while let Ok(line) = progress_rx.try_recv() {
+                    let _ = writer.write_all(line.as_bytes()).await;
+                }
+                return response;
+            }
+            Some(line) = progress_rx.recv() => {
+                let _ = writer.write_all(line.as_bytes()).await;
+            }
+            filled = reader.fill_buf(), if watching => {
+                watching = false;
+                let closed = match filled {
+                    Ok(buffer) => buffer.is_empty(),
+                    Err(_) => true,
+                };
+                if closed {
+                    cancel.cancel("the client closed its connection to the daemon");
+                }
+            }
+        }
+    }
+}
+
 /// Read the PID stored in `pid_file_path`, if any.
 pub fn read_pid_file(pid_file_path: &str) -> Option<u32> {
     std::fs::read_to_string(pid_file_path)
@@ -1362,7 +1436,11 @@ async fn run_serve_with_signals(
                                 ).await;
                             }
                             "call" => {
-                                let resp = invoke_daemon_tool(&reg, req).await;
+                                let options: CallOptions =
+                                    serde_json::from_slice(&line).unwrap_or_default();
+                                let resp = run_daemon_call(
+                                    &reg, req, options, &mut reader, &mut writer,
+                                ).await;
                                 let _ = writer.write_all(
                                     (serde_json::to_string(&resp).unwrap() + "\n").as_bytes()
                                 ).await;

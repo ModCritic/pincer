@@ -91,6 +91,7 @@ pub mod recording_loader;
 pub mod recording_render;
 pub mod recording_tools;
 pub mod recording_zoom;
+pub mod request_control;
 #[cfg(feature = "script")]
 pub mod script_tool;
 pub mod server;
