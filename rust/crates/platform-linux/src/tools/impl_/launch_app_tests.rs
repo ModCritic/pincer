@@ -206,17 +206,23 @@ fn launched_window_titles_are_read_once_they_stop_changing() {
     );
 
     // A title that keeps changing returns at the limit with the latest one.
+    // Each pass sleeps 50 ms before it reads, so the 300 ms limit allows at
+    // most 6 reads however slow the machine is; a limit that did not hold
+    // would keep reading (and stops at 100 here, to fail instead of hang).
     let mut reads = 0;
     let started = std::time::Instant::now();
     let settled = settle_window_titles(
         vec![window(1, "0")],
         || {
-            reads += 1;
+            if reads < 100 {
+                reads += 1;
+            }
             vec![window(1, &reads.to_string())]
         },
         std::time::Duration::from_millis(120),
         std::time::Duration::from_millis(300),
     );
-    assert!(started.elapsed() < std::time::Duration::from_millis(600));
+    assert!(reads <= 6, "read {reads} times past the limit");
+    assert!(started.elapsed() >= std::time::Duration::from_millis(300));
     assert_eq!(settled[0].title, reads.to_string());
 }

@@ -14,7 +14,15 @@ unsafe extern "C" {
 
 #[cfg(target_os = "macos")]
 pub fn already_disclaimed() -> bool {
-    std::env::var_os(pincer_core::RESPONSIBILITY_DISCLAIMED_ENV).is_some()
+    disclaimed(std::env::var_os(pincer_core::RESPONSIBILITY_DISCLAIMED_ENV).as_deref())
+}
+
+/// Whether the disclaim marker variable, with this value, says the process
+/// already disclaimed: any value does. Split out so the test passes values
+/// in instead of changing the environment other tests read.
+#[cfg(target_os = "macos")]
+fn disclaimed(marker: Option<&std::ffi::OsStr>) -> bool {
+    marker.is_some()
 }
 
 /// Split out from [`reexec_disclaimed_if_needed`] so the decision is
@@ -185,18 +193,12 @@ mod tests {
 
     #[test]
     fn already_disclaimed_reflects_env_var() {
-        let name = pincer_core::RESPONSIBILITY_DISCLAIMED_ENV;
-        let original = std::env::var_os(name);
-
-        std::env::remove_var(name);
-        assert!(!already_disclaimed());
-
-        std::env::set_var(name, "1");
-        assert!(already_disclaimed());
-
-        match original {
-            Some(value) => std::env::set_var(name, value),
-            None => std::env::remove_var(name),
-        }
+        assert!(!disclaimed(None));
+        assert!(disclaimed(Some(std::ffi::OsStr::new("1"))));
+        assert!(disclaimed(Some(std::ffi::OsStr::new(""))));
+        assert_eq!(
+            already_disclaimed(),
+            std::env::var_os(pincer_core::RESPONSIBILITY_DISCLAIMED_ENV).is_some()
+        );
     }
 }

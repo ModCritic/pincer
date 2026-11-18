@@ -109,9 +109,14 @@ fn the_processes_a_launcher_started_are_listed_while_they_run() {
     let launcher = script(dir.path(), "starts.sh", "sleep 30 &\nsleep 30 &\nwait");
     let mut child = Command::new(&launcher).spawn().unwrap();
     let pid = child.id();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // Each child of the launcher is a copy of its shell until it execs
+    // sleep: wait for both to run sleep, not only to exist.
+    let runs_sleep = |p: &u32| {
+        std::fs::read_to_string(format!("/proc/{p}/comm")).is_ok_and(|comm| comm.trim() == "sleep")
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
     let mut started = descendants(pid);
-    while started.len() < 2 && Instant::now() < deadline {
+    while !(started.len() == 2 && started.iter().all(runs_sleep)) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
         started = descendants(pid);
     }

@@ -132,11 +132,12 @@ fn a_read_back_escapes_quotes_and_invisible_characters() {
 fn a_process_running_a_binary_beside_a_chromium_payload_is_a_chromium_embedder() {
     let dir = tempfile::tempdir().unwrap();
     let app = dir.path().join("chat-app");
-    std::fs::copy("/bin/sh", &app).unwrap();
+    crate::test_env::copy_executable("/bin/sh", &app);
     let mut plain = std::process::Command::new(&app)
         .args(["-c", "sleep 30; exit 0"])
         .spawn()
         .unwrap();
+    crate::test_env::wait_for_exec(&plain, &app);
     let before = is_chromium_embedder(plain.id());
     let _ = plain.kill();
     let _ = plain.wait();
@@ -146,6 +147,7 @@ fn a_process_running_a_binary_beside_a_chromium_payload_is_a_chromium_embedder()
         .args(["-c", "sleep 30; exit 0"])
         .spawn()
         .unwrap();
+    crate::test_env::wait_for_exec(&electron, &app);
     let after = is_chromium_embedder(electron.id());
     let _ = electron.kill();
     let _ = electron.wait();

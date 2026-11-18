@@ -107,6 +107,37 @@ pub(crate) mod test_env {
         guard
     }
 
+    /// Copy the executable `from` to `to` with `cp`, in a child process. A
+    /// file this process writes itself is open for writing, for a moment,
+    /// in any child another test thread forks meanwhile, until that child
+    /// execs; running the copy then fails with ETXTBSY (text file busy).
+    pub(crate) fn copy_executable(from: &str, to: &std::path::Path) {
+        let status = std::process::Command::new("cp")
+            .arg(from)
+            .arg(to)
+            .status()
+            .expect("run cp");
+        assert!(status.success(), "cp {from} {}", to.display());
+    }
+
+    /// Wait until `child` runs `program`: a spawned child shows its
+    /// parent's executable and command line until its exec completes, which
+    /// can be after spawn returned.
+    pub(crate) fn wait_for_exec(child: &std::process::Child, program: &std::path::Path) {
+        let program = std::fs::canonicalize(program).expect("the program exists");
+        let link = format!("/proc/{}/exe", child.id());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::fs::read_link(&link).ok().as_deref() != Some(program.as_path()) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{} never ran {}",
+                child.id(),
+                program.display()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
     impl Drop for DisplayOverride {
         fn drop(&mut self) {
             for (name, value) in [

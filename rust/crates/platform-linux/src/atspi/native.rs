@@ -9759,31 +9759,40 @@ mod budget_tests {
 
     #[test]
     fn per_call_timeout_clamps_to_operation_deadline() {
+        // A paused clock moves only to the next timer, when every task
+        // waits: the times below are what the code waited for, not how fast
+        // this machine ran it.
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
+            .start_paused(true)
             .build()
             .unwrap();
         rt.block_on(async {
             // No deadline in scope: the historical per-call timeout applies.
             assert_eq!(remaining_budget(), CALL_TIMEOUT);
             assert!(!deadline_passed());
-            let deadline = tokio::time::Instant::now() + Duration::from_millis(200);
+            let started = tokio::time::Instant::now();
+            let deadline = started + Duration::from_millis(200);
             OP_DEADLINE
                 .scope(deadline, async {
                     assert!(remaining_budget() <= Duration::from_millis(200));
                     // A call that would outlive the remaining budget is cut at
                     // the deadline, not at CALL_TIMEOUT.
-                    let started = std::time::Instant::now();
                     let got = call(tokio::time::sleep(Duration::from_secs(10))).await;
                     assert!(got.is_none());
-                    assert!(started.elapsed() < Duration::from_secs(2));
+                    let waited = started.elapsed();
+                    assert!(
+                        waited >= Duration::from_millis(200) && waited < CALL_TIMEOUT,
+                        "waited {waited:?}"
+                    );
                     assert!(deadline_passed());
-                    // Once the deadline has passed, calls short-circuit.
-                    let started = std::time::Instant::now();
+                    // Once the deadline has passed, calls short-circuit: no
+                    // time passes at all.
+                    let before = tokio::time::Instant::now();
                     assert!(call(tokio::time::sleep(Duration::from_secs(10)))
                         .await
                         .is_none());
-                    assert!(started.elapsed() < Duration::from_millis(50));
+                    assert_eq!(tokio::time::Instant::now(), before);
                 })
                 .await;
         });

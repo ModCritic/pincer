@@ -83,6 +83,41 @@ fn text_of(result: &ToolResult) -> String {
         .collect()
 }
 
+/// Set in the child copy of the test binary that [`in_child_with_env`] runs.
+const CHILD_ENV: &str = "PINCER_LAUNCH_SCOPE_CHILD";
+
+/// Whether this process should run the body of test `name` (in this module).
+/// A launch passes on Pincer's own environment, so these tests need
+/// variables in it; changing this process's environment while other tests
+/// run (and read it, from Rust or C) is a race. Outside the child copy this
+/// runs `name` in a child copy of the test binary with `env` added from its
+/// start, checks that it passed, and answers false.
+fn in_child_with_env(name: &str, env: &[(&str, &std::ffi::OsStr)]) -> bool {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return true;
+    }
+    let output = std::process::Command::new(std::env::current_exe().expect("test binary"))
+        .args([
+            &format!("tools::impl_::launch_scope_tests::{name}"),
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD_ENV, "1")
+        .envs(env.iter().copied())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run the child test");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("test result: ok. 1 passed"),
+        "child test failed ({}):\n--- stdout\n{stdout}\n--- stderr\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    false
+}
+
 fn wait_for(path: &Path) -> bool {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while !path.exists() && std::time::Instant::now() < deadline {
@@ -225,9 +260,15 @@ async fn the_launch_runs_exactly_the_attested_program() {
 // them.
 #[tokio::test]
 async fn launched_programs_do_not_inherit_pincer_variables() {
+    let variable = "PINCER_TEST_LAUNCH_INHERITS";
+    if !in_child_with_env(
+        "launched_programs_do_not_inherit_pincer_variables",
+        &[(variable, "leaked".as_ref())],
+    ) {
+        return;
+    }
+    assert!(std::env::var_os(variable).is_some());
     let _apps = installed(Vec::new());
-    let variable = format!("PINCER_TEST_LAUNCH_INHERITS_{}", std::process::id());
-    std::env::set_var(&variable, "leaked");
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("env");
     let _ = LaunchAppTool
@@ -236,26 +277,14 @@ async fn launched_programs_do_not_inherit_pincer_variables() {
             "additional_arguments": ["-c", format!("env > '{}.tmp' && mv '{0}.tmp' '{0}'", marker.display())],
         }))
         .await;
-    std::env::remove_var(&variable);
     assert!(wait_for(&marker));
     let env = std::fs::read_to_string(&marker).unwrap();
-    assert!(!env.contains(&variable), "{env}");
+    assert!(!env.contains(variable), "{env}");
     assert!(env.contains("ACCESSIBILITY_ENABLED=1"), "{env}");
     // Firefox and Thunderbird switch their accessibility on only for this
     // variable (or the session-wide status); without it a launched Firefox
     // had no tree.
     assert!(env.contains("GNOME_ACCESSIBILITY=1"), "{env}");
-}
-
-struct PathGuard(Option<std::ffi::OsString>);
-
-impl Drop for PathGuard {
-    fn drop(&mut self) {
-        match self.0.take() {
-            Some(path) => std::env::set_var("PATH", path),
-            None => std::env::remove_var("PATH"),
-        }
-    }
 }
 
 // LXTOOLS-12: xdg-open inherited the driver's stdin, stdout and stderr (in
@@ -267,11 +296,33 @@ impl Drop for PathGuard {
 // lives in this one test.
 #[tokio::test]
 async fn urls_alone_open_through_xdg_open_with_private_stdio() {
+    const DIR_ENV: &str = "PINCER_TEST_XDG_DIR";
+    let variable = "PINCER_TEST_XDG_INHERITS";
+    if std::env::var_os(CHILD_ENV).is_none() {
+        // The fake xdg-open's folder goes first on the child's PATH.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let mut path = std::ffi::OsString::from(&bin);
+        if let Some(original) = std::env::var_os("PATH") {
+            path.push(":");
+            path.push(original);
+        }
+        in_child_with_env(
+            "urls_alone_open_through_xdg_open_with_private_stdio",
+            &[
+                ("PATH", &path),
+                (DIR_ENV, dir.path().as_os_str()),
+                (variable, "leaked".as_ref()),
+            ],
+        );
+        return;
+    }
+    assert!(std::env::var_os(variable).is_some());
     let _apps = installed(Vec::new());
-    let dir = tempfile::tempdir().unwrap();
-    let bin = dir.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let report = dir.path().join("report");
+    let dir = std::path::PathBuf::from(std::env::var_os(DIR_ENV).expect("the parent's folder"));
+    let bin = dir.join("bin");
+    let report = dir.join("report");
     let fake = program(
         &bin,
         "xdg-open",
@@ -284,26 +335,15 @@ async fn urls_alone_open_through_xdg_open_with_private_stdio() {
             report = report.display()
         ),
     );
-    let original = std::env::var_os("PATH");
-    let _path = PathGuard(original.clone());
-    let mut path = std::ffi::OsString::from(&bin);
-    if let Some(original) = &original {
-        path.push(":");
-        path.push(original);
-    }
-    std::env::set_var("PATH", &path);
 
-    let text = dir.path().join("notes.txt");
+    let text = dir.join("notes.txt");
     std::fs::write(&text, "notes").unwrap();
-    let entry = dir.path().join("evil.desktop");
+    let entry = dir.join("evil.desktop");
     std::fs::write(&entry, "[Desktop Entry]\nType=Application\nExec=sh\n").unwrap();
-    let script = program(dir.path(), "run.sh", "exit 0");
+    let script = program(&dir, "run.sh", "exit 0");
     let text = text.to_string_lossy().into_owned();
     let entry = entry.to_string_lossy().into_owned();
-    let variable = format!("PINCER_TEST_XDG_INHERITS_{}", std::process::id());
-    std::env::set_var(&variable, "leaked");
     let result = LaunchAppTool.invoke(json!({"urls": [text.clone()]})).await;
-    std::env::remove_var(&variable);
     assert_ne!(result.is_error, Some(true), "{result:?}");
     assert!(wait_for(&report));
     let seen = std::fs::read_to_string(&report).unwrap();
@@ -315,7 +355,7 @@ async fn urls_alone_open_through_xdg_open_with_private_stdio() {
         assert!(child.is_some(), "{seen}");
         assert_ne!(child, own(fd), "xdg-open fd {fd} is the driver's own: {seen}");
     }
-    assert!(!seen.contains(&variable), "{seen}");
+    assert!(!seen.contains(variable), "{seen}");
 
     for (urls, options) in [
         (vec![text.clone()], false),

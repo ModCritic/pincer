@@ -202,10 +202,24 @@ fn sleeper(args: &[&str]) -> std::process::Child {
         .expect("the sleeper should spawn")
 }
 
-/// `check` within 2 s: a spawned child runs the test binary's image until
-/// its exec, so its command line takes a moment to change.
+/// A shell with `arg` on its command line, waiting in the `read` builtin
+/// (its stdin is a pipe nobody writes). Unlike `sh -c "sleep 30; :"` it
+/// starts no child, which would carry the same command line until it
+/// execs, also after the shell was stopped.
+fn holder(arg: &str) -> std::process::Child {
+    std::process::Command::new("/bin/sh")
+        .args(["-c", "read -r _", "sh", arg])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("the holder should spawn")
+}
+
+/// `check` within 10 s: a spawned child runs the test binary's image until
+/// its exec, so its command line takes a moment to change. Generous because
+/// a busy machine can take long to run the exec, and a check that holds
+/// returns at once.
 fn soon(check: impl Fn() -> bool) -> bool {
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
         if check() {
             return true;
@@ -283,7 +297,7 @@ fn a_run_folder_a_process_still_runs_from_is_kept() {
         .expect("a sleep binary");
     let copy = path.join("appimage_extracted_x").join("sleep");
     std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
-    std::fs::copy(sleep, &copy).unwrap();
+    crate::test_env::copy_executable(sleep, &copy);
     let app = sleeper(&[copy.to_str().unwrap(), "30"]);
     assert!(soon(|| in_use(&path)));
     // No launcher recorded and past the grace: only the use keeps it.
@@ -293,7 +307,7 @@ fn a_run_folder_a_process_still_runs_from_is_kept() {
     assert!(!in_use(&path));
     // A command-line argument under the folder counts too.
     let arg = format!("{}/file", path.display());
-    let shell = sleeper(&["/bin/sh", "-c", "sleep 30; :", "sh", &arg]);
+    let shell = holder(&arg);
     assert!(soon(|| in_use(&path)));
     stop(shell);
     assert_eq!(sweep_run_dirs_with(root.path(), Duration::ZERO), 1);
@@ -318,7 +332,7 @@ fn a_release_waits_until_nothing_runs_from_the_folder() {
     let path = dir.path().to_path_buf();
     std::fs::write(path.join("unpacked"), b"x").unwrap();
     let arg = format!("{}/unpacked", path.display());
-    let user = sleeper(&["/bin/sh", "-c", "sleep 30; :", "sh", &arg]);
+    let user = holder(&arg);
     assert!(soon(|| in_use(&path)));
     let release = std::thread::spawn(move || dir.release());
     std::thread::sleep(Duration::from_millis(500));

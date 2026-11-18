@@ -5,6 +5,11 @@
 //! provider. A walk that ignored its budget used to hold every recorded action
 //! for the full provider latency (33 s per click on a Tk window), including
 //! clicks refused before any input was dispatched.
+//!
+//! Time limits here separate "waited for the provider" (at least
+//! [`SLOW_PROVIDER`]) from "did not": they hold however slow or loaded the
+//! machine is. What the recorder did instead (no walk, one abandoned walk,
+//! a captured partial tree) is checked through its call count and manifests.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -133,8 +138,8 @@ async fn recorded_actions_stay_bounded_with_a_slow_accessibility_provider() {
     let refused_elapsed = started.elapsed();
     assert_eq!(refused.is_error, Some(true));
     assert!(
-        refused_elapsed < Duration::from_millis(800),
-        "refused click took {refused_elapsed:?}"
+        refused_elapsed < SLOW_PROVIDER,
+        "refused click waited for the provider: {refused_elapsed:?}"
     );
     assert_eq!(
         STATE_CALLS.load(Ordering::SeqCst),
@@ -163,11 +168,13 @@ async fn recorded_actions_stay_bounded_with_a_slow_accessibility_provider() {
         )
         .await;
     let dispatched_elapsed = started.elapsed();
+    // One backstop is the expected cost; the manifest below shows the after
+    // phase did not wait again.
     assert!(
-        dispatched_elapsed < backstop + Duration::from_millis(900),
-        "recorded click took {dispatched_elapsed:?} (backstop {backstop:?}); result {dispatched:?}"
+        dispatched_elapsed < SLOW_PROVIDER,
+        "recorded click waited for the provider: {dispatched_elapsed:?} (backstop {backstop:?}); \
+         result {dispatched:?}"
     );
-    assert!(dispatched_elapsed < SLOW_PROVIDER);
     let manifest = evidence(&directory.path().join("turn-00002"));
     assert_eq!(
         manifest["before"]["state"],
@@ -182,15 +189,14 @@ async fn recorded_actions_stay_bounded_with_a_slow_accessibility_provider() {
     assert_eq!(STATE_CALLS.load(Ordering::SeqCst), 1);
 
     // 3. A provider that honours its budget receives it and its partial tree
-    //    is recorded as truncated evidence.
-    let started = Instant::now();
+    //    is recorded as truncated evidence. A walk the backstop cut would
+    //    read `state_capture_timeout` instead of `captured`.
     registry
         .invoke(
             "click",
             json!({"pid": BUDGETED_PID, "window_id": 8, "x": 1, "y": 1}),
         )
         .await;
-    assert!(started.elapsed() < backstop);
     let turn = directory.path().join("turn-00003");
     let manifest = evidence(&turn);
     for phase in ["before", "after"] {

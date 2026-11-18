@@ -1380,17 +1380,21 @@ mod tests {
     }
 
     /// A focus already on a client window returns on the first read: the
-    /// happy path pays no retry.
+    /// happy path pays no retry. Counted in reads, not time: a retry is a
+    /// second read after a 25 ms sleep, however slow the machine.
     #[test]
     fn settled_focus_returns_without_waiting() {
-        let started = Instant::now();
+        let mut reads = 0;
         let focused = await_focus_destination(
-            started + Duration::from_secs(2),
-            || Some(0x3e0_0096),
+            Instant::now() + Duration::from_secs(2),
+            || {
+                reads += 1;
+                Some(0x3e0_0096)
+            },
             |_| false,
         );
         assert_eq!(focused, Some(0x3e0_0096));
-        assert!(started.elapsed() < Duration::from_millis(25));
+        assert_eq!(reads, 1, "the settled focus was read again");
     }
 
     #[test]
