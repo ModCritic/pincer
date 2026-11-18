@@ -18,6 +18,8 @@
 pub mod delivery;
 pub mod focus_guard;
 pub mod foreground;
+/// A press that leaves its button held, run under a time budget.
+pub(crate) mod held_press;
 /// Low-latency ordered input batches for one target (embedders).
 pub mod interactive;
 /// The one table of keyboard modifier names every route parses.
@@ -3957,6 +3959,19 @@ fn note_xtest_button(button: u8, down: bool) {
         XTEST_BUTTONS_DOWN.fetch_or(bit, Ordering::SeqCst);
     } else {
         XTEST_BUTTONS_DOWN.fetch_and(!bit, Ordering::SeqCst);
+    }
+}
+
+/// Release XTest `button` where the pointer is when this process pressed it
+/// and has not released it; nothing otherwise. The undo for a held press
+/// that must not stay down (see [`held_press`]).
+pub(crate) fn release_xtest_button_if_down(button: u8) {
+    let down = (1..=7).contains(&button)
+        && XTEST_BUTTONS_DOWN.load(Ordering::SeqCst) & (1 << (button - 1)) != 0;
+    if down {
+        if let Err(error) = release_button_xtest_at_pointer(button) {
+            tracing::warn!("could not release XTest button {button}: {error:#}");
+        }
     }
 }
 

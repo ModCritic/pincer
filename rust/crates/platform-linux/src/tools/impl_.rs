@@ -15357,7 +15357,21 @@ impl Tool for MouseButtonDownTool {
             })
             .await
         } else if foreground {
-            spawn_blocking_bounded(
+            // The press is the core pointer's real button, and the blocking
+            // work outlives a call that stops waiting (budget, cancelled
+            // request): the hold is recorded as the press lands, or the
+            // button released at once when the call already gave up.
+            let state = self.state.clone();
+            let held_cursor = cursor_id.clone();
+            let hold = MouseHoldState {
+                pid,
+                xid,
+                button,
+                x,
+                y,
+                foreground: true,
+            };
+            crate::input::held_press::press_and_hold_bounded(
                 "foreground mouse_button_down",
                 foreground_budget(0),
                 move || {
@@ -15377,6 +15391,10 @@ impl Tool for MouseButtonDownTool {
                         },
                     )
                     .map(|((), _report)| ())
+                },
+                move || crate::input::release_xtest_button_if_down(button),
+                move || {
+                    state.mouse_hold.lock().unwrap().insert(held_cursor, hold);
                 },
             )
             .await
