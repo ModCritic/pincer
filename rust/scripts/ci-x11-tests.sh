@@ -35,6 +35,7 @@ lib_tests=(
     clipboard::tests::native_clipboard_round_trips_text_on_x11
     history::tests::secret_service_key_lifecycle_is_isolated_corruptible_and_destroyable
     input::xlib_live_tests::a_broken_connection_releases_held_buttons_before_the_exit
+    input::xlib_live_tests::a_held_xtest_button_keeps_its_connection_until_the_release
     input::xlib_live_tests::an_early_refusal_closes_its_display
     input::xlib_live_tests::an_x_error_does_not_end_the_process
     overlay::tests::x11_desktop_capture_hides_the_resting_overlay_and_restores_it
