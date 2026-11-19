@@ -408,7 +408,10 @@ impl Tool for ReplayTrajectoryTool {
                 browser_type, ...), launch_app, kill_app, bring_to_front and browser_navigate. \
                 A turn naming any other tool (run_steps, run_script, replay_trajectory, \
                 set_config, or a recording, session, clipboard, upload, download or installer \
-                tool) does not run: it counts as failed, with `refusal.code: \"not_replayable\"`.\n\n\
+                tool) does not run: it counts as failed, with `refusal.code: \"not_replayable\"`. \
+                `not_replayable_turns` lists every such turn before any turn runs; with \
+                `stop_on_error` false the turns after one run, but may depend on it (a paste \
+                after a clipboard write).\n\n\
                 A replay stops before a turn once `max_turns` turn folders were gone \
                 through or `timeout_ms` passed (`stop_reason` and `not_run` say so); `turns` \
                 keeps the first and last 50 entries, each `result_summary` cut to 300 \
@@ -521,19 +524,36 @@ impl Tool for ReplayTrajectoryTool {
         let mut turns_json = TurnLog::default();
         let mut first_failure: Option<(String, String, String)> = None;
         let mut skipped_turns: Vec<String> = Vec::new();
-        let mut refused_turns: Vec<(String, String)> = Vec::new();
+        let mut refused = 0usize;
         let mut refound = 0u32;
         // Why the replay stopped before a turn, which turn, and how many
         // turn folders did not run.
         let mut stopped: Option<(String, String, usize)> = None;
+        // The not_replayable turn stop_on_error stopped at, its tool, and
+        // how many turn folders after it did not run.
+        let mut stopped_at: Option<(String, String, usize)> = None;
         let mut cancelled = false;
         let planned = turn_dirs.len().min(max_turns);
 
+        // Every turn the replay may reach is read before any runs, so the
+        // result lists each turn it will refuse up front: a later turn may
+        // depend on one (a paste after a clipboard write).
+        let actions: Vec<_> = turn_dirs[..planned]
+            .iter()
+            .map(|turn_dir| parse_action_json(&turn_dir.join("action.json")))
+            .collect();
+        let not_replayable_turns: Vec<(String, String)> = turn_dirs
+            .iter()
+            .zip(&actions)
+            .filter_map(|(turn_dir, action)| {
+                let (tool, ..) = action.as_ref().ok()?;
+                (!replayable(tool)).then(|| (turn_folder_name(turn_dir), tool.clone()))
+            })
+            .collect();
+        let mut actions = actions.into_iter();
+
         for (position, turn_dir) in turn_dirs.iter().enumerate() {
-            let turn_name = turn_dir
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "?".to_owned());
+            let turn_name = turn_folder_name(turn_dir);
             let stop_reason = if crate::request_control::is_cancelled() {
                 cancelled = true;
                 Some(crate::request_control::describe_cancel())
@@ -552,8 +572,10 @@ impl Tool for ReplayTrajectoryTool {
                 format!("turn {} of {planned}: {}", position + 1, shown_name(&turn_name))
             });
 
-            let action_path = turn_dir.join("action.json");
-            let (tool_name, mut tool_args, recorded_error, element) = match parse_action_json(&action_path) {
+            // One parsed action per turn before max_turns, which ended the
+            // loop above.
+            let Some(action) = actions.next() else { break };
+            let (tool_name, mut tool_args, recorded_error, element) = match action {
                 Ok(v) => v,
                 Err(e) => {
                     failed += 1;
@@ -585,13 +607,19 @@ impl Tool for ReplayTrajectoryTool {
                         NOT_REPLAYABLE_MESSAGE.to_owned(),
                     ));
                 }
+                refused += 1;
+                let mut refusal = json!({"code": NOT_REPLAYABLE, "message": NOT_REPLAYABLE_MESSAGE});
+                let after = turn_dirs.len() - position - 1;
+                if stop_on_error && after > 0 {
+                    refusal["hint"] = json!(not_replayable_stop_hint(after));
+                    stopped_at = Some((turn_name.clone(), tool_name.clone(), after));
+                }
                 turns_json.push(json!({
                     "turn": turn_name,
                     "tool": &tool_name,
                     "ok": false,
-                    "refusal": {"code": NOT_REPLAYABLE, "message": NOT_REPLAYABLE_MESSAGE},
+                    "refusal": refusal,
                 }));
-                refused_turns.push((turn_name, tool_name));
                 if stop_on_error {
                     break;
                 }
@@ -684,7 +712,6 @@ impl Tool for ReplayTrajectoryTool {
             .map(|n| n.to_string_lossy())
             .unwrap_or_else(|| "?".into());
         let skipped = skipped_turns.len();
-        let refused = refused_turns.len();
         let mut summary_text = format!(
             "replay {}: attempted={attempted} succeeded={succeeded} failed={failed} \
              skipped={skipped}",
@@ -698,6 +725,31 @@ impl Tool for ReplayTrajectoryTool {
                 " first_failure={}:{}",
                 shown_name(turn),
                 shown_name(tool)
+            ));
+        }
+        if !not_replayable_turns.is_empty() {
+            let mut names: Vec<String> = not_replayable_turns
+                .iter()
+                .take(REPLAY_NAMES_LISTED)
+                .map(|(turn, tool)| format!("{} {}", shown_name(turn), shown_name(tool)))
+                .collect();
+            if not_replayable_turns.len() > REPLAY_NAMES_LISTED {
+                names.push(format!(
+                    "and {} more",
+                    not_replayable_turns.len() - REPLAY_NAMES_LISTED
+                ));
+            }
+            summary_text.push_str(&format!(
+                "\nTurns refused as {NOT_REPLAYABLE} when reached (only single actions replay): {}.",
+                names.join(", ")
+            ));
+        }
+        if let Some((turn, tool, not_run)) = &stopped_at {
+            summary_text.push_str(&format!(
+                "\nStopped at {} ({}): {}",
+                shown_name(turn),
+                shown_name(tool),
+                not_replayable_stop_hint(*not_run)
             ));
         }
         if refound > 0 {
@@ -733,21 +785,11 @@ impl Tool for ReplayTrajectoryTool {
                 names.join(", ")
             ));
         }
-        if refused > 0 {
-            let mut names: Vec<String> = refused_turns
-                .iter()
-                .take(REPLAY_NAMES_LISTED)
-                .map(|(turn, tool)| format!("{} {}", shown_name(turn), shown_name(tool)))
-                .collect();
-            if refused > REPLAY_NAMES_LISTED {
-                names.push(format!("and {} more", refused - REPLAY_NAMES_LISTED));
-            }
-            summary_text.push_str(&format!(
-                "\nRefused turns ({NOT_REPLAYABLE}, not run): {}. {NOT_REPLAYABLE_MESSAGE}",
-                names.join(", ")
-            ));
-        }
 
+        let not_replayable_json: Vec<Value> = not_replayable_turns
+            .iter()
+            .map(|(turn, tool)| json!({"turn": turn, "tool": tool}))
+            .collect();
         let mut structured = json!({
             "directory": dir.to_string_lossy(),
             "attempted": attempted,
@@ -759,7 +801,8 @@ impl Tool for ReplayTrajectoryTool {
             "refound": refound,
             "max_turns": max_turns,
             "timeout_ms": timeout_ms,
-            "stopped_early": stopped.is_some(),
+            "stopped_early": stopped.is_some() || stopped_at.is_some(),
+            "not_replayable_turns": not_replayable_json,
             "turns": turns_json.entries,
             "turns_omitted": turns_json.omitted,
         });
@@ -769,6 +812,12 @@ impl Tool for ReplayTrajectoryTool {
         if let Some((turn, reason, not_run)) = stopped {
             structured["stop_reason"] = json!(reason);
             structured["stopped_before"] = json!(turn);
+            structured["not_run"] = json!(not_run);
+        }
+        if let Some((turn, _tool, not_run)) = stopped_at {
+            structured["stop_reason"] =
+                json!("stop_on_error is true and this turn is not replayable");
+            structured["stopped_at"] = json!(turn);
             structured["not_run"] = json!(not_run);
         }
         if cancelled {
@@ -789,6 +838,24 @@ const NOT_REPLAYABLE: &str = "not_replayable";
 const NOT_REPLAYABLE_MESSAGE: &str = "replay_trajectory runs only single actions (click, \
     type_text, press_key and the other input tools, launch_app, kill_app, bring_to_front, \
     browser_navigate); this turn's tool is not one, so it did not run.";
+
+/// What to do after stop_on_error stopped at a not_replayable turn with
+/// `not_run` turn folders after it.
+fn not_replayable_stop_hint(not_run: usize) -> String {
+    format!(
+        "stop_on_error is true, so {not_run} later turn folder(s) did not run. \
+         stop_on_error:false replays them, but a later turn may depend on this one (such as \
+         a paste after a clipboard write), so check the app afterward."
+    )
+}
+
+/// A turn folder's own name, such as `turn-00002`.
+fn turn_folder_name(turn_dir: &std::path::Path) -> String {
+    turn_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "?".to_owned())
+}
 
 /// Whether replay_trajectory runs a turn that names `tool`: a single action
 /// on a window, a page or an app, which start_recording writes with the
@@ -1261,6 +1328,90 @@ mod tests {
         .expect("a self-replaying folder ends");
         let structured = result.structured_content.clone().unwrap();
         assert_eq!(structured["refused"], 1, "{structured}");
+    }
+
+    /// A recorded clipboard_write between two key presses: the default
+    /// replay stopped at the refused write with only `first_failure` to show
+    /// for it, so the caller learned neither which other turns would be
+    /// refused nor that `stop_on_error: false` runs the paste after it.
+    #[tokio::test]
+    async fn replay_lists_not_replayable_turns_and_says_how_to_go_on() {
+        let (registry, calls) = replay_registry(&["press_key", "clipboard_write", "set_config"]);
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("trajectory");
+        write_trajectory(
+            &dir,
+            &[
+                press_key_turn(),
+                json!({"tool": "clipboard_write", "arguments": {"text": "pasted"}}),
+                press_key_turn(),
+                json!({"tool": "set_config", "arguments": {}}),
+            ],
+        );
+        let both = json!([
+            {"turn": "turn-00002", "tool": "clipboard_write"},
+            {"turn": "turn-00004", "tool": "set_config"},
+        ]);
+
+        // Default stop_on_error: both refused turns are listed before any
+        // turn runs, and the replay stops at the first with what to do next.
+        let result = registry
+            .invoke("replay_trajectory", json!({"dir": dir, "delay_ms": 0}))
+            .await;
+        let shown = text(&result);
+        let structured = result.structured_content.clone().unwrap();
+        assert_eq!(*calls.lock().unwrap(), ["press_key"], "{structured}");
+        assert_eq!(structured["not_replayable_turns"], both, "{structured}");
+        assert_eq!(structured["stopped_early"], true, "{structured}");
+        assert_eq!(structured["stopped_at"], "turn-00002", "{structured}");
+        assert_eq!(structured["not_run"], 2, "{structured}");
+        let hint = structured["turns"][1]["refusal"]["hint"].as_str().unwrap_or_default();
+        for expected in ["stop_on_error:false", "2 later turn", "clipboard write"] {
+            assert!(hint.contains(expected), "{expected}: {hint}");
+        }
+        let listed = shown
+            .find("turn-00002 clipboard_write, turn-00004 set_config")
+            .unwrap_or_else(|| panic!("no up-front list: {shown}"));
+        let stop = shown
+            .find("Stopped at turn-00002 (clipboard_write")
+            .unwrap_or_else(|| panic!("no stop line: {shown}"));
+        assert!(listed < stop, "{shown}");
+        for expected in ["2 later turn", "stop_on_error:false", "check the app afterward"] {
+            assert!(shown.contains(expected), "{expected}: {shown}");
+        }
+
+        // max_turns bounds the scan.
+        let result = registry
+            .invoke(
+                "replay_trajectory",
+                json!({"dir": dir, "delay_ms": 0, "max_turns": 3}),
+            )
+            .await;
+        let structured = result.structured_content.clone().unwrap();
+        assert_eq!(
+            structured["not_replayable_turns"],
+            json!([{"turn": "turn-00002", "tool": "clipboard_write"}]),
+            "{structured}"
+        );
+
+        // stop_on_error:false runs the press after the refused write; a
+        // refused last turn stops nothing.
+        calls.lock().unwrap().clear();
+        let result = registry
+            .invoke(
+                "replay_trajectory",
+                json!({"dir": dir, "delay_ms": 0, "stop_on_error": false}),
+            )
+            .await;
+        let shown = text(&result);
+        let structured = result.structured_content.clone().unwrap();
+        assert_eq!(*calls.lock().unwrap(), ["press_key", "press_key"], "{structured}");
+        assert_eq!(structured["not_replayable_turns"], both, "{structured}");
+        assert_eq!(structured["refused"], 2, "{structured}");
+        assert_eq!(structured["stopped_early"], false, "{structured}");
+        assert!(structured.get("not_run").is_none(), "{structured}");
+        assert!(structured["turns"][1]["refusal"].get("hint").is_none(), "{structured}");
+        assert!(!shown.contains("Stopped at"), "{shown}");
     }
 
     /// REPLAY-3: the folder names and the `tool` string come from whoever
