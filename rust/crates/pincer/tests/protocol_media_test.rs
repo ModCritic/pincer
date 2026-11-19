@@ -453,9 +453,11 @@ fn recording_screenshot_capture() {
 #[test]
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn replay_trajectory() {
-    //! Write a minimal no-GUI trajectory, replay it, verify succeeded=1.
-    //! The test daemon deliberately starts with `--no-overlay`, so an
-    //! agent-cursor move would correctly refuse before exercising replay.
+    //! Write a no-GUI trajectory whose only turn names start_session, which
+    //! replay refuses (only single actions replay, and those need a window),
+    //! replay it, and check the refusal end to end: the replay itself is not
+    //! an error, the turn is listed up front in `not_replayable_turns`, it is
+    //! refused with code `not_replayable`, and nothing ran.
     let Some(mut d) = spawn_unrestricted() else {
         return;
     };
@@ -486,16 +488,19 @@ fn replay_trajectory() {
     );
     let sc = &resp["result"]["structuredContent"];
     assert_eq!(
-        sc["attempted"].as_u64().unwrap_or(0),
-        1,
-        "expected attempted=1"
+        sc["attempted"].as_u64(),
+        Some(0),
+        "nothing should run: {sc}"
     );
+    assert_eq!(sc["succeeded"].as_u64(), Some(0), "{sc}");
+    assert_eq!(sc["failed"].as_u64(), Some(1), "{sc}");
+    assert_eq!(sc["refused"].as_u64(), Some(1), "{sc}");
     assert_eq!(
-        sc["succeeded"].as_u64().unwrap_or(0),
-        1,
-        "expected succeeded=1"
+        sc["not_replayable_turns"],
+        serde_json::json!([{"turn": "turn-00001", "tool": "start_session"}]),
+        "{sc}"
     );
-    assert_eq!(sc["failed"].as_u64().unwrap_or(99), 0, "expected failed=0");
+    assert_eq!(sc["turns"][0]["refusal"]["code"], "not_replayable", "{sc}");
 
     drop(d);
     let _ = std::fs::remove_dir_all(&traj_dir);
