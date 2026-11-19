@@ -59,6 +59,8 @@ pub fn run(
     if generation.is_empty() {
         anyhow::bail!("private worker requires one valid --generation value");
     }
+    // stdout is the channel to the host from here on: see protocol_stdout.
+    crate::protocol_stdout::claim_at_startup()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -72,8 +74,8 @@ async fn run_async(
     let mut initialized = InitializationSignal(initialized);
     let stdin = std::io::stdin();
     let mut lines = stdin.lock().lines();
-    let stdout = std::io::stdout();
-    let mut writer = stdout.lock();
+    // Stray prints from libraries go to stderr, not into this channel.
+    let mut writer = crate::protocol_stdout::blocking_writer()?;
 
     let Some(first_line) = lines.next() else {
         return Ok(());

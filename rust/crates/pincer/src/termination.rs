@@ -161,8 +161,11 @@ pub(crate) mod test_child {
 
     impl SignalTestOutcome {
         /// The child exited by itself with status 0 and its test passed.
+        /// A child that ran a stdio transport moved fd 1 to stderr
+        /// (`protocol_stdout`), so the harness's summary is there.
         pub(crate) fn passed(&self) -> bool {
-            self.status.is_some_and(|status| status.success()) && self.stdout.contains("1 passed")
+            self.status.is_some_and(|status| status.success())
+                && (self.stdout.contains("1 passed") || self.stderr.contains("1 passed"))
         }
     }
 

@@ -74,11 +74,12 @@ pub(crate) async fn run_direct(
     if crate::mcp_envelope::configured()? {
         // The envelope loop owns its reads and requests, so a signal ends it
         // where it stands; the shutdown below still runs.
+        let stdout = crate::protocol_stdout::async_writer()?;
         let result = tokio::select! {
             result = crate::mcp_envelope::run(
                 sdk.clone(),
                 BufReader::new(tokio::io::stdin()),
-                tokio::io::stdout(),
+                stdout,
             ) => result,
             signal = signals.recv() => {
                 *terminated = Some(signal);
@@ -134,7 +135,7 @@ async fn serve_direct_stdio(
         signals,
         terminated,
         BufReader::new(tokio::io::stdin()),
-        tokio::io::BufWriter::new(tokio::io::stdout()),
+        tokio::io::BufWriter::new(crate::protocol_stdout::async_writer()?),
     )
     .await
 }
@@ -404,7 +405,7 @@ pub async fn run_proxy(socket_path: String) -> anyhow::Result<()> {
     let cached_tools_list = Arc::new(cached_tools_list);
 
     let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
+    let stdout = crate::protocol_stdout::async_writer()?;
     supervise_control_connection(
         &mut control,
         run_proxy_io(
@@ -1522,6 +1523,96 @@ mod tests {
         assert!(
             ended.contains("sigterm-probe"),
             "SIGTERM skipped the session cleanup (ended: {ended:?}): {outcome}"
+        );
+    }
+
+    /// A library that prints to stdout during a call cannot put a line into
+    /// the MCP stream of direct `pincer mcp`. clipboard-rs 0.3.5 prints
+    /// "Somebody else owns the clipboard now" with println! when another
+    /// app takes the X11 clipboard after clipboard_write, and a client that
+    /// reads JSON lines failed on it. Here a session-end hook prints during
+    /// end_session, after the first replies went out; every line the client
+    /// reads after the test harness's own first lines must be JSON-RPC, and
+    /// the print must reach stderr.
+    #[cfg(unix)]
+    #[test]
+    fn a_library_print_during_a_call_stays_out_of_the_protocol_stream() {
+        const NAME: &str =
+            "proxy::tests::a_library_print_during_a_call_stays_out_of_the_protocol_stream";
+        const PRINTED: &str = "Somebody else owns the clipboard now";
+        if crate::is_test_child() {
+            pincer_core::session::register_session_end_hook(|session| {
+                println!("{PRINTED} ({session})");
+            });
+            run_direct_blocking(crate::termination::test_child::headless_driver())
+                .expect("direct MCP ends cleanly after SIGTERM");
+            return;
+        }
+
+        let state = pincer_testkit::IsolatedStateRoot::new().unwrap();
+        let mut child = crate::termination::test_child::spawn(NAME, &state, &[]);
+        let call = |id: u64, name: &str, session: &str| {
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                "params": {"name": name, "arguments": {"session": session}}
+            })
+        };
+        let rounds = [
+            vec![
+                serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
+                call(2, "start_session", "print-probe"),
+            ],
+            vec![
+                call(3, "end_session", "print-probe"),
+                call(4, "start_session", "after-print"),
+            ],
+        ];
+        for (round, last_id) in rounds.iter().zip([2, 4]) {
+            {
+                use std::io::Write as _;
+                let stdin = child.child.stdin.as_mut().unwrap();
+                for request in round {
+                    writeln!(stdin, "{request}").unwrap();
+                }
+                stdin.flush().unwrap();
+            }
+            let answered = child.wait_for_line(std::time::Duration::from_secs(60), |line| {
+                line.rfind("{\"jsonrpc\"")
+                    .and_then(|at| serde_json::from_str::<serde_json::Value>(&line[at..]).ok())
+                    .is_some_and(|reply| reply["id"] == last_id)
+            });
+            if answered.is_none() {
+                child.fail(&format!("direct MCP never answered request {last_id}"));
+            }
+        }
+        let outcome = child.signal_and_wait(libc::SIGTERM, std::time::Duration::from_secs(20));
+        assert!(
+            outcome.passed(),
+            "direct MCP did not exit cleanly: {outcome}"
+        );
+        // The test harness wrote "running 1 test" and "test <name> ... "
+        // before the MCP loop started; from the first reply on, stdout is
+        // the protocol stream.
+        let start = outcome
+            .stdout
+            .find("{\"jsonrpc\"")
+            .unwrap_or(outcome.stdout.len());
+        let stream: Vec<&str> = outcome.stdout[start..].lines().collect();
+        let mut ids = Vec::new();
+        for line in stream {
+            let parsed = serde_json::from_str::<serde_json::Value>(line);
+            assert!(
+                parsed
+                    .as_ref()
+                    .is_ok_and(|message| message["jsonrpc"] == "2.0"),
+                "a line in the MCP stream is not JSON-RPC: {line:?}\n{outcome}"
+            );
+            ids.push(parsed.unwrap()["id"].clone());
+        }
+        assert_eq!(ids, [1, 2, 3, 4], "{outcome}");
+        assert!(
+            outcome.stderr.contains(&format!("{PRINTED} (")),
+            "the session-end hook never printed: {outcome}"
         );
     }
 

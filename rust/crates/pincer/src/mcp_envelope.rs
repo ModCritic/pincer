@@ -350,7 +350,12 @@ pub(crate) async fn proxy(socket_path: &str) -> anyhow::Result<()> {
 }
 
 async fn relay<S: AsyncRead + AsyncWrite + Unpin>(stream: S) -> anyhow::Result<()> {
-    relay_io(stream, tokio::io::stdin(), tokio::io::stdout()).await
+    relay_io(
+        stream,
+        tokio::io::stdin(),
+        crate::protocol_stdout::async_writer()?,
+    )
+    .await
 }
 
 async fn relay_io<S, I, O>(stream: S, mut stdin: I, mut stdout: O) -> anyhow::Result<()>

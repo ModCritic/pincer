@@ -28,6 +28,7 @@ mod mcp_envelope;
 mod mcp_http;
 mod mcp_stdio;
 mod private_worker;
+mod protocol_stdout;
 mod proxy;
 mod responsibility;
 mod sdk_adapter;
@@ -408,6 +409,16 @@ fn run_mcp_direct(compatibility_mode: bool) -> anyhow::Result<()> {
     };
     let driver = build_driver(cursor, compatibility_mode, true)?;
     proxy::run_direct_blocking(driver)
+}
+
+/// Give the MCP stream its own descriptor before anything in `pincer mcp`
+/// can print, so a library's stray print goes to stderr (see
+/// [`protocol_stdout`]); exit when that fails.
+fn claim_stdout_for_mcp() {
+    if let Err(error) = protocol_stdout::claim_at_startup() {
+        eprintln!("pincer: cannot set up stdout for MCP: {error}");
+        std::process::exit(1);
+    }
 }
 
 fn history_admission_requested(explicit: bool, persisted: bool) -> bool {
@@ -801,6 +812,7 @@ fn main() {
             claude_code_compat,
             grants,
         } => {
+            claim_stdout_for_mcp();
             let result = match mcp_uses_direct_runtime(socket.as_deref(), direct) {
                 Ok(true) => {
                     if let Err(error) =
@@ -1040,6 +1052,7 @@ fn main() -> anyhow::Result<()> {
             claude_code_compat,
             grants,
         } => {
+            claim_stdout_for_mcp();
             let result = match mcp_uses_direct_runtime(socket.as_deref(), direct) {
                 Ok(true) => {
                     configure_startup_permission_mode(None, false, None, false, &grants)?;
