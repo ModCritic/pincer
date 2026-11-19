@@ -483,19 +483,29 @@ fn has_partial_read(md: &str) -> bool {
 /// Cut every `value="..."` longer than [`VALUE_PREVIEW_CHARS`] to its start
 /// plus `..." (N chars)`. A text area's value is its whole document: a
 /// 300-line file cost about 2,500 tokens on every read (desc-test round 3).
-/// The value is the first ` value="` outside every quoted field, so a name
-/// that contains ` value="` cannot hide the real one. The cut never ends
-/// inside an escape (see [`escape_safe_prefix`]). A count the platform wrote
-/// is kept as it is: it is the field's real length, where counting the
-/// shown text would count each escape (`\n`, `\"`) twice and stop at what
-/// the platform read.
+/// See [`shorten_values`].
 pub fn shorten_long_values(md: &str) -> std::borrow::Cow<'_, str> {
+    shorten_values(md, VALUE_PREVIEW_CHARS)
+}
+
+/// Cut every `value="..."` longer than `preview_chars` shown characters to
+/// its start plus `..." (N chars)`, N being the value's own length. The
+/// value is the first ` value="` outside every quoted field, so a name that
+/// contains ` value="` cannot hide the real one. The cut never ends inside
+/// an escape (see [`escape_safe_prefix`]). A count the platform wrote is
+/// kept as it is: it is the field's real length, where the shown text stops
+/// at what the platform read. Without one, N counts each escape (`\n`,
+/// `\"`) as the one character it stands for, as [`untrusted_text::inline_len`]
+/// does: the rows that carry ` value="` (Linux) escape their values, so
+/// counting the escaped text would count each line break twice.
+///
+/// [`untrusted_text::inline_len`]: crate::untrusted_text::inline_len
+pub fn shorten_values(md: &str, preview_chars: usize) -> std::borrow::Cow<'_, str> {
     const OPEN: &str = " value=\"";
     if !md.lines().any(|line| {
         find_unquoted(line, OPEN).is_some_and(|start| {
-            value_end(line, start + OPEN.len()).is_some_and(|end| {
-                line[start + OPEN.len()..end].chars().count() > VALUE_PREVIEW_CHARS
-            })
+            value_end(line, start + OPEN.len())
+                .is_some_and(|end| line[start + OPEN.len()..end].chars().count() > preview_chars)
         })
     }) {
         return std::borrow::Cow::Borrowed(md);
@@ -509,13 +519,13 @@ pub fn shorten_long_values(md: &str) -> std::borrow::Cow<'_, str> {
             let from = start + OPEN.len();
             let end = value_end(line, from)?;
             let value = &line[from..end];
-            let chars = value.chars().count();
-            (chars > VALUE_PREVIEW_CHARS).then(|| {
-                let keep = escape_safe_prefix(value, VALUE_PREVIEW_CHARS);
+            (value.chars().count() > preview_chars).then(|| {
+                let keep = escape_safe_prefix(value, preview_chars);
                 let rest = &line[end + 1..];
                 if platform_count_len(rest).is_some() {
                     format!("{}{keep}...\"{rest}", &line[..from])
                 } else {
+                    let chars = crate::untrusted_text::inline_len(value);
                     format!("{}{keep}...\" ({chars} chars){rest}", &line[..from])
                 }
             })
@@ -1830,11 +1840,13 @@ mod tests {
     #[test]
     fn long_values_are_cut_in_reads_but_diffed_whole() {
         // A 300-line KWrite document as its text area's value (one_line
-        // escapes the newlines).
-        let doc: String = (1..=300)
-            .map(|i| format!("scroll test line {i} november words\\n"))
+        // escapes the newlines). The count is the document's own length,
+        // not the escaped text's.
+        let document: String = (1..=300)
+            .map(|i| format!("scroll test line {i} november words\n"))
             .collect();
-        let chars = doc.chars().count();
+        let chars = document.chars().count();
+        let doc = document.replace('\n', "\\n");
         let md = long_value_tree(&doc);
         let (mut content, mut s) = payload("s0000f101", &md);
         apply(&opts(json!({})), &ctx(7101), &mut content, &mut s);

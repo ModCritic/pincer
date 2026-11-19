@@ -77,6 +77,9 @@ const LISTED_TITLE_CHARS: usize = 40;
 const APP_SHOWN_CHARS: usize = 40;
 /// A tree row a check matched.
 const ROW_SHOWN_CHARS: usize = 120;
+/// The value in a tree row a check matched, cut first so the row's
+/// ` (N chars)` names the value's own length rather than the row's.
+const ROW_VALUE_SHOWN_CHARS: usize = 40;
 /// A tree row named in a miss.
 const MISS_ROW_SHOWN_CHARS: usize = 80;
 
@@ -1384,7 +1387,10 @@ fn evaluate(check: &Check, read: &Read) -> Result<Held, Miss> {
     } else {
         !structured.is_empty() || (rows_count && !rows.is_empty())
     };
-    let shown_row = |row: &str| quote_untrusted(row, ROW_SHOWN_CHARS);
+    let shown_row = |row: &str| {
+        let row = crate::window_state_view::shorten_values(row, ROW_VALUE_SHOWN_CHARS);
+        quote_untrusted(&row, ROW_SHOWN_CHARS)
+    };
     let window = &read.window;
     if check.gone {
         return if present {
@@ -2270,6 +2276,37 @@ mod tests {
         assert!(evaluate(&check(json!({"text": "Error", "gone": true})), &read).is_ok());
         let still = evaluate(&check(json!({"text": "Saved", "gone": true})), &read).unwrap_err();
         assert_eq!(still.code, "still_present");
+    }
+
+    /// A matched row with a long value states the value's own length, as
+    /// get_window_state does, not the length of the whole escaped row: an
+    /// expect said "(24868 chars)" for KWrite's 24,510-character document,
+    /// counting the row's label and each escaped line break twice (round
+    /// 11). Linux rows escape their values (`\n` is two characters) and
+    /// write the real count after a long one.
+    #[test]
+    fn a_matched_row_states_its_values_own_length() {
+        let document = "R11 clipboard test\n".to_owned() + &"line of text\n".repeat(300);
+        let note = "Short note\n".repeat(9);
+        assert_eq!((document.chars().count(), note.chars().count()), (3919, 99));
+        let markdown = format!(
+            "- [0] text \"notes.txt\" value=\"{}\" (3919 chars) [actions=[]]\n\
+             - [1] text \"Long field label for the second editor\" value=\"{}\" [actions=[]]",
+            untrusted_text::inline(&document),
+            untrusted_text::inline(&note),
+        );
+        let read = read(Vec::new(), &markdown);
+        let check = |raw: Value| Check::parse(&raw, 0).unwrap();
+        for (text, count) in [("R11 clipboard test", 3919), ("Short note", 99)] {
+            let held = evaluate(&check(json!({"text": text})), &read).unwrap();
+            let observed = held.observed.unwrap();
+            assert!(observed.contains(text), "{observed}");
+            assert!(
+                observed.contains(&format!("...\\\" ({count} chars)")),
+                "{observed}"
+            );
+            assert!(observed.chars().count() <= 160, "{observed}");
+        }
     }
 
     #[test]

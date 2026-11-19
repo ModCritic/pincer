@@ -182,6 +182,34 @@ pub fn clip(text: &str, max_chars: usize) -> Cow<'_, str> {
     }
 }
 
+/// How many characters text that [`inline`] escaped stood for: each escape
+/// it writes (`\\`, `\"`, `\n`, `\r`, `\t`, `\u{hex}`) counts as the one
+/// character it replaced. A backslash before anything else counts as itself.
+pub fn inline_len(escaped: &str) -> usize {
+    let mut count = 0;
+    let mut rest = escaped;
+    while let Some(c) = rest.chars().next() {
+        let mut step = c.len_utf8();
+        if c == '\\' {
+            let tail = &rest[1..];
+            if tail.starts_with(['\\', '"', 'n', 'r', 't']) {
+                step = 2;
+            } else if let Some(hex) = tail.strip_prefix("u{") {
+                if let Some(close) = hex.find('}') {
+                    if (1..=6).contains(&close)
+                        && hex[..close].bytes().all(|b| b.is_ascii_hexdigit())
+                    {
+                        step = close + 4;
+                    }
+                }
+            }
+        }
+        count += 1;
+        rest = &rest[step..];
+    }
+    count
+}
+
 /// [`clip`] then [`inline`]: untrusted text for one quoted field of bounded
 /// length.
 pub fn inline_clipped(text: &str, max_chars: usize) -> Cow<'_, str> {
@@ -261,6 +289,15 @@ mod tests {
             invisible("a \"b\" \\c\n\td\u{0}"),
             "a \"b\" \\c\n\td\\u{0}"
         );
+    }
+
+    #[test]
+    fn inline_len_counts_the_characters_before_escaping() {
+        let raw = "a\"b\\c\nd\re\tf\u{202e}g\u{1b}h 日本 👍🏽";
+        assert_eq!(inline_len(&inline(raw)), raw.chars().count());
+        assert_eq!(inline_len("plain"), 5);
+        // Not an escape inline writes: the backslash counts as itself.
+        assert_eq!(inline_len("C:\\x \\u{zz} \\"), 13);
     }
 
     #[test]
